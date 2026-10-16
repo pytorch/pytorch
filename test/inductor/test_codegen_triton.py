@@ -7,7 +7,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 from enum import Enum, IntEnum
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import sympy
 
@@ -33,7 +33,12 @@ from torch._inductor.codegen.triton import (
     TritonScheduling,
     TritonSymbols,
 )
-from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wrapper
+from torch._inductor.codegen.wrapper import (
+    _escape_triton_kernel_source_for_wrapper,
+    render_user_defined_triton_kernel_transitive_closure,
+    user_defined_triton_kernel_transitive_closure,
+    user_defined_triton_kernel_transitive_closure_source_code,
+)
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
@@ -88,6 +93,46 @@ except ImportError:
     )
 
 
+if has_triton_package():
+    import triton
+
+    # triton.constexpr_function was introduced in Triton 3.5.
+    if hasattr(triton, "constexpr_function"):
+        try:
+            from .triton_kernel_helpers import (
+                maximum as transitive_user_maximum,
+                transitive_constexpr_helper as transitive_constexpr_alias,
+                transitive_jit_helper as transitive_jit_alias,
+                transitive_triton_alias_kernel,
+            )
+        except ImportError:
+            from triton_kernel_helpers import (
+                maximum as transitive_user_maximum,
+                transitive_constexpr_helper as transitive_constexpr_alias,
+                transitive_jit_helper as transitive_jit_alias,
+                transitive_triton_alias_kernel,
+            )
+
+    @triton.jit
+    def _test_transitive_helper(x):
+        return x + 1
+
+    @triton.jit
+    def _test_transitive_kernel(x):
+        return _test_transitive_helper(x)
+
+    if hasattr(triton, "constexpr_function"):
+        # This test exercises a constexpr alias. The constexpr is used with a
+        # different symbol name than its definition.
+        @triton.jit
+        def _test_transitive_alias_kernel(x):
+            return transitive_constexpr_alias(x)
+
+        @triton.jit
+        def _test_transitive_jit_alias_kernel(x):
+            return transitive_jit_alias(x)
+
+
 class _FixedConfigChoices(InductorChoices):
     def __init__(self, fixed_config):
         self.fixed_config = fixed_config
@@ -117,6 +162,95 @@ class TestCodegenTriton(InductorTestCase):
     def tearDown(self):
         self._stack.close()
         super().tearDown()
+
+    def test_tma_store_can_use_descriptor_local_int32_indexing(self):
+        layout = SimpleNamespace(offset=0, stride=[512, 1])
+        buffer = Mock(spec=ir.Buffer)
+        buffer.get_layout.return_value = layout
+        buffer.get_name.return_value = "buf0"
+        buffer.has_tensor_output.return_value = True
+        kernel = SimpleNamespace(index_dtype="tl.int64", output_node=None)
+        checker = TMACompatibilityChecker(
+            kernel, torch.bfloat16, for_store=True, force=False, buffer_name="buf0"
+        )
+
+        with (
+            patch.object(self._graph, "try_get_buffer", return_value=buffer),
+            patch.object(
+                self._graph,
+                "get_current_device_or_throw",
+                return_value=torch.device("cuda"),
+            ),
+            patch.object(self._graph, "get_allocation_size", return_value=[128, 512]),
+            patch.object(
+                self._graph, "get_allocation_storage_size", return_value=128 * 512
+            ),
+        ):
+            self.assertTrue(checker.can_use_32bit_indexing())
+
+        kernel.output_node = buffer
+        with (
+            patch.object(self._graph, "try_get_buffer", return_value=None),
+            patch.object(
+                self._graph,
+                "get_current_device_or_throw",
+                return_value=torch.device("cuda"),
+            ),
+            patch.object(self._graph, "get_allocation_size", return_value=[128, 512]),
+            patch.object(
+                self._graph, "get_allocation_storage_size", return_value=128 * 512
+            ),
+        ):
+            self.assertTrue(checker.can_use_32bit_indexing())
+
+    def test_tma_descriptor_local_int32_indexing_fails_closed(self):
+        int32_max = torch.iinfo(torch.int32).max
+        size = sympy.Symbol("s", positive=True, integer=True)
+        kernel = SimpleNamespace(index_dtype="tl.int64", output_node=None)
+
+        def can_use(
+            *,
+            for_store=True,
+            device="cuda",
+            offset=0,
+            stride=(1,),
+            shape=(1,),
+            storage=1,
+        ):
+            layout = SimpleNamespace(offset=offset, stride=stride)
+            buffer = Mock(spec=ir.Buffer)
+            buffer.get_layout.return_value = layout
+            buffer.has_tensor_output.return_value = True
+            checker = TMACompatibilityChecker(
+                kernel,
+                torch.bfloat16,
+                for_store=for_store,
+                force=False,
+                buffer_name="buf0",
+            )
+            with (
+                patch.object(self._graph, "try_get_buffer", return_value=buffer),
+                patch.object(
+                    self._graph,
+                    "get_current_device_or_throw",
+                    return_value=torch.device(device),
+                ),
+                patch.object(self._graph, "get_allocation_size", return_value=shape),
+                patch.object(
+                    self._graph,
+                    "get_allocation_storage_size",
+                    return_value=storage,
+                ),
+            ):
+                return checker.can_use_32bit_indexing()
+
+        self.assertFalse(can_use(for_store=False))
+        self.assertFalse(can_use(device="cpu"))
+        self.assertFalse(can_use(offset=-1))
+        self.assertFalse(can_use(stride=(-1,)))
+        self.assertFalse(can_use(shape=(size,), storage=size))
+        self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
+        self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):
@@ -342,6 +476,153 @@ def helper(x):
 
             call = ast.parse(wrapper_src).body[0].value
             self.assertEqual(ast.literal_eval(call.args[1]), source)
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_triton_kernel_transitive_closure(self):
+        source_modules = user_defined_triton_kernel_transitive_closure(
+            _test_transitive_kernel
+        )
+        source = user_defined_triton_kernel_transitive_closure_source_code(
+            _test_transitive_kernel
+        )
+
+        # The root kernel is always retained, independent of imported modules.
+        kernel_source = source_modules[0]
+        self.assertIsNone(kernel_source.module_name)
+        self.assertIn("def _test_transitive_kernel", kernel_source.source)
+
+        # Dependencies retain their defining module for filtering.
+        self.assertTrue(
+            any(
+                source_module.module_name == _test_transitive_helper.fn.__module__
+                and "def _test_transitive_helper" in source_module.source
+                for source_module in source_modules
+            )
+        )
+
+        # The compatibility API composes collection and formatting.
+        self.assertEqual(
+            source,
+            render_user_defined_triton_kernel_transitive_closure(source_modules),
+        )
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "constexpr_function"),
+        "requires triton.constexpr_function",
+    )
+    def test_user_defined_triton_kernel_with_alias(self):
+        module_name = transitive_constexpr_alias.fn.__module__
+        source_modules = user_defined_triton_kernel_transitive_closure(
+            _test_transitive_alias_kernel
+        )
+        # We want to simulate substituting an import for a module's source code.
+        # The tricky part is how to handle aliases.
+        # `from helper import *` defines `transitive_constexpr_helper`, not the
+        # `transitive_constexpr_alias` referenced by the kernel.
+        source_modules = [
+            dataclasses.replace(
+                source_module,
+                source=f"from {module_name} import *\n",
+            )
+            if source_module.module_name == module_name
+            else source_module
+            for source_module in source_modules
+        ]
+        source = render_user_defined_triton_kernel_transitive_closure(source_modules)
+        rendered_globals: dict[str, object] = {}
+        exec(source, rendered_globals)
+
+        # The renderer must emit
+        # `transitive_constexpr_alias = transitive_constexpr_helper`.
+        self.assertIs(
+            rendered_globals["transitive_constexpr_alias"],
+            transitive_constexpr_alias,
+        )
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "constexpr_function"),
+        "requires triton.constexpr_function",
+    )
+    def test_user_defined_triton_kernel_with_jit_alias(self):
+        module_name = transitive_jit_alias.fn.__module__
+        source_modules = user_defined_triton_kernel_transitive_closure(
+            _test_transitive_jit_alias_kernel
+        )
+        source_modules = [
+            dataclasses.replace(
+                source_module,
+                source=f"from {module_name} import *\n",
+            )
+            if source_module.module_name == module_name
+            else source_module
+            for source_module in source_modules
+        ]
+        rendered_globals: dict[str, object] = {}
+        exec(
+            render_user_defined_triton_kernel_transitive_closure(source_modules),
+            rendered_globals,
+        )
+
+        self.assertIs(
+            rendered_globals["transitive_jit_alias"],
+            transitive_jit_alias,
+        )
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "constexpr_function"),
+        "requires triton.constexpr_function",
+    )
+    def test_user_defined_triton_kernel_with_imported_module_alias(self):
+        module_name = transitive_jit_alias.fn.__module__
+        source_modules = user_defined_triton_kernel_transitive_closure(
+            _test_transitive_jit_alias_kernel
+        )
+        source = render_user_defined_triton_kernel_transitive_closure(
+            source_modules,
+            imported_modules=(module_name,),
+        )
+        self.assertNotIn("def transitive_jit_helper", source)
+        self.assertIn("def _test_transitive_jit_alias_kernel", source)
+        self.assertIn("transitive_jit_alias = transitive_jit_helper", source)
+
+        rendered_globals: dict[str, object] = {}
+        exec(f"from {module_name} import *\n" + source, rendered_globals)
+        self.assertIs(rendered_globals["transitive_jit_alias"], transitive_jit_alias)
+
+    @unittest.skipUnless(
+        has_triton_package() and hasattr(triton, "constexpr_function"),
+        "requires triton.constexpr_function",
+    )
+    def test_user_defined_triton_kernel_with_triton_alias(self):
+        """Avoid overwriting a user helper with an aliased Triton import.
+
+        This simulates replacing a helper module's inline source with an import.
+
+        Unsafe:
+            def maximum(...): ...
+            from triton.language import maximum
+            tl_maximum = maximum  # `maximum` no longer refers to the helper.
+
+        Safe:
+            from triton.language import maximum as tl_maximum
+        """
+        module_name = transitive_triton_alias_kernel.fn.__module__
+        source_modules = user_defined_triton_kernel_transitive_closure(
+            transitive_triton_alias_kernel
+        )
+        source_modules = [
+            source_module
+            for source_module in source_modules
+            if source_module.module_name != module_name
+        ]
+        source = f"from {module_name} import maximum\n"
+        source += render_user_defined_triton_kernel_transitive_closure(source_modules)
+        rendered_globals: dict[str, object] = {}
+        exec(source, rendered_globals)
+
+        # The aliased Triton import must not replace the user-defined helper.
+        self.assertIs(rendered_globals["tl_maximum"], triton.language.maximum)
+        self.assertIs(rendered_globals["maximum"], transitive_user_maximum)
 
     def test_persistent_reduction_choice_two_arg_override(self):
         seen_scores = []

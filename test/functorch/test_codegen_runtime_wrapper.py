@@ -115,7 +115,8 @@ class TestCodegenRuntimeWrapper(TestCase):
         source = captured[0]
         self.assertIn("torch._C._set_view_replay_enabled(True)", source)
         self.assertIn("if not prev_view_replay_enabled:", source)
-        self.assertIn("torch.enable_grad()", source)
+        self.assertIn("torch._C._set_grad_enabled(True)", source)
+        self.assertIn("if not prev_grad_enabled:", source)
 
     def test_training_with_detach_indices(self):
         """

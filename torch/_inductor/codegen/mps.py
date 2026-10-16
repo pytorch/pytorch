@@ -13,6 +13,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
@@ -278,7 +279,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
+        typecast_b = f"static_cast<decltype({b}+{c})>({b})"
+        typecast_c = f"static_cast<decltype({b}+{c})>({c})"
+        return f"{a} ? {typecast_b} : {typecast_c}"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
@@ -1083,7 +1086,7 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(__file__).parent.parent.parent / "include"],
+                    [Path(get_file_path("torch")) / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
