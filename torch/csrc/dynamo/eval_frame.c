@@ -791,6 +791,19 @@ static void DisabledGraph_dealloc(DisabledGraph* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
+// Matches the repr of the Python wrapper this replaces, which
+// functools.update_wrapper also gives the wrapped function's __qualname__.
+static PyObject* DisabledGraph_repr(PyObject* self) {
+  PyObject* qualname = PyObject_GetAttrString(self, "__qualname__");
+  if (qualname == NULL) {
+    PyErr_Clear();
+    return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
+  }
+  PyObject* repr = PyUnicode_FromFormat("<function %S at %p>", qualname, self);
+  Py_DECREF(qualname);
+  return repr;
+}
+
 static PyGetSetDef DisabledGraph_getset[] = {
     {"__dict__", PyObject_GenericGetDict, PyObject_GenericSetDict, NULL, NULL},
     {NULL}};
@@ -800,6 +813,7 @@ static PyTypeObject DisabledGraphType = {
     .tp_name = "torch._C._dynamo.eval_frame._DisabledGraph",
     .tp_basicsize = sizeof(DisabledGraph),
     .tp_dealloc = (destructor)DisabledGraph_dealloc,
+    .tp_repr = DisabledGraph_repr,
     .tp_vectorcall_offset = offsetof(DisabledGraph, vectorcall),
     .tp_call = PyVectorcall_Call,
     .tp_flags =
