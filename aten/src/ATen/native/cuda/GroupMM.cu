@@ -48,6 +48,14 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 namespace {
 using Strides = at::cuda::detail::Strides; // std::array<int64_t, 3>;
 
+// Whether some targeted arch gives the sm90 / sm100 kernels a body (see the
+// enable_*_kernel_for_* wrappers); kernels for one major get no body when
+// compiled for another.
+using at::cuda::detail::cuda_arch_list_has_major;
+constexpr bool kBuiltSm90 = cuda_arch_list_has_major(9);
+constexpr bool kBuiltSm100 =
+    cuda_arch_list_has_major(10) || cuda_arch_list_has_major(11);
+
 template <typename ArchTag, bool PONGOr2SM, typename TB_M, typename TB_N, typename TB_K>
 struct Schedule {
   // SM90
@@ -77,7 +85,7 @@ int ceildiv(int a, int b) {
   return (a + b - 1) / b;
 }
 
-int round_up_to_nearest_multiple(int a, int b) {
+[[maybe_unused]] int round_up_to_nearest_multiple(int a, int b) {
   return ceildiv(a, b) * b;
 }
 
@@ -314,6 +322,29 @@ void bf16bf16_grouped_gemm_impl_sm90_sm100(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+// Only instantiates the kernel if some targeted arch gives it a body.
+template <
+    typename ArchTag,
+    bool a_row_major,
+    bool b_row_major,
+    bool PONGOr2SM,
+    typename TB_M,
+    typename TB_N,
+    typename TB_K>
+void bf16bf16_grouped_gemm_if_built(
+    at::Tensor mat_a,
+    at::Tensor mat_b,
+    std::optional<at::Tensor> offs,
+    std::optional<at::Tensor> bias,
+    at::Tensor& out) {
+  if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm100> ? kBuiltSm100 : kBuiltSm90) {
+    bf16bf16_grouped_gemm_impl_sm90_sm100<ArchTag, a_row_major, b_row_major, PONGOr2SM, TB_M, TB_N, TB_K>(
+        mat_a, mat_b, offs, bias, out);
+  } else {
+    at::cuda::detail::cutlass_arch_not_built("grouped mm");
+  }
+}
+
 template <bool a_row_major, bool b_row_major>
 void dispatch_bf16_grouped_kernel_on_tile_size(
     at::Tensor mat_a, // bf16
@@ -344,12 +375,16 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   //        (K >= 2048 && N >= 2048));
   bool small = (M <= 128 || N <= 128);
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
   const bool sm11x = properties != nullptr && properties->major == 11;
+  TORCH_CHECK(
+      sm9x || sm10x || sm11x,
+      "grouped mm is not currently supported on your device");
 
   if (sm10x || sm11x) {
     if (small){
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
+      bf16bf16_grouped_gemm_if_built<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
@@ -358,7 +393,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_256,
         cute::_64>(mat_a, mat_b, offs, bias, out); // Tile shape taken from CUTLASS examples, 64 = 128/sizeof(bfloat16)
     } else {
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
+      bf16bf16_grouped_gemm_if_built<
         cutlass::arch::Sm100,
         a_row_major,
         b_row_major,
@@ -369,7 +404,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
     }
   } else {
     if(small) {
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
+      bf16bf16_grouped_gemm_if_built<
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
@@ -378,7 +413,7 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
         cute::_128,
         cute::_128>(mat_a, mat_b, offs, bias, out);
     } else {
-      bf16bf16_grouped_gemm_impl_sm90_sm100<
+      bf16bf16_grouped_gemm_if_built<
         cutlass::arch::Sm90,
         a_row_major,
         b_row_major,
@@ -429,6 +464,15 @@ void bf16bf16_grouped_mm(
   dispatch_bf16_grouped_kernel_on_ab_transpose(mat_a, mat_b, offs, bias, out);
 #else
   TORCH_CHECK(false, "grouped mm is not supported on your system");
+#endif
+}
+
+bool bf16bf16_grouped_mm_built_for_device() {
+#if defined(BUILD_GG_KERNEL)
+  const int major = at::cuda::getCurrentDeviceProperties()->major;
+  return major == 9 ? kBuiltSm90 : (major == 10 || major == 11) && kBuiltSm100;
+#else
+  return false;
 #endif
 }
 
