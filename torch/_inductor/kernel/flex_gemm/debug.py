@@ -98,7 +98,7 @@ def format_flex_gemm_problem(
     *,
     alpha: float,
     beta: float,
-    tuned: bool,
+    autotune: bool,
     fast_math: bool,
     explicit_config: dict[str, Any] | None,
 ) -> str:
@@ -107,7 +107,7 @@ def format_flex_gemm_problem(
         f"gemm_op: {gemm_op}",
         "kernel_options:",
         "  backend: QUACK",
-        f"  tuned: {tuned}",
+        f"  autotune: {autotune}",
         f"  fast_math: {fast_math}",
         f"  config: {explicit_config!r}",
         f"alpha: {alpha}",
@@ -343,11 +343,11 @@ def format_flex_gemm_lowering_plan(
 
 
 def format_flex_gemm_config_candidates(
-    configs: "Sequence[QuackConfigKey]", *, tuned: bool
+    configs: "Sequence[QuackConfigKey]", *, autotune: bool
 ) -> str:
     """Render the QuACK configs Inductor will benchmark or pin."""
     lines = [
-        f"mode: {'autotune' if tuned else 'default'}",
+        f"mode: {'autotune' if autotune else 'default'}",
         f"candidates: {len(configs)}",
     ]
     for config in configs:
