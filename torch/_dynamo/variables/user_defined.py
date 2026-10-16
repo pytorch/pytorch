@@ -1168,11 +1168,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
         elif name == "fromkeys" and issubclass(self.value, dict):
-            if not issubclass(self.value, collections.OrderedDict):
-                no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
-                check_positional(tx, "fromkeys", len(args), 1, 2)
+            if issubclass(self.value, collections.OrderedDict):
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.odict_fromkeys),
+                    [self, *args],
+                    kwargs,
+                )
+            no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+            check_positional(tx, "fromkeys", len(args), 1, 2)
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self, *args, **kwargs
+                tx, self, *args
             )
         elif self.value is collections.OrderedDict and name in (
             "keys",
