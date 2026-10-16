@@ -5200,6 +5200,9 @@ class TestPrecompileDynamoCapture(TestCase):
             with open(os.path.join(self.dir, name + ".py"), "w") as f:
                 f.write(source)
             self.addCleanup(sys.modules.pop, name, None)
+        # The directory's mtime may not move between setUp's import and these
+        # writes, which would leave the import system's listing of it stale.
+        importlib.invalidate_caches()
         reg = importlib.import_module(registry)
         step = importlib.import_module(entry).step
         key = reg.Key()
@@ -5236,13 +5239,6 @@ class TestPrecompileDynamoCapture(TestCase):
             "x = torch.load(sys.argv[6])\n"
             "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
             "key = reg.Key()\n"
-            "if f.installed:\n"
-            "    try:\n"
-            "        f(key, x)\n"
-            "    except torch.compiler.PrecompileError as e:\n"
-            "        assert 'refuses to recompile' in str(e), e\n"
-            "        print('refused', str(e).split('function name: ')[1])\n"
-            "        sys.exit()\n"
             "for scale in (3.0, 5.0, None):\n"
             "    if scale is None:\n"
             "        del reg.REGISTRY[key]\n"
@@ -5259,10 +5255,7 @@ class TestPrecompileDynamoCapture(TestCase):
         cmd = [sys.executable, "-c", script, *argv]
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         self.assertEqual(out.returncode, 0, out.stderr)
-        # An installed artifact refuses scale() itself, as its refuse-recompile
-        # callback does not honor disable(recursive=False). Flip this to
-        # "served" once https://github.com/pytorch/pytorch/pull/198787 lands.
-        self.assertIn("refused 'scale'" if installed else "served", out.stdout)
+        self.assertIn("served", out.stdout)
 
     @skipIfCrossRef
     def test_only_graphless_callees_that_lose_a_guard_are_served_eagerly(self):
@@ -5320,24 +5313,31 @@ class TestPrecompileDynamoCapture(TestCase):
 
     @skipIfCrossRef
     def test_a_risky_drop_only_in_an_eager_frame_is_not_reported(self):
-        # Both frames drop G['op']. The graphless lookup() reads an aliased op,
-        # a risky drop, but is served eagerly; step() reads a def of that name
-        # from its own file, which the default filter drops harmlessly.
+        # Both frames drop G['op'], a function whose globals no importable
+        # module owns, so its CLOSURE_MATCH cannot be saved. The graphless
+        # lookup() reads an aliased op, a risky drop, but is served eagerly;
+        # step() reads a def of that name from its own file, a harmless drop.
+        from torch._dynamo.eval_frame import _RefuseRecompileCallback
+        from torch._dynamo.package import CompilePackage
+
         names = [f"{self.module_name}_{n}" for n in ("lookup", "step")]
         sources = (
             "import torch\n\n"
-            "def _double(n):\n    return 2 * n\n\nop = _double\n\n"
-            "def lookup(module, n):\n    return op(n)\n\n"
+            "def _double(module, n):\n    return 2 * n\n\n"
+            "op = type(_double)(_double.__code__, {'__builtins__': __builtins__})\n\n"
+            "def lookup(module, n):\n    return op(module, n)\n\n"
             "@torch._dynamo.disable(recursive=False)\n"
             "def scale(x):\n    return x * lookup(torch.nn.Module(), 3)\n",
             f"import {names[0]}\n\n"
             "def op(x):\n    return x + 1\n\n"
+            "op = type(op)(op.__code__, {'__builtins__': __builtins__})\n\n"
             f"def step(x):\n    return {names[0]}.scale(op(x.sin()))\n",
         )
         for name, source in zip(names, sources):
             with open(os.path.join(self.dir, name + ".py"), "w") as f:
                 f.write(source)
             self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
         step = importlib.import_module(names[1]).step
         tracer = DynamoTracer(require_no_risky_drops=True)
         build = mock.patch(
@@ -5352,6 +5352,17 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual((lookup.guarded_codes, lookup.bypassed), ([], False))
         self.assertIn(("CLOSURE_MATCH", "G['op']"), summary.dropped_guards)
         self.assertEqual(summary.risky_dropped_guards, ())
+        # Installed with a refusing callback, as an installed artifact is,
+        # lookup() runs its inlined callee _double() as plain Python too: that
+        # frame takes a module and has no entry, so the callback would refuse it.
+        torch._dynamo.reset()
+        package = CompilePackage(step, built.call_args.args[0])
+        package.install(built.call_args.args[1])
+        self.addCleanup(package.uninstall)
+        context = torch._dynamo.optimize("eager")
+        context.callback = _RefuseRecompileCallback(context.callback)
+        served = context(sys.modules[names[0]].lookup)
+        self.assertEqual(served(torch.nn.Module(), 3), 6)
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
@@ -5374,6 +5385,31 @@ class TestPrecompileDynamoCapture(TestCase):
         torch.save(cache, self.cache)
         with self.assertRaisesRegex(PrecompileError, "predates the flag"):
             load(self.artifact, self.cache, allow_serve_time_compiles=True)
+
+    @parametrize(
+        "line,allow,msg",
+        [
+            ("_ALLOW_SERVE_TIME_COMPILES = True", False, "something other than False"),
+            ("_ALLOW_SERVE_TIME_COMPILES = False  # edited", True, "not in the form"),
+        ],
+    )
+    def test_an_installed_artifact_with_an_edited_flag_line_refuses_to_load(
+        self, line, allow, msg
+    ):
+        with self._capture(self.mod.calls_breaking_helper, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            python_code = f.read()
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        self.assertIn(default, python_code)
+        python_code = python_code.replace(default, f"\n{line}\n")
+        with open(self.artifact, "w") as f:
+            f.write(python_code)
+        cache = torch.load(self.cache, weights_only=True)
+        cache["code_hash"] = hashlib.sha256(python_code.encode()).hexdigest()
+        torch.save(cache, self.cache)
+        with self.assertRaisesRegex(PrecompileError, msg):
+            load(self.artifact, self.cache, allow_serve_time_compiles=allow)
 
     @skipIfCrossRef
     def test_an_installed_artifact_refuses_to_load_with_dynamo_disabled(self):

@@ -490,9 +490,9 @@ def set_enable_guard_collectives(enabled: bool):
     the frame is skipped, we don't issue collectives.  The exception is a frame
     that a loaded artifact recorded with no compiled code and therefore skips:
     it reports the skip, since another rank's artifact may have compiled that
-    frame.  The frame runs eagerly only if every rank reports the same skip; a
-    mixture of hits, misses and skips forces the miss path (recompilation) on
-    every rank.  Entries and skips installed from a precompile artifact assume
+    frame.  A miss on any rank forces the miss path (recompilation) on every
+    rank; otherwise each rank runs its cached code (hit) or runs eagerly (skip),
+    so a mixture of hits and skips never recompiles.  Entries and skips installed from a precompile artifact assume
     every rank installed the same artifact.
 
     Returns the previous setting of enabled.

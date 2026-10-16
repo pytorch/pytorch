@@ -67,7 +67,8 @@ bool searches_default_bucket(int64_t isolate_recompiles_id, bool strict) {
   return isolate_recompiles_id >= 0 && !strict;
 }
 
-// The region's own bucket, then the default bucket, matching lookup order.
+// The region's own bucket, then the default bucket if searches_default_bucket,
+// matching lookup order.
 template <typename Fn>
 void for_each_bucket(
     ExtraState* extra_state,
