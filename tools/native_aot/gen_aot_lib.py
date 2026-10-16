@@ -509,16 +509,21 @@ def _native_function(
         os.path.join(aten, "native", "tags.yaml"),
     )
     groups = get_grouped_native_functions(parsed.native_functions)
+    candidates = []
     for g in groups:
         if isinstance(g, NativeFunctionsGroup) and g.structured:
             if structured:
                 fname = g.functional.func.name
-                if (str(fname) if "." in op else fname.name.base) == op:
+                if str(fname) == op:
                     return g
+                if fname.name.base == op:
+                    candidates.append(g)
         elif not structured:
             f = g.functional if isinstance(g, NativeFunctionsGroup) else g
             if str(f.func.name) == op:
                 return f
+    if structured and len(candidates) == 1:
+        return candidates[0]
     raise RuntimeError(f"no native function for {op}")
 
 
@@ -1035,6 +1040,19 @@ def main(argv: list[str] | None = None) -> None:
         for child in children:
             dirs_by_id.setdefault(child, []).append(os.path.join(art_dir, child))
 
+    # A declaration may provide another dispatcher entry point over an identical
+    # kernel grid. Point it at the owner's sidecars instead of compiling and linking
+    # a second set of objects with the same exported C symbols. Old per-declaration
+    # artifact trees are deliberately ignored; exported artifacts are never deleted
+    # automatically.
+    for did, (d, _) in by_id.items():
+        source = decl.decl_id_for_op(decl.kernel_source(d))
+        if source == did:
+            continue
+        dirs_by_id.pop(did, None)
+        if source in dirs_by_id:
+            dirs_by_id[did] = dirs_by_id[source]
+
     # A generated source whose artifacts are all gone -- an arch tree deleted by
     # hand, or every tree it had skipped by --archs -- is deleted here. It is not
     # reached by the loop below (which walks decl_ids that still HAVE artifacts).
@@ -1047,7 +1065,7 @@ def main(argv: list[str] | None = None) -> None:
 
     all_prefixes: list[str] = []
     link_objects: list[str] = []
-    # (out_dir, path, source, kernel count) -- written only once every
+    # (out_dir, path, source, launcher count) -- written only once every
     # declaration has passed its refusals; see the commit step after the loop.
     pending: list[tuple[str, str, str, int]] = []
     for entry, art_dirs in sorted(dirs_by_id.items()):
@@ -1263,7 +1281,9 @@ def main(argv: list[str] | None = None) -> None:
         # @generated .cpp that the previous run's CMake still names, failing the
         # MAIN build at compile time.
         _write_atomic(out, src)
-        print(f"wrote {out} ({n} kernels)")
+        print(f"wrote {out} ({n} launchers)")
+    all_prefixes = list(dict.fromkeys(all_prefixes))
+    link_objects = list(dict.fromkeys(link_objects))
     ver = write_version_script(args.artifacts_dir, all_prefixes)
     print(f"wrote {ver}")
     written = write_cmake_include(

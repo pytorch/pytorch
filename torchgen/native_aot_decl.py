@@ -24,11 +24,14 @@ import os
 import re
 from typing import Any, Protocol
 
+from torchgen.native_aot_spec_grid import expand_specs
+
 
 class AotDeclaration(Protocol):
     ATEN_OP: str
     DISPATCH_KEY: str
     KERNEL_MODULE: str
+    KERNEL_SOURCE: str
     # Architectures this op's kernels are valid on (sm strings, e.g.
     # ("sm_90a", "sm_100a")). OPTIONAL in source declarations, so read it
     # through archs_of(d), never d.ARCHS. Export skips (declaration x
@@ -57,6 +60,11 @@ def decl_id_for_op(aten_op: str) -> str:
 def decl_id(d: AotDeclaration) -> str:
     """decl_id_for_op for a loaded declaration."""
     return decl_id_for_op(d.ATEN_OP)
+
+
+def kernel_source(d: AotDeclaration) -> str:
+    """The declaration whose exported artifacts this declaration launches."""
+    return getattr(d, "KERNEL_SOURCE", d.ATEN_OP)
 
 
 _REQUIRED_CONSTS = ("ATEN_OP", "DISPATCH_KEY", "KERNEL_MODULE")
@@ -209,6 +217,19 @@ def _validate(d, path: str, label: str) -> None:
     for name, arity in _OPTIONAL_FNS.items():
         if getattr(d, name, None) is not None:
             _check_arity(d, name, arity, path)
+    aliases = getattr(d, "ATEN_ALIASES", ())
+    if (
+        not isinstance(aliases, (list, tuple))
+        or not all(isinstance(alias, str) and alias for alias in aliases)
+        or len(set(aliases)) != len(aliases)
+        or d.ATEN_OP in aliases
+    ):
+        raise RuntimeError(
+            f"{path}: {label} ATEN_ALIASES must contain unique non-empty op names"
+        )
+    source = kernel_source(d)
+    if not isinstance(source, str) or not source:
+        raise RuntimeError(f"{path}: {label} KERNEL_SOURCE must be a non-empty op name")
 
     # Validate ARCHS but do NOT write it back: a validating loader that
     # mutates its input leaves the source module and the declaration
@@ -245,6 +266,37 @@ def _validate(d, path: str, label: str) -> None:
             )
 
 
+def _validate_kernel_sources(decls: list[AotDeclaration], path: str) -> None:
+    by_op = {d.ATEN_OP: d for d in decls}
+    for d in decls:
+        source_name = kernel_source(d)
+        if source_name == d.ATEN_OP:
+            continue
+        source = by_op.get(source_name)
+        if source is None:
+            raise RuntimeError(
+                f"{path}: {d.ATEN_OP} KERNEL_SOURCE {source_name!r} must name "
+                "another declaration in the same module"
+            )
+        if kernel_source(source) != source.ATEN_OP:
+            raise RuntimeError(
+                f"{path}: {d.ATEN_OP} KERNEL_SOURCE {source_name!r} is not an "
+                "artifact-owning declaration"
+            )
+        if (
+            d.DISPATCH_KEY != source.DISPATCH_KEY
+            or d.KERNEL_MODULE != source.KERNEL_MODULE
+            or archs_of(d) != archs_of(source)
+            or expand_specs(d.kernel_precompile_grid())
+            != expand_specs(source.kernel_precompile_grid())
+        ):
+            raise RuntimeError(
+                f"{path}: {d.ATEN_OP} cannot share KERNEL_SOURCE {source_name!r}: "
+                "dispatch key, kernel module, architectures, and expanded kernel "
+                "grid must match"
+            )
+
+
 def load_declarations(path: str) -> list[AotDeclaration]:
     """Load and validate one aot.py: a single-op module (the module IS
     the declaration) or a family module (exports declarations() -> list
@@ -259,9 +311,11 @@ def load_declarations(path: str) -> list[AotDeclaration]:
             raise RuntimeError(f"{path}: declarations() must return a non-empty list")
         for i, d in enumerate(decls):
             _validate(d, path, f"declarations()[{i}] ({getattr(d, 'ATEN_OP', '?')}):")
+        _validate_kernel_sources(decls, path)
         return decls
 
     _validate(mod, path, "")
+    _validate_kernel_sources([mod], path)
     return [mod]
 
 

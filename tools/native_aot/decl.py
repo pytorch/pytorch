@@ -21,11 +21,8 @@ registration.
 
 Required exports (module or declaration object):
 
-  ATEN_OP: str                name of a structured op: a base name
-                              ("topk") when the base resolves to exactly
-                              one structured group, or overload-qualified
-                              ("gt.Tensor", "all.dim") when overloads
-                              have separate structured groups. With
+  ATEN_OP: str                exact functional name of a structured op
+                              ("topk", "gt.Tensor", or "all.dim"). With
                               STRUCTURED=False, the exact name of an
                               unstructured functional overload returning
                               fresh tensors. decl_id()
@@ -80,6 +77,18 @@ Optional exports:
                               ARCHS intersect shipped-arches, so
                               declarations never hand-write arch
                               checks.
+  ATEN_ALIASES: tuple[str, ...]
+                              router symbols for output overloads in the
+                              same structured group. They share this
+                              declaration's coverage because torchgen
+                              inserts the same stub in those wrappers.
+  KERNEL_SOURCE: str          another declaration in this module whose
+                              exported kernel artifacts this declaration
+                              launches. The dispatch key, kernel module,
+                              architectures, and kernel grid must match.
+                              Only the source compiles and links artifacts;
+                              both declarations emit their own dispatcher
+                              stubs and coverage predicates.
   cpp_dispatch_prelude() -> str | None
                               shared front half of the dispatch chain:
                               cheap universal rejects and setup (locals,
@@ -129,6 +138,7 @@ from torchgen.native_aot_decl import (
     archs_of,
     decl_id,
     discover_declarations,
+    kernel_source,
     load_by_path,
     load_declaration,
     load_declarations,
@@ -140,6 +150,7 @@ __all__ = [
     "archs_of",
     "decl_id",
     "discover_declarations",
+    "kernel_source",
     "load_by_path",
     "load_declaration",
     "load_declarations",

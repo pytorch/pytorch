@@ -29,6 +29,7 @@ CORE_OPS = _DATA.CORE_OPS
 INDEX_OPS = _DATA.INDEX_OPS
 WELFORD_OPS = _DATA.WELFORD_OPS
 PLAIN_OPS = _DATA.PLAIN_OPS
+DTYPE_OPS = _DATA.DTYPE_OPS
 NORM_TRAITS = _DATA.NORM_TRAITS
 DTYPES = _DATA.DTYPES
 ROW_CLASSES = _DATA.ROW_CLASSES
@@ -49,6 +50,9 @@ def _row_geometry(self, dim, style):
     ndim = self.dim()
     if ndim < 1:
         return None
+    if style == "full":
+        n = self.numel()
+        return (n, 1, True) if n else None
     reduce_all = False
     if style == "int":
         values = [dim]
@@ -75,6 +79,15 @@ def _row_geometry(self, dim, style):
 
 
 def _geometry_cpp(style, *, expose_first=False):
+    if style == "full":
+        first = "const int64_t first = 0;" if expose_first else ""
+        return f"""
+      const bool row_dims = self.dim() > 0;
+      const bool reduce_all = true;
+      const int64_t N = self.numel();
+      {first}
+    """
+
     if style == "int":
         first = "const int64_t first = self.dim() - 1;" if expose_first else ""
         return """
@@ -207,6 +220,8 @@ class _RowReduction:
 
     def __init__(self, aten_op, trait, has_dtype, dim_style):
         self.ATEN_OP = aten_op
+        self.ATEN_ALIASES = _DATA.AOT_ALIASES.get(aten_op, ())
+        self.KERNEL_SOURCE = _DATA.KERNEL_SOURCES.get(aten_op, aten_op)
         self._trait = trait
         self._has_dtype = has_dtype
         self._dim_style = dim_style
@@ -520,6 +535,8 @@ class _IndexReduction:
 
     def __init__(self, aten_op, trait, dim_style, out_specs, outputs):
         self.ATEN_OP = aten_op
+        self.ATEN_ALIASES = _DATA.AOT_ALIASES.get(aten_op, ())
+        self.KERNEL_SOURCE = _DATA.KERNEL_SOURCES.get(aten_op, aten_op)
         self._trait = trait
         self._dim_style = dim_style
         self._out_specs = out_specs
@@ -637,15 +654,19 @@ class _ExtendedReduction:
     KERNEL_MODULE = "aot_kernel.py"
     ARCHS = ARCHS
 
-    def __init__(self, aten_op, traits, dim_style, out_specs, outputs):
+    def __init__(
+        self, aten_op, traits, dim_style, out_specs, outputs, has_keepdim=True
+    ):
         self.ATEN_OP = aten_op
+        self.ATEN_ALIASES = _DATA.AOT_ALIASES.get(aten_op, ())
+        self.KERNEL_SOURCE = _DATA.KERNEL_SOURCES.get(aten_op, aten_op)
         self.STRUCTURED = bool(outputs)
         self._traits = tuple(traits)
         self._dim_style = dim_style
         self._out_specs = tuple(out_specs)
         self._outputs = tuple(outputs)
         self._has_dtype = "dtype" in self._out_specs
-        self._has_keepdim = aten_op != "count_nonzero.dim_IntList"
+        self._has_keepdim = has_keepdim
 
     def _out_dtypes(self, dtype):
         if self._has_dtype:
@@ -798,7 +819,7 @@ class _ExtendedReduction:
             out_accept = " || ".join(
                 f"out_st == {_DTYPE_CPP[dtype]}" for dtype in DTYPES
             )
-            if output:
+            if output and self.STRUCTURED:
                 out_dtype = f"""
       const auto out_st = {self._outputs[0]}.scalar_type();
       if (!({out_accept})) return false;
@@ -1060,11 +1081,44 @@ class _NormReduction(_ExtendedReduction):
 
 
 class _PlainReduction(_ExtendedReduction):
-    def __init__(self, aten_op, trait, dim_style, out_specs, outputs):
-        super().__init__(aten_op, (trait,), dim_style, out_specs, outputs)
+    def __init__(self, aten_op, trait, dim_style, out_specs, outputs, has_keepdim):
+        super().__init__(
+            aten_op,
+            (trait,),
+            dim_style,
+            out_specs,
+            outputs,
+            has_keepdim=has_keepdim,
+        )
 
     def covered_axes(self, self_t, dim=None, keepdim=False):
+        if self.ATEN_OP in ("all.dims", "any.dims") and dim is not None and not dim:
+            return self._covered_axes(self_t, dim, None)
         return self._covered_axes(self_t, dim, self._traits[0])
+
+    def _variant_cpp(self):
+        if self.ATEN_OP in ("all.dims", "any.dims"):
+            return """
+      if (dim.has_value() && dim->empty()) return false;
+"""
+        return ""
+
+
+class _DtypeReduction(_ExtendedReduction):
+    def __init__(self, aten_op, trait, dim_style, has_keepdim):
+        super().__init__(
+            aten_op,
+            (trait,),
+            dim_style,
+            ("dtype",),
+            (),
+            has_keepdim=has_keepdim,
+        )
+
+    def covered_axes(self, self_t, dim=None, keepdim=False, *, dtype=None):
+        return self._covered_axes(
+            self_t, dim, self._traits[0], self_t.dtype if dtype is None else dtype
+        )
 
 
 def declarations():
@@ -1074,4 +1128,5 @@ def declarations():
         *(_WelfordReduction(*row) for row in WELFORD_OPS),
         _NormReduction(),
         *(_PlainReduction(*row) for row in PLAIN_OPS),
+        *(_DtypeReduction(*row) for row in DTYPE_OPS),
     ]

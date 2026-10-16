@@ -201,6 +201,36 @@ def _touch_artifacts(out_dir, prefix, exts=(".o", ".h"), tensor_args=None):
 
 
 class TestExportJobs(unittest.TestCase):
+    def test_shared_kernel_source_exports_only_the_owner(self):
+        class Owner:
+            ATEN_OP = "fakeop"
+            DISPATCH_KEY = "CUDA"
+            KERNEL_MODULE = "aot_kernel.py"
+
+            @staticmethod
+            def kernel_precompile_grid():
+                return [{"N": 1}]
+
+        class Alias(Owner):
+            ATEN_OP = "fakeop.full"
+            KERNEL_SOURCE = "fakeop"
+
+        with tempfile.TemporaryDirectory() as ops, tempfile.TemporaryDirectory() as out:
+            os.makedirs(os.path.join(ops, "fakeop"))
+            with open(os.path.join(ops, "fakeop", "aot.py"), "w"):
+                pass
+            with (
+                mock.patch.object(export, "OPS_DIR", ops),
+                mock.patch.object(
+                    export.decl, "load_declarations", return_value=[Owner, Alias]
+                ),
+                _no_ambient_arch(device="sm_100"),
+            ):
+                jobs = export._collect_jobs(None, out, [None])
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(os.path.basename(jobs[0][3]), "fakeop")
+
     def test_job_skip_matches_on_spec(self):
         # A spec match alone re-exports: the source closure must match too.
         with tempfile.TemporaryDirectory() as d:

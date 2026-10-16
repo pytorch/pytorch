@@ -3,6 +3,7 @@
 # Wiring tests for routing, fallback, and CUDA graph capture. OpInfo tests cover
 # numerical behavior.
 
+import contextlib
 import math
 import sys
 import unittest
@@ -37,6 +38,18 @@ from torch._native.ops.reductions import (
 
 def _disabled():
     return torch.backends.python_native.cutedsl.disabled()
+
+
+@contextlib.contextmanager
+def _aot_disabled():
+    from torch import _native
+
+    enabled = _native.aot_enabled()
+    try:
+        _native.set_aot_enabled(False)
+        yield
+    finally:
+        _native.set_aot_enabled(enabled)
 
 
 _OUT_CASES = (
@@ -164,11 +177,8 @@ _OUT_CASES = (
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 class TestCuTeDSLReductionWiring(TestCase):
     def _fired_count(self, fn):
-        from torch import _native
-
         names = ("reduce_dim", "reduce_dim2", "reduce_all", "reduce_all2")
         orig = {nm: getattr(kernel_general, nm) for nm in names}
-        aot_enabled = _native.aot_enabled()
         n = [0]
 
         def wrap(f):
@@ -181,10 +191,9 @@ class TestCuTeDSLReductionWiring(TestCase):
         for nm in names:
             setattr(kernel_general, nm, wrap(orig[nm]))
         try:
-            _native.set_aot_enabled(False)
-            fn()
+            with _aot_disabled():
+                fn()
         finally:
-            _native.set_aot_enabled(aot_enabled)
             for nm in names:
                 setattr(kernel_general, nm, orig[nm])
         return n[0]
@@ -463,13 +472,14 @@ class TestCuTeDSLReductionOut(TestCase):
         if name == "sum_dim":
             actual = (torch.empty(1, device=device, dtype=dtypes[0]),)
         try:
-            if name == "sum_dim":
-                with self.assertWarnsRegex(
-                    UserWarning, "An output with one or more elements was resized"
-                ):
+            with _aot_disabled():
+                if name == "sum_dim":
+                    with self.assertWarnsRegex(
+                        UserWarning, "An output with one or more elements was resized"
+                    ):
+                        result = call(x, actual)
+                else:
                     result = call(x, actual)
-            else:
-                result = call(x, actual)
         finally:
             for entry, fn in original.items():
                 setattr(kernel_general, entry, fn)
