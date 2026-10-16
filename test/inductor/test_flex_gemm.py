@@ -3265,7 +3265,9 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 a.shape[1],
             )
         b = torch.randn(64, 129, device="cuda", dtype=torch.bfloat16)
-        with self.assertRaisesRegex(InductorError, "config_constraints.*swap_ab"):
+        with self.assertRaisesRegex(
+            InductorError, "mat2.*16-byte aligned outer strides"
+        ):
             compiled(a, b)
 
     @skipIfNoCuteDSL
