@@ -145,6 +145,16 @@ def reset_user_object_tracking() -> None:
     keep_alive.clear()
 
 
+def install_captured_registry(registry: UserObjectRegistry) -> None:
+    """Let a captured graph run without its pre-graph bytecode until the next compile.
+
+    Export re-traces the captured graph directly, so nothing else fills the table,
+    and the registry holding the graph-created objects may not outlive the capture.
+    """
+    registry.install()
+    keep_alive[:] = registry.keep_alive
+
+
 def register_graph_created_object(
     example_value: object, construct_fn: Callable[[int, PyCodegen], None]
 ) -> int:

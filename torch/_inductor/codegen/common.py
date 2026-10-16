@@ -349,6 +349,8 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
     def set_device(self, device_idx: DeviceIdx) -> str:
+        """Only emitted right after entering device_guard(device_idx), so an
+        implementation may rely on the guard having set the device."""
         raise NotImplementedError
 
     def synchronize(self) -> str:
