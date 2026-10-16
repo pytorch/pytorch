@@ -22991,6 +22991,17 @@ if RUN_GPU:
             self.assertEqual(result, normalize(x, mean, rstd))
             self.assertIn("ynumel", " ".join(code))
 
+            # Short rows and rows that are not a multiple of 16 bytes (1025 fp32
+            # elements) keep the flat 1D kernel.
+            for shape in [(64, 512), (64, 1025)]:
+                x32 = torch.randn(shape, device=GPU_TYPE)
+                torch._dynamo.reset()
+                result, code = run_and_get_code(
+                    torch.compile(normalize), x32, mean, rstd
+                )
+                self.assertEqual(result, normalize(x32, mean, rstd))
+                self.assertNotIn("ynumel", " ".join(code))
+
             # Tiling is disabled with max_tiles=1.
             torch._dynamo.reset()
             with config.patch({"triton.max_tiles": 1}):
@@ -23008,19 +23019,29 @@ if RUN_GPU:
             self.assertNotIn("ynumel", " ".join(code))
 
         def test_size_one_innermost_reduction_dim_stays_unsplit(self):
-            # A size-1 innermost reduced dim is not "constant along the
-            # reduction": the contiguous read must still vote INNER (one kernel).
+            # A read that is contiguous along one reduction var and constant along
+            # another (a size-1 or broadcast innermost dim) still votes INNER, so
+            # these stay one unsplit kernel.
             def fn(x):
                 return x.sum((1, 2))
 
-            x = torch.randn(64, 4096, 1, device=GPU_TYPE)
-            result, code = run_and_get_code(torch.compile(fn), x)
-            self.assertEqual(result, fn(x))
-            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+            def broadcast_sum(x):
+                return x[:, :, None].expand(4096, 8, 32).sum((1, 2))
+
+            for f, x in [
+                (fn, torch.randn(64, 4096, 1, device=GPU_TYPE)),
+                (broadcast_sum, torch.randn(4096, 8, device=GPU_TYPE)),
+            ]:
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
+                self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
         def test_small_strided_read_keeps_outer_reduction(self):
-            # A transposed (strided) read votes OUTER even when it is a small
-            # dtype: its per-element cost does not shrink with itemsize.
+            # Only reads constant across the whole reduction abstain from the
+            # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
+            # including a small-dtype one (guards against weighting votes by
+            # itemsize).
             def fn(x, mask):
                 return (x * mask.t()).sum(1)
 
@@ -23069,7 +23090,16 @@ if RUN_GPU:
                 return torch.gather(x, dim, indices), indices
 
             specials = torch.tensor(
-                [float("inf"), -float("inf"), float("nan"), 0.0, -0.0, 1.0, 1.0],
+                [
+                    float("inf"),
+                    -float("inf"),
+                    float("nan"),
+                    -float("nan"),
+                    0.0,
+                    -0.0,
+                    1.0,
+                    1.0,
+                ],
                 device=GPU_TYPE,
             )
             for shape, k, dim, dtype, special in [
@@ -23079,6 +23109,7 @@ if RUN_GPU:
                 ((16, 128, 3), 3, 1, torch.float32, False),
                 ((512, 64), 8, -1, torch.float32, True),
                 ((512, 64), 8, -1, torch.bfloat16, True),
+                ((512, 64), 8, -1, torch.float16, True),
             ]:
                 x = torch.randn(shape, device=GPU_TYPE)
                 if special:
@@ -23103,16 +23134,8 @@ if RUN_GPU:
                     self.assertIsNotNone(fallback)
                 ref_values, ref_indices = reference(x, k, dim)
                 self.assertEqual(indices, ref_indices)
-                self.assertTrue(
-                    torch.equal(
-                        values.view(
-                            torch.int16 if dtype == torch.bfloat16 else torch.int32
-                        ),
-                        ref_values.view(
-                            torch.int16 if dtype == torch.bfloat16 else torch.int32
-                        ),
-                    )
-                )
+                bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+                self.assertTrue(torch.equal(values.view(bits), ref_values.view(bits)))
 
             # As in ATen, +0 ranks above -0; equal values go to the lowest index.
             x = torch.zeros(64, 32, device=GPU_TYPE)

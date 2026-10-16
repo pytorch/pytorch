@@ -548,8 +548,9 @@ def _nll_loss_backward(
     else:
         index_dtype = _class_index_dtype(num_classes)
     target = torch.where(in_range, target, -1).to(index_dtype)
-    classes_shape = [1] * self.dim()
-    classes_shape[channel_dim] = num_classes
+    # classes broadcasts along the leading (batch) dims by rank alone, which is
+    # how the auto-chunker recognizes an operand that is not chunked.
+    classes_shape = [num_classes] + [1] * (self.dim() - channel_dim - 1)
     classes = torch.arange(num_classes, dtype=index_dtype, device=self.device)
     one_hot = target == classes.view(classes_shape)
     return torch.where(one_hot, -grad_output, 0)
