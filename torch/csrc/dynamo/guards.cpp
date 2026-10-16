@@ -268,23 +268,21 @@ bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  // In terms of a sparse_csr tensor, it does not support strides information
-  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
-  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
-      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
-      v.layout() == c10::kSparseBsr;
-  if (!does_not_support_stride) {
-    sym_strides = v.sym_strides();
+  auto check_with_strides = [&](c10::SymIntArrayRef sym_strides) {
+    return check(
+        state,
+        v.key_set(),
+        v.dtype().toScalarType(),
+        v.device(),
+        v.sym_sizes(),
+        sym_strides,
+        v.requires_grad());
+  };
+  // Compressed sparse layouts don't support strides; compare against -1s.
+  if (at::sparse_csr::is_sparse_compressed(v)) {
+    return check_with_strides(std::vector<SymInt>(v.ndimension(), -1));
   }
-
-  return check(
-      state,
-      v.key_set(),
-      v.dtype().toScalarType(),
-      v.device(),
-      v.sym_sizes(),
-      sym_strides,
-      v.requires_grad());
+  return check_with_strides(v.sym_strides());
 }
 
 bool TensorCheck::check(
@@ -309,17 +307,13 @@ bool TensorCheck::check(
   const auto& sizes = sym_sizes;
   const auto& strides = sym_strides;
   for (auto i : c10::irange(ndim)) {
-    auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
-    if (known_size.has_value()) {
-      if (known_size.value() != sizes[i]) {
-        return false;
-      }
+    const auto& known_size = sizes_[i];
+    const auto& known_stride = strides_[i];
+    if (known_size && *known_size != sizes[i]) {
+      return false;
     }
-    if (known_stride.has_value()) {
-      if (known_stride.value() != strides[i]) {
-        return false;
-      }
+    if (known_stride && *known_stride != strides[i]) {
+      return false;
     }
   }
   return true;
@@ -669,6 +663,9 @@ struct AutocastState {
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
+  // Excluded autocast dispatch keys, equivalent to `enabled` but checkable in
+  // one mask compare.
+  c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -676,25 +673,25 @@ struct AutocastState {
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
     cache_enabled = at::autocast::is_autocast_cache_enabled();
+    disabled_keys = c10::impl::tls_local_dispatch_key_set().excluded_ &
+        c10::autocast_dispatch_keyset;
   }
 
-  // Read the excluded dispatch key set from TLS once, and only fetch dtypes for
-  // devices with autocast enabled.
+  // Compares all enabled flags at once via the TLS excluded set, and only
+  // fetches dtypes for enabled devices.
   bool matches_current() const {
     const auto& excluded{c10::impl::tls_local_dispatch_key_set().excluded_};
-    // This would be a std::ranges::zip_view in C++23.
+    if ((excluded & c10::autocast_dispatch_keyset) != disabled_keys) {
+      return false;
+    }
+
     for (size_t i{0}; i < DEVICES.size(); ++i) {
-      const bool cur_enabled{!excluded.has(
-          at::autocast::get_autocast_dispatch_key_from_device_type(
-              DEVICES[i]))};
-      if (cur_enabled != enabled[i]) {
-        return false;
-      }
-      if (cur_enabled &&
+      if (enabled[i] &&
           dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
       }
     }
+
     return cache_enabled == at::autocast::is_autocast_cache_enabled();
   }
 
@@ -729,6 +726,16 @@ struct AutocastState {
     json_t.enabled = json_j.at("enabled");
     json_t.dtype = json_j.at("dtype");
     json_t.cache_enabled = json_j.at("cached_enabled");
+
+    // Rebuild disabled_keys from enabled
+    json_t.disabled_keys = c10::DispatchKeySet();
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (!json_t.enabled[i]) {
+        json_t.disabled_keys = json_t.disabled_keys.add(
+            at::autocast::get_autocast_dispatch_key_from_device_type(
+                DEVICES[i]));
+      }
+    }
   }
 };
 
