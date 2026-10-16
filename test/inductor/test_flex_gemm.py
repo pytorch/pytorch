@@ -9267,7 +9267,6 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
 
     def test_grouped_mm_chunked_glu_saves_pre_activation(self, device):
         x, w_t, offs = self.makeGroupedMm((201, 0, 129, 182), device, total_m=640)
-        w_t = w_t.mT.contiguous().mT
 
         def epilogue_fn(acc):
             gate, up = acc.float().chunk(2, dim=-1)
