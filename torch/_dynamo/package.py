@@ -657,7 +657,8 @@ def _globals_module_name(
     ``inspect.getmodule`` maps a code object to a module by its file, so it can
     answer with the other alias, whose globals and functions are not the frame's.
     ``preferred`` is tried first, so a key that already names the owner (e.g. an
-    importable alias of ``__main__``) is kept.
+    importable alias of ``__main__``) is kept. A module that rebinds ``__name__``
+    is still registered under ``__spec__.name``, so that is tried last.
     """
     for name in (
         preferred,
@@ -1153,6 +1154,41 @@ def _compile_frame_context(
     return _ctx()
 
 
+# The skips installed packages hold on each code object, one per package, True
+# for a skip of everything the code calls. A strategy is process-global, so a
+# code keeps the widest skip still held and goes back to the default only when
+# the last holder uninstalls. A strategy set before install() (e.g. by
+# torch._dynamo.skip) is not restored: there is no getter for it.
+_SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+
+def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None:
+    from torch._C._dynamo.eval_frame import (
+        _load_precompile_skip,
+        set_code_exec_strategy,
+    )
+
+    from .types import FrameAction, FrameExecStrategy
+
+    holds = _SKIP_HOLDS.setdefault(code, [])
+    if hold:
+        holds.append(recursive)
+    else:
+        holds.remove(recursive)
+    if not holds:
+        del _SKIP_HOLDS[code]
+        set_code_exec_strategy(
+            code, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        )
+    elif any(holds):
+        set_code_exec_strategy(
+            code, FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+        )
+    else:
+        # {SKIP, DEFAULT} that also reports SKIP to the guard collective.
+        _load_precompile_skip(code)
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1184,9 +1220,9 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # Codes install() gave a SKIP strategy, which uninstall() resets: a
-        # strategy is process-global and would outlive this package.
-        self._skipped_codes: list[types.CodeType] = []
+        # The skips install() holds in _SKIP_HOLDS, which uninstall() releases:
+        # (code, whether its callees are skipped too).
+        self._skipped_codes: list[tuple[types.CodeType, bool]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1316,6 +1352,13 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
+    @property
+    def _entry_module_name(self) -> str | None:
+        # Frames sharing the entry's globals keep the key the entry was recorded
+        # under, e.g. an importable alias of __main__ the driver can import.
+        entry = next(iter(self._codes.values()), None)
+        return entry.python_module if entry is not None else None
+
     def _add_user_function(
         self,
         code: types.CodeType,
@@ -1340,7 +1383,8 @@ class CompilePackage:
             function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            _globals_module_name(vars(module)) or module.__name__,
+            _globals_module_name(vars(module), self._entry_module_name)
+            or module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
@@ -1432,7 +1476,8 @@ class CompilePackage:
     ) -> None:
         self._add_function(
             python_code,
-            _globals_module_name(global_scope) or global_scope["__name__"],
+            _globals_module_name(global_scope, self._entry_module_name)
+            or global_scope["__name__"],
             function_name=_FunctionId(function_name),
             install_to_global=True,
         )
@@ -1494,12 +1539,7 @@ class CompilePackage:
             self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import (
-            _reset_precompile_entries,
-            set_code_exec_strategy,
-        )
-
-        from .types import FrameAction, FrameExecStrategy
+        from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
@@ -1508,9 +1548,8 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
-        default = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
-        for code in self._skipped_codes:
-            set_code_exec_strategy(code, default)
+        for code, recursive in self._skipped_codes:
+            _update_skip_hold(code, recursive, hold=False)
         self._skipped_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
@@ -1522,17 +1561,12 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        from torch._C._dynamo.eval_frame import (
-            _load_precompile_entry,
-            _load_precompile_skip,
-            set_code_exec_strategy,
-        )
+        from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
         from .decorators import _nonrecursive_disable_wrapper_code
         from .output_graph import get_builtins_dict
         from .symbolic_convert import UNNAMED_SCOPE_PREFIX
-        from .types import FrameAction, FrameExecStrategy
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1614,18 +1648,13 @@ class CompilePackage:
                             torch._dynamo.disable(backend),
                         )
 
-                if entry.skip_recursive:
-                    # Not reported to the guard collective: like it, this
-                    # assumes every rank installed the same artifact, so every
-                    # rank skips the frame and its callees.
-                    skip_all = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
-                    set_code_exec_strategy(target_code, skip_all)
-                    self._skipped_codes.append(target_code)
-                elif len(entry.guarded_codes) == 0:
-                    # Dynamo generates empty graph for trivial functions, should just skip them
-                    # in these cases.
-                    _load_precompile_skip(target_code)
-                    self._skipped_codes.append(target_code)
+                # Dynamo generates empty graph for trivial functions, should just skip them
+                # in these cases. A recursive skip is not reported to the guard
+                # collective: like it, this assumes every rank installed the
+                # same artifact, so every rank skips the frame and its callees.
+                if entry.skip_recursive or len(entry.guarded_codes) == 0:
+                    _update_skip_hold(target_code, entry.skip_recursive, hold=True)
+                    self._skipped_codes.append((target_code, entry.skip_recursive))
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):
@@ -1642,7 +1671,7 @@ class CompilePackage:
                             self._install_global(
                                 module,
                                 name,
-                                module.__dict__.get(name, value),
+                                runtime_global_scope.get(name, value),
                                 record_only_if_new=True,
                             )
                     # The installed builtins dict might be absent from the runtime
