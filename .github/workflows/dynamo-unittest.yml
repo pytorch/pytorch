@@ -55,6 +55,8 @@ jobs:
           { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
+      # pull.yml already runs dynamo_wrapped on this build environment for 3.11.
+      selected-test-configs: ${{ matrix.python-version == '3.11' && 'dynamo_core' || '' }}
       python-version: ${{ matrix.python-version }}
       compiler: clang21
       cuda-version: cpu
