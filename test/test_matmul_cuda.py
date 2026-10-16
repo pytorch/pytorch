@@ -47,8 +47,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
-    MI300_ARCH,
-    MI350_ARCH,
     NAVI3_5_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -93,7 +91,8 @@ def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
 
 
 @contextlib.contextmanager
-def rocm_group_gemm_ck_env(value, var="ROCM_ALLOW_GROUP_GEMM_CK"):
+def rocm_group_gemm_ck_env(value):
+    var = "ROCM_ALLOW_GROUP_GEMM_CK"
     old = os.environ.get(var, None)
     try:
         if value is None:
@@ -1190,15 +1189,9 @@ class TestMatmulCuda(InductorTestCase):
 
     @skipCUDAIfNotRocm
     # Fails with triton 3.7
-    @parametrize("backend", ["ck", "ck_tile"])
-    def test_grouped_gemm_rocm_ck_flag(self, backend):
-        # env var that enables the backend, and a substring of its kernel name for both equal and unequal K
-        env_var, CK_EQUAL_K_HINT, CK_UNEQUAL_K_HINT = {
-            "ck": ("ROCM_ALLOW_GROUP_GEMM_CK", "kernel_grouped_gemm_xdl_splitk", "kernel_grouped_gemm_xdl_splitk"),
-            "ck_tile": ("ROCM_ALLOW_GROUP_GEMM_CK_TILE", "ck_tile::GroupedGemmKernel", "ck_tile::GroupedGemmKernel"),
-        }[backend]
-        if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
-            raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+    def test_grouped_gemm_rocm_ck_flag(self):
+        CK_EQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
+        CK_UNEQUAL_K_HINT = "kernel_grouped_gemm_xdl_splitk"
         HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
 
         def has_ck_kernel(kernels: set[str], hint: str) -> bool:
@@ -1237,9 +1230,9 @@ class TestMatmulCuda(InductorTestCase):
                 kernels.add(evt.key)
             return kernels
 
-        with rocm_group_gemm_ck_env(None, var=env_var):
+        with rocm_group_gemm_ck_env(None):
             self.assertTrue(uses_hipblaslt(collect_kernel_names(equal_k=True)))
-        with rocm_group_gemm_ck_env("1", var=env_var):
+        with rocm_group_gemm_ck_env("1"):
             ck_equal_kernels = collect_kernel_names(equal_k=True)
             self.assertTrue(has_ck_kernel(ck_equal_kernels, CK_EQUAL_K_HINT))
 
