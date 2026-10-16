@@ -140,6 +140,9 @@ def _capture_config() -> Iterator[None]:
         functorch_patch["strict_autograd_cache"] = True
     import torch._inductor.config as inductor_config
 
+    # TODO: drop the bundled_autotune_remote_cache patch once
+    # AutotuneCacheBundler keeps one bundle per compiled module rather than one
+    # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
         inductor_config.patch(bundled_autotune_remote_cache=False),
@@ -183,7 +186,7 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
         # stance path (eval_frame._create_wrapped_callback, behind set_stance)
         # rebuilds a plain ConvertFrame with no package and is outside a capture
         # session's contract.
-        if self._inner_convert._package is None:
+        if self._package is None:
             return lambda backend: type(self)(
                 backend, self._hooks, recompile_limit=self._recompile_limit
             )
