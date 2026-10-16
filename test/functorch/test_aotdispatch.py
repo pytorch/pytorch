@@ -13079,6 +13079,19 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         )
 
 
+def inherit_device_tests(cls):
+    """
+    Copy inherited device-generic tests into the decorated class' own __dict__.
+
+    instantiate_device_type_tests() only looks at generic_test_class.__dict__, so a
+    subclass that adds no tests of its own would otherwise be instantiated empty.
+    """
+    for name in dir(cls):
+        if name.startswith("test") and name not in cls.__dict__:
+            setattr(cls, name, getattr(cls, name))
+    return cls
+
+
 class _AOTAutogradDynamoMixin:
     """
     Runs dynamo first to get a graph module, then runs aot_autograd on it.
@@ -13315,6 +13328,15 @@ class TestAOTAutogradWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutograd):
             self.assertEqual(ref, inplace)
 
 
+@inherit_device_tests
+class TestAOTAutogradDeviceWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutogradDevice):
+    """
+    These are the same as TestAOTAutogradDevice tests, but we run dynamo first to get a graph module.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
 class MockFXGraphCache:
     """
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
@@ -13452,14 +13474,7 @@ class TestAOTAutogradWithCache(_AOTAutogradCacheMixin, TestAOTAutogradWithDynamo
         self.skipTest("Skipping because it fails in strict cache mode")
 
 
-class TestAOTAutogradDeviceWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutogradDevice):
-    """
-    These are the same as TestAOTAutogradDevice tests, but we run dynamo first to get a graph module.
-    """
-
-    hw_classification = HardwareClassification.ACCELERATOR
-
-
+@inherit_device_tests
 class TestAOTAutogradDeviceWithCache(
     _AOTAutogradCacheMixin, TestAOTAutogradDeviceWithDynamo
 ):
@@ -13474,6 +13489,18 @@ instantiate_parametrized_tests(TestAOTAutograd)
 instantiate_parametrized_tests(TestPartitioning)
 instantiate_device_type_tests(
     TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTAutogradDeviceWithDynamo,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestAOTAutogradDeviceWithCache,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_parametrized_tests(TestAOTModuleSimplified)
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
