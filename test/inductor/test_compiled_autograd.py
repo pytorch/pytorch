@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     parametrize,
     scoped_load_inline,
+    set_rng_seed,
     skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
@@ -4693,6 +4694,34 @@ class CompiledAutograd1(torch.nn.Module):
 
         first, second, third, fourth = fn(eager(), aot_eager())
         self.assertIsNone(third)
+
+    def test_conv_zero_batch_double_backward_with_undefined_grad(self):
+        def fn():
+            set_rng_seed(0)
+            module = nn.Conv1d(4, 5, 3)
+            input = torch.randn(0, 4, 5, requires_grad=True)
+            output = module(input)
+            grad_output = torch.randn_like(output, requires_grad=True)
+            input_grad, weight_grad, bias_grad = torch.autograd.grad(
+                output,
+                (input, module.weight, module.bias),
+                grad_output,
+                create_graph=True,
+            )
+            outputs = (
+                output.sum() + input_grad.sum() + weight_grad.sum() + bias_grad.sum()
+            )
+            return torch.autograd.grad(
+                outputs,
+                (input, grad_output, module.weight, module.bias),
+                retain_graph=True,
+            )
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            wrapped = torch._dynamo.optimize("eager_noexcept", nopython=False)(fn)
+            actual = wrapped()
+        self.assertEqual(expected, actual)
 
     @unittest.skipIf(
         not torch.distributed.is_available(),
