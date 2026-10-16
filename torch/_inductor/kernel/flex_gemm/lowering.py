@@ -327,17 +327,18 @@ def require_tma_loadable_tile_captures(
     an interleaved load pairs adjacent N columns, so it must be N-major. Views
     such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
+    The copy's row stride is padded to the alignment, so an unaligned N (a bf16
+    ``[m, 12]`` tile) stays loadable.
     Row-strided views such as ``h[:, :n]`` already qualify and load in place.
     """
     from torch._inductor.virtualized import V
 
     sizevars = V.graph.sizevars
 
-    def loadable(arg: TensorBox, unit_dims: tuple[int, ...]) -> bool:
+    def loadable(arg: TensorBox, unit_dims: tuple[int, ...], alignment: int) -> bool:
         stride = arg.maybe_get_stride()
         if stride is None:
             return True
-        alignment = max(16 // arg.get_dtype().itemsize, 1)
         for unit in unit_dims:
             if statically_known_equal(stride[unit], 1) and all(
                 sizevars.statically_known_multiple_of(s, alignment)
@@ -350,11 +351,14 @@ def require_tma_loadable_tile_captures(
     unit_dims = {"tile": (-1, -2), "interleaved": (-1,)}
     out = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True):
-        if kind in unit_dims and not loadable(arg, unit_dims[kind]):
+        alignment = max(16 // arg.get_dtype().itemsize, 1)
+        if kind in unit_dims and not loadable(arg, unit_dims[kind], alignment):
+            *outer, n = arg.get_size()
+            padded = [*outer, ceildiv(n, alignment) * alignment]
             arg = cast(
                 TensorBox,
                 ir.ExternKernel.require_exact_strides(
-                    arg, ir.FlexibleLayout.contiguous_strides(arg.get_size())
+                    arg, ir.FlexibleLayout.contiguous_strides(padded)
                 ),
             )
         out.append(arg)
