@@ -49,7 +49,6 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint
@@ -2657,6 +2656,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.XCCL, "xpu:xccl"),
             (dist.Backend.NCCL, "cuda:nccl"),
             (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
@@ -2667,19 +2667,11 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
+            ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
+            ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
+            ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
         ]
-
-        if TEST_XPU:
-            # Override backend_config_strings_and_expected_values for Intel GPU.
-            backend_config_strings_and_expected_values[4:10] = [
-                (dist.Backend.DUMMY, dummy_backend_config),
-                ("DUMMY", dummy_backend_config),
-                ("dummy", dummy_backend_config),
-                ("cpu:dummy,xpu:dummy", "cpu:dummy,xpu:dummy"),
-                ("cpu:dummy,xpu:xccl", "cpu:dummy,xpu:xccl"),
-                ("cpu:gloo,xpu:dummy", "cpu:gloo,xpu:dummy"),
-                ("cpu:gloo,xpu:xccl", "cpu:gloo,xpu:xccl"),
-            ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:
             with self.subTest(config_str):
@@ -2713,6 +2705,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             _parse_backend_string("NCCL", available_devices=all_devices),
             {"cuda": "nccl"},
         )
+        for backend_str in ("xccl", "XCCL"):
+            parsed = _parse_backend_string(backend_str, available_devices=all_devices)
+            self.assertEqual(parsed, {"xpu": "xccl"})
         # gloo is the default for both cpu and mps in default_device_backend_map.
         self.assertEqual(
             _parse_backend_string("gloo", available_devices=all_devices),
@@ -2730,6 +2725,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ),
             {"cpu": "gloo", "cuda": "nccl"},
         )
+        for backend_str in ("cpu:gloo,xpu:xccl", "CPU:GLOO , XPU:XCCL"):
+            parsed = _parse_backend_string(backend_str, available_devices=all_devices)
+            self.assertEqual(parsed, {"cpu": "gloo", "xpu": "xccl"})
         # Unknown device types in merged form are accepted (no validation here).
         self.assertEqual(
             _parse_backend_string("xpu:nccl", available_devices=all_devices),
