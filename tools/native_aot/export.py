@@ -319,9 +319,22 @@ def _collect_jobs(ops_filter, out_root: str, archs):
         op_dir = os.path.join(OPS_DIR, entry)
         if not os.path.exists(os.path.join(op_dir, "aot.py")):
             continue
-        for d in decl.load_declarations(os.path.join(op_dir, "aot.py")):
+        declarations = decl.load_declarations(os.path.join(op_dir, "aot.py"))
+        selected_sources = {
+            decl.kernel_source(d)
+            for d in declarations
+            if not ops_filter or entry in ops_filter or d.ATEN_OP in ops_filter
+        }
+        for d in declarations:
             did = decl.decl_id(d)
-            if ops_filter and entry not in ops_filter and d.ATEN_OP not in ops_filter:
+            if decl.kernel_source(d) != d.ATEN_OP:
+                continue
+            if (
+                ops_filter
+                and entry not in ops_filter
+                and d.ATEN_OP not in ops_filter
+                and d.ATEN_OP not in selected_sources
+            ):
                 continue
             for arch in archs:
                 # No unnamed layout: an artifact whose arch nobody can state

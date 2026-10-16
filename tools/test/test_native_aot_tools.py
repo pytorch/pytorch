@@ -201,6 +201,36 @@ def _touch_artifacts(out_dir, prefix, exts=(".o", ".h"), tensor_args=None):
 
 
 class TestExportJobs(unittest.TestCase):
+    def test_shared_kernel_source_exports_only_the_owner(self):
+        class Owner:
+            ATEN_OP = "fakeop"
+            DISPATCH_KEY = "CUDA"
+            KERNEL_MODULE = "aot_kernel.py"
+
+            @staticmethod
+            def kernel_precompile_grid():
+                return [{"N": 1}]
+
+        class Alias(Owner):
+            ATEN_OP = "fakeop.full"
+            KERNEL_SOURCE = "fakeop"
+
+        with tempfile.TemporaryDirectory() as ops, tempfile.TemporaryDirectory() as out:
+            os.makedirs(os.path.join(ops, "fakeop"))
+            with open(os.path.join(ops, "fakeop", "aot.py"), "w"):
+                pass
+            with (
+                mock.patch.object(export, "OPS_DIR", ops),
+                mock.patch.object(
+                    export.decl, "load_declarations", return_value=[Owner, Alias]
+                ),
+                _no_ambient_arch(device="sm_100"),
+            ):
+                jobs = export._collect_jobs(None, out, [None])
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(os.path.basename(jobs[0][3]), "fakeop")
+
     def test_job_skip_matches_on_spec(self):
         # A spec match alone re-exports: the source closure must match too.
         with tempfile.TemporaryDirectory() as d:
@@ -1162,6 +1192,41 @@ class TestLauncherGeneration(unittest.TestCase):
             src,
         )
 
+    def test_tensor_list_marshalling(self):
+        sc = dict(
+            SIDECAR,
+            tensor_args=[
+                {"name": "mX", "dynamic_sizes": [0], "read_only": True},
+                {
+                    "name": "mOuts",
+                    "items": [
+                        {"name": "mOut0", "dynamic_sizes": [0]},
+                        {"name": "mOut1", "dynamic_sizes": [0]},
+                    ],
+                },
+            ],
+        )
+        src = gen_aot_lib.gen_launcher(sc)
+        self.assertIn(
+            "const at::Tensor& mX, const at::Tensor& mOut0, "
+            "const at::Tensor& mOut1, c10::Stream stream",
+            src,
+        )
+        self.assertIn(
+            "fakeop_f32_n1024_k8_TensorList_mOuts_t mOuts_s;\n  mOuts_s.count = 2;",
+            src,
+        )
+        self.assertIn(
+            "mOuts_s.elements[1].dynamic_shapes[0] = "
+            "static_cast<int32_t>(mOut1.size(0));",
+            src,
+        )
+        self.assertIn(
+            "cute_dsl_fakeop_f32_n1024_k8_wrapper("
+            "&fakeop_f32_n1024_k8_module, &mX_s, &mOuts_s,",
+            src,
+        )
+
 
 class TestScalarArgs(unittest.TestCase):
     def test_launcher_forwards_scalars_by_value(self):
@@ -1770,6 +1835,16 @@ class TestAbiValidation(unittest.TestCase):
             + self._struct("mOut", shapes=2, strides=1)
         )
 
+    def _list_header(self, name, count):
+        p = SIDECAR["prefix"]
+        return (
+            "#pragma once\n#include <stdint.h>\n"
+            + self._struct(name, shapes=1, strides=0)
+            + "typedef struct {\n"
+            f"  {p}_Tensor_{name}_t elements[{count}];\n"
+            f"  int32_t count;\n}} {p}_TensorList_{name}_t;\n"
+        )
+
     def _sidecar(self, tmpdir, header: str, **over) -> dict:
         with open(os.path.join(tmpdir, SIDECAR["prefix"] + ".h"), "w") as f:
             f.write(header)
@@ -1790,6 +1865,19 @@ class TestAbiValidation(unittest.TestCase):
         # int32 SHAPE slots are expected and handled (explicit cast + size gate);
         # only the stride WIDTH and both slot COUNTS are the subject.
         self._accepts(self._header())
+
+    def test_tensor_list_count_and_elements_are_validated(self):
+        items = [
+            {"name": "mOut0", "dynamic_sizes": [0]},
+            {"name": "mOut1", "dynamic_sizes": [0]},
+        ]
+        tensor_args = [{"name": "mOuts", "items": items}]
+        self._accepts(self._list_header("mOuts", 2), tensor_args=tensor_args)
+        self._refuses(
+            self._list_header("mOuts", 3),
+            "declares elements\\[3\\], but the sidecar lists 2",
+            tensor_args=tensor_args,
+        )
 
     def test_int32_stride_slots_are_refused(self):
         # aten strides are int64 and the launcher assigns them straight across, so
