@@ -17,7 +17,12 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_SLOW_GRADCHECK
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+    TEST_WITH_SLOW_GRADCHECK,
+)
 
 
 # Make the helper files in test/ importable
@@ -197,6 +202,7 @@ class ConvMultiFunctionalBN(torch.nn.Module):
         return tmp + tmp2
 
 
+@instantiate_parametrized_tests
 class OptimizeForInferenceTemplate(TestCase):
     def test_mutation(self):
         class Mod(torch.nn.Module):
@@ -224,6 +230,39 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_eager, out_comp)
             self.assertEqual(out_eager2, out_comp2)
+
+    @parametrize(
+        "dtype,requires_grad",
+        [
+            (torch.int64, False),
+            (torch.bool, False),
+            (torch.float32, False),
+            (torch.float32, True),
+        ],
+    )
+    def test_discard_parameters_preserves_requires_grad(self, dtype, requires_grad):
+        from torch._inductor.freezing import ErasedTensor
+
+        class Mod(torch.nn.Module):
+            def __init__(self, dtype, requires_grad):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.ones(8, dtype=dtype),
+                    requires_grad=requires_grad,
+                )
+
+            def forward(self, x):
+                return x + self.weight
+
+        mod = Mod(dtype, requires_grad).to(self.device).eval()
+        inp = torch.randn(8, device=self.device)
+        with torch.no_grad():
+            expected = mod(inp)
+            compiled = torch.compile(mod, fullgraph=True)
+            self.assertEqual(compiled(inp), expected)
+            self.assertEqual(compiled(inp + 1), expected + 1)
+        self.assertIsInstance(mod.weight, ErasedTensor)
+        self.assertEqual(mod.weight.requires_grad, requires_grad)
 
     def test_aliased_param_return(self):
         class Mod(torch.nn.Module):
