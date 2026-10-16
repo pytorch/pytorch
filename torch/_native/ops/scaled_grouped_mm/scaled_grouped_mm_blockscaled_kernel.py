@@ -4,6 +4,7 @@
 import cuda.bindings.driver as cuda
 import cutlass
 import cutlass.cute as cute
+import cutlass.cute.testing as cute_testing
 import cutlass.pipeline as pipeline
 import cutlass.utils as utils
 import cutlass.utils.blackwell_helpers as sm100_utils
@@ -689,6 +690,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             total_num_clusters,
             tensormap_cute_tensor,
             group_offsets,
+            (*initial_sfa.shape[:2], *initial_sfb.shape[:2]),
         ).launch(grid=(group_count, 1, 1), block=[32, 1, 1], stream=stream)
 
         self.kernel(
@@ -1660,6 +1662,9 @@ class Sm100GroupedBlockScaledGemmKernel:
         total_num_clusters: cute.Tensor,
         tensormaps: cute.Tensor,
         group_offsets: cute.Tensor,
+        scale_extents: tuple[
+            cutlass.Int32, cutlass.Int32, cutlass.Int32, cutlass.Int32
+        ],
     ):
         # One warp per group. Every lane computes the group's metadata, so the
         # descriptors are built from registers; lane 0 stores what the GEMM reads.
@@ -1687,6 +1692,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         if g > 0:
             off_start = offs[g - 1]
         group_size = offs[g] - off_start
+        cute_testing.assert_(group_size >= 0, "group offsets must be nondecreasing")
 
         # 2d/3d: 128-row padded A scale rows; 2d/2d: 4-column padded scale columns.
         scale_blocks_before = cutlass.Int32(0)
@@ -1703,6 +1709,38 @@ class Sm100GroupedBlockScaledGemmKernel:
         scale_blocks_before = cute.arch.warp_reduction(
             scale_blocks_before, lambda x, y: x + y
         )
+
+        # Mirror the device-side checks of the ATen (MSLK) kernels.
+        sfa_rows, sfa_cols, sfb_rows, sfb_cols = scale_extents
+        if cutlass.const_expr(not self.uniform_mn_groups):
+            cute_testing.assert_(
+                offs[g] <= M, "group offsets must not exceed mat_a.size(0)"
+            )
+            cute_testing.assert_(
+                scale_blocks_before + cute.ceil_div(group_size, 128) * 128 <= sfa_rows,
+                "scale_a must hold every group's rows padded to 128",
+            )
+        else:
+            cute_testing.assert_(
+                offs[g] <= K, "group offsets must not exceed the contraction size"
+            )
+            cute_testing.assert_(
+                group_size % self.sf_vec_size == 0,
+                "group sizes along K must be multiples of the scale block size",
+            )
+            scale_cols_end = cutlass.Int64(
+                scale_blocks_before
+                + cute.ceil_div(cute.ceil_div(group_size, self.sf_vec_size), 4) * 4
+            )
+            for sf_rows, sf_cols, rows in (
+                (sfa_rows, sfa_cols, M),
+                (sfb_rows, sfb_cols, N),
+            ):
+                cute_testing.assert_(
+                    cutlass.Int64(cute.ceil_div(rows, 128) * 128) * scale_cols_end
+                    <= cutlass.Int64(sf_rows) * cutlass.Int64(sf_cols),
+                    "scales must hold every group's columns padded to 4",
+                )
 
         if cutlass.const_expr(not self.uniform_mn_groups):
             # 2d/3d: offs partition rows (M) of A/output.

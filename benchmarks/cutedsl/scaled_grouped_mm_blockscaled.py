@@ -520,7 +520,9 @@ def benchmark_scaled_grouped_mm(
 
     run_cpp = backend in ("both", "cpp")
     cpp_only = functools.partial(
-        python_native.operations_disabled, "_scaled_grouped_mm_v2"
+        python_native.operations_disabled,
+        "_scaled_grouped_mm_v2",
+        "_scaled_grouped_mm_v2.out",
     )
     run_cute = backend in ("both", "cute")
     if run_cute:

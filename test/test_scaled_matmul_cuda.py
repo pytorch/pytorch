@@ -1,10 +1,13 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import inspect
 import json
 import math
 import re
 import itertools
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -699,6 +702,27 @@ def _copy_to_end_of_device_mapping(t):
     return guarded.view(t.dtype).view(t.shape), release
 
 
+def _zero_mxfp8_2d_3d_inputs(G, M, N, K, device):
+    # Correctly shaped mxfp8 2d-3d inputs with zero data, for validation tests.
+    offs = torch.arange(1, G + 1, dtype=torch.int32, device=device) * (M // G)
+    scale_a_rows = G * ((M // G + 127) // 128 * 128)
+    scale_cols = (K // 32 + 3) // 4 * 4
+    xq = torch.zeros((M, K), dtype=torch.float8_e4m3fn, device=device)
+    wq = torch.zeros((G, N, K), dtype=torch.float8_e4m3fn, device=device)
+    xs = torch.zeros((scale_a_rows, scale_cols), dtype=torch.float8_e8m0fnu, device=device)
+    ws = torch.zeros((G, scale_cols * ((N + 127) // 128 * 128)), dtype=torch.float8_e8m0fnu, device=device)
+    return xq, wq, xs, ws, offs
+
+
+def _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs):
+    recipe = [ScalingType.BlockWise1x32]
+    swizzle = [SwizzleType.SWIZZLE_32_4_4]
+    return scaled_grouped_mm(
+        xq, wq.transpose(-2, -1), [xs], recipe, [ws], recipe,
+        swizzle_a=swizzle, swizzle_b=swizzle, offs=offs, output_dtype=torch.bfloat16,
+    )
+
+
 def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     # Build some standard args that are wordy
     swizzle = SwizzleType.NO_SWIZZLE
@@ -1113,6 +1137,86 @@ class TestFP8Matmul(TestCase):
             input_group_end_offsets=offs, guard_input_end=True,
         )
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @skipIfNoCuteDSL
+    @parametrize("layout", ["2d_2d", "2d_3d"])
+    def test_scaled_grouped_mm_empty_contraction(self, layout, device):
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        G, M, N = 4, 256, 512
+        xq, wq, xs, ws, offs = _zero_mxfp8_2d_3d_inputs(G, M, N, 0, device)
+        if layout == "2d_2d":
+            wq = torch.zeros((N, 0), dtype=wq.dtype, device=device)
+            xs = torch.zeros((M, 0), dtype=xs.dtype, device=device)
+            ws = torch.zeros((N, 0), dtype=ws.dtype, device=device)
+            offs = torch.zeros(G, dtype=torch.int32, device=device)
+        # K=0 tensors still need 16-byte row strides to pass ATen's checks.
+        xq = torch.zeros((M, 16), dtype=xq.dtype, device=device)[:, :0]
+        wq = torch.zeros((*wq.shape[:-1], 16), dtype=wq.dtype, device=device)[..., :0]
+        out = _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)
+        with torch.backends.python_native.operations_disabled("_scaled_grouped_mm_v2", "_scaled_grouped_mm_v2.out"):
+            out_cpp = _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)
+        self.assertEqual(out.shape, out_cpp.shape)
+        self.assertEqual(out, torch.zeros_like(out))
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @skipIfNoCuteDSL
+    @parametrize("case", ["scale_a_rows", "scale_b_size", "scale_b_3d", "offs_count", "offs_dtype", "mat_a_transposed"])
+    def test_scaled_grouped_mm_2d_3d_invalid_inputs(self, case, device):
+        # Inputs ATen rejects must raise here too, not compute on garbage.
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        G, M, N, K = 4, 512, 256, 256
+        xq, wq, xs, ws, offs = _zero_mxfp8_2d_3d_inputs(G, M, N, K, device)
+        if case == "scale_a_rows":
+            xs = xs[: M // 2]
+        elif case == "scale_b_size":
+            ws = ws[:, : ws.shape[1] // 2]
+        elif case == "scale_b_3d":
+            ws = ws.view(G, -1, 4)
+        elif case == "offs_count":
+            offs = offs[:-1]
+        elif case == "offs_dtype":
+            offs = offs.to(torch.int64)
+        else:
+            xq = xq.t().contiguous().t()
+        with self.assertRaises((ValueError, RuntimeError)):
+            _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @skipIfNoCuteDSL
+    @parametrize("case", ["offs_past_m", "offs_decreasing", "scale_a_rows_unpadded"])
+    def test_scaled_grouped_mm_2d_3d_device_asserts(self, case, device):
+        # Offsets live on the device, so like ATen's kernels the CuTeDSL kernel
+        # checks them there; a failed device assert ends the process.
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        expected = {
+            "offs_past_m": "group offsets must not exceed mat_a.size(0)",
+            "offs_decreasing": "group offsets must be nondecreasing",
+            "scale_a_rows_unpadded": "scale_a must hold every group's rows padded to 128",
+        }[case]
+        code = "\n".join([
+            "import torch",
+            "from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType",
+            inspect.getsource(_zero_mxfp8_2d_3d_inputs),
+            inspect.getsource(_mxfp8_scaled_grouped_mm),
+            "xq, wq, xs, ws, offs = _zero_mxfp8_2d_3d_inputs(4, 256, 256, 256, 'cuda')",
+            "if CASE == 'offs_past_m':",
+            "    offs[-1] = 512",
+            "elif CASE == 'offs_decreasing':",
+            "    offs[1] = 32",
+            "else:",
+            "    xs = xs[:256]",
+            "_mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)",
+            "torch.cuda.synchronize()",
+            "raise SystemExit('device assert did not fire')",
+        ]).replace("CASE", repr(case))
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertNotIn("device assert did not fire", proc.stderr)
+        self.assertIn(expected, proc.stdout + proc.stderr)
+
     def _run_scaled_grouped_mm_2d_3d(
         self, G, M, N, K, format, use_out, device, compare_cpp,
         input_group_end_offsets=None, guard_input_end=False,
@@ -1251,7 +1355,7 @@ class TestFP8Matmul(TestCase):
             **kwargs
         )
         if compare_cpp:
-            with torch.backends.python_native.operations_disabled("_scaled_grouped_mm_v2"):
+            with torch.backends.python_native.operations_disabled("_scaled_grouped_mm_v2", "_scaled_grouped_mm_v2.out"):
                 y_cpp = scaled_grouped_mm_wrap(
                     xq,
                     wq.transpose(-2, -1),

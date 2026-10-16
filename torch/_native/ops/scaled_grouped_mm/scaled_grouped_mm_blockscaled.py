@@ -97,22 +97,15 @@ def _get_blockscaled_format(
     )
 
 
-def _allocate_output(
-    mat_a: Tensor, mat_b: Tensor, out_dtype: torch.dtype, ngroups: int
-) -> Tensor:
+def _output_size_stride(
+    mat_a: Tensor, mat_b: Tensor, ngroups: int
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    # Same layout as ATen's compute_grouped_gemm_output_size_stride for bf16.
     M, N = mat_a.size(0), mat_b.size(-1)
-    alignment = 128 // torch.finfo(out_dtype).bits
-    N_padded = round_up(N, alignment)
+    N_padded = round_up(N, 8)
     if mat_b.dim() == 2:
-        return torch.empty_strided(
-            (ngroups, M, N),
-            (M * N_padded, N_padded, 1),
-            device=mat_a.device,
-            dtype=out_dtype,
-        )
-    return torch.empty_strided(
-        (M, N), (N_padded, 1), device=mat_a.device, dtype=out_dtype
-    )
+        return (ngroups, M, N), (M * N_padded, N_padded, 1)
+    return (M, N), (N_padded, 1)
 
 
 @instrumented_cutedsl_cache("aten::_scaled_grouped_mm_v2")
@@ -135,37 +128,49 @@ def _compile_scaled_grouped_mm_blockscaled(
 
     from .scaled_grouped_mm_blockscaled_kernel import Sm100GroupedBlockScaledGemmKernel
 
-    m = sym()
-    n = sym(16)
-    k = sym(scale_ab_vec_size)
-    a_stride_m = sym(16)
-    b_stride_n = sym(16)
-
+    # The compiled function checks these constraints at call time, natively:
+    # shared sizes, unit strides (layout), divisibility (16-byte rows and sizes,
+    # as ATen requires) and 16-byte data alignment.
     cute_ab_dtype = torch2cute[ab_dtype]
     cute_scale_ab_dtype = torch2cute[scale_ab_dtype]
     c_dtype = torch2cute[torch.bfloat16]
-    c_stride_0 = sym(128 // c_dtype.width)
+    ab_16_bytes = 128 // cute_ab_dtype.width
+    m = sym()
+    n = sym(16)
+    k = sym(32)
+    g = sym()
 
-    fake_a = make_fake_tensor(cute_ab_dtype, (m, k, 1), stride=(a_stride_m, 1, 0))
+    fake_a = make_fake_tensor(
+        cute_ab_dtype, (m, k, 1), stride=(sym(ab_16_bytes), 1, 0), assumed_align=16
+    )
     if uniform_mn_groups:
-        fake_b = make_fake_tensor(cute_ab_dtype, (n, k, 1), stride=(b_stride_n, 1, 0))
+        b_shape, b_stride = (n, k, 1), (sym(ab_16_bytes), 1, 0)
     else:
-        fake_b = make_fake_tensor(
-            cute_ab_dtype, (n, k, sym()), stride=(b_stride_n, 1, sym(16))
-        )
+        b_shape, b_stride = (n, k, g), (sym(ab_16_bytes), 1, sym(ab_16_bytes))
+    fake_b = make_fake_tensor(cute_ab_dtype, b_shape, stride=b_stride, assumed_align=16)
+    c_stride_0 = sym(128 // c_dtype.width)
     if transpose_ab:
         # In transpose mode, C is passed as (N, M, 1) with transpose strides.
-        fake_c = make_fake_tensor(c_dtype, (n, m, 1), stride=(1, c_stride_0, 0))
+        fake_c = make_fake_tensor(
+            c_dtype, (n, m, 1), stride=(1, c_stride_0, 0), assumed_align=16
+        )
     else:
-        fake_c = make_fake_tensor(c_dtype, (m, n, 1), stride=(c_stride_0, 1, 0))
+        fake_c = make_fake_tensor(
+            c_dtype, (m, n, 1), stride=(c_stride_0, 1, 0), assumed_align=16
+        )
     fake_scale_a = make_fake_tensor(
-        cute_scale_ab_dtype, (sym(), sym(), 1), stride=(sym(), sym(), 0)
+        cute_scale_ab_dtype,
+        (sym(), sym(), 1),
+        stride=(sym(), sym(), 0),
+        assumed_align=16,
     )
     fake_scale_b = make_fake_tensor(
-        cute_scale_ab_dtype, (sym(), sym(), 1), stride=(sym(), sym(), 0)
+        cute_scale_ab_dtype,
+        (sym() if uniform_mn_groups else g, sym(), 1),
+        stride=(sym(), sym(), 0),
+        assumed_align=16,
     )
 
-    g = sym()
     fake_problem = fake_compact(cutlass.Int32, (g, 4), stride_order=(1, 0))
     fake_total_clusters = fake_compact(cutlass.Int32, (1,))
     fake_tensormap = fake_compact(
@@ -318,41 +323,51 @@ def scaled_grouped_mm_blockscaled(
     scale_a: list[Tensor],
     scale_b: list[Tensor],
     offs: Tensor,
+    out: Tensor | None = None,
 ) -> Tensor:
     # Assumes _should_use_cutedsl_scaled_grouped_mm_blockscaled accepted the inputs.
+    # The rest of ATen's validation runs natively in the compiled function, from
+    # the fake-tensor constraints; only what those can't express is checked here.
     from torch._native.cutedsl.launch import read_only, stream
-
-    def _is_transposed_layout(t: Tensor) -> bool:
-        end_dim = t.dim() - 1
-        if t.stride(end_dim - 1) == 1 and t.stride(end_dim) >= max(
-            1, t.size(end_dim - 1)
-        ):
-            return True
-        if t.stride(end_dim) == 1 and t.stride(end_dim - 1) >= max(1, t.size(end_dim)):
-            return False
-        raise ValueError(
-            f"Invalid strides/sizes, got {t.stride()} for strides and "
-            f"{t.size()} for sizes"
-        )
 
     b_is_2d = mat_b.dim() == 2
     fmt = _validated_blockscaled_format(mat_a, scale_a)
 
     device = mat_a.device
-    if mat_b.device != device:
-        raise ValueError("mat_a and mat_b must be on the same device")
-    if any(scale.device != device for scale in scale_a):
-        raise ValueError("scale_a must be on the same device as mat_a")
-    if any(scale.device != device for scale in scale_b):
-        raise ValueError("scale_b must be on the same device as mat_a")
-    if offs.device != device:
-        raise ValueError("offs must be on the same device as mat_a")
+    if any(t.device != device for t in (mat_b, offs, *scale_a, *scale_b)):
+        raise ValueError("all tensors must be on the same device as mat_a")
+    if mat_a.stride(0) < mat_a.size(1) or mat_b.stride(-1) < mat_b.size(-2):
+        raise ValueError(
+            f"Invalid strides/sizes, got {mat_a.stride()} and {mat_b.stride()} for "
+            f"strides and {mat_a.size()} and {mat_b.size()} for sizes"
+        )
 
     ngroups = int(offs.numel())
     mat_a_m = int(mat_a.size(0))
-    mat_a_physical_k = int(mat_a.size(-1))
     mat_b_n = int(mat_b.size(-1))
-    mat_b_physical_k = int(mat_b.size(0 if b_is_2d else -2))
+    logical_k_a = int(mat_a.size(-1)) * fmt.logical_vals_per_elem
+    scale_a0 = scale_a[0]
+    scale_b0 = scale_b[0]
+    if scale_a0.dim() != 2 or scale_a0.size(0) < mat_a_m:
+        raise ValueError(
+            f"for block-scaled, mat_a of shape {tuple(mat_a.shape)} needs a 2d "
+            f"scale with at least {mat_a_m} rows, got {tuple(scale_a0.shape)}"
+        )
+    if b_is_2d:
+        if scale_b0.dim() != 2 or scale_b0.size(0) < mat_b_n:
+            raise ValueError(
+                f"for block-scaled, mat_b of shape {tuple(mat_b.shape)} needs a 2d "
+                f"scale with at least {mat_b_n} rows, got {tuple(scale_b0.shape)}"
+            )
+    else:
+        scale_b_cols = round_up(logical_k_a // fmt.scale_ab_vec_size, 4)
+        expected_scale_b = (mat_b.size(0), scale_b_cols * round_up(mat_b_n, 128))
+        if tuple(scale_b0.shape) != expected_scale_b:
+            raise ValueError(
+                f"for block-scaled 2d-3d grouped GEMM, mat_b of shape "
+                f"{tuple(mat_b.shape)} needs scale shape {expected_scale_b}, "
+                f"got {tuple(scale_b0.shape)}"
+            )
     global_scale_ptrs = (0, 0)
     if fmt.name == "nvfp4":
         if scale_a[1].numel() != ngroups or scale_b[1].numel() != ngroups:
@@ -365,31 +380,14 @@ def scaled_grouped_mm_blockscaled(
             const_data_ptr(global_scale_a),
             const_data_ptr(global_scale_b),
         )
-    out = _allocate_output(mat_a, mat_b, torch.bfloat16, ngroups)
+    if out is None:
+        size, stride = _output_size_stride(mat_a, mat_b, ngroups)
+        out = torch.empty_strided(size, stride, device=device, dtype=torch.bfloat16)
     if ngroups == 0:
         return out
-
-    if const_data_ptr(mat_a) % 16 != 0:
-        raise ValueError("expected data_ptr to be aligned to 16 bytes")
-    if _is_transposed_layout(mat_a):
-        raise ValueError("expected mat_a to not be transposed")
-
-    if const_data_ptr(mat_b) % 16 != 0:
-        raise ValueError("expected data_ptr to be aligned to 16 bytes")
-    if not _is_transposed_layout(mat_b):
-        raise ValueError("expected mat_b to be transposed")
-
-    logical_k_a = mat_a_physical_k * fmt.logical_vals_per_elem
-    logical_k_b = mat_b_physical_k * fmt.logical_vals_per_elem
-    if b_is_2d and logical_k_a != logical_k_b:
-        raise ValueError("for 2d/2d grouped gemm, total K dimensions must match")
-    if not b_is_2d:
-        if logical_k_a != logical_k_b:
-            raise ValueError("contraction dimension of mat_a and mat_b must match")
-        if ngroups != int(mat_b.size(0)):
-            raise ValueError(
-                "for 2d/3d grouped gemm, offs size must match mat_b.size(0)"
-            )
+    # An empty contraction leaves no K tile to accumulate, so write the zeros here.
+    if logical_k_a == 0:
+        return out.zero_()
 
     device_id = device.index
     m_for_heuristic = mat_a_m if b_is_2d else (mat_a_m // max(ngroups, 1))
@@ -428,9 +426,6 @@ def scaled_grouped_mm_blockscaled(
     problem_sizes, total_num_clusters, tensormaps, group_offsets = _get_aux_tensors(
         ngroups, device_id
     )
-
-    scale_a0 = scale_a[0]
-    scale_b0 = scale_b[0]
 
     mat_a_ptr = const_data_ptr(mat_a)
     mat_b_ptr = const_data_ptr(mat_b)
@@ -530,9 +525,6 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
         return False
     if mat_a.dim() != 2 or mat_b.dim() not in (2, 3):
         return False
-    # The kernel needs at least one K tile to produce an accumulator.
-    if mat_a.size(-1) == 0:
-        return False
     if out_dtype not in (None, torch.bfloat16):
         return False
     if not isinstance(contraction_dim, Sequence):
@@ -562,6 +554,14 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
         return False
     if offs is None:
         return False
+    # Kernel requirements ATen does not check: decline rather than fail.
+    if mat_a.size(-1) * fmt.logical_vals_per_elem % 32 != 0:
+        return False
+    if not isinstance(offs, Tensor) or offs.dim() != 1 or offs.stride(0) != 1:
+        return False
+    scales = (scale_a[0], scale_b[0])
+    if any(const_data_ptr(scale) % 16 != 0 for scale in scales):
+        return False
     if bias is not None:
         return False
     if bool(use_fast_accum):
@@ -569,7 +569,23 @@ def _should_use_cutedsl_scaled_grouped_mm_blockscaled(
     return True
 
 
+def _should_use_cutedsl_scaled_grouped_mm_blockscaled_out(
+    mat_a: Tensor, mat_b: Tensor, offs: Tensor, out: Tensor
+) -> bool:
+    # Anything else goes to ATen, which resizes or rejects `out` as usual.
+    ngroups = offs.size(0) if mat_b.dim() == 2 else 0
+    size, stride = _output_size_stride(mat_a, mat_b, ngroups)
+    return (
+        out.dtype == torch.bfloat16
+        and out.device == mat_a.device
+        and tuple(out.shape) == size
+        and out.stride() == stride
+        and const_data_ptr(out) % 16 == 0
+    )
+
+
 __all__ = [
     "scaled_grouped_mm_blockscaled",
     "_should_use_cutedsl_scaled_grouped_mm_blockscaled",
+    "_should_use_cutedsl_scaled_grouped_mm_blockscaled_out",
 ]

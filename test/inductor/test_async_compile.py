@@ -614,6 +614,25 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             release.set()
             pool.shutdown(wait=True)
 
+    def test_triton_worker_receives_static_launch_config(self):
+        from torch._inductor.async_compile import CompiledTritonKernels
+
+        pool = Mock()
+        source = "# test_triton_worker_receives_static_launch_config\n"
+        with (
+            config.patch(static_launch_user_defined_triton_kernels=True),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+            patch.object(AsyncCompile, "should_use_thread_workers", return_value=False),
+            patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+        ):
+            try:
+                AsyncCompile().triton("kernel", source)
+            finally:
+                CompiledTritonKernels.remove_future(source)
+        extra_config = pool.submit.call_args.args[3]
+        self.assertIs(extra_config["static_launch_user_defined_triton_kernels"], True)
+
 
 @skipIfNoCuteDSL
 class TestCuteDSLSubprocessCompile(TestCase):

@@ -3035,12 +3035,12 @@ class TestImports(TestCase):
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl
                            "torch._native.ops.norm.rmsnorm_kernels",  # depends on cutlass
                            "torch._native.ops.polar.nvmath_impl",  # depends on nvmath-python, cuda-python
-                           "torch._native.ops.reductions.inner_tree_kernel",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_general",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_rowtile",  # depends on cutlass
                            "torch._native.ops.reductions.tile",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_coltile",  # depends on cutlass
+                           "torch._native.ops.reductions.ordered",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
                            "torch._native.ops.scaled_grouped_mm",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
