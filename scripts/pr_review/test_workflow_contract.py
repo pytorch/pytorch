@@ -1765,8 +1765,6 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # the review reports and moves the prompt hash, and without this line it
         # schedules no run of the suite that asserts either.
         ".agents/skills/pr-review/**",
-        # The interactive review prompt that stage A's must stay in step with.
-        ".github/workflows/claude-code.yml",
         # This file's OWN path. Without it, an edit that rewires or weakens the
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
@@ -4835,7 +4833,7 @@ class TestThePrConversationReachesTheReview(unittest.TestCase):
         # Stage A is the reviewer; stage B only copies its review.
         stage_a = model_step(self.review, "a")
         self.assertIn(f"Read(/{self.PATH})", stage_a)
-        self.assertIn(self.PATH, prompt_scalar(stage_a))
+        self.assertIn(self.PATH, stage_a_system_prompt())
 
     def test_the_fetch_fails_closed_before_the_started_row(self):
         fetch = self._step(self.prepare, "Fetch the PR conversation")
@@ -6647,73 +6645,46 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
         )
 
 
-# The interactive prompt the shared lines are compared against, and the lines of
-# its first paragraph that stage A leaves out on purpose: they tell the model how
-# to format a GitHub comment, and stage A publishes no comment.
-INTERACTIVE = WORKFLOWS / "claude-code.yml"
-INTERACTIVE_ONLY = {
-    "Always put the details of the PR review inside a GitHub collapsible section and",
-    "a one sentence summary outside.",
-}
-# Every gh/git command the pr-review skill runs, and how stage A's offline prompt
-# covers it. A new command fails the test below until the prompt maps it.
+def stage_a_system_prompt() -> str:
+    """Stage A's APPEND_SYSTEM_PROMPT: one double-quoted line whose only escapes
+    are \\n, which JSON decodes the same way YAML does."""
+    values = re.findall(
+        r'(?m)^\s*APPEND_SYSTEM_PROMPT:\s*(".*")\s*$',
+        model_step(STAGE2.read_text(), "a"),
+    )
+    assert len(values) == 1, "premise changed: APPEND_SYSTEM_PROMPT"
+    return json.loads(values[0])
+
+
+COMMENTS = "/tmp/pr-comments.json"
+# Every gh/git command the pr-review skill runs, and what stage A's system prompt
+# names in its place (None: in a mode a bare `/pr-review <N>` never selects).
 SKILL_COMMANDS = {
-    # Local CLI and GitHub Actions modes: read from the /tmp/pr-* files instead.
-    "gh pr view <PR_NUMBER> --json title,body,author,baseRefName,headRefName,files,additions,deletions,commits",
-    "gh pr diff <PR_NUMBER>",
-    "gh pr view <PR_NUMBER> --json comments,reviews",
-    "git diff origin/<baseBranch>...HEAD",
-    "git diff --stat origin/<baseBranch>...HEAD",
-    "git log origin/<baseBranch>..HEAD --oneline",
-    "git fetch origin <baseBranch> --depth=1",
-    # Local Branch mode: never selected by stage A's prompt.
-    "git branch --show-current",
-    "git diff --name-only main...HEAD",
-    "git diff main...HEAD",
-    "git log main..HEAD --oneline",
-    "git diff --stat main...HEAD",
-    # Maintainer comments: the skill skips this check without network, so CI
-    # does not check unaddressed maintainer comments.
-    "gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments",
-    "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews",
-    "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments",
-    "gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions",
+    # Local CLI mode.
+    "gh pr view <PR_NUMBER> --json title,body,author,baseRefName,headRefName,files,additions,deletions,commits": COMMENTS,
+    "gh pr diff <PR_NUMBER>": "/tmp/pr-diff.txt",
+    "gh pr view <PR_NUMBER> --json comments,reviews": COMMENTS,
+    "gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments": COMMENTS,
+    "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews": COMMENTS,
+    "gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments": COMMENTS,
+    "gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions": "`role`",
+    # GitHub Actions mode.
+    "git diff origin/<baseBranch>...HEAD": None,
+    "git diff --stat origin/<baseBranch>...HEAD": None,
+    "git log origin/<baseBranch>..HEAD --oneline": None,
+    "git fetch origin <baseBranch> --depth=1": None,
+    # Local Branch mode.
+    "git branch --show-current": None,
+    "git diff --name-only main...HEAD": None,
+    "git diff main...HEAD": None,
+    "git log main..HEAD --oneline": None,
+    "git diff --stat main...HEAD": None,
 }
 
 
-class TestStageAMatchesInteractivePrReview(unittest.TestCase):
-    """Stage A runs the same pr-review skill as `@claude review`; these keep the
-    prompt around it from drifting away from the interactive one unnoticed."""
-
-    def test_stage_a_carries_the_interactive_system_prompt(self):
-        lines = INTERACTIVE.read_text().splitlines()
-        starts = [
-            i for i, ln in enumerate(lines) if ln.strip() == "append_system_prompt: |"
-        ]
-        self.assertEqual(len(starts), 1, "premise changed: claude-code.yml prompt")
-        indent = len(lines[starts[0]]) - len(lines[starts[0]].lstrip())
-        first_paragraph = []
-        for ln in lines[starts[0] + 1 :]:
-            if not ln.strip():
-                break
-            self.assertGreater(len(ln) - len(ln.lstrip()), indent)
-            first_paragraph.append(ln.strip())
-        # A one-line double-quoted scalar whose only escapes are \n, which JSON
-        # decodes the same way YAML does.
-        values = re.findall(
-            r'(?m)^\s*APPEND_SYSTEM_PROMPT:\s*(".*")\s*$',
-            model_step(STAGE2.read_text(), "a"),
-        )
-        self.assertEqual(len(values), 1, "premise changed: APPEND_SYSTEM_PROMPT")
-        stage_a = json.loads(values[0]).splitlines()
-        for line in first_paragraph:
-            if line not in INTERACTIVE_ONLY:
-                self.assertIn(
-                    line,
-                    stage_a,
-                    "claude-code.yml's review prompt changed; carry the line into "
-                    "stage A's APPEND_SYSTEM_PROMPT or list it in INTERACTIVE_ONLY",
-                )
+class TestStageACoversTheSkillOffline(unittest.TestCase):
+    """A skill check whose gh/git command stage A cannot serve offline is
+    silently skipped; that is how the maintainer-comment check was once lost."""
 
     def test_every_skill_command_is_covered_offline(self):
         found = set()
@@ -6723,10 +6694,14 @@ class TestStageAMatchesInteractivePrReview(unittest.TestCase):
                     found.add(ln.strip())
         self.assertEqual(
             found,
-            SKILL_COMMANDS,
+            set(SKILL_COMMANDS),
             "the pr-review skill's gh/git commands changed; stage A runs offline, "
-            "so map each new one in its prompt, then update SKILL_COMMANDS",
+            "so map each new one in its system prompt, then update SKILL_COMMANDS",
         )
+        offline = stage_a_system_prompt()
+        for command, source in SKILL_COMMANDS.items():
+            if source:
+                self.assertIn(source, offline, f"stage A no longer maps {command!r}")
 
 
 if __name__ == "__main__":
