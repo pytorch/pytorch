@@ -120,20 +120,31 @@ class ReduceBlock:
 _stream = _L.stream
 # _L.compile_kernel uses fake operands and tvm-ffi, avoiding per-call tensor wrapping.
 _compile = _L.compile_kernel
-_PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
+_PART_TORCH = {
+    Float32: torch.float32,
+    Float64: torch.float64,
+    Int32: torch.int32,
+    Int64: torch.int64,
+}
 
 _COMPILE_CACHE = {}  # structural key -> compiled kernel (one per cache_sig)
 _PLAN = {}  # (structural key, geom_sig) -> (compiled fn, pre-boxed geometry args)
 
 
-def _fakes(ts: Sequence[torch.Tensor], *, int64_extent: bool = False) -> list[Any]:
+def _fakes(
+    ts: Sequence[torch.Tensor],
+    *,
+    int64_extent: bool = False,
+    alignments: Sequence[int] | None = None,
+) -> list[Any]:
     # Dynamic flat descriptors let one structural kernel serve every length.
     return [
         _L.fake_compact(
             torch2cute[t.dtype],
             (cute.sym_int64() if int64_extent else _L.sym(),),
+            align=None if alignments is None else alignments[i],
         )
-        for t in ts
+        for i, t in enumerate(ts)
     ]
 
 
@@ -178,6 +189,23 @@ def _launch(
 ) -> None:
     # _PLAN caches boxed geometry (~6us); _COMPILE_CACHE deduplicates structural kernels.
     op_name = key[1]
+    alignments = None
+    itree = op.tile.itree
+    if (
+        op.tile.order == "inner_tree"
+        and itree.shape == "combine"
+        and itree.combine_tile
+    ):
+        # Async atoms require the partial buffers' proven alignment in the fake descriptors.
+        alignments = tuple(itree.combine_grp * t.element_size() for t in ins)
+        if any(
+            _L.supported_alignment(t, align) < align
+            for t, align in zip(ins, alignments)
+        ):
+            raise ValueError(
+                "inner-tree async combine requires aligned partial buffers"
+            )
+        key += (("input_alignments", alignments),)
     key = (str(ins[0].device),) + key
     plan = _PLAN.get((key, op.geom_sig))
     if plan is None:
@@ -186,7 +214,9 @@ def _launch(
             key,
             lambda: _compile(
                 op.tile,
-                _fakes(ins, int64_extent=True),
+                # A flat input storage span can exceed 2**31 even though each
+                # decoded kept and reduced extent fits Int32.
+                _fakes(ins, int64_extent=True, alignments=alignments),
                 _fakes(outs, int64_extent=op.wide_output),
                 *_geom_args(op),
                 _stream(),
@@ -298,7 +328,7 @@ def _try_fast_row(
 
     M, itemsize = x.shape[0], x.element_size()
     ordered = rt.inner_tree_order_enabled()
-    if ordered and rt.itree_plan(N, M, itemsize) is not None:
+    if ordered and rt.itree_plan(N, M, itemsize, device=x.device) is not None:
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
     if not ordered and rt.one_thread_row_ok(N, itemsize, M, x.device):
         return rt.reduce_row_tile(
@@ -450,9 +480,11 @@ def _try_indexed_itree(
     """Apply the fixed logical-row DAG through arbitrary storage strides."""
     from . import kernel_rowtile as rt
 
-    plan = rt.itree_plan(count, num_o, x.element_size(), stage=False)
+    plan = rt.itree_plan(count, num_o, x.element_size(), stage=False, device=x.device)
     if plan is None:
         return None
+    # General addressing cannot stage physically adjacent rows.
+    plan = plan._replace(stage_rows=False)
     nbatch = plan.split[0] if plan.shape == "split" else 1
     if num_o * nbatch >= 2**31:
         return None
@@ -499,7 +531,13 @@ def _try_indexed_itree(
     _launch(s1, key1, [_flat(x)], parts)
 
     outs = [torch.empty(num_o, device=x.device, dtype=d) for d in out_dtypes]
-    combine = rt.itree_combine_plan(plan)
+    combine = rt.itree_combine_plan(
+        plan,
+        parts[0].element_size(),
+        x.device,
+        nfields=trait.nfields,
+        nrows=num_o,
+    )
     s2 = ReduceBlock(
         trait,
         count=nbatch,
