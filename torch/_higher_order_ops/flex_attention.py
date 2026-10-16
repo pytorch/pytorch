@@ -172,6 +172,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
 
 
 flex_attention_backward = FlexAttentionBackwardHOP()
+# Match the default HOP fallthrough that AutocastCPU/CUDA/XPU get in torch/_ops.py.
+flex_attention_backward.fallthrough(DispatchKey.AutocastPrivateUse1)
 
 
 def _math_attention_inner(

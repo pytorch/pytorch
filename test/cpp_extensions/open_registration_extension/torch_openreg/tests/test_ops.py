@@ -306,7 +306,7 @@ class TestFlexAttention(TestCase):
             return q_idx >= kv_idx
 
         def rel_bias(score, b, h, q_idx, kv_idx):
-            return score + (q_idx - kv_idx)
+            return score + 0.01 * (q_idx - kv_idx)
 
         seq_len = 128
         shape = (2, 2, seq_len, 16)
@@ -322,7 +322,7 @@ class TestFlexAttention(TestCase):
 
         pos = torch.arange(seq_len)
         scores = q_ref @ k_ref.transpose(-2, -1) * shape[-1] ** -0.5
-        scores = scores + (pos[:, None] - pos[None, :])
+        scores = scores + 0.01 * (pos[:, None] - pos[None, :])
         scores = scores.masked_fill(pos[:, None] < pos[None, :], float("-inf"))
         out_ref = scores.softmax(dim=-1) @ v_ref
         out_ref.backward(grad_out)
@@ -333,10 +333,15 @@ class TestFlexAttention(TestCase):
             self.assertEqual(t.grad.cpu(), t_ref.grad, atol=1e-4, rtol=1e-4)
 
     def test_flex_attention_autocast(self, device):
-        q, k, v = (torch.randn(1, 2, 128, 16, device=device) for _ in range(3))
+        q, k, v = (
+            torch.randn(1, 2, 128, 16, device=device, requires_grad=True)
+            for _ in range(3)
+        )
         with torch.autocast(torch.device(device).type, dtype=torch.float16):
             out = flex_attention(q, k, v)
+            out.sum().backward()
         self.assertEqual(out.dtype, torch.float16)
+        self.assertEqual(q.grad.dtype, torch.float32)
         self.assertEqual(out.cpu(), flex_attention(q.half(), k.half(), v.half()).cpu())
 
 
