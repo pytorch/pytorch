@@ -525,7 +525,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // A frame a loaded artifact skips takes part in the guard collective, since
   // another rank's artifact may have compiled it. Its skip only answers calls
-  // its cache entries miss: those exist once a peer's disagreement compiled it.
+  // its cache entries miss: those exist once a peer's miss compiled it.
   const bool precompile_skip = strategy.cur_action == FrameAction::SKIP &&
       guard_complete_hook != nullptr && is_precompile_skip(code);
 
@@ -602,7 +602,7 @@ PyObject* dynamo__custom_eval_frame(
       eval_default();
       return eval_result;
     }
-    // Anything but a unanimous hit forces the miss path on every rank.
+    // Any rank's miss forces the miss path on every rank.
     if (state != GuardCollectiveState::Hit) {
       cache_hit.code = py::none();
     }

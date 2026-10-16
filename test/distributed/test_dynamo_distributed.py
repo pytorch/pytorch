@@ -1649,6 +1649,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @enable_guard_collectives()
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_guard_collective_precompile_skip_propagates_miss(self):
         from torch._C._dynamo.eval_frame import _load_precompile_skip
 
@@ -1664,9 +1665,17 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 compiled = torch.compile(fn, backend=counter, dynamic=False)
             else:
                 compiled, counter = _load_as_precompile_entries(fn, x)
+            # A SKIP/HIT mix runs each rank's own path and never recompiles,
+            # however often it repeats.
+            for _ in range(5):
+                self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 0)
+            # Only rank 1 misses; every rank recompiles.
+            if self.rank == 1:
+                x = torch.randn(5, device=self.rank)
             self.assertEqual(compiled(x), x.sin())
             self.assertEqual(counter.frame_count, 1)
-            # Both ranks now hit the entry compiled for the disagreement.
+            # Both ranks now hit the entry compiled for the miss.
             self.assertEqual(compiled(x), x.sin())
             self.assertEqual(counter.frame_count, 1)
 
