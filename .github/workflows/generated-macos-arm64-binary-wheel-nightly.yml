@@ -63,19 +63,12 @@ jobs:
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
-        uses: actions/checkout@v5.1.0
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # Full fetch on tag pushes so the release tag is visible to
           # `git describe --tags --exact`; nightlies stay shallow for speed.
           fetch-depth: ${{ github.ref_type != 'tag' && 1 || 0 }}
-          fetch-tags: ${{ github.ref_type == 'tag' }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
+          no-sudo: true
       - name: Install libomp
         run: |
           "${PYTORCH_ROOT}/.ci/wheel/mac/install_libomp.sh"
