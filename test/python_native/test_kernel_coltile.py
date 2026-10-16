@@ -124,21 +124,74 @@ class TestKernelColTile(TestCase):
             )
         self.assertEqual(out, x.var(dim=0), atol=1e-5, rtol=1e-5)
 
+    @parametrize("dtype", [torch.complex32, torch.complex64, torch.complex128])
+    def test_complex_batched_two_output(self, dtype):
+        """Preserve complex batched addressing for traits that return two outputs."""
+        acc = cutlass.Float64 if dtype is torch.complex128 else cutlass.Float32
+        real_dtype = dtype.to_real()
+        x = torch.randn(128, 65, 64, device="cuda", dtype=dtype)
+        got = ct.reduce_batched_col_tile(
+            T.ComplexVarMeanOps(acc=acc),
+            "complex_batched",
+            x,
+            [real_dtype, dtype],
+            2,
+        )
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.var_mean(x, dim=1)
+        tol = (
+            1e-2
+            if dtype is torch.complex32
+            else 1e-3
+            if dtype is torch.complex64
+            else 1e-10
+        )
+        self.assertEqual(got, expected, rtol=tol, atol=tol)
+
     def test_dispatcher_routes_a_column_reduction(self):
         # Numerics cannot distinguish the column arm from K0; assert routing and reshape.
         trait = T.SumOps(acc=cutlass.Float32)
         x = torch.randn(512, 256, device="cuda")
         nd = torch.randn(8, 64, 128, device="cuda")
+        transposed = torch.randn(128, 256, device="cuda").t()
+        batched = torch.randn(8, 64, 128, device="cuda")
         real = ct.reduce_col_tile
-        with mock.patch.object(ct, "reduce_col_tile", wraps=real) as served:
+        real_batched = ct.reduce_batched_col_tile
+        with (
+            mock.patch.object(ct, "reduce_col_tile", wraps=real) as served,
+            mock.patch.object(
+                ct, "reduce_batched_col_tile", wraps=real_batched
+            ) as served_batched,
+        ):
             got = kg.reduce_dim(trait, "disp_col", x, 0, torch.float32)
             got_nd = kg.reduce_dim(trait, "disp_col_nd", nd, (0, 1), torch.float32)
-        self.assertEqual(served.call_count, 2, "K0 served these, not the col arm")
+            got_transposed = kg.reduce_dim(
+                trait, "disp_col_transposed", transposed, 1, torch.float32
+            )
+            got_batched = kg.reduce_dim(
+                trait, "disp_col_batched", batched, 1, torch.float32
+            )
+        self.assertEqual(served.call_count, 3, "K0 served these, not the col arm")
+        self.assertEqual(
+            served_batched.call_count, 1, "K0 served this, not the batched-col arm"
+        )
         torch.testing.assert_close(
             got, x.double().sum(dim=0).float(), atol=1e-3, rtol=1e-4
         )
         torch.testing.assert_close(
             got_nd, nd.double().sum(dim=(0, 1)).float(), atol=1e-3, rtol=1e-4
+        )
+        self.assertEqual(
+            got_transposed,
+            transposed.double().sum(dim=1).float(),
+            atol=1e-3,
+            rtol=1e-4,
+        )
+        self.assertEqual(
+            got_batched,
+            batched.double().sum(dim=1).float(),
+            atol=1e-3,
+            rtol=1e-4,
         )
 
 

@@ -229,37 +229,54 @@ class TestCuTeDSLReductionWiring(TestCase):
             out[0], torch.tensor([40000], device="cuda", dtype=torch.int64)
         )
 
-    @parametrize("dtype", [torch.complex64, torch.complex128])
+    @parametrize("dtype", [torch.complex32, torch.complex64, torch.complex128])
     def test_complex_reductions_are_served(self, dtype):
         """Serve complex reduction families with ATen-compatible values and dtypes."""
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        real_dtype = dtype.to_real()
         base = torch.complex(
             torch.randn(17, 9, device="cuda", dtype=real_dtype),
             torch.randn(17, 9, device="cuda", dtype=real_dtype),
         )
         base[0, 0] = complex(float("nan"), 2)
         base[1, 0] = complex(1, float("nan"))
+        base[2, 0] = complex(float("inf"), float("nan"))
         x = base.t().conj()
         multi = base.reshape(17, 3, 3).permute(1, 0, 2).conj()
         calls = (
             lambda: torch.sum(x, dim=-1),
             lambda: torch.sum(multi, dim=(0, 2)),
-            lambda: torch.mean(x, dim=-1),
             lambda: torch.nansum(x, dim=-1),
             lambda: torch.prod(x, dim=-1),
             lambda: torch.var_mean(x, dim=-1),
             lambda: torch.var_mean(multi, dim=(0, 2)),
             lambda: torch.std(x, dim=-1),
-            lambda: torch.linalg.vector_norm(x, dim=-1),
-            lambda: torch.linalg.vector_norm(x, ord=float("inf"), dim=-1),
-            lambda: torch.all(x, dim=-1),
-            lambda: torch.any(x, dim=-1),
             lambda: torch.count_nonzero(x, dim=-1),
         )
-        tol = 1e-3 if dtype is torch.complex64 else 1e-10
+        if dtype is not torch.complex32:
+            calls += (
+                lambda: torch.mean(x, dim=-1),
+                lambda: torch.all(x, dim=-1),
+                lambda: torch.any(x, dim=-1),
+            )
+        tol = (
+            1e-2
+            if dtype is torch.complex32
+            else 1e-3
+            if dtype is torch.complex64
+            else 1e-10
+        )
         for fn in calls:
             with self.subTest(fn=fn), _disabled():
                 expected = fn()
+            self.assertEqual(self._fired_count(fn), 1)
+            self.assertEqual(fn(), expected, rtol=tol, atol=tol, exact_dtype=True)
+        for ord_ in (2, float("inf")):
+            fn = lambda: torch.linalg.vector_norm(x, ord=ord_, dim=-1)  # noqa: E731
+            reference_x = x.to(torch.complex64) if dtype is torch.complex32 else x
+            with self.subTest(ord=ord_), _disabled():
+                expected = torch.linalg.vector_norm(reference_x, ord=ord_, dim=-1).to(
+                    real_dtype
+                )
             self.assertEqual(self._fired_count(fn), 1)
             self.assertEqual(fn(), expected, rtol=tol, atol=tol, exact_dtype=True)
 
@@ -267,11 +284,19 @@ class TestCuTeDSLReductionWiring(TestCase):
         """Apply supported complex input and output conversions inside the override."""
         real = torch.randn(8, 16, device="cuda")
         complex_input = torch.complex(real, torch.randn_like(real))
+        complex32_input = complex_input.to(torch.complex32)
         calls = (
+            lambda: torch.sum(real, dim=1, dtype=torch.complex32),
             lambda: torch.sum(real, dim=1, dtype=torch.complex64),
+            lambda: torch.mean(complex32_input, dim=1, dtype=torch.complex64),
             lambda: torch.mean(complex_input, dim=1, dtype=torch.float64),
+            lambda: torch.nansum(complex_input, dim=1, dtype=torch.complex32),
             lambda: torch.nansum(complex_input, dim=1, dtype=torch.complex128),
+            lambda: torch.prod(real, dim=1, dtype=torch.complex32),
             lambda: torch.prod(real, dim=1, dtype=torch.complex64),
+            lambda: torch.linalg.vector_norm(
+                complex32_input, dim=1, dtype=torch.complex64
+            ),
         )
         for fn in calls:
             with self.subTest(fn=fn), warnings.catch_warnings():
@@ -279,7 +304,10 @@ class TestCuTeDSLReductionWiring(TestCase):
                 with _disabled():
                     expected = fn()
                 self.assertEqual(self._fired_count(fn), 1)
-                self.assertEqual(fn(), expected, rtol=1e-5, atol=1e-5, exact_dtype=True)
+                tol = (
+                    5e-3 if expected.dtype in (torch.float16, torch.complex32) else 1e-5
+                )
+                self.assertEqual(fn(), expected, rtol=tol, atol=tol, exact_dtype=True)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_fp32_widening_is_fused(self, dtype):
@@ -365,15 +393,70 @@ class TestCuTeDSLReductionWiring(TestCase):
     def test_nansum_integer_conversion_contract(self):
         """Match nansum conversion support at integer, float8, and complex boundaries."""
         fp8 = torch.ones(4, 8, device="cuda", dtype=torch.float8_e4m3fn)
-        complex64 = torch.ones(4, 8, device="cuda", dtype=torch.complex64)
+        complex32 = torch.ones(4, 8, device="cuda", dtype=torch.complex32)
+        complex64 = complex32.to(torch.complex64)
         out = torch.empty(4, device="cuda", dtype=torch.int32)
         calls = (
             lambda: torch.nansum(fp8, dim=1, dtype=torch.int32),
+            lambda: torch.nansum(complex32, dim=1, dtype=torch.int32),
             lambda: torch.nansum(complex64, dim=1, out=out),
         )
         for fn in calls:
             with self.subTest(fn=fn), self.assertRaises(RuntimeError):
                 fn()
+
+    def test_complex_fast_path_routing(self):
+        """Route eligible complex row, cross-CTA, and column shapes to optimized kernels."""
+        row = torch.randn(32, 1024, device="cuda", dtype=torch.complex64)
+        xcta = torch.randn(2, 1 << 16, device="cuda", dtype=torch.complex64)
+        col = torch.randn(4097, 128, device="cuda", dtype=torch.complex64)
+        middle = torch.randn(8, 257, 64, device="cuda", dtype=torch.complex64)
+        with (
+            mock.patch.object(
+                kernel_rowtile,
+                "reduce_row_tile",
+                wraps=kernel_rowtile.reduce_row_tile,
+            ) as row_served,
+            mock.patch.object(
+                kernel_xcta,
+                "reduce_row_xcta",
+                wraps=kernel_xcta.reduce_row_xcta,
+            ) as xcta_served,
+            mock.patch.object(
+                kernel_coltile,
+                "reduce_col_tile",
+                wraps=kernel_coltile.reduce_col_tile,
+            ) as col_served,
+            mock.patch.object(
+                kernel_coltile,
+                "reduce_batched_col_tile",
+                wraps=kernel_coltile.reduce_batched_col_tile,
+            ) as middle_served,
+        ):
+            torch.sum(row, dim=1)
+            torch.sum(xcta, dim=1)
+            torch.sum(col, dim=0)
+            torch.sum(middle, dim=1)
+        self.assertEqual(row_served.call_count, 1)
+        self.assertEqual(xcta_served.call_count, 1)
+        self.assertEqual(col_served.call_count, 1)
+        self.assertEqual(middle_served.call_count, 1)
+
+    def test_complex128_inf_norm_xcta_residual_waves(self):
+        """Handle nonfinite complex128 norm values in partial cross-CTA waves."""
+        x = torch.randn(3, 12290, device="cuda", dtype=torch.complex128)
+        x[0, 0] = complex(float("inf"), float("nan"))
+        x[1, 0] = complex(float("nan"), 1)
+        with _disabled():
+            expected = torch.linalg.vector_norm(x, ord=float("inf"), dim=1)
+        with mock.patch.object(
+            kernel_xcta,
+            "reduce_row_xcta",
+            wraps=kernel_xcta.reduce_row_xcta,
+        ) as served:
+            actual = torch.linalg.vector_norm(x, ord=float("inf"), dim=1)
+        self.assertEqual(served.call_count, 1)
+        self.assertEqual(actual, expected)
 
     def test_argmax_declines_bool(self):
         """Preserve ATen's bool argmax error instead of accepting an unsupported dtype."""
@@ -593,6 +676,14 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertEqual(self._fired_count(lambda: x.sum()), 1)
         self.assertEqual(x.sum(), expected)
 
+    def test_nansum_checks_nan_before_integer_conversion(self):
+        """Remove NaNs before integer conversion so sentinel casts cannot leak."""
+        x = torch.tensor([[float("nan"), 2.0], [3.0, float("nan")]], device="cuda")
+        self.assertEqual(
+            torch.nansum(x, dim=1, dtype=torch.int64),
+            torch.tensor([2, 3], device="cuda"),
+        )
+
     def test_invalid_degrees_of_freedom_warn_and_are_served(self):
         """Match warnings and NaNs for Welford corrections with no valid divisor."""
         x = torch.randn(4, 16, device="cuda")
@@ -731,7 +822,7 @@ class TestCuTeDSLReductionOut(TestCase):
                         self.assertIs(result, actual)
                         self.assertEqual(actual, expected)
 
-    @parametrize("output_dtype", [torch.complex64, torch.complex128])
+    @parametrize("output_dtype", [torch.complex32, torch.complex64, torch.complex128])
     def test_nansum_complex_out(self, device, output_dtype):
         """Convert complex nansum results into supported real and complex out tensors."""
         x = torch.tensor(
@@ -779,18 +870,25 @@ class TestCuTeDSLReductionOut(TestCase):
         for got, ref in zip(actual, expected):
             self.assertEqual(got, ref, rtol=1e-3, atol=1e-3)
 
-    @parametrize("dtype", [torch.complex64, torch.complex128])
+    @parametrize("dtype", [torch.complex32, torch.complex64, torch.complex128])
     def test_complex_out_overloads(self, device, dtype):
         """Serve complex reduction families through all supported out conversions."""
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        real_dtype = dtype.to_real()
         x = torch.complex(
             torch.randn(8, 16, device=device, dtype=real_dtype),
             torch.randn(8, 16, device=device, dtype=real_dtype),
         )
 
-        def run():
+        def run(norm_reference=False):
+            std_out_dtype = {
+                torch.complex32: torch.complex64,
+                torch.complex64: torch.complex128,
+                torch.complex128: torch.complex32,
+            }[dtype]
             sum_out = torch.empty(8, device=device, dtype=dtype)
             var_out = torch.empty(8, device=device, dtype=real_dtype)
+            complex_var_out = torch.empty(8, device=device, dtype=dtype)
+            complex_std_out = torch.empty(8, device=device, dtype=std_out_dtype)
             norm_out = torch.empty(8, device=device, dtype=real_dtype)
             pair = (
                 torch.empty(8, device=device, dtype=real_dtype),
@@ -798,17 +896,37 @@ class TestCuTeDSLReductionOut(TestCase):
             )
             torch.sum(x, dim=1, out=sum_out)
             torch.var(x, dim=1, out=var_out)
-            torch.linalg.vector_norm(x, dim=1, out=norm_out)
+            torch.var(x, dim=1, out=complex_var_out)
+            torch.std(x, dim=1, out=complex_std_out)
+            if norm_reference:
+                norm_out.copy_(torch.linalg.vector_norm(x.to(torch.complex64), dim=1))
+            else:
+                torch.linalg.vector_norm(x, dim=1, out=norm_out)
             torch.ops.aten.var_mean.correction_out(
                 x, [1], correction=1, keepdim=False, out0=pair[0], out1=pair[1]
             )
-            return sum_out, var_out, norm_out, *pair
+            return (
+                sum_out,
+                var_out,
+                complex_var_out,
+                complex_std_out,
+                norm_out,
+                *pair,
+            )
 
         with _disabled():
-            expected = run()
+            expected = run(norm_reference=dtype is torch.complex32)
         actual = run()
-        tol = 1e-3 if dtype is torch.complex64 else 1e-10
         for got, ref in zip(actual, expected):
+            tol = (
+                1e-2
+                if dtype is torch.complex32
+                or ref.dtype in (torch.float16, torch.complex32)
+                else 1e-3
+                if dtype is torch.complex64
+                or ref.dtype in (torch.float32, torch.complex64)
+                else 1e-10
+            )
             self.assertEqual(got, ref, rtol=tol, atol=tol, exact_dtype=True)
 
 

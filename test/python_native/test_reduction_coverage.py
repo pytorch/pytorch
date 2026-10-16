@@ -30,6 +30,7 @@ DTYPES = {
     "f8e5m2": torch.float8_e5m2,
     "f8e5m2z": torch.float8_e5m2fnuz,
     "f8e8m0": torch.float8_e8m0fnu,
+    "c32": torch.complex32,
     "c64": torch.complex64,
     "c128": torch.complex128,
     "i32": torch.int32,
@@ -88,7 +89,7 @@ def _build(dtype, contiguous=True, empty=None, zerodim=False):
         return torch.zeros((), device="cuda").to(dtype)
     shape = {"output": (0, 5), "axis": (5, 0)}.get(empty, (64, 128))
     if dtype.is_complex:
-        real_dtype = torch.float32 if dtype is torch.complex64 else torch.float64
+        real_dtype = dtype.to_real()
         real = torch.randn(shape, device="cuda", dtype=real_dtype)
         imag = torch.randn(shape, device="cuda", dtype=real_dtype)
         t = torch.complex(real, imag)
@@ -166,7 +167,11 @@ class TestReductionCoverage(TestCase):
             call = lambda t=t, fn=fn, kw=kwargs: fn(t, **kw)  # noqa: E731
             try:
                 with torch.backends.python_native.cutedsl.disabled():
-                    ref = call()
+                    ref = (
+                        fn(t.to(torch.complex64), **kwargs).to(torch.float16)
+                        if op_name == "vector_norm" and dtype is torch.complex32
+                        else call()
+                    )
             except Exception:
                 counts["aten-rejects"] += 1
                 continue

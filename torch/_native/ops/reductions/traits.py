@@ -8,8 +8,9 @@ from typing import Any
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Int32, Int64
+from cutlass import const_expr, Float32, Float64, Int32, Int64
 from cutlass._mlir.dialects import llvm
+from cutlass.cute.ffi import extern
 
 from . import minmax as _mm
 
@@ -21,6 +22,10 @@ def welford_nouts(key: str) -> int:
     if key.startswith(("varmean", "stdmean")):
         return 2
     return int(key.startswith(("var", "std")))
+
+
+@extern(name="__nv_hypot", inline=False)
+def _nv_hypot(x: Float64, y: Float64) -> Float64: ...
 
 
 # Arg-reduction "no winner" sentinel. Use Int32 to reduce partial traffic unless the
@@ -382,6 +387,7 @@ class NanSumOps:
     # acc = (sum,); NaN inputs map to 0. Validates vs torch.nansum(x, dim=-1).
     nfields = 1
     nouts = 1
+    preserve_input_dtype = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -396,7 +402,7 @@ class NanSumOps:
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
-        clean = val if (val == val) else self.acc(0.0)
+        clean = self.acc(val) if (val == val) else self.acc(0.0)
         add = clean if valid else self.acc(0.0)
         return (acc[0] + add,)
 
@@ -579,8 +585,16 @@ def _complex_abs(acc, val):
     lo = min(re, im)
     ratio = lo / hi if hi != acc(0.0) else acc(0.0)
     finite = hi * cute.math.sqrt(acc(1.0) + ratio * ratio)
-    result = hi if hi == acc.inf else finite
-    return re + im if (re != re) | (im != im) else result
+    result = re + im if (re != re) | (im != im) else finite
+    return acc(acc.inf) if (re == acc.inf) | (im == acc.inf) else result
+
+
+@cute.jit
+def _complex_abs_square(acc, val):
+    re = acc(cute.math.absf(val[0]))
+    im = acc(cute.math.absf(val[1]))
+    square = re * re + im * im
+    return acc(acc.inf) if (re == acc.inf) | (im == acc.inf) else square
 
 
 class ComplexNormOps(NormOps):
@@ -588,11 +602,13 @@ class ComplexNormOps(NormOps):
 
     @cute.jit
     def _absp(self, val):
+        if const_expr(self.p == 2.0):
+            re = self.acc(val[0])
+            im = self.acc(val[1])
+            return re * re + im * im
         a = _complex_abs(self.acc, val)
         if const_expr(self.p == 1.0):
             return a
-        elif const_expr(self.p == 2.0):
-            return a * a
         else:
             return cute.math.exp(self.acc(self.p) * cute.math.log(a))
 
@@ -601,6 +617,7 @@ class AllOps:
     # acc is the product of 0/1 truth flags; NaN is truthy, matching torch.all.
     nfields = 1
     nouts = 1
+    preserve_input_dtype = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -636,6 +653,7 @@ class AnyOps:
     # acc = (1.0 if any-true,). OR via max of 0/1 flags. Validates vs torch.any.
     nfields = 1
     nouts = 1
+    preserve_input_dtype = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -809,15 +827,51 @@ class AbsMinOps:
 
 class ComplexAbsMaxOps(AbsMaxOps):
     complex_input = True
+    complex_abs_max = True
+
+    @cute.jit
+    def _abs(self, val):
+        re = Float64(cute.math.absf(val[0]))
+        im = Float64(cute.math.absf(val[1]))
+        hi = max(re, im)
+        exceptional = (
+            (hi > Float64(2.0**500))
+            | (hi < Float64(2.0**-500))
+            | (re == Float64.inf)
+            | (im == Float64.inf)
+        )
+        out = Float64(0.0)
+        if exceptional:
+            out = Float64(_nv_hypot(re, im))
+        else:
+            out = cute.math.sqrt(re * re + im * im)
+        return out
 
     @cute.jit
     def leaf(self, val, idx):
-        return (_complex_abs(self.acc, val),)
+        return (self.acc(self._abs(val)),)
 
     @cute.jit
     def reduce(self, acc, val, idx, valid):
-        out = max(acc[0], _complex_abs(self.acc, val))
+        out = self.acc(max(acc[0], self._abs(val)))
+        return (out if valid else self.acc(acc[0]),)
+
+
+class ComplexAbsMaxWideOps(AbsMaxOps):
+    complex_input = True
+
+    @cute.jit
+    def leaf(self, val, idx):
+        return (_complex_abs_square(self.acc, val),)
+
+    @cute.jit
+    def reduce(self, acc, val, idx, valid):
+        out = max(acc[0], _complex_abs_square(self.acc, val))
         return (out if valid else acc[0],)
+
+    @cute.jit
+    def project(self, acc, n):
+        return cute.math.sqrt(acc[0])
 
 
 class ComplexAbsMinOps(AbsMinOps):

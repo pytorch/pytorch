@@ -276,6 +276,16 @@ class TestKernelGeneral(TestCase):
             )
         self.assertEqual(out, torch.zeros((), device="cuda"))
 
+    def test_reduce_all_storage_offset(self):
+        """Honor a nonzero storage offset when flattening a full reduction."""
+        storage = torch.zeros(65538, device="cuda")
+        storage[1] = 1
+        x = storage[1:]
+        out = kg.reduce_all(
+            T.ArgMaxOps(acc=cutlass.Float32), "offset_all", x, torch.int32
+        )
+        self.assertEqual(out, torch.zeros((), device="cuda", dtype=torch.int32))
+
     def test_int64_mixed_radix_decode(self):
         """Decode logical indices beyond INT32_MAX without truncating strides or extents."""
         cases = (

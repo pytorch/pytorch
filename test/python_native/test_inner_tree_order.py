@@ -30,6 +30,7 @@ if not TEST_CUTEDSL:
 import cutlass
 
 from torch._native.ops.reductions import (
+    kernel_coltile as ct,
     kernel_general as kg,
     kernel_rowtile as rt,
     tile,
@@ -118,7 +119,11 @@ def _trait_key(trait):
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestInnerTreeOrder(TestCase):
     def _run(self, trait, x):
-        acc = cutlass.Float64 if x.dtype is torch.float64 else cutlass.Float32
+        acc = (
+            cutlass.Float64
+            if x.dtype in (torch.float64, torch.complex128)
+            else cutlass.Float32
+        )
         (got,) = rt.reduce_row_tile(
             trait(acc=acc), _trait_key(trait), x, [x.dtype], order="inner_tree"
         )
@@ -247,6 +252,79 @@ class TestInnerTreeOrder(TestCase):
                     torch.equal(sub.view(torch.int32), whole[:m].view(torch.int32)),
                     f"rows={m}: the order's bits changed with the batch size",
                 )
+
+    @parametrize("dtype", [torch.complex32, torch.complex64, torch.complex128])
+    def test_complex_logical_elements_across_plan_shapes(self, dtype):
+        """Reduce complex values as logical elements across every plan shape."""
+        tol = (
+            1e-2
+            if dtype is torch.complex32
+            else 3e-3
+            if dtype is torch.complex64
+            else 1e-9
+        )
+        cases = (
+            (64, 8, "multirow"),
+            (8, 4097, "looped"),
+            (256, 4096, "looped"),
+            (2, 100003, "split"),
+        )
+        for m, n, shape in cases:
+            with self.subTest(dtype=dtype, shape=(m, n), plan=shape):
+                x = torch.randn(m, n, device="cuda", dtype=dtype)
+                self.assertEqual(
+                    rt.itree_plan(n, m, x.element_size()).shape,
+                    shape,
+                )
+                got = self._run(T.ComplexSumOps, x)
+                with torch.backends.python_native.cutedsl.disabled():
+                    expected = x.sum(dim=1)
+                self.assertEqual(got, expected, atol=tol, rtol=tol)
+
+    @parametrize("dtype", [torch.complex32, torch.complex64, torch.complex128])
+    def test_complex_multifield_and_two_output(self, dtype):
+        """Preserve complex multi-field state and paired outputs under inner-tree order."""
+        acc = cutlass.Float64 if dtype is torch.complex128 else cutlass.Float32
+        real_dtype = dtype.to_real()
+        tol = (
+            1e-2
+            if dtype is torch.complex32
+            else 3e-3
+            if dtype is torch.complex64
+            else 1e-9
+        )
+        for m, n in ((8, 4097), (2, 100003)):
+            with self.subTest(dtype=dtype, shape=(m, n)):
+                x = torch.randn(m, n, device="cuda", dtype=dtype)
+                got = rt.reduce_row_tile(
+                    T.ComplexVarMeanOps(acc=acc),
+                    f"inner_tree_complex_var_mean_{dtype}",
+                    x,
+                    [real_dtype, dtype],
+                    nouts=2,
+                    order="inner_tree",
+                )
+                with torch.backends.python_native.cutedsl.disabled():
+                    expected = torch.var_mean(x, dim=1)
+                self.assertEqual(got, expected, atol=tol, rtol=tol)
+
+    def test_complex_indexed_dims_preserve_the_order(self):
+        """Keep complex reduction order after indexed dimensions are linearized."""
+        x = torch.randn(5, 7, 9, device="cuda", dtype=torch.complex64)
+        rows = x.permute(1, 0, 2).contiguous().reshape(7, 45)
+        want = self._run(T.ComplexSumOps, rows)
+        with _order_on():
+            got = kg.reduce_dim(
+                T.ComplexSumOps(acc=cutlass.Float32),
+                "inner_tree_test_complex_indexed",
+                x,
+                [0, 2],
+                torch.complex64,
+            )
+        self.assertEqual(
+            got.reshape(-1).view(torch.int32),
+            want.view(torch.int32),
+        )
 
     def test_async_combine_short_blocks_preserve_bits(self):
         """Handle short async-combine blocks without reading padded partials as data."""
@@ -416,13 +494,52 @@ class TestInnerTreeOrder(TestCase):
                 got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
             self.assertEqual(got, x.sum(dim=1, dtype=dtype))
 
+    def test_ordered_column_layouts_use_the_coalesced_route(self):
+        """Route ordered column layouts through the coalesced implementation."""
+        physical = torch.randn(1024, 64, device="cuda")
+        batched = torch.randn(2, 1024, 64, device="cuda")
+        cases = (
+            ("transposed", physical.t(), 1, physical.t().contiguous()),
+            ("column", physical, 0, physical.t().contiguous()),
+            (
+                "batched",
+                batched,
+                1,
+                batched.transpose(1, 2).contiguous().reshape(-1, 1024),
+            ),
+        )
+        with (
+            _order_on(),
+            mock.patch.object(
+                ct, "reduce_ordered_col", wraps=ct.reduce_ordered_col
+            ) as served,
+        ):
+            for name, x, dim, rows in cases:
+                with self.subTest(name=name):
+                    got = kg.reduce_dim(
+                        T.SumOps(acc=cutlass.Float32),
+                        f"inner_tree_test_ordered_{name}",
+                        x,
+                        dim,
+                        torch.float32,
+                    )
+                    want = self._run(T.SumOps, rows)
+                    self.assertEqual(
+                        got.reshape(-1).view(torch.int32), want.view(torch.int32)
+                    )
+        self.assertEqual(served.call_count, len(cases))
+
     def test_ragged_plan_fusion_is_trait_aware(self):
         """Select ragged fusion from trait precision so low-precision sums stay accurate."""
         n, m = 4097, 4096
         default = rt.itree_plan(n, m, 2)
         lowp = rt.trait_itree_plan(T.SumOps(), n, m, 2)
+        complex_sum = rt.trait_itree_plan(T.ComplexSumOps(), n, m, 8)
+        complex_norm = rt.trait_itree_plan(T.ComplexNormOps(1), n, m, 8)
         self.assertEqual(default.kchunk, 4)
         self.assertEqual(lowp.kchunk, 2)
+        self.assertEqual(complex_sum.kchunk, 2)
+        self.assertEqual(complex_norm.kchunk, 1)
 
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
