@@ -90,7 +90,7 @@ class TestBits(TestCase):
 instantiate_device_type_tests(TestBits, globals(), allow_xpu=True)
 
 
-class TestBitsSubclass(TestCase):
+class TestBitsGeneric(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_subclass(self):
