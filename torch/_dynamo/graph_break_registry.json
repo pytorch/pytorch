@@ -679,6 +679,16 @@
       ]
     }
   ],
+  "GB5108": [
+    {
+      "Gb_type": "autograd inputs from an external mapping proxy",
+      "Context": "",
+      "Explanation": "Dynamo cannot identify the underlying mapping or its items/values overrides.",
+      "Hints": [
+        "Construct the mapping proxy inside the compiled region."
+      ]
+    }
+  ],
   "GB0046": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
@@ -1426,6 +1436,16 @@
       ]
     }
   ],
+  "GB9131": [
+    {
+      "Gb_type": "Skipped function wrapper __dict__ access",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model the copied dictionary of this function wrapper.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
@@ -1798,6 +1818,16 @@
       "Gb_type": "Unexpected failure during itertools.groupby() iteration",
       "Context": "call_function {self} {args} {kwargs}",
       "Explanation": "Unexpected failure in invoking function during groupby",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo does not support tracing class creation with type().",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

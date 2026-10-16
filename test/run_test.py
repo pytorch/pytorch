@@ -527,16 +527,25 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
-def _torchci_report_args(reports_dir: str | None) -> list[str]:
+def _torchci_report_args(
+    test_file: str, is_cpp_test: bool, reports_dir: str | None
+) -> list[str]:
     if not HAS_TORCHCI_REPORTS or not reports_dir:
         return []
-    return [f"--save-torchci-reports={reports_dir}"]
+    if not is_cpp_test:
+        return [f"--save-torchci-reports={reports_dir}"]
+    # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
+    from torch.testing._internal.torchci import plugin
+
+    prefix = Path(reports_dir) / sanitize_test_filename(test_file)
+    return ["-p", plugin.__name__, f"--torchci-report-prefix={prefix}"]
 
 
 def _torchci_reports_default() -> str | None:
     # The CI jobs that write reports by default, widening until it's all of CI.
     # upload-test-artifacts uploads this folder.
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
+    workflows = ("trunk", "pull", "slow", "inductor", "periodic-strict")
+    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in workflows:
         return str(REPO_ROOT / "test/torchci-reports")
     return None
 
@@ -618,8 +627,8 @@ def run_test(
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
-    if not is_cpp_test:
-        unittest_args.extend(_torchci_report_args(options.save_torchci_reports))
+    reports_dir = options.save_torchci_reports
+    unittest_args += _torchci_report_args(test_file, is_cpp_test, reports_dir)
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -1019,6 +1028,7 @@ def run_gloo_test(test_module, test_directory, options):
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
             "ProcessGroupGlooFRTest",
+            "DistributedDataParallelTest",
         ),
     )
 
@@ -1033,6 +1043,15 @@ def run_common_test(test_module, test_directory, options):
             "ProcessGroupWithDispatchedCollectivesTests",
             "LocalRankTest",
         ),
+    )
+
+
+def run_nccl_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        ("DistributedDataParallelTest", "CommTest", "NCCLTraceTest", "WorkHookTest"),
     )
 
 
@@ -1537,7 +1556,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_nccl": run_nccl_test,
     "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_common_test,
