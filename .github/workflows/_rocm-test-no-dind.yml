@@ -1,7 +1,7 @@
 # Owner(s): ["module: rocm"]
 #
 # Removes the Docker-in-Docker (DinD) requirement. The CI image is the job pod.
-name: test-kubernetes
+name: rocm-test-no-dind
 
 on:
   workflow_call:
