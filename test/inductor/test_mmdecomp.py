@@ -19,11 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
 )
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    parametrize,
-    run_tests,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, run_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
