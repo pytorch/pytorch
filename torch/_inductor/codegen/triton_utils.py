@@ -58,15 +58,22 @@ def use_block_ptr_enabled() -> bool:
     return False
 
 
-def should_unwrap_unspec_arg(name: str):
-    if V.graph.is_unspec_arg(name):
-        # Unwrap on all devices except CPU
-        if V.graph.get_current_device_or_throw().type != "cpu":
-            return True
-        # Only unwrap on CPU if the input is not used as an output
-        if name not in V.graph.mutated_buffers:
-            return True
-    return False
+def should_unwrap_unspec_arg(name: str) -> bool:
+    if not V.graph.is_unspec_arg(name):
+        return False
+
+    wrapper_code = getattr(V.graph, "wrapper_code", None)
+    if getattr(wrapper_code, "preserve_zero_dim_tensor_args", False):
+        return False
+
+    device_type = V.graph.get_current_device_or_throw().type
+    if device_type == "mtia":
+        return False
+    # Unwrap on all other accelerators.
+    if device_type != "cpu":
+        return True
+    # Only unwrap on CPU if the input is not used as an output.
+    return name not in V.graph.mutated_buffers
 
 
 def use_uint8_triton_storage_for_cuda_float8_e4m3fn(

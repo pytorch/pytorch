@@ -3595,7 +3595,26 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    # Note [log_sigmoid_forward buffer contract]: The buffer output is only
+    # consumed by the CPU backward kernel (log_sigmoid_backward_cpu). The
+    # CUDA and MPS forward kernels allocate an empty (0,) buffer and ignore
+    # it (log_sigmoid_forward_{cuda,mps}; the same NOTE also appears in some
+    # backward and out variants, e.g. log_sigmoid_backward_cuda and
+    # log_sigmoid_forward_out_mps). PrivateUse1 backends follow the
+    # accelerator semantics (verified on the registered torch_npu backend).
+    # Meta tensors follow the CPU branch: this op has no Meta kernel, and
+    # this decomposition is what activate_meta()
+    # (torch/_meta_registrations.py) registers as its Meta kernel, so it
+    # defines its own meta behavior. Backends not listed below keep the
+    # historical full-shape buffer.
+    if self.is_cpu or self.is_meta:
+        buffer = z
+    elif (
+        self.is_cuda
+        or self.is_xpu
+        or self.is_mps
+        or self.device.type == torch._C._get_privateuse1_backend_name()
+    ):
         buffer = self.new_zeros((0,))
     else:
         buffer = z
@@ -5996,10 +6015,17 @@ def squeeze_default(self: Tensor, dim: int | None = None):
 @register_decomposition(torch.ops.aten._weight_norm_interface)
 def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
-    keep_dim = tuple(i for i in range(len(v.shape)) if i != dim)
-    # align with cuda behavior, keep norm in 'float' when g is 'bfloat16'
-    norm_dtype = torch.float if g.dtype == torch.bfloat16 else None
-    norm = v.norm(2, keep_dim, keepdim=True, dtype=norm_dtype)
+    reduce_dims = tuple(i for i in range(len(v.shape)) if i != dim)
+    # match ATen: CPU/CUDA keep the norm in float when g is bfloat16/half, MPS keeps g.dtype
+    if g.dtype in (torch.bfloat16, torch.half) and v.device.type != "mps":
+        norm_dtype = torch.float
+    else:
+        norm_dtype = g.dtype
+    if reduce_dims:
+        norm = v.norm(2, reduce_dims, keepdim=True, dtype=norm_dtype)
+    else:
+        # dim=() reduces over all dims for any p, so a 1-D v needs per-element abs
+        norm = v.abs().to(norm_dtype)
     return v * (g / norm.to(g.dtype)), norm
 
 

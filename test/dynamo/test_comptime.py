@@ -69,7 +69,7 @@ Tensor(shape=(s77,), dtype=torch.float32)
 {'foo': Tensor(shape=(s77,), dtype=torch.float32)}
 range(1, 3)
 Employee(name='foo', id=2)
-UserDefinedListVariable(mylist)
+[1, 2]
 set()
 {'a', 'b'}
 s77""",
@@ -350,6 +350,13 @@ y = Tensor(shape=(2,), dtype=torch.float32)
             'guarded_class': None
         }
         global '' TORCH_FUNCTION_STATE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' FX_ANNOTATION
         {
             'guard_types': None,
             'code': None,

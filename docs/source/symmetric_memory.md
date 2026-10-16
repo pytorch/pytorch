@@ -7,8 +7,63 @@
 
 :::{note}
 `torch.distributed._symmetric_memory` is currently in alpha state and under
-development. API changes may be possible.
+development. Its Python APIs and every operator in `torch.ops.symm_mem` may
+change without notice. A dispatcher-visible operator is not necessarily a
+user-facing API. The maturity table below identifies which operators are
+intended for direct use and which are implementation details.
 :::
+
+## API status and operator guide
+
+The module-level alpha label applies to every operator intended for direct use.
+The table separates maturity from runtime scope so that hardware or backend
+requirements are not presented as a lower maturity level. These classifications
+summarize the current implementations and tests; they do not establish new
+project-wide PyTorch stability levels or backward-compatibility guarantees:
+
+- **Alpha** identifies operators intended for direct use under the module-wide
+  alpha disclaimer.
+- **Experimental** identifies especially incomplete or compiler-oriented
+  interfaces that may change rapidly.
+- **Internal** identifies compiler targets or implementation details that
+  should not be called directly.
+
+| Operations | Maturity | Scope or requirements | When to use them |
+| --- | --- | --- | --- |
+| `empty`, `rendezvous`, `get`, and `get_mem_pool` | Alpha | General | Allocate, establish, access, and reuse symmetric memory. |
+| `fused_all_gather_matmul` and `fused_matmul_reduce_scatter` | Alpha | General | Overlap an unscaled matrix multiplication with a tensor-parallel collective. Ordinary accelerator tensors are accepted; the operators manage a symmetric workspace. These are also targets of the compiler's tensor-parallel fusion pass. |
+| `fused_all_gather_scaled_matmul` and `fused_scaled_matmul_reduce_scatter` | Experimental | Hardware-specific | FP8 or other scaled matrix multiplication when the accelerator supports `aten._scaled_mm`. Their interfaces closely follow compiler lowering requirements. |
+| `one_shot_all_reduce`, `one_shot_all_reduce_out`, and `two_shot_all_reduce_` | Alpha | Hardware-specific | Low-latency, direct-access all-reduce on a symmetric tensor. |
+| `multimem_all_reduce_` and `multimem_all_gather_out` | Alpha | Hardware-specific | NVIDIA systems with multicast and multimem support, such as NVLink SHARP. |
+| `multimem_one_shot_all_reduce`, `multimem_one_shot_all_reduce_out`, and `multimem_one_shot_reduce_out` | Experimental | Hardware-specific | Compiler-oriented multimem variants. Their reduction order is not fixed, so all ranks are not guaranteed to receive bitwise-identical results. |
+| `get_remote_tensors` | Alpha | Hardware-specific | Create local tensor views of peer allocations when every peer is directly addressable. The views require explicit cross-rank synchronization. |
+| `nvshmem_*`, `all_to_all_vdev*`, `tile_reduce`, and `multi_root_tile_reduce` | Alpha | Backend-specific | NVSHMEM or rocSHMEM transport and device-driven collectives. Availability differs by operation and SHMEM implementation. |
+| `reduce_scatter_offset` and `all_to_all_nd` | Alpha | Backend-specific | NCCL-backend routing and multidimensional all-to-all. |
+| `put_signal` and `wait_signal` | Experimental | Backend-specific | One-sided signaling; currently implemented only for the NCCL backend. |
+| `_low_contention_*`, `_async_input_mm`, `_rendezvous`, and `_barrier` | Internal | Compiler-facing | Compiler and dispatcher implementation details. |
+| `one_shot_all_reduce_copy`, `one_shot_all_reduce_copy_out`, `two_shot_all_reduce_out`, and `reduce_scatter_out` | Internal | Compiler-facing | Compiler buffer-planning variants. Use the documented allocating or in-place operator instead. |
+| `stream_write_value32_`, `memset32_`, `memcpy_to_multicast_`, and raw `nccl_*` operators | Internal | Backend implementation | Kernel composition or backend dispatch. Use a documented Python wrapper instead. |
+
+The scaled fused operators, hardware-specific collectives, and internal
+operators are the least portable parts of the surface. In particular, do not
+infer support from an operator being present in `torch.ops.symm_mem`: some
+kernels are compiled only for particular backends or require runtime hardware
+features.
+
+The `torch.ops.symm_mem` namespace also does not provide a stable public
+autograd contract. For training graphs, prefer expressing the unfused
+collective and computation with higher-level PyTorch APIs and allowing the
+compiler to select a Symmetric Memory fusion when applicable.
+
+(symmetric-memory-stream-ordering)=
+### Stream ordering
+
+Built-in CUDA-backend barriers, signal operations, and collectives serialize
+their signal-pad use across streams for each process group and device. This
+serialization also participates in CUDA graph capture. It does not cover
+NVSHMEM operations, `ncclPutSignal`/`ncclWaitSignal`, or custom kernels that use
+a raw signal-pad tensor. Issue those uncovered operations for a group from one
+stream, or explicitly order their streams.
 
 ## Why Symmetric Memory?
 
@@ -628,6 +683,14 @@ communicator for the process group if it doesn't already exist.
 ```
 
 ```{eval-rst}
+.. autofunction:: put_signal
+```
+
+```{eval-rst}
+.. autofunction:: wait_signal
+```
+
+```{eval-rst}
 .. autofunction:: is_nvshmem_available
 ```
 
@@ -655,6 +718,10 @@ communicator for the process group if it doesn't already exist.
 .. autofunction:: get_signal_pad_size
 ```
 
+```{eval-rst}
+.. autofunction:: all_to_all_nd
+```
+
 ## Op Reference
 :::{note}
 The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
@@ -674,19 +741,122 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 ```
 
 ```{eval-rst}
+.. py:function:: fused_all_gather_matmul(A_shard: Tensor, Bs: list[Tensor], gather_dim: int, group_name: str, *, return_A: bool = True) -> tuple[Tensor | None, list[Tensor]]
+
+    Overlaps an all-gather of ``A_shard`` with one or more matrix
+    multiplications. It is semantically equivalent to::
+
+        A = all_gather_single(A_shard, gather_dim, group)
+        outputs = [torch.matmul(A, B) for B in Bs]
+
+    The tensors in ``Bs`` must be 2-D and compatible with ``A`` for matrix
+    multiplication. ``A_shard`` may be an ordinary accelerator tensor; the
+    operator allocates and reuses symmetric workspace internally. All ranks
+    must call the operator with matching shapes and arguments.
+
+    For best performance, arrange ``A_shard`` so that
+    ``A_shard.movedim(gather_dim, 0)`` is contiguous. Set ``return_A=False``
+    when only the matrix-multiplication results are needed; this can avoid
+    materializing the gathered tensor on supported systems. Run the operator
+    once before CUDA graph capture so that its workspace is large enough.
+
+    :param Tensor A_shard: Rank-local shard of the left matrix.
+    :param list[Tensor] Bs: Right-hand matrices. Multiple matrices reuse the
+        same gathered input.
+    :param int gather_dim: Dimension of ``A_shard`` to gather.
+    :param str group_name: Name of the process group.
+    :param bool return_A: Whether to return the gathered ``A``. Defaults to
+        ``True``.
+    :returns: The gathered tensor (or ``None``) and the list of matrix-
+        multiplication results.
+
+
+.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, B_scales: list[Tensor], gather_dim: int, group_name: str, biases: list[Tensor | None], result_scales: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
+
+    Scaled-matrix-multiplication variant of
+    :func:`fused_all_gather_matmul`. Each entry of ``B_scales``, ``biases``,
+    ``result_scales``, ``out_dtypes``, and ``use_fast_accum`` corresponds to
+    the entry at the same position in ``Bs`` and is forwarded to
+    ``aten._scaled_mm``.
+
+    ``A_scale`` may be a tensor-wise scalar, a row-wise scale sharded like
+    ``A_shard``, or a row-wise scale for the fully gathered tensor. The exact
+    dtype, scale-layout, and accelerator requirements are those of
+    ``aten._scaled_mm``. This is a specialized compiler fusion target; support
+    for a particular FP8 format or shape must be checked on the target
+    accelerator.
+
+    :returns: The gathered ``A`` and the list of scaled-matmul results.
+
+
+.. py:function:: fused_matmul_reduce_scatter(A: Tensor, B: Tensor, reduce_op: str, scatter_dim: int, group_name: str) -> Tensor
+
+    Overlaps matrix multiplication with a reduce-scatter. It is semantically
+    equivalent to::
+
+        C = torch.matmul(A, B)
+        out = reduce_scatter_single(C, reduce_op, scatter_dim, group)
+
+    ``A`` must have at least two dimensions, ``B`` must be 2-D, and the size
+    of the matrix-multiplication result along ``scatter_dim`` must be divisible
+    by the process-group size. ``reduce_op`` may be ``"sum"`` or ``"avg"``.
+    ``A`` and ``B`` may be ordinary accelerator tensors; symmetric workspace
+    is managed internally.
+
+    For best performance, arrange ``A`` so that
+    ``A.movedim(scatter_dim, 0)`` is contiguous. Run the operator once before
+    CUDA graph capture so that its workspace is large enough.
+
+    :param Tensor A: Left matrix or batch of matrices.
+    :param Tensor B: 2-D right-hand matrix.
+    :param str reduce_op: ``"sum"`` or ``"avg"``.
+    :param int scatter_dim: Result dimension to scatter.
+    :param str group_name: Name of the process group.
+
+
+.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, B_scale: Tensor, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, result_scale: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
+
+    Scaled-matrix-multiplication variant of
+    :func:`fused_matmul_reduce_scatter`. The two scatter dimensions and
+    ``output_shape`` preserve the shape information from the compiler pattern
+    ``reshape -> aten._scaled_mm -> reshape -> reduce_scatter``. For a direct
+    call without those reshapes, pass the same value for both scatter
+    dimensions and pass ``[*A.shape[:-1], B.shape[1]]`` as ``output_shape``.
+
+    This operator is primarily a compiler target. Its supported dtypes, scale
+    layouts, and hardware follow ``aten._scaled_mm`` and are narrower than the
+    unscaled operator.
+
+
+.. py:function:: get_remote_tensors(x: Tensor, group_name: str) -> list[Tensor]
+
+    Returns tensor views of the allocation belonging to every rank in
+    ``group_name``, ordered by rank. ``x`` must be a symmetric-memory tensor
+    and every peer must be directly addressable, for example within one NVLink
+    domain. The operation does not work across a network transport.
+
+    The returned tensors alias peer memory. PyTorch does not automatically
+    synchronize peer reads and writes through these views; coordinate access
+    with a barrier, signal, or another suitable protocol.
+
+    :param Tensor x: Local tensor naming the symmetric allocation.
+    :param str group_name: Name of the process group used to rendezvous the
+        allocation.
+
+
+```
+
+```{eval-rst}
 .. py:function:: multimem_all_reduce_(input: Tensor, reduce_op: str, group_name: str) -> Tensor
 
     Performs a multimem all-reduce operation on the input tensor. This operation
     requires hardware support for multimem operations. On NVIDIA GPUs, NVLink
     SHARP is required.
 
-    .. warning::
-        All symm_mem collectives for a given group must be issued from a single
-        CUDA stream. The kernels synchronize ranks using a shared signal pad
-        indexed by block ID with no per-stream isolation; issuing concurrent
-        launches from different streams on the same group will cause a deadlock.
-        To use symm_mem collectives from multiple streams, serialize them onto
-        one dedicated stream using ``stream.wait_stream()`` / ``current_stream.wait_stream()``.
+    The built-in CUDA implementation orders this operation with other built-in
+    signal-pad operations for the same group. See
+    :ref:`symmetric-memory-stream-ordering` for the operations not covered by
+    that ordering.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
@@ -697,10 +867,6 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
     Performs a multimem all-gather operation on the input tensor. This operation requires hardware support for multimem operations. On NVIDIA GPUs, NVLink SHARP is required.
 
-    .. warning::
-        All symm_mem collectives for a given group must be issued from a single
-        CUDA stream. See :func:`multimem_all_reduce_` for details.
-
     :param Tensor input: Input tensor to perform all-gather on.
     :param str group_name: Name of the group to perform all-gather on.
     :param Tensor out: Output tensor to store the result of the all-gather operation. Must be symmetric.
@@ -709,10 +875,6 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: one_shot_all_reduce(input: Tensor, reduce_op: str, group_name: str) -> Tensor
 
     Performs a one-shot all-reduce operation on the input tensor.
-
-    .. warning::
-        All symm_mem collectives for a given group must be issued from a single
-        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
@@ -723,10 +885,6 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 
     Performs a one-shot all-reduce operation based on the input tensor and writes the result to the output tensor.
 
-    .. warning::
-        All symm_mem collectives for a given group must be issued from a single
-        CUDA stream. See :func:`multimem_all_reduce_` for details.
-
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
     :param str group_name: Name of the group to perform all-reduce on.
@@ -736,10 +894,6 @@ them directly via `torch.ops.symm_mem.<op_name>`.
 .. py:function:: two_shot_all_reduce_(input: Tensor, reduce_op: str, group_name: str) -> Tensor
 
     Performs a two-shot all-reduce operation on the input tensor.
-
-    .. warning::
-        All symm_mem collectives for a given group must be issued from a single
-        CUDA stream. See :func:`multimem_all_reduce_` for details.
 
     :param Tensor input: Input tensor to perform all-reduce on. Must be symmetric.
     :param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
