@@ -1132,6 +1132,68 @@ def fn(x):
             package.uninstall()
             self.assertNotIn(alias, set(unseeded_scope))
 
+    @torch._dynamo.config.patch(nested_graph_breaks=True)
+    def test_package_binds_an_inlined_frames_resume_in_the_root_module(self):
+        # Under nested graph breaks, the continuation of a graph break inside an
+        # inlined helper runs with the helper's globals but is bound in, and
+        # loaded by LOAD_GLOBAL from, the root frame's module. Binding it in the
+        # helper's module instead leaves the root's bytecode with a NameError.
+        helper_name = "test_package_ngb_helper"
+        entry_name = "test_package_ngb_entry"
+        sources = {
+            helper_name: (
+                "import torch\n\n"
+                "OFF = 3.0\n\n"
+                "def helper(y):\n"
+                "    y = y.sin() + OFF\n"
+                "    torch._dynamo.graph_break()\n"
+                "    return y.cos() * OFF\n"
+            ),
+            entry_name: (
+                f"import {helper_name}\n\n"
+                "def fn(x):\n"
+                f"    return {helper_name}.helper(x * 2) + 1\n"
+            ),
+        }
+        ctx = DiskDynamoStore()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+
+            def fresh_import():
+                for name, source in sources.items():
+                    path = os.path.join(tmp_dir, name + ".py")
+                    with open(path, "w") as f:
+                        f.write(source)
+                    self.addCleanup(sys.modules.pop, name, None)
+                    module = import_from_path(name, path)
+                return vars(sys.modules[helper_name]), module
+
+            _, entry = fresh_import()
+            args = (torch.randn(3),)
+            expected = entry.fn(*args)
+            package = CompilePackage(entry.fn)
+            torch._dynamo.optimize(backend="eager", package=package)(entry.fn)(*args)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+            bound_in = {
+                name: module
+                for code in package._codes.values()
+                for name, module in code.bound_in.items()
+            }
+            self.assertEqual(set(bound_in.values()), {entry_name})
+
+            torch._dynamo.reset()
+            helper_scope, entry = fresh_import()
+            package, backends = ctx.load_package(entry.fn, self.path())
+            with torch.compiler.set_stance("fail_on_recompile"):
+                compiled_fn = torch._dynamo.optimize(package=package)(entry.fn)
+                package.install(backends)
+                self.assertEqual(compiled_fn(*args), expected)
+            self.assertTrue(set(bound_in) <= set(vars(entry)))
+            self.assertEqual(set(bound_in) & set(helper_scope), set())
+            package.uninstall()
+            self.assertEqual(set(bound_in) & set(vars(entry)), set())
+
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_bound_method_name_guard_survives_func_reached_first(self):
         # Regression: a guard on a bound method's __name__ where the method's
