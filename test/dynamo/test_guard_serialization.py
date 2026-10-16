@@ -4639,6 +4639,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded, {"mp": types.MappingProxyType({"a": torch.randn(3, 2)})}, False
         )
 
+    def test_ordered_dict_keys_match(self):
+        keys = ("layer.0.weight", "layer.1.weight")
+
+        def fn(x, mapping):
+            return x + (mapping == collections.OrderedDict.fromkeys(keys, 1))
+
+        x = torch.randn(3)
+        mapping = collections.OrderedDict.fromkeys(keys, 1)
+        ref, loaded = self._test_serialization(
+            "ORDERED_DICT_KEYS_MATCH", fn, x, mapping
+        )
+        fresh = collections.OrderedDict.fromkeys(
+            [key.encode().decode() for key in keys], 1
+        )
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": fresh}, True)
+        fresh.move_to_end(keys[0])
+        self._test_check_fn(ref, loaded, {"x": x, "mapping": fresh}, False)
+
     def test_dict_keys_match(self):
         def fn(x):
             ret = 1
