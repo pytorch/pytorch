@@ -60,6 +60,7 @@
     "AllToAllOptions",
     "AllreduceCoalescedOptions",
     "AllreduceOptions",
+    "BackendBase",
     "BarrierOptions",
     "BroadcastOptions",
     "BuiltinCommHookType",
