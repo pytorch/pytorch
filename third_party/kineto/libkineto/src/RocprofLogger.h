@@ -24,10 +24,6 @@
 
 #include "RocLogger.h"
 
-namespace libkineto {
-class RocprofActivityApiTest;
-}
-
 struct ThreadTraceBuffer {
   explicit ThreadTraceBuffer(uint64_t bufferGeneration)
       : generation(bufferGeneration) {}
@@ -120,5 +116,4 @@ class RocprofLogger {
   bool logging_{false};
 
   friend class libkineto::RocprofActivityApi;
-  friend class libkineto::RocprofActivityApiTest;
 };

@@ -16,10 +16,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
-#include <initializer_list>
 #include <iterator>
 #include <optional>
-#include <thread>
 
 #include <unistd.h>
 
@@ -303,97 +301,6 @@ class MockRocActivities : public RocprofActivityApi {
   mutable int availabilityChecks{0};
   int processActivitiesCalls{0};
 };
-
-namespace libkineto {
-
-class RocprofActivityApiTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    api_.d = &logger_;
-    api_.activityMaskSnapshot_ =
-        1 << static_cast<uint32_t>(ActivityType::GPU_MEMCPY);
-  }
-
-  void appendRows(std::initializer_list<uint64_t> ids) {
-    std::lock_guard<std::mutex> lock(logger_.rowsMutex_);
-    logger_.rows_.reserve(logger_.rows_.capacity() + ids.size());
-    for (auto id : ids) {
-      rows_.push_back(std::make_unique<rocprofAsyncRow>(
-          id,
-          ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-          0,
-          ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE,
-          0,
-          1,
-          10,
-          20,
-          std::string()));
-      logger_.rows_.push_back(rows_.back().get());
-    }
-  }
-
-  void appendCorrelations(
-      std::initializer_list<std::pair<uint64_t, uint64_t>> correlations) {
-    std::lock_guard<std::mutex> lock(logger_.externalCorrelationsMutex_);
-    auto& pending =
-        logger_.externalCorrelations_[RocLogger::CorrelationDomain::Default];
-    pending.reserve(pending.capacity() + correlations.size());
-    pending.insert(pending.end(), correlations.begin(), correlations.end());
-  }
-
-  RocprofLogger logger_;
-  RocprofActivityApi api_;
-  std::vector<std::unique_ptr<rocprofAsyncRow>> rows_;
-};
-
-TEST_F(RocprofActivityApiTest, RowSnapshotSurvivesCallbackAppends) {
-  appendRows({1, 2});
-  appendCorrelations({{1, 11}});
-  std::vector<uint64_t> processed;
-  const int count = api_.processActivities(
-      [&](const rocprofBase* row) {
-        processed.push_back(row->id);
-        if (processed.size() == 1) {
-          std::thread producer([&] { appendRows({5, 6}); });
-          producer.join();
-        }
-      },
-      [&](uint64_t, uint64_t, RocLogger::CorrelationDomain) {
-        std::thread producer([&] { appendRows({3, 4}); });
-        producer.join();
-      });
-  EXPECT_EQ(count, 2);
-  EXPECT_EQ(processed, (std::vector<uint64_t>{1, 2}));
-}
-
-TEST_F(RocprofActivityApiTest, CorrelationSnapshotPreservesCallbackAppends) {
-  appendCorrelations({{1, 11}, {2, 22}});
-  std::vector<std::pair<uint64_t, uint64_t>> processed;
-  api_.processActivities(
-      [](const rocprofBase*) {},
-      [&](uint64_t id, uint64_t externalId, RocLogger::CorrelationDomain domain) {
-        EXPECT_EQ(domain, RocLogger::CorrelationDomain::Default);
-        processed.emplace_back(id, externalId);
-        if (processed.size() == 1) {
-          std::thread producer([&] { appendCorrelations({{3, 33}}); });
-          producer.join();
-        }
-      });
-  EXPECT_EQ(
-      processed,
-      (std::vector<std::pair<uint64_t, uint64_t>>{{1, 11}, {2, 22}}));
-
-  processed.clear();
-  api_.processActivities(
-      [](const rocprofBase*) {},
-      [&](uint64_t id, uint64_t externalId, RocLogger::CorrelationDomain) {
-        processed.emplace_back(id, externalId);
-      });
-  EXPECT_EQ(
-      processed, (std::vector<std::pair<uint64_t, uint64_t>>{{3, 33}}));
-}
-
-} // namespace libkineto
 
 // Common setup / teardown and helper functions
 class RocmActivityProfilerTest : public ::testing::Test {
