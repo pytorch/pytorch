@@ -30,4 +30,8 @@
 
 .. autoclass:: LogsSpecs
    :members:
+
+.. autoclass:: Std
+
+.. autoclass:: SignalException
 ```
