@@ -6302,6 +6302,7 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
                 torch.optim.NAdam,
                 torch.optim.RAdam,
                 torch.optim.Adadelta,
+                torch.optim.Adagrad,
                 torch.optim.RMSprop,
                 torch.optim.Rprop,
             ),
