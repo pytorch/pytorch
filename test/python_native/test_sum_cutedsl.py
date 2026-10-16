@@ -280,6 +280,38 @@ class TestSumCuteDSLOverride(TestCase):
         torch.sum(x, dim=1, out=out)
         self.assertEqual(out, ref)
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2,
+        "requires at least 2 visible CUDA devices",
+    )
+    @skipIfRocm
+    def test_non_current_device(self):
+        """Launch functional and out variants on the input tensor's device."""
+        previous = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            x = torch.ones(17, 8192, device="cuda:1")
+            x[:, 0] = 2
+            with torch.backends.python_native.cutedsl.disabled():
+                expected_sum = x.sum(dim=1)
+                expected_prod = x.prod(dim=1)
+
+            with mock.patch.object(
+                rt, "reduce_row_itree", wraps=rt.reduce_row_itree
+            ) as run:
+                got_sum = x.sum(dim=1)
+                got_prod = torch.empty(17, device="cuda:1")
+                torch.prod(x, dim=1, out=got_prod)
+
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(torch.cuda.current_device(), 0)
+            self.assertEqual(got_sum.device, torch.device("cuda:1"))
+            self.assertEqual(got_prod.device, torch.device("cuda:1"))
+            self.assertEqual(got_sum, expected_sum)
+            self.assertEqual(got_prod, expected_prod)
+        finally:
+            torch.cuda.set_device(previous)
+
     @parametrize("op", ("sum", "prod"))
     def test_singleton_noncollapsible_rows_fall_through(self, op):
         values = torch.arange(36, device="cuda", dtype=torch.float32)
