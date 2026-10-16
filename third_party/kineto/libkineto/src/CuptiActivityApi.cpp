@@ -24,18 +24,18 @@ namespace KINETO_NAMESPACE {
 // 1MB to 10MB.
 // Given the kDefaultActivitiesMaxGpuBufferSize is around 128MB, in the worst
 // case, there will be 32 buffers contending for the mutex.
-constexpr size_t kBufSize(4 * 1024 * 1024);
+constexpr size_t kBufSize(size_t{4} * 1024 * 1024);
 constexpr uint32_t kCuptiBufferRejectionMinVersion = 27;
 
-inline bool cuptiTearDown_() {
+static inline bool cuptiTearDown_() {
   return isEnvVarSetToOne("TEARDOWN_CUPTI");
 }
 
-inline bool cuptiLazyInit_() {
+static inline bool cuptiLazyInit_() {
   return cuptiTearDown_() && !isEnvVarSetToOne("DISABLE_CUPTI_LAZY_REINIT");
 }
 
-inline void reenableCuptiCallbacks_(CuptiCallbackApi& cbapi) {
+static inline void reenableCuptiCallbacks_(CuptiCallbackApi& cbapi) {
   // Re-enable callbacks from the past if they exist.
   LOG(INFO) << "Re-enable previous CUPTI callbacks - Starting";
   VLOG(1) << "  CUPTI subscriber before reinit:" << cbapi.getCuptiSubscriber();
@@ -114,7 +114,7 @@ static bool nextActivityRecord(
 }
 
 void CuptiActivityApi::setMaxBufferSize(int64_t size) {
-  maxGpuBufferCount_ = 1 + size / kBufSize;
+  maxGpuBufferCount_ = static_cast<int64_t>(1 + size / kBufSize);
 }
 
 void CuptiActivityApi::setDeviceBufferSize(size_t size) {
@@ -379,6 +379,11 @@ void CuptiActivityApi::enableCuptiActivities(
       externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
     }
     if (activity == CUDA_SYNC) {
+#if CUDA_VERSION >= 12090
+      // CUDA event records supply source-stream correlation. CUDA 12.9+
+      // requires explicitly enabling them separately from synchronization.
+      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CUDA_EVENT));
+#endif
 #if CUDA_VERSION >= 13000
       CUPTI_CALL(cuptiActivityEnableCudaEventDeviceTimestamps(true));
 #endif
@@ -428,6 +433,9 @@ void CuptiActivityApi::disableCuptiActivities(
           cuptiActivityDisable(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION));
     }
     if (activity == CUDA_SYNC) {
+#if CUDA_VERSION >= 12090
+      CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_CUDA_EVENT));
+#endif
       CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_SYNCHRONIZATION));
     }
     if (activity == CUDA_RUNTIME) {

@@ -121,7 +121,7 @@ from .exc import (
     UserErrorType,
 )
 from .hooks import Hooks
-from .mutation_guard import install_generation_tagging_init
+from .mutation_guard import GenerationTracker, install_generation_tagging_init
 from .utils import (
     _get_error_on_graph_break,
     _set_error_on_graph_break,
@@ -303,6 +303,14 @@ class _FailOnRecompileCallback:
         # A frame the backend would not compile is no recompile.
         if convert_frame.skips_tensor_free_frame(self._torchdynamo_orig_backend, frame):
             return ConvertFrameReturn()
+
+        # convert_frame would skip a disable(recursive=False) frame rather than
+        # compile it, so a cache miss there is not a recompile. The eval-frame
+        # hook calls this method directly, so its caller is the missed frame's.
+        if (
+            disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
+        ) is not None:
+            return disabled
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -558,6 +566,11 @@ class OptimizedModule(torch.nn.Module):
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
         self.training = self._orig_mod.training
+
+    def __bool__(self) -> bool:
+        # Proxy the bool call to the original module
+        # pyrefly: ignore [unsafe-overlap]
+        return bool(self._orig_mod)
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
@@ -1456,8 +1469,10 @@ class OptimizeContext(_TorchDynamoContext):
         isolate_recompiles: bool = False,
         dynamic_shapes: ShapesSpec | ParamsSpec | dict[str, Any] | None = None,
     ) -> None:
+        install_generation_tagging_init()
+
         def on_enter() -> None:
-            install_generation_tagging_init()
+            GenerationTracker.generation += 1
 
         super().__init__(
             callback=callback,
@@ -1521,7 +1536,7 @@ class RunOnlyContext(_TorchDynamoContext):
     def __init__(self) -> None:
         # cudagraph trees relies on generation increment
         def on_enter() -> None:
-            torch._dynamo.mutation_guard.GenerationTracker.generation += 1
+            GenerationTracker.generation += 1
 
         super().__init__(callback=False, on_enter=on_enter)
 
