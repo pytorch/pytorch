@@ -566,6 +566,12 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
   }
 
   Tensor output = at::empty_like(input_, input_.options());
+  // host_softmax uses GRAIN_SIZE / dim_size. An empty softmax dim makes
+  // dim_size == 0 and divides by zero (SIGSEGV). Match _softmax, which
+  // returns early on empty inputs. See #199937.
+  if (input_.numel() == 0) {
+    return output;
+  }
   auto input = input_.contiguous();
   int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
   dim = maybe_wrap_dim(dim, input_.dim());
@@ -592,6 +598,11 @@ Tensor masked_softmax_backward_cpu(
   TORCH_CHECK(
       mask_.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
+  // host_softmax_backward uses GRAIN_SIZE / dim_size; empty grads must not
+  // enter that path. See #199937.
+  if (grad_.numel() == 0) {
+    return at::empty_like(grad_);
+  }
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
   auto mask = mask_.contiguous();
