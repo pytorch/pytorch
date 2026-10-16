@@ -34,6 +34,14 @@ class _LazyProtocol(Protocol):
 
     def _infer_parameters(self, module, input): ...
 
+    def has_uninitialized_params(self): ...
+
+    def _initialize_parameters_from_state_dict(self): ...
+
+    def _finalize_initialization(self): ...
+
+    cls_to_become: type[Any] | None
+
     @property
     def _parameters(self): ...
 
@@ -132,8 +140,11 @@ class LazyModuleMixin:
                  'fc2.bias': <UninitializedParameter>})
 
     Lazy modules can load regular :class:`torch.nn.Parameter` s (i.e. you can serialize/deserialize
-    initialized LazyModules and they will remain initialized)
-
+    initialized LazyModules and they will remain initialized). Loading a complete
+    initialized state into a built-in lazy module also infers its non-tensor
+    dimensions and converts it to the regular module class, without a dry run.
+    Stateless modules and custom modules with their own input-dependent
+    initialization still require the first forward pass.
 
     >>> full_mlp = LazyMLP()
     >>> # Dry run to initialize another module
@@ -226,6 +237,58 @@ class LazyModuleMixin:
                         with torch.no_grad():
                             param.materialize(input_param.shape)
 
+    def _load_from_state_dict(
+        self: _LazyProtocol,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        errors_before = len(error_msgs)
+        super()._load_from_state_dict(  # type: ignore[misc]
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
+        # Complete loading and its pre-hooks before removing the lazy hooks or
+        # changing class. Stateless lazy modules still need input shape inference.
+        if (
+            hasattr(self, "_initialize_hook")
+            and len(error_msgs) == errors_before
+            and not self.has_uninitialized_params()
+            and any(
+                tensor is not None
+                for tensor in itertools.chain(
+                    self._parameters.values(), self._buffers.values()
+                )
+            )
+        ):
+            if self._initialize_parameters_from_state_dict():
+                self._finalize_initialization()
+
+    def _initialize_parameters_from_state_dict(self: _LazyProtocol):
+        """Return whether state loading has completed input-independent initialization.
+
+        Custom lazy modules retain their forward initialization unless they
+        explicitly implement initialization from saved state.
+        """
+        return False
+
+    def _finalize_initialization(self: _LazyProtocol):
+        self._initialize_hook.remove()
+        self._load_hook.remove()
+        delattr(self, "_initialize_hook")
+        delattr(self, "_load_hook")
+        if self.cls_to_become is not None:
+            self.__class__ = self.cls_to_become
+
     def initialize_parameters(self: _LazyProtocol, *args, **kwargs):
         r"""Initialize parameters according to the input batch properties.
 
@@ -263,12 +326,7 @@ class LazyModuleMixin:
         module.initialize_parameters(*args, **kwargs)
         if module.has_uninitialized_params():
             raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
-        module._initialize_hook.remove()
-        module._load_hook.remove()
-        delattr(module, '_initialize_hook')
-        delattr(module, '_load_hook')
-        if module.cls_to_become is not None:
-            module.__class__ = module.cls_to_become
+        module._finalize_initialization()
     # fmt: on
 
     def _replicate_for_data_parallel(self: _LazyProtocol):

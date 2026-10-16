@@ -22,6 +22,168 @@ class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
 class TestLazyModules(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_load_state_without_dry_run(self):
+        factories = [
+            (lambda: nn.Linear(3, 4), lambda: nn.LazyLinear(4), (2, 3), "in_features"),
+            (
+                lambda: nn.Conv1d(4, 6, 3, groups=2),
+                lambda: nn.LazyConv1d(6, 3, groups=2),
+                (2, 4, 5),
+                "in_channels",
+            ),
+            (
+                lambda: nn.ConvTranspose2d(4, 6, 3, groups=2),
+                lambda: nn.LazyConvTranspose2d(6, 3, groups=2),
+                (2, 4, 5, 5),
+                "in_channels",
+            ),
+            (
+                lambda: nn.BatchNorm2d(4),
+                lambda: nn.LazyBatchNorm2d(),
+                (2, 4, 3, 3),
+                "num_features",
+            ),
+            (
+                lambda: nn.InstanceNorm1d(4, affine=True),
+                lambda: nn.LazyInstanceNorm1d(affine=True, track_running_stats=False),
+                (2, 4, 3),
+                "num_features",
+            ),
+            (
+                lambda: nn.InstanceNorm2d(4, track_running_stats=True),
+                lambda: nn.LazyInstanceNorm2d(affine=False, track_running_stats=True),
+                (2, 4, 3, 3),
+                "num_features",
+            ),
+        ]
+        old_swap = torch.__future__.get_swap_module_params_on_conversion()
+        try:
+            for swap in (False, True):
+                torch.__future__.set_swap_module_params_on_conversion(swap)
+                for assign in (False, True):
+                    for eager_factory, lazy_factory, shape, attribute in factories:
+                        reference, module = eager_factory(), lazy_factory()
+                        with self.subTest(
+                            module=type(module), assign=assign, swap=swap
+                        ):
+                            module.load_state_dict(
+                                reference.state_dict(), assign=assign
+                            )
+                            self.assertIs(type(module), type(reference))
+                            self.assertEqual(
+                                getattr(module, attribute),
+                                getattr(reference, attribute),
+                            )
+                            self.assertFalse(hasattr(module, "_initialize_hook"))
+                            self.assertFalse(hasattr(module, "_load_hook"))
+                            self.assertEqual(
+                                module.state_dict(), reference.state_dict()
+                            )
+                            input = torch.randn(shape)
+                            self.assertEqual(module(input), reference(input))
+        finally:
+            torch.__future__.set_swap_module_params_on_conversion(old_swap)
+
+    def test_load_state_preserves_user_hooks(self):
+        module = nn.LazyLinear(4)
+        reference = nn.Linear(3, 4)
+        events = []
+        for index in range(2):
+
+            def pre_hook(mod, *args, index=index):
+                events.append((index, type(mod)))
+
+            module.register_load_state_dict_pre_hook(pre_hook)
+
+        def post_hook(mod, incompatible):
+            events.append(("post", type(mod)))
+
+        module.register_load_state_dict_post_hook(post_hook)
+        module.load_state_dict(reference.state_dict())
+        self.assertEqual(
+            events, [(0, nn.LazyLinear), (1, nn.LazyLinear), ("post", nn.Linear)]
+        )
+        events.clear()
+        module.load_state_dict(reference.state_dict())
+        self.assertEqual(events, [(0, nn.Linear), (1, nn.Linear), ("post", nn.Linear)])
+        self.assertEqual(module(torch.ones(2, 3)), reference(torch.ones(2, 3)))
+
+    def test_load_state_partial_and_failed_copy(self):
+        reference = nn.Linear(3, 4)
+        module = nn.LazyLinear(4)
+        module.load_state_dict({"weight": reference.weight}, strict=False)
+        self.assertIs(type(module), nn.LazyLinear)
+        module.load_state_dict({"bias": reference.bias}, strict=False)
+        self.assertIs(type(module), nn.Linear)
+        self.assertEqual(module.state_dict(), reference.state_dict())
+
+        module = nn.LazyLinear(4)
+        module.load_state_dict({"weight": reference.weight}, strict=False)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch for weight"):
+            module.load_state_dict(
+                {"weight": torch.randn(5, 3), "bias": reference.bias}
+            )
+        self.assertIs(type(module), nn.LazyLinear)
+        self.assertTrue(hasattr(module, "_initialize_hook"))
+        module.load_state_dict(reference.state_dict())
+        self.assertIs(type(module), nn.Linear)
+        self.assertEqual(module.state_dict(), reference.state_dict())
+
+    def test_load_state_meta_assign_and_script(self):
+        reference = nn.Linear(3, 4)
+        module = nn.LazyLinear(4, device="meta")
+        module.load_state_dict(reference.state_dict(), assign=True)
+        self.assertIs(type(module), nn.Linear)
+        self.assertEqual(module.weight.device, reference.weight.device)
+        input = torch.randn(2, 3)
+        self.assertEqual(torch.jit.script(module)(input), reference(input))
+        self.assertEqual(pickle.loads(pickle.dumps(module))(input), reference(input))
+
+    def test_load_state_nested_without_dry_run(self):
+        reference = nn.Sequential(nn.Linear(3, 4), nn.Sequential(nn.Linear(4, 2)))
+        module = nn.Sequential(nn.LazyLinear(4), nn.Sequential(nn.LazyLinear(2)))
+        module.load_state_dict(reference.state_dict())
+        self.assertIs(type(module[0]), nn.Linear)
+        self.assertIs(type(module[1][0]), nn.Linear)
+        self.assertEqual(module[0].in_features, 3)
+        self.assertEqual(module[1][0].in_features, 4)
+        input = torch.randn(2, 3)
+        self.assertEqual(module(input), reference(input))
+
+    def test_load_state_preserves_custom_initialization(self):
+        class CustomLazy(LazyModule):
+            def __init__(self):
+                super().__init__()
+                self.weight = UninitializedParameter()
+
+            def initialize_parameters(self, input):
+                self.input_shape = tuple(input.shape[1:])
+                if self.has_uninitialized_params():
+                    self.weight.materialize((input.shape[-1],))
+
+            def forward(self, input):
+                return input.reshape(-1, *self.input_shape) * self.weight
+
+        class CustomLazyLinear(nn.LazyLinear):
+            def initialize_parameters(self, input):
+                super().initialize_parameters(input)
+                self.input_shape = tuple(input.shape[1:])
+
+        for assign in (False, True):
+            with self.subTest(assign=assign):
+                module = CustomLazy()
+                module.load_state_dict({"weight": torch.ones(3)}, assign=assign)
+                self.assertTrue(hasattr(module, "_initialize_hook"))
+                self.assertEqual(module(torch.ones(2, 3)), torch.ones(2, 3))
+                self.assertEqual(module.input_shape, (3,))
+                reference = nn.Linear(3, 4)
+                module = CustomLazyLinear(4)
+                module.load_state_dict(reference.state_dict(), assign=assign)
+                self.assertIs(type(module), CustomLazyLinear)
+                input = torch.randn(2, 3)
+                self.assertEqual(module(input), reference(input))
+                self.assertEqual(module.input_shape, (3,))
+
     @suppress_warnings
     def test_lazy_module_parameter(self):
         module = LazyModule()
@@ -158,10 +320,8 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIs(type(lazy_module), nn.Linear)
+        self.assertEqual(lazy_module.in_features, 5)
         self.assertTrue(lazy_module.weight.shape == (10, 5))
         self.assertTrue(lazy_module.bias.shape == (10,))
 
@@ -175,11 +335,9 @@ class TestLazyModules(TestCase):
         module = nn.Linear(5, 10)
         lazy_module = nn.LazyLinear(10)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Linear one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
-        self.assertTrue(isinstance(lazy_module, nn.LazyLinear))
+        self.assertIs(type(lazy_module), nn.Linear)
+        self.assertEqual(lazy_module.in_features, 5)
+        self.assertNotIsInstance(lazy_module, nn.LazyLinear)
 
         input = torch.randn(5, 5)
         lazy_module(input)
@@ -247,10 +405,8 @@ class TestLazyModules(TestCase):
         module = gen_module()
         lazy_module = gen_lazy_module()
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Conv one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIs(type(lazy_module), type(module))
+        self.assertEqual(lazy_module.in_channels, module.in_channels)
         self.assertEqual(lazy_module.weight.shape, expected_weight_shape)
         if lazy_module.bias is not None:
             self.assertEqual(lazy_module.bias.shape, expected_bias_shape)
@@ -607,10 +763,8 @@ class TestLazyModules(TestCase):
         module = cls(10)
         lazy_module = lazy_cls(affine=True, track_running_stats=True)
         lazy_module.load_state_dict(module.state_dict())
-        # Parameters have been initialized but the module won't become a full
-        # Conv one until the first iteration. This is due to
-        # limitations on the state_dict loading logic
-        self.assertFalse(lazy_module.has_uninitialized_params())
+        self.assertIs(type(lazy_module), type(module))
+        self.assertEqual(lazy_module.num_features, 10)
         self.assertEqual(lazy_module.weight.shape, (10,))
         self.assertEqual(lazy_module.bias.shape, (10,))
         self.assertEqual(lazy_module.running_mean.shape, (10,))
@@ -629,10 +783,11 @@ class TestLazyModules(TestCase):
                     affine=affine, track_running_stats=track_running_stats
                 )
                 lazy_module.load_state_dict(module.state_dict())
-                # Parameters have been initialized but the module won't become a full
-                # InstanceNorm one until the first iteration. This is due to
-                # limitations on the state_dict loading logic
-                self.assertFalse(lazy_module.has_uninitialized_params())
+                if affine or track_running_stats:
+                    self.assertIs(type(lazy_module), cls)
+                    self.assertEqual(lazy_module.num_features, 10)
+                else:
+                    self.assertIs(type(lazy_module), lazy_cls)
                 if affine:
                     self.assertEqual(lazy_module.weight.shape, (10,))
                     self.assertEqual(lazy_module.bias.shape, (10,))
