@@ -5314,7 +5314,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
-    def test_ddp_module(self):
+    @parametrize("default_group", [True, False])
+    def test_ddp_module(self, default_group):
         import torch.distributed as dist
 
         if not dist.is_available():
@@ -5326,45 +5327,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
         try:
-            ddp_model = DDP(GlobalNestedModule())
-
-            def foo(ddp, x):
-                return ddp(x)
-
-            unsupported = frozenset(
-                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            )
-            x = torch.randn(10)
-            package = CompilePackage(foo)
-            torch._dynamo.optimize(
-                package=package,
-                guard_filter_fn=lambda gs: [
-                    x.guard_type not in unsupported for x in gs
-                ],
-            )(foo)(ddp_model, x)
-            self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
-            torch._dynamo.package.load_guards_state(
-                package._codes[foo.__code__].guarded_codes[0].guards_state
-            )
-        finally:
-            dist.destroy_process_group()
-            tmpfile.close()
-
-    def test_ddp_module_non_default_process_group(self):
-        import torch.distributed as dist
-
-        if not dist.is_available():
-            self.skipTest("Torch distributed is not available")
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
-        tmpfile = tempfile.NamedTemporaryFile()  # noqa: SIM115
-        dist.init_process_group(
-            backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
-        )
-        try:
-            ddp_model = DDP(
-                GlobalNestedModule(), process_group=dist.new_group(ranks=[0])
-            )
+            pg = None if default_group else dist.new_group(ranks=[0])
+            ddp_model = DDP(GlobalNestedModule(), process_group=pg)
 
             def foo(ddp, x):
                 return ddp(x)
