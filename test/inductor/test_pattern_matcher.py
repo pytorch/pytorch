@@ -1429,6 +1429,39 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(result, fn(x))
         self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
+    def test_one_hot_sum(self):
+        # sum(where(selector == arange(C), val, 0), 1, keepdim=True) folds into the
+        # selected term (no reduction) only for an integer selector, a zero
+        # background, an arange from 0 and keepdim=True.
+        def one_hot_sum(selector, val, start=0, background=0.0, keepdim=True):
+            classes = torch.arange(start, start + 1000, device=selector.device)
+            one_hot = torch.where(
+                selector[:, None] == classes, val[:, None], background
+            )
+            return one_hot.sum(1, keepdim=keepdim)
+
+        labels = torch.randint(-1, 1001, (64,), device=GPU_TYPE)
+        val = torch.randn(64, device=GPU_TYPE)
+        for kwargs, selector, folds in [
+            ({}, labels, True),
+            ({}, labels.int(), True),
+            ({}, labels.float() + 0.5, False),
+            ({"background": 1.0}, labels, False),
+            ({"keepdim": False}, labels, False),
+            ({"start": 1}, labels, False),
+        ]:
+            torch._dynamo.reset()
+
+            def fn(selector, val, kwargs=kwargs):
+                return one_hot_sum(selector, val, **kwargs)
+
+            result, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), selector, val
+            )
+            self.assertEqual(result, fn(selector, val))
+            # triton_heuristics.reduction( or .persistent_reduction(
+            self.assertEqual("reduction(" not in code, folds, msg=str(kwargs))
+
     def test_splitwithsizes_cat(self):
         # Good case
         def fn(a):
