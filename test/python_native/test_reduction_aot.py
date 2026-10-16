@@ -55,13 +55,50 @@ for n in (1536, 131072):
 print("RESULTS=" + json.dumps(results))
 """
 
+_INDEX_AOT_PROBE = r"""
+import json
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+x = torch.randn(8, 1536, device="cuda")
+expected_argmax = x.cpu().argmax(dim=-1)
+expected_max = x.cpu().max(dim=-1)
+results = []
+for fn, expected in (
+    (lambda: torch.argmax(x, dim=-1), expected_argmax),
+    (lambda: torch.max(x, dim=-1), expected_max),
+):
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        out = fn()
+        torch.cuda.synchronize()
+    launches = sum(
+        "torch_nativeopsreductions" in event.name
+        for event in prof.events()
+        if event.device_type.name == "CUDA"
+    )
+    values = tuple(out) if isinstance(out, tuple) else (out,)
+    refs = tuple(expected) if isinstance(expected, tuple) else (expected,)
+    results.append((launches, all(torch.equal(a.cpu(), b) for a, b in zip(values, refs))))
+print("RESULTS=" + json.dumps(results))
+"""
+
 
 class TestReductionAOT(TestCase):
     def test_core_family_grid(self):
         declarations = load_declarations(str(_DECL))
         self.assertEqual(
             [declaration.ATEN_OP for declaration in declarations],
-            ["sum.dim_IntList", "mean.dim", "amax", "amin", "prod.dim_int"],
+            [
+                "sum.dim_IntList",
+                "mean.dim",
+                "amax",
+                "amin",
+                "prod.dim_int",
+                "argmax",
+                "argmin",
+                "max.dim",
+                "min.dim",
+            ],
         )
         for declaration in declarations:
             grid = expand_specs(declaration.kernel_precompile_grid())
@@ -70,9 +107,10 @@ class TestReductionAOT(TestCase):
                 "mean.dim",
                 "prod.dim_int",
             }
-            expected = 135 if ordered else 18
+            index = declaration.ATEN_OP in {"argmax", "argmin", "max.dim", "min.dim"}
+            expected = 135 if ordered else 15 if index else 18
             self.assertEqual(len(grid), expected)
-            paths = {"row", "xcta"}
+            paths = {"row"} if index else {"row", "xcta"}
             if ordered:
                 paths.update({"itree_multirow", "itree_looped", "itree_split"})
             self.assertEqual({point["path"] for point in grid}, paths)
@@ -118,6 +156,23 @@ class TestReductionAOTCUDA(TestCase):
             json.loads(line.removeprefix("RESULTS=")), [[1, True], [2, True]]
         )
 
+    @skipIfNoNativeAot("argmax")
+    def test_embedded_index_callables_own_reduction_launches(self, device):
+        proc = subprocess.run(
+            [sys.executable, "-c", _INDEX_AOT_PROBE],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, TORCH_DISABLE_NATIVE_JIT="1"),
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        line = next(
+            line for line in proc.stdout.splitlines() if line.startswith("RESULTS=")
+        )
+        self.assertEqual(
+            json.loads(line.removeprefix("RESULTS=")), [[1, True], [1, True]]
+        )
+
     @skipIfNoCuteDSL
     def test_dynamic_row_builder_converts_output(self, device):
         import cutlass.cute as cute
@@ -145,7 +200,10 @@ class TestReductionAOTCUDA(TestCase):
                     "dynamic_strides": [0],
                     "read_only": True,
                 },
-                {"name": "mOut", "dynamic_sizes": [0]},
+                {
+                    "name": "mOuts",
+                    "items": [{"name": "mOut0", "dynamic_sizes": [0]}],
+                },
             ],
         )
         self.assertEqual(
@@ -158,8 +216,46 @@ class TestReductionAOTCUDA(TestCase):
         )
         x = torch.randn(8, 1536, device=device, dtype=torch.bfloat16)
         out = torch.empty(8, device=device, dtype=torch.float32)
-        compiled(x, out, 192, 6, 1536, torch.cuda.current_stream().cuda_stream)
+        compiled(x, [out], 192, 6, 1536, torch.cuda.current_stream().cuda_stream)
         self.assertEqual(out, x.sum(dim=1, dtype=torch.float32))
+
+    @skipIfNoCuteDSL
+    @parametrize(
+        "trait_name,out_dtypes",
+        (("argmax", ("int64",)), ("maxdim", ("float32", "int64"))),
+    )
+    def test_index_row_builder_projects_trait_outputs(
+        self, device, trait_name, out_dtypes
+    ):
+        import cutlass.cute as cute
+
+        from torch._native.ops.reductions import aot_kernel
+
+        built = aot_kernel.build(
+            {
+                "path": "row",
+                "trait": trait_name,
+                "dtype": "float32",
+                "out_dtypes": out_dtypes,
+                "row_class": "t32_b128",
+                "order": "linear",
+            }
+        )
+        compiled = cute.compile(built["fn"], *built["fake_args"])
+        x = torch.randn(8, 1536, device=device)
+        outs = [
+            torch.empty(
+                8,
+                device=device,
+                dtype=torch.int64 if dtype == "int64" else torch.float32,
+            )
+            for dtype in out_dtypes
+        ]
+        compiled(x, outs, 384, 12, 1536, torch.cuda.current_stream().cuda_stream)
+        expected = torch.argmax(x, dim=-1)
+        if trait_name == "maxdim":
+            expected = torch.max(x, dim=-1)
+        self.assertEqual(tuple(outs) if len(outs) > 1 else outs[0], expected)
 
     @skipIfNoCuteDSL
     @parametrize("n", (32, 1536, 32768))

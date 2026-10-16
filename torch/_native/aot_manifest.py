@@ -34,6 +34,7 @@ _SPEC_DTYPES: dict[str, torch.dtype] = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
     "float64": torch.float64,
+    "int64": torch.int64,
 }
 
 

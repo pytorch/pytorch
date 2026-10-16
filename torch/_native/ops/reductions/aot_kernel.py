@@ -26,7 +26,10 @@ _TRAITS = {
     "amax": lambda: traits.AMaxOps(acc=Float32),
     "amin": lambda: traits.AMinOps(acc=Float32),
     "prod": lambda: traits.ProdOps(acc=Float32),
+    "argmax": lambda: traits.ArgMaxOps(acc=Float32, idx=Int32),
+    "argmin": lambda: traits.ArgMinOps(acc=Float32, idx=Int32),
     "maxdim": lambda: traits.MaxDimOps(acc=Float32, idx=Int32),
+    "mindim": lambda: traits.MinDimOps(acc=Float32, idx=Int32),
     "varmean": lambda: traits.VarMeanOps(acc=Float32),
 }
 
@@ -338,7 +341,7 @@ class _RowAdapter:
     def __call__(
         self,
         mX: cute.Tensor,
-        mOut: cute.Tensor,
+        mOuts: list,
         nchunks: Int32,
         nwaves: Int32,
         n: Int32,
@@ -346,7 +349,7 @@ class _RowAdapter:
     ):
         self.op(
             [mX],
-            [mOut],
+            mOuts,
             nchunks,
             nwaves,
             n,
@@ -428,8 +431,8 @@ class _XctaAdapter:
 
 def _build_row(spec):
     dtype = _DTYPES[spec["dtype"]]
-    out_dtype = _DTYPES[spec["out_dtype"]]
     trait = _TRAITS[spec["trait"]]()
+    out_dtypes = _itree_out_dtypes(spec, trait)
     threads_per_row, threads_per_block = data.ROW_CLASSES[spec["row_class"]]
     vec = 128 // dtype.width
     op = tile.TileReduce(
@@ -439,7 +442,7 @@ def _build_row(spec):
         vec,
         threads_per_row=threads_per_row,
         threads_per_block=threads_per_block,
-        nouts=1,
+        nouts=trait.nouts,
         final=True,
         unroll=4,
         use_tma=False,
@@ -453,14 +456,20 @@ def _build_row(spec):
         stride_order=(1, 0),
         assumed_align=16,
     )
-    out_fake = cute.runtime.make_fake_tensor(
-        out_dtype,
-        (m,),
-        stride=(1,),
-        assumed_align=16,
-    )
+    out_fakes = [
+        cute.runtime.make_fake_tensor(
+            out_dtype,
+            (m,),
+            stride=(1,),
+            assumed_align=16,
+        )
+        for out_dtype in out_dtypes
+    ]
     in_tag = _DTYPE_TAG[spec["dtype"]]
-    out_tag = _DTYPE_TAG[spec["out_dtype"]]
+    out_names = (
+        tuple(spec["out_dtypes"]) if "out_dtypes" in spec else (spec["out_dtype"],)
+    )
+    out_tag = "_".join(_DTYPE_TAG[name] for name in out_names)
     return {
         "prefix": (
             f"reduction_row_{spec['trait']}_{in_tag}_{out_tag}_{spec['row_class']}"
@@ -468,7 +477,7 @@ def _build_row(spec):
         "fn": _RowAdapter(op),
         "fake_args": [
             x_fake,
-            out_fake,
+            out_fakes,
             Int32(vec),
             Int32(1),
             Int32(vec),
@@ -481,7 +490,7 @@ def _build_row(spec):
                 "dynamic_strides": [0],
                 "read_only": True,
             },
-            {"name": "mOut", "dynamic_sizes": [0]},
+            _itree_tensor_list("mOuts", "mOut", trait.nouts),
         ],
         "scalar_args": [
             {"name": "nchunks", "ctype": "int32_t"},
