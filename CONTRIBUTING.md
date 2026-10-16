@@ -239,9 +239,6 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   the current local source-tree when importing `torch` package. (This is done by installing an import hook in the `site-packages` folder that redirects `torch`'s Python modules to the source tree; compiled output is not redirected.)
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
-  Compiled artifacts are loaded from `build/editable-install/`, so the editable install depends on the `build` folder:
-  `make clean` or deleting `build` breaks it, and because that tree is cleared at the start of each install, a failed
-  rebuild leaves no working `torch` until the next successful install.
 
 
   One way to avoid running `python -m pip install -e . -v --no-build-isolation` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
