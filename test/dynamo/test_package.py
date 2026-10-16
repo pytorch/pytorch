@@ -251,6 +251,16 @@ torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
 # namedtuple builds __new__ with exec into a namespace no module owns.
 PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
 
+PKG_LOG_SCOPE = {"log": []}
+exec("def scale(self, x):\n    log.append(1)\n    return x * 3\n", PKG_LOG_SCOPE)
+
+
+class PkgLogger:
+    scale = PKG_LOG_SCOPE["scale"]
+
+
+PKG_LOGGER = PkgLogger()
+
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -860,6 +870,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
             record = PkgRecord(x.sin(), 2)
             return record.value * record.weight
 
+        return self._save_unnamed_scope_package(ctx, fn)
+
+    def _save_unnamed_scope_package(self, ctx, fn):
         package = CompilePackage(fn)
         torch._dynamo.optimize(
             backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
@@ -937,6 +950,33 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package.uninstall()
         for name in names:
             fn.__globals__.pop(name, None)
+
+    def test_install_leaves_unbound_the_unnamed_scope_globals_the_bytecode_reads(self):
+        # The artifact holds the guard pickler's copy of the namespace, so a
+        # store the bytecode replays through the key would land in that copy and
+        # not in the namespace PkgLogger.scale really runs in.
+        def fn(x):
+            return PKG_LOGGER.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        torch._dynamo.reset()
+        scope = fn.__globals__
+        for name in names:
+            scope.pop(name, None)
+
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.assertFalse(names & scope.keys())
+        log = PKG_LOG_SCOPE["log"]
+        before = len(log)
+        x = torch.randn(4)
+        self.assertEqual(compiled_fn(x), x.sin() * 3)
+        self.assertEqual(len(log), before + 1)
+        package.uninstall()
+        for name in names:
+            scope.pop(name, None)
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
