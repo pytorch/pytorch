@@ -1,4 +1,5 @@
 import functools
+import inspect
 import os
 from functools import cached_property
 from typing import Any
@@ -12,15 +13,67 @@ from .triton_helpers import get_constexprs
 @functools.lru_cache(None)
 def _tma_arg_helpers():
     """Cached (make_arg, TensorDescriptor) for host-side TMA arg expansion.
-    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]; the nvidia
-    backend's make_tensordesc_arg ignores its third arg, so we pass None."""
+    make_arg(arg, metadata) -> [CUtensorMap, *shape, *strides]."""
     from triton.backends.nvidia.driver import make_tensordesc_arg
     from triton.tools.tensor_descriptor import TensorDescriptor
 
-    def make_arg(arg, metadata):
-        return make_tensordesc_arg(arg, metadata, None)
+    # triton 3.5.0 and earlier take (arg, metadata); 3.8.0 added a third
+    # argument the nvidia backend ignores. Resolve the arity once, not per
+    # launch.
+    if len(inspect.signature(make_tensordesc_arg).parameters) >= 3:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata, None)
+
+    else:
+
+        def make_arg(arg, metadata):
+            return make_tensordesc_arg(arg, metadata)
 
     return make_arg, TensorDescriptor
+
+
+@functools.lru_cache(None)
+def _triton_allocator_var():
+    from triton.runtime._allocation import _allocator
+
+    return _allocator
+
+
+def make_host_tma_expander():
+    """Bind the TMA arg helpers once, so the launcher does not resolve them per call.
+
+    Returns expand_host_tma_descriptor, which builds the expanded kernel params
+    ([CUtensorMap, *shape, *strides]) for one descriptor and caches them per
+    descriptor position.
+
+    On a cache hit (same base address) it returns the previously-encoded
+    CUtensorMap, skipping both the TensorDescriptor construction/validation and
+    cuTensorMapEncodeTiled. The descriptor only encodes addressing (not buffer
+    contents), so reuse is safe whenever the address/shape/strides match.
+
+    `tensor` must already be TMA-aligned; the launcher calls _host_tma_aligned
+    and keeps the (possibly cloned) result alive across the launch, since the
+    CUtensorMap stores only a raw device address. `cacheable` is False when that
+    call cloned, because the clone is transient.
+    """
+    make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
+
+    def expand_host_tma_descriptor(
+        cache, pos, tensor, cacheable, shape, strides, block, meta
+    ):
+        data_ptr = tensor.data_ptr()
+        if cacheable:
+            cached = cache.get(pos)
+            if cached is not None and cached[0] == data_ptr:
+                return cached[1]
+        desc = TensorDescriptor(tensor, shape, strides, block)
+        expanded = tuple(make_tensordesc_arg(desc, meta))
+        if cacheable:
+            cache[pos] = (data_ptr, expanded)
+        return expanded
+
+    return expand_host_tma_descriptor
 
 
 class StaticallyLaunchedTritonKernel:
@@ -54,11 +107,14 @@ class StaticallyLaunchedTritonKernel:
     def C_impl(self):
         raise NotImplementedError
 
+    supports_global_scratch = False
+
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
+        self.cubin_filename = os.path.basename(self.cubin_path)
 
         # Used by torch.compile to filter constants in older triton versions
         # pyrefly: ignore [missing-attribute]
@@ -81,7 +137,7 @@ class StaticallyLaunchedTritonKernel:
             launch_enter = triton_knobs.runtime.launch_enter_hook
             launch_exit = triton_knobs.runtime.launch_exit_hook
 
-        def hook_is_empty(hook: Any) -> bool:
+        def hook_is_empty(hook: object) -> bool:
             if hook is None:
                 return True
             if (
@@ -104,27 +160,28 @@ class StaticallyLaunchedTritonKernel:
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
 
-        def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
-            # pyrefly: ignore [missing-attribute]
-            if hasattr(kernel.metadata, param_name):
-                # pyrefly: ignore [missing-attribute]
-                if getattr(kernel.metadata, param_name) > 0:
-                    raise NotImplementedError(
-                        f"{scratch_name} scratch not yet supported"
-                    )
-                return True
-            return False
-
-        # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
-        # Inductor never uses this field or enables it, but we still have to pass
-        # an extra None into the set of params if its enabled
-        self.has_global_scratch = needs_scratch_arg("Global", "global_scratch_size")
-        # same situation for profile scratch - triton-lang/triton#7258
-        self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
-
+        # Newer triton versions pass extra scratch parameters to the compiled kernel.
         # pyrefly: ignore [missing-attribute]
-        self.tensordesc_meta = getattr(kernel.metadata, "tensordesc_meta", None)
+        metadata = kernel.metadata
+        self.global_scratch_size = getattr(metadata, "global_scratch_size", None)
+        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1) or 1
+        if (
+            self.global_scratch_size
+            and self.global_scratch_size > 0
+            and not self.supports_global_scratch
+        ):
+            raise NotImplementedError("Global scratch not yet supported")
+        self.has_global_scratch = self.global_scratch_size is not None
+        # same situation for profile scratch - triton-lang/triton#7258
+        self.profile_scratch_size = getattr(metadata, "profile_scratch_size", None)
+        if self.profile_scratch_size and self.profile_scratch_size > 0:
+            raise NotImplementedError("Profile scratch not yet supported")
+        self.has_profile_scratch = self.profile_scratch_size is not None
+
+        self.tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
         self._has_tensordesc = False
+        # tensordesc<> arg names in signature order; filled by arg_ty_from_signature
+        self.tensordesc_arg_names: list[str] = []
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
@@ -134,9 +191,10 @@ class StaticallyLaunchedTritonKernel:
         # function is bound to a single device, so when device_agnostic is set we keep
         # them per device and resolve the current device at launch time. The cubin
         # (device-agnostic) is retained so it can be loaded onto additional devices.
-        # These per-device dicts assume one thread per device for a given launcher (the
-        # single-process multi-device path is sequential in practice); concurrent
-        # first-launch on two new devices would need external locking.
+        # CooR's intended model uses one current device per rank/process, which
+        # make_launcher loads eagerly. These dicts also support sequential reuse across
+        # devices, but lazy initialization for a previously unseen device is not
+        # thread-safe; callers must serialize its first use.
         self.device_agnostic: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
@@ -156,14 +214,16 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if self.cubin_path is None:
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
-                raise AssertionError("cubin_raw must be set when cubin_path is None")
+                raise AssertionError(
+                    "cubin_raw must be set to restore a missing binary"
+                )
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
-        return self.cubin_path
+        self.cubin_path = filepath  # pyre-ignore
+        return filepath
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
@@ -241,8 +301,8 @@ class StaticallyLaunchedTritonKernel:
             "u16": "H",
             "u32": "I",
             "u64": "K",
-            "fp16": "f",
-            "bf16": "f",
+            "fp16": "e",
+            "bf16": "y",
             "fp32": "f",
             "f32": "f",
             "fp64": "d",
@@ -324,6 +384,7 @@ class StaticallyLaunchedTritonKernel:
         # So we can ignore them here too
         params = []
         self._tensordesc_idx = 0
+        self.tensordesc_arg_names = []
 
         for i in sorted(signature.keys()):
             ty = signature[i]
@@ -334,6 +395,7 @@ class StaticallyLaunchedTritonKernel:
                 pass
             elif isinstance(ty, str) and ty.startswith("tensordesc<"):
                 self._has_tensordesc = True
+                self.tensordesc_arg_names.append(self.arg_names[i])
                 params.append(self._expand_tensordesc_type(ty))
             else:
                 # pyrefly: ignore [bad-argument-type]
@@ -353,8 +415,13 @@ class StaticallyLaunchedTritonKernel:
         return state
 
     def _expand_tma_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
-        """Expand host-side TMA TensorDescriptor args into the flat kernel params
-        (CUtensorMap + shape + strides) so they match the expanded type string."""
+        """Fallback expansion of host-side TMA TensorDescriptor args into the
+        flat kernel params (CUtensorMap + shape + strides). The static launcher
+        normally pre-expands (with caching) in the generated launcher via
+        expand_host_tma_descriptor, so by the time run() is reached the args are
+        already expanded and this is a no-op; it only fires if a TensorDescriptor
+        reaches run() directly.
+        """
         make_tensordesc_arg, TensorDescriptor = _tma_arg_helpers()
 
         meta = self.tensordesc_meta
@@ -406,39 +473,27 @@ class StaticallyLaunchedTritonKernel:
         arg_tys = self.arg_tys
 
         if is_rocm():
-            # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
-            # global_scratch and profile_scratch parameters in the kernel signature,
-            # even when the kernel doesn't use them (i.e., when has_*_scratch is False).
-            #
-            # This differs fundamentally from CUDA, where these parameters are only
-            # present in the signature if the corresponding has_*_scratch flag is True.
-            #
-            # The flags indicate whether memory will be allocated/used:
-            # - has_global_scratch: Whether global scratch workspace is needed
-            # - has_profile_scratch: Whether profiling instrumentation is enabled
-            #
-            # However, regardless of flag values, we MUST always pass both parameters
-            # to match the HIP kernel ABI. Passing None is safe:
-            #
-            # - If scratch is not needed (has_*_scratch=False or scratch_size=0):
-            #   The None becomes nullptr, which the kernel never dereferences
-            #
-            # - If scratch is needed (has_*_scratch=True and scratch_size>0):
-            #   The None becomes nullptr initially, but the HIP runtime intercepts
-            #   the kernel launch, allocates the required scratch memory based on
-            #   kernel metadata, and replaces the nullptr with a valid pointer before
-            #   the kernel actually executes
-            #
-            # Not passing both parameters causes segmentation faults because the kernel
-            # expects them at specific positions in the argument array.
+            # HIP always includes both scratch slots in the kernel ABI.
             arg_tys = arg_tys + "OO"
             args = (*args, None, None)
 
         else:
-            for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
-                if has_scratch:
-                    arg_tys = arg_tys + "O"
-                    args = (*args, None)
+            if self.has_global_scratch:
+                global_scratch = None
+                if self.global_scratch_size:
+                    allocator = _triton_allocator_var().get()
+                    global_scratch = allocator(
+                        # Keep grid scaling in sync with _generate_lazy_scratch and
+                        # test_lazy_tma_global_scratch_scales_with_launch_grid.
+                        grid_x * grid_y * grid_z * self.global_scratch_size,
+                        self.global_scratch_align,
+                        stream,
+                    )
+                arg_tys = arg_tys + "O"
+                args = (*args, global_scratch)
+            if self.has_profile_scratch:
+                arg_tys = arg_tys + "O"
+                args = (*args, None)
         # pyrefly: ignore [bad-argument-type]
         if len(args) != len(arg_tys):
             raise AssertionError(f"Expected {len(arg_tys)} args, got {len(args)}")
@@ -459,6 +514,8 @@ class StaticallyLaunchedTritonKernel:
 
 
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
+    supports_global_scratch = not is_rocm()
+
     @cached_property
     def C_impl(self):
         from torch._C import _StaticCudaLauncher
@@ -539,14 +596,68 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.modules = {}
 
 
+_STATIC_LAUNCHER_REGISTRY: dict[str, type[StaticallyLaunchedTritonKernel]] = {}
+
+
+def register_statically_launched_kernel(
+    device_type: str,
+    kernel_cls: type[StaticallyLaunchedTritonKernel],
+    *,
+    override: bool = False,
+) -> None:
+    """Register a device-type specific static Triton kernel launcher.
+
+    Backends (e.g. privateuse1 devices such as NPU) that implement a
+    StaticallyLaunchedTritonKernel subclass can register it here instead of
+    patching this dispatch.
+
+    Args:
+        device_type: torch.device.type string (e.g. "cuda", "hip", "xpu").
+        kernel_cls: a StaticallyLaunchedTritonKernel subclass that can launch
+            kernels compiled for device_type.
+        override: allow overriding an existing registration.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    # Guard against non-class inputs before issubclass (its native TypeError
+    # message "must be a class" doesn't say whether the value is a valid class).
+    if not isinstance(kernel_cls, type) or not issubclass(
+        kernel_cls, StaticallyLaunchedTritonKernel
+    ):
+        raise TypeError(
+            "kernel_cls must be a StaticallyLaunchedTritonKernel subclass, "
+            "got " + str(kernel_cls)
+        )
+    if not override and device_type in _STATIC_LAUNCHER_REGISTRY:
+        raise ValueError(
+            "Static launcher for device_type '" + device_type + "' already registered"
+        )
+    _STATIC_LAUNCHER_REGISTRY[device_type] = kernel_cls
+
+
+# Register the built-in static launchers explicitly, mirroring the
+# register_benchmarker pattern in benchmarking.py.
+register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("hip", StaticallyLaunchedCudaKernel)
+register_statically_launched_kernel("xpu", StaticallyLaunchedXpuKernel)
+
+
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
-    if device_type in ("cuda", "hip"):
-        return StaticallyLaunchedCudaKernel(kernel)
-    elif device_type == "xpu":
-        return StaticallyLaunchedXpuKernel(kernel)
-    else:
+    kernel_cls = _STATIC_LAUNCHER_REGISTRY.get(device_type)
+    if kernel_cls is None:
+        supported = ", ".join(sorted(_STATIC_LAUNCHER_REGISTRY))
         raise NotImplementedError(
-            f"Device type {device_type} is not supported for static launcher"
+            "Device type " + device_type + " is not registered for static launcher. "
+            "Registered device types: " + supported + ". Backends can register one via "
+            "register_statically_launched_kernel()."
         )
+    return kernel_cls(kernel)
+
+
+def is_registered_static_launch_device(device_type: str) -> bool:
+    """Return whether a static Triton kernel launcher is registered for device_type."""
+    return device_type in _STATIC_LAUNCHER_REGISTRY

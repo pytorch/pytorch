@@ -56,6 +56,7 @@ class Reducer:
         use_python_reducer: bool = ...,
         bucket_bytes_cap_list: list[int] = ...,
         batched_grad_copy: bool = ...,
+        lazy_bucket_allocation: bool = ...,
     ) -> None: ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: list[Tensor]) -> None: ...
@@ -79,6 +80,9 @@ class Reducer:
     def _set_sparse_metadata(self, global_unique_ids: dict[str, Tensor]) -> None: ...
     def _reset_state(self) -> None: ...
     def _update_process_group(self, new_process_group: ProcessGroup) -> None: ...
+    def _set_manual_finalization_required(self, required: bool) -> None: ...
+    def _should_finalize_after_backward(self) -> bool: ...
+    def _finalize_backward_manual(self) -> None: ...
 
 class DDPLoggingData:
     strs_map: dict[str, str]
@@ -120,8 +124,13 @@ def set_debug_level_from_env() -> None: ...
 class ReduceOp:
     # pyrefly: ignore  # unknown-name
     def __init__(self, op: RedOpType) -> None: ...
+    # pyrefly: ignore  # unknown-name
+    op: RedOpType
     @property
     def factor(self) -> float | Tensor: ...
+    def boxed(self) -> ScriptObject: ...
+    @staticmethod
+    def unbox(obj: ScriptObject) -> ReduceOp: ...
 
     # pyrefly: ignore  # unknown-name
     SUM: RedOpType = ...
@@ -144,6 +153,9 @@ class ReduceOp:
     # pyrefly: ignore  # unknown-name
     UNUSED: RedOpType = ...
 
+    # pyrefly: ignore  # unknown-name
+    op: RedOpType
+
     # mypy error being ignored:
     # Detected enum "torch._C._distributed_c10d.ReduceOp.RedOpType" in a type
     # stub with zero members. There is a chance this is due to a recent change
@@ -158,12 +170,14 @@ class BroadcastOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllreduceOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
+    config: object | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -173,15 +187,18 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class GatherOptions:
     rootRank: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ScatterOptions:
     rootRank: int
@@ -192,6 +209,7 @@ class ReduceScatterOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class BarrierOptions:
     device_ids: list[int]
@@ -202,6 +220,7 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ReconfigureOptions:
     uuid: int
@@ -477,6 +496,9 @@ class ProcessGroup:
         XCCL = ...
         CUSTOM = ...
 
+    @overload
+    def __init__(self, rank: int, size: int) -> None: ...
+    @overload
     def __init__(
         self,
         store: Store,
@@ -813,8 +835,28 @@ class ProcessGroup:
     def group_desc(self) -> str: ...
 
 class FakeProcessGroup(Backend):
+    class Options(Backend.Options):
+        fake_option: int
+        error_on_collective: bool
+        simulate_uniform_ranks: bool
+
+        def __init__(self) -> None: ...
+
     @staticmethod
-    def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
+    def _create_internal(
+        rank: int,
+        world_size: int,
+        options: FakeProcessGroup.Options | None = ...,
+    ) -> FakeProcessGroup: ...
+    # getOptions() returns null when the group was built without options, and
+    # callers (test_device_mesh) branch on that, so this must stay optional.
+    # Backend.options is not, which makes the narrowing a real LSP violation
+    # rather than a stub inaccuracy: this property is bound to a different C++
+    # method than the base one, and widening it to match would misdescribe
+    # behavior three assertIsNone checks already pin.
+    @property
+    # pyrefly: ignore  # bad-override
+    def options(self) -> FakeProcessGroup.Options | None: ...
 
 class FakeWork(Work):
     seq_id: int
@@ -880,6 +922,8 @@ class ProcessGroupNCCL(Backend):
         cga_cluster_size: int
         min_ctas: int
         max_ctas: int
+        host_cft_mode: int
+        nvls_host_mode: int
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
@@ -887,6 +931,7 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
+        lazy_init: bool
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -960,6 +1005,7 @@ def _register_process_group(
     process_group: ProcessGroup,
 ) -> None: ...
 def _resolve_process_group(group_name: GroupName) -> ProcessGroup: ...
+def _is_process_group_registered(group_name: GroupName) -> bool: ...
 def _create_work_from_future(future: Future) -> Work: ...
 def _register_work(tensor: torch.Tensor, work: Work) -> ProcessGroup: ...
 def _get_work_registry_size() -> int: ...
@@ -969,9 +1015,10 @@ def _set_allow_inflight_collective_as_graph_input(
 def _allow_inflight_collective_as_graph_input() -> bool: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: GroupName) -> None: ...
+def _release_nvshmem_team_pool(group_name: GroupName) -> None: ...
 
 # Initializes the device state in CUmodule so that it's able to perform NVSHMEM
-# operations.  CUmodule is a pointer to a CUDA module, carried by a int64 in
+# operations.  CUmodule is a pointer to a CUDA module, carried by an int64 in
 # Python. At C++ interface, it is converted to a uintptr_t.
 def _nvshmemx_cumodule_init(module: int) -> None: ...
 
@@ -1054,6 +1101,8 @@ class _SymmetricMemory:
     def rank(self) -> int: ...
     @property
     def world_size(self) -> int: ...
+    @property
+    def group_name(self) -> GroupName: ...
     @staticmethod
     def rendezvous(
         tensor: torch.Tensor, group_name: str | None = None
@@ -1092,6 +1141,9 @@ class _SymmetricMemory:
         sizes: torch.types._size,
         dtype: torch.dtype,
     ) -> torch.Tensor: ...
+    # Host-side NCCL CFT logical endpoint, as (le_id, le_offset).
+    def get_peer_cft_handle(self, peer: int) -> tuple[int, int]: ...
+    def get_multimem_cft_handle(self) -> tuple[int, int]: ...
     @staticmethod
     def memset32(
         tensor: torch.Tensor, offset: int, val: int, count: int = 1
@@ -1181,6 +1233,10 @@ class NanCheckHook:
     @staticmethod
     def attach(pg: ProcessGroup) -> NanCheckHook: ...
     def remove(self) -> None: ...
+
+class HealthCheckHook:
+    @staticmethod
+    def attach(pg: ProcessGroup) -> None: ...
 
 def _set_process_group(pg: ProcessGroup) -> None: ...
 def _current_process_group() -> ProcessGroup: ...

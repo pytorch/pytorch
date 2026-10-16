@@ -314,9 +314,17 @@ class MPSProfiler {
       MPSStream* stream);
   uint64_t beginProfileKernel(
       const void* handle,
+      const std::string& strKey,
+      bool isGraph);
+  uint64_t beginProfileKernel(
+      const void* handle,
       const std::string& kernelName,
       const TensorList& tensors,
       MPSStream* stream);
+  uint64_t beginProfileKernel(
+      const void* handle,
+      const std::string& kernelName,
+      const TensorList& tensors);
   uint64_t beginProfileCopy(
       const void* srcBuffer,
       const void* dstBuffer,
@@ -326,16 +334,27 @@ class MPSProfiler {
       MPSStream* stream,
       bool isNonBlocking,
       bool usesBlitter = true);
+  uint64_t beginProfileCopy(
+      const void* srcBuffer,
+      const void* dstBuffer,
+      const OptionalTensorRef srcTensor,
+      const OptionalTensorRef dstTensor,
+      size_t length,
+      bool isNonBlocking,
+      bool usesBlitter = true);
   uint64_t beginProfileCPUFallback(
       const std::string& opName,
       const TensorList& tensors);
   void beginProfileGPUInterval(const void* handle, MPSStream* stream);
+  void beginProfileGPUInterval(const void* handle);
 
   void endProfileCopy(uint64_t profileId, SyncType syncType, MPSStream* stream);
+  void endProfileCopy(uint64_t profileId, SyncType syncType);
   void endProfileKernel(
       const void* handle,
       MPSStream* stream,
       SyncType syncType = SyncType::NONE);
+  void endProfileKernel(const void* handle, SyncType syncType = SyncType::NONE);
   void endProfileCPUFallback(const std::string& opName);
 
   // these are used to hook into Python bindings for torch.mps.profiler module.

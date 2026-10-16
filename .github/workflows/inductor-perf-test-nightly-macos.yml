@@ -33,7 +33,12 @@ concurrency:
 permissions: read-all
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   macos-perf-py3-arm64-build:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: macos-perf-py3-arm64
     uses: ./.github/workflows/_mac-build.yml

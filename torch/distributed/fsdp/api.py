@@ -249,7 +249,7 @@ class StateDictType(Enum):
 
     .. note::
         FSDP currently supports three types of ``state_dict``:
-            1. ``state_dict/load_state_dict`: this pair of APIs return and load
+            1. ``state_dict/load_state_dict``: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the
                same as using DDP.
             2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
