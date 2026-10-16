@@ -230,7 +230,7 @@ def _make_impl(reduce_into):
         _run(self, d, out_kd, reduce_into)
         return out_kd if keepdim else out_kd.squeeze(d)
 
-    return cap.cuda_device_guard(cap.resolve_neg_view(_impl))
+    return cap.cuda_device_guard(_impl)
 
 
 def _make_out_impl(reduce_into):
@@ -244,7 +244,7 @@ def _make_out_impl(reduce_into):
         _run(self, d, out_kd, reduce_into)
         return out
 
-    return cap.cuda_device_guard(cap.resolve_neg_view(_out_impl))
+    return cap.cuda_device_guard(_out_impl)
 
 
 def register_to_dispatch() -> None:
