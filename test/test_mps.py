@@ -11417,10 +11417,12 @@ class TestNNMPS(NNTestCase):
 
             # Input and weights on different devices
             self.assertRaisesRegex(RuntimeError,
-                                   'must be on the same device',
+                                   'Expected all tensors to be on the same device, but got weight is on mps:0, '
+                                   'different from other tensors on cpu',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 3, 3, device='mps')))
             self.assertRaisesRegex(RuntimeError,
-                                   'Input type \\(MPSFloatType\\) and weight type \\(torch\\.FloatTensor\\) should be the same',
+                                   'Expected all tensors to be on the same device, but got weight is on cpu, '
+                                   'different from other tensors on mps:0',
                                    lambda: torch.conv2d(torch.rand(1, 3, 32, 32, device='mps'), torch.rand(1, 3, 3, 3)))
 
 
