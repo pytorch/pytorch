@@ -173,6 +173,86 @@ class TestStaticTritonLauncherUnit(TestCase):
         gc.collect()
         self.assertIsNone(owner_ref())
 
+    def _device_agnostic_fast_launcher(self, functions, loaded):
+        built = []
+
+        class FakeFastLauncher:
+            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+                built.append(func)
+
+        kernel = object.__new__(StaticallyLaunchedCudaKernel)
+        kernel.function = None
+        kernel.device_agnostic = True
+        kernel.functions = dict(functions)
+        kernel.modules = dict.fromkeys(functions, 0xCAFE)
+        kernel.num_warps = 4
+        kernel.shared = 0
+        kernel.arg_tys = "OOi"
+        kernel.has_global_scratch = False
+        kernel.has_profile_scratch = False
+
+        def load_kernel(device):
+            loaded.append(device)
+            kernel.functions.setdefault(device, 0xF00D)
+
+        kernel.load_kernel = load_kernel
+
+        # Same shape as a generated launcher: kernel arguments, then stream.
+        calls = []
+        ns = {"runner": kernel.run, "calls": calls}
+        exec(
+            "def launcher(in_ptr0, out_ptr0, xnumel, stream):\n"
+            "    calls.append((runner, in_ptr0, out_ptr0, xnumel, stream))\n",
+            ns,
+        )
+        launcher = ns["launcher"]
+        launcher._is_static = True
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        with (
+            mock.patch("torch._C._FastCudaLauncher", FakeFastLauncher, create=True),
+            mock.patch("torch._C._cuda_getDevice", return_value=2),
+        ):
+            fast_launcher = autotuner._build_fast_launcher(launcher)
+        return kernel, fast_launcher, built, calls, FakeFastLauncher
+
+    def test_fast_launcher_binds_device_agnostic_kernel_to_current_device(self):
+        """
+        compile-on-one-rank kernels (every kernel a shared precompile artifact
+        serves) keep per-device handles and used to be refused the fast launcher,
+        paying the regular static launcher's per-launch argument parsing and
+        pointer queries. Bind the current device's handle instead, and fall
+        back to the regular launcher on any other device.
+        """
+        kernel, fast_launcher, built, calls, fake = self._device_agnostic_fast_launcher(
+            {2: 0xBEEF}, loaded=[]
+        )
+        self.assertIsNotNone(fast_launcher)
+        self.assertEqual(built, [0xBEEF])
+        self.assertIs(fast_launcher._static_kernel_owner, kernel)
+        self.assertTrue(fast_launcher._is_static)
+
+        with mock.patch("torch._C._cuda_getDevice", return_value=2):
+            fast_launcher(10, 20, 128, stream=7)
+        runner, *args = calls[-1]
+        self.assertIsInstance(runner, fake)
+        self.assertEqual(args, [10, 20, 128, 7])
+
+        with mock.patch("torch._C._cuda_getDevice", return_value=3):
+            fast_launcher(11, 21, 256, stream=8)
+        self.assertEqual(calls[-1], (kernel.run, 11, 21, 256, 8))
+
+    def test_fast_launcher_loads_the_current_device_handle(self):
+        # The current device's handle is loaded when the fast launcher is built,
+        # not only bound if some earlier launch happened to load it.
+        loaded = []
+        _, fast_launcher, built, _, _ = self._device_agnostic_fast_launcher({}, loaded)
+        self.assertIsNotNone(fast_launcher)
+        self.assertEqual(loaded, [2])
+        self.assertEqual(built, [0xF00D])
+
     def test_resolve_load_device_cpu_stays_none(self):
         # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
         # concrete index makes the guard call exchange_device, which CPU does not
@@ -1124,6 +1204,47 @@ class TestFastCudaLauncher(TestCase):
         return _FastCudaLauncher(
             kernel.function, kernel.num_warps, kernel.shared, kernel.arg_tys, n_scratch
         )
+
+    def test_device_agnostic_kernel_takes_fast_launcher(self):
+        # A compile-on-one-rank kernel, launched for real through the launcher
+        # CachingAutotuner._build_fast_launcher builds for it.
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            tl.store(arg0, x + arg1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        kernel = self._make_launcher(simple_kernel[(1,)](arg0, 5))
+        device = get_interface_for_device(GPU_TYPE).current_device()
+        kernel.device_agnostic = True
+        kernel.functions = {device: kernel.function}
+        kernel.modules = {device: kernel.module}
+        kernel.function = None
+        kernel.module = None
+
+        ns = {"runner": kernel.run}
+        exec(
+            "def launcher(arg0, arg1, stream):\n"
+            "    runner(1, 1, 1, stream, arg0, arg1)\n",
+            ns,
+        )
+        launcher = ns["launcher"]
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        fast_launcher = autotuner._build_fast_launcher(launcher)
+        self.assertIsNotNone(fast_launcher)
+
+        # Any launch through the regular launcher (the fallback) is recorded.
+        fallback_calls = []
+        ns["runner"] = lambda *args: fallback_calls.append(args) or kernel.run(*args)
+
+        out = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        stream = get_interface_for_device(GPU_TYPE).get_raw_stream(device)
+        fast_launcher(out, 5, stream=stream)
+        self.assertEqual(out, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
+        self.assertEqual(fallback_calls, [])
 
     def test_basic(self):
         @triton.jit
