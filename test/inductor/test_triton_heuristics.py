@@ -14,7 +14,10 @@ import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
+from torch._inductor.runtime.triton_compat import (
+    _patch_triton_intel_launcher,
+    HAS_WARP_SPEC,
+)
 from torch._inductor.utils import clone_preserve_strides
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -100,6 +103,49 @@ def get_autotuned_amd_sqr_kernel():
         ],
         key=[],
     )(amd_sqr_kernel)
+
+
+class TestTritonHeuristicsXPU(TestCase):
+    def test_patch_triton_intel_launcher_binds_global_scratch(self):
+        import textwrap
+
+        launcher_source = textwrap.dedent("""\
+            auto cgf = [&](sycl::handler &cgh) {
+                set_scalar_arg<int32_t>(cgh, 0, params[0]);
+                if (shared_memory) {
+                    cgh.parallel_for(parallel_work_size, kernel_ptr);
+                }
+            };
+        """)
+
+        def fake_make_launcher(constants, signature):
+            return launcher_source
+
+        intel_driver = types.SimpleNamespace(make_launcher=fake_make_launcher)
+
+        # Patch inspect.getsource so that the patching logic doesn't shortcut
+        with patch("inspect.getsource", return_value=launcher_source):
+            _patch_triton_intel_launcher(intel_driver)
+
+        patched = intel_driver.make_launcher({}, {})
+        self.assertEqual(
+            patched.count(
+                "set_scalar_arg<void*>(cgh, num_params - 1, &global_scratch);"
+            ),
+            1,
+        )
+
+    def test_patch_triton_intel_launcher_raises_for_unrecognized_layout(self):
+        def fake_make_launcher(constants, signature):
+            return "auto cgf = [&](sycl::handler &cgh) {\n    foo();\n};\n"
+
+        intel_driver = types.SimpleNamespace(make_launcher=fake_make_launcher)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Intel Triton launcher source layout is not recognized",
+        ):
+            _patch_triton_intel_launcher(intel_driver)
 
 
 @instantiate_parametrized_tests
