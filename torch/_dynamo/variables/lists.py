@@ -2398,11 +2398,59 @@ class ByteArrayVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return ConstantVariable.create(result)
 
+    def bytearray_insert(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_insert_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        check_positional(tx, "insert", len(args), 2, 2)
+        index = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+        item = pynumber_index(tx, args[1])
+        if not item.is_python_constant():
+            return None
+        new_data = bytearray(self.data)
+        try:
+            new_data.insert(index, item.as_python_constant())
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer: do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    def bytearray_pop(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_pop_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        check_positional(tx, "pop", len(args), 0, 1)
+        index = -1
+        if args:
+            index = pylong_as_ssize_t(tx, pynumber_index(tx, args[0]))
+        new_data = bytearray(self.data)
+        try:
+            result = new_data.pop(index)
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+        return ConstantVariable.create(result)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
+        "insert": Method(bytearray_insert),
+        "pop": Method(bytearray_pop),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
