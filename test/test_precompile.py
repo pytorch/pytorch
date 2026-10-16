@@ -5492,6 +5492,9 @@ class TestPrecompileDynamoCapture(TestCase):
         # The bundled autotune remote cache opens one bundle per compile context
         # and closes it on the first compiled call; the capture lowers the
         # backward with the forward, before either runs.
+        from torch._inductor.runtime.autotune_cache import (
+            _AutotuneCacheBundlerImpl as Bundler,
+        )
         from torch._inductor.utils import fresh_cache
 
         single = self.mod.single
@@ -5500,6 +5503,8 @@ class TestPrecompileDynamoCapture(TestCase):
         expected.sum().backward()
         cold = mock.Mock()
         cold.get.return_value = None
+        # Without Triton the bundler has no backend hash and fails before it
+        # reaches the one-bundle check.
         with (
             fresh_cache(),
             torch._inductor.config.patch(bundled_autotune_remote_cache=True),
@@ -5507,6 +5512,7 @@ class TestPrecompileDynamoCapture(TestCase):
                 "torch._inductor.runtime.autotune_cache.create_cache",
                 return_value=cold,
             ),
+            mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
         ):
             with self._capture(single, backend="inductor") as cap:
                 y = cap(self.model, self.x2)
@@ -5527,6 +5533,9 @@ class TestPrecompileDynamoCapture(TestCase):
         # An installed artifact's load post-compiles the forward and the
         # backward in install()'s one compile context, so it hits the same
         # one-bundle limit the capture does.
+        from torch._inductor.runtime.autotune_cache import (
+            _AutotuneCacheBundlerImpl as Bundler,
+        )
         from torch._inductor.utils import fresh_cache
 
         fn = self.mod.calls_breaking_helper
@@ -5542,6 +5551,7 @@ class TestPrecompileDynamoCapture(TestCase):
                 "torch._inductor.runtime.autotune_cache.create_cache",
                 return_value=cold,
             ),
+            mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
         ):
             with self._capture(fn, backend="inductor") as cap:
                 y = cap(self.model, self.x2)
@@ -5556,6 +5566,9 @@ class TestPrecompileDynamoCapture(TestCase):
             import sys
             from unittest import mock
             import torch
+            from torch._inductor.runtime.autotune_cache import (
+                _AutotuneCacheBundlerImpl as Bundler,
+            )
             from torch._inductor.utils import fresh_cache
 
             tmp, module, artifact, cache, state = sys.argv[1:6]
@@ -5572,6 +5585,7 @@ class TestPrecompileDynamoCapture(TestCase):
                     "torch._inductor.runtime.autotune_cache.create_cache",
                     return_value=cold,
                 ),
+                mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
             ):
                 f = torch.compiler.precompile.load(artifact, cache)
                 assert f.installed
