@@ -9099,9 +9099,8 @@ class TritonScheduling(SIMDScheduling):
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
         optional = isinstance(kernel, SIMDKernel) and kernel.optional
         if (
-            not wrapper.defines_triton_kernels_as_code()
-            and async_compile.use_process_pool()
-        ):
+            optional or not wrapper.defines_triton_kernels_as_code()
+        ) and async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
@@ -9324,15 +9323,22 @@ class TritonScheduling(SIMDScheduling):
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
+        pins = (
+            self.tensor_descriptor_variant_pins()
+            if allow_tma_variants and not is_scan
+            else []
+        )
+        if pins and (
+            kernel_features.numel.free_symbols
+            or kernel_features.reduction_numel.free_symbols
+        ):
+            # Host-side descriptors cannot materialize dynamic shapes.
+            kernel_kwargs = {**kernel_kwargs, **pins[0]}
+            pins = []
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         choices = self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
-        # A multi_kernel pool was asked for explicitly, and scans are out of scope for #187175.
-        if (
-            len(choices) > 1
-            or is_scan
-            or not allow_tma_variants
-            or not (pins := self.tensor_descriptor_variant_pins())
-        ):
+        # A multi_kernel pool was asked for explicitly.
+        if len(choices) > 1 or not pins:
             return choices
         # The pinned choices replace the unpinned kernel, which Kernel.__init__ already counted.
         metrics.generated_kernel_count -= 1

@@ -2761,6 +2761,22 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
         FileCheck().check_count("'tma_variant': True", 1, exactly=True).run(code)
         FileCheck().check("async_compile.multi_kernel").run(code)
 
+    def test_dynamic_shapes_use_pointer_loads(self):
+        def rmsnorm(x, weight):
+            x_float = x.float()
+            scale = torch.rsqrt(x_float.pow(2).mean(-1, keepdim=True) + 1e-6)
+            return (x_float * scale).to(x.dtype) * weight
+
+        x = torch.randn(1024, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.randn(4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        result, (code,) = run_and_get_code(
+            torch.compile(rmsnorm, dynamic=True), x, weight
+        )
+        self.assertEqual(result, rmsnorm(x, weight), exact_device=True)
+        FileCheck().check_not("'tma_variant': True").check_not(
+            "host_tma_descriptor_args"
+        ).check_not("tl.make_tensor_descriptor").run(code)
+
     @config.patch(
         {
             "triton.autotune_tensor_descriptor": "all",
@@ -2769,20 +2785,29 @@ class TritonTensorDescriptorAutotuneTestCUDA(InductorTestCase):
             "fx_graph_remote_cache": False,
         }
     )
-    def test_tma_variants_out_of_shared_memory_are_dropped(self):
+    def test_tma_variants_that_fail_precompile_are_dropped(self):
         from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        make_launchers = CachingAutotuner._make_launchers
+
+        def fail_tma_launchers(autotuner):
+            if autotuner.inductor_meta.get("tma_variant"):
+                raise RuntimeError("injected TMA precompile failure")
+            return make_launchers(autotuner)
 
         def fn(x):
             return torch.softmax(x, dim=-1)
 
-        # 18432 wide, where no default reduction config of a TMA variant fits in shared memory.
-        x = torch.randn(256, 18432, dtype=torch.bfloat16, device=GPU_TYPE)
+        x = torch.randn(256, 4096, dtype=torch.bfloat16, device=GPU_TYPE)
         # The second compile loads the graph from the FX graph cache, with the dropped variants bundled.
-        for _ in range(2):
-            torch._dynamo.reset()
-            PyCodeCache.cache_clear(purge=True)
-            # Loose, since the TMA block floor can change the accumulation order.
-            self.assertEqual(torch.compile(fn)(x), fn(x), atol=1e-2, rtol=1.6e-2)
+        with mock.patch.object(
+            CachingAutotuner, "_make_launchers", fail_tma_launchers
+        ):
+            for _ in range(2):
+                torch._dynamo.reset()
+                PyCodeCache.cache_clear(purge=True)
+                self.assertEqual(torch.compile(fn)(x), fn(x), atol=1e-2, rtol=1.6e-2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertGreaterEqual(
             counters["inductor"]["multi_kernel_sub_kernel_dropped"], 2
