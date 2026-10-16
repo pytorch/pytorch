@@ -2902,7 +2902,7 @@ class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
         for name, call in calls.items():
             with self.subTest(name=name):
                 msg = f"torch.distributed.nn.functional.{name} is deprecated"
-                with self.assertWarnsRegex(FutureWarning, re.escape(msg)):
+                with self.assertWarnsOnceRegex(FutureWarning, re.escape(msg)):
                     call()
 
     def test_nn_functional_all_reduce_unsupported(self):
