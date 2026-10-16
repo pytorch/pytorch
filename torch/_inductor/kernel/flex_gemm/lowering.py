@@ -323,7 +323,7 @@ def require_tma_loadable_tile_captures(
 ) -> list[TensorBox]:
     """Give tile and interleaved captures a layout QuACK's TMA load can read in place.
 
-    A tile load needs one unit-stride matrix dim and 16-byte multiple outer strides;
+    A tile load needs a 16-byte aligned base, one unit-stride matrix dim, and aligned outer strides;
     an interleaved load pairs adjacent N columns, so it must be N-major. Views
     such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
@@ -338,7 +338,7 @@ def require_tma_loadable_tile_captures(
     def loadable(arg: TensorBox, unit_dims: tuple[int, ...], alignment: int) -> bool:
         stride = arg.maybe_get_stride()
         if stride is None:
-            return True
+            return False
         for unit in unit_dims:
             if statically_known_equal(stride[unit], 1) and all(
                 sizevars.statically_known_multiple_of(s, alignment)
@@ -352,6 +352,11 @@ def require_tma_loadable_tile_captures(
     out = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True):
         alignment = max(16 // arg.get_dtype().itemsize, 1)
+        if kind in unit_dims and arg.maybe_get_stride() is not None:
+            if not sizevars.statically_known_multiple_of(
+                arg.get_layout().offset, alignment
+            ):
+                arg = ir.ExternKernel.copy_input(arg)
         if kind in unit_dims and not loadable(arg, unit_dims[kind], alignment):
             *outer, n = arg.get_size()
             padded = [*outer, ceildiv(n, alignment) * alignment]
@@ -762,7 +767,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     output_transform = outputs.output_transform
     if varlen_axis == "k" and output_transform is not None:
         raise NotImplementedError(
-            "FlexGEMM varlen-K does not support output contractions"
+            "FlexGEMM varlen-K does not support output contractions or expansions"
         )
     if (
         blockscaled is not None
