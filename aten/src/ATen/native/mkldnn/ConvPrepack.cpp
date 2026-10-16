@@ -103,7 +103,7 @@ static void _mkldnn_convolution_out(
     int64_t groups,
     const ideep::attr_t& attr = ideep::attr_t()) {
   if (b.has_value()) {
-    mkldnn::convolution_forward_compute_v2(
+    ideep::convolution_forward::compute_v2(
         x,
         w,
         b.value(),
@@ -121,7 +121,7 @@ static void _mkldnn_convolution_out(
         std::vector<int32_t>(),
         attr);
   } else {
-    mkldnn::convolution_forward_compute_v2(
+    ideep::convolution_forward::compute_v2(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
