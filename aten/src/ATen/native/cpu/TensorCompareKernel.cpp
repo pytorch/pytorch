@@ -332,7 +332,7 @@ void isin_default_kernel_cpu(
   // must be done manually.
   ScalarType common_type = at::native::result_type(elements, test_elements);
   Tensor promoted_elements = elements.to(common_type);
-  Tensor test_elements_flat = test_elements.to(common_type).view(-1);
+  Tensor test_elements_flat = test_elements.to(common_type).reshape(-1);
   auto test_elements_stride = test_elements_flat.stride(0);
 
   auto iter = TensorIteratorConfig()
