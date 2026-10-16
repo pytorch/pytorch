@@ -363,7 +363,7 @@ def match_output_expansion(
         return None
     pack = view_args[0]
     gemm_shape = tensor_meta_shape(gemm)
-    if gemm_shape is None:
+    if gemm_shape is None or pack.target not in (aten.stack.default, aten.cat.default):
         return None
     lane_dims = (-1, len(gemm_shape))
     packed = pack.args[0]
