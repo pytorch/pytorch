@@ -1,10 +1,13 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import inspect
 import json
 import math
 import re
 import itertools
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -62,6 +65,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
+    skipIfNoCuteDSL,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
@@ -73,6 +77,7 @@ from torch.testing._internal.common_quantized import (
     ceil_div, to_blocked,
     to_mxfp,
     data_to_nvfp4_scale,
+    data_to_nvfp4_with_global_scale,
     from_blocked_format,
     generate_jagged_offs,
     pack_uint4,
@@ -351,7 +356,6 @@ def scaled_grouped_mm_wrap(
             use_fast_accum=use_fast_accum)
 
 
-
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: torch.Tensor | None = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
@@ -529,42 +533,6 @@ def data_to_mx_scale(x, block_size, recipe):
     return scale_e8m0_biased.reshape(orig_shape[0], -1)
 
 
-def data_to_nvfp4_with_global_scale(x, block_size):
-    # Simple (slow) reference implementation of NVFP4 two-level-scaling
-    orig_shape = x.shape
-    x = x.reshape(-1, block_size)
-
-    # Per-block-amax
-    block_max = torch.amax(torch.abs(x), 1) + 1e-12
-
-    # Per-tensor max
-    global_max = x.abs().max()
-
-    # Constants
-    # Global encoding scale for block-scales
-    S_enc = FP4_MAX_VAL * F8E4M3_MAX_VAL / global_max
-    S_dec = 1. / S_enc
-
-    # Per-block decode-scale
-    S_dec_b = block_max / FP4_MAX_VAL
-
-    # Stored scaled-e4m3 per-block decode scales
-    S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
-
-    # Actual per-block encoding scale
-    S_enc_b = S_enc / S_dec_b_e4m3.float()
-
-    # scale & reshape input, reshape scales
-    x = (S_enc_b.unsqueeze(1) * x).bfloat16().reshape(orig_shape)
-    S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
-
-    # cast input
-    x_fp4 = _bfloat16_to_float4_e2m1fn_x2(x)
-
-    # fp4x2, fp8_e4m3, float respectively
-    return x_fp4, S_dec_b_e4m3, S_dec.float()
-
-
 def unpack_uint4(uint8_data) -> torch.Tensor:
     # Take a packed uint8 tensor (i.e. nvfp4) and unpack into
     # a tensor twice as wide. Useful for dequant operations.
@@ -672,6 +640,8 @@ def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
                     t_scale_slice
                 )  # (round_up(M, 128), round_up(K_group//32, 4))
             t_blocked_scale_list.append(t_scale_slice_blocked)
+        elif format == 'nvfp4':
+            t_global_scale_list.append(torch.ones((), dtype=torch.float32, device=t.device))
 
     # Assemble the full XQ and WQ
     tq = torch.cat(t_list, dim=1).contiguous()
@@ -688,6 +658,70 @@ def _2d_grouped_tensor_to_blocked_scaled(t, MN, G, offs, format='mxfp8'):
         t_global_scales = torch.stack(t_global_scale_list)
 
     return th, tq, t_blocked_scales, t_global_scales
+
+def _copy_to_end_of_device_mapping(t):
+    # Places a copy of `t` so that it ends exactly where a VMM mapping ends, with
+    # the following page reserved but unmapped, so any read past `t` faults.
+    from torch.cuda._utils import _check_cuda_bindings_driver as check, _HAS_CUDA_BINDINGS
+
+    if not _HAS_CUDA_BINDINGS:
+        raise unittest.SkipTest("cuda.bindings is required")
+    from cuda.bindings import driver
+
+    nbytes = t.numel() * t.element_size()
+    prop = driver.CUmemAllocationProp()
+    prop.type = driver.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+    prop.location.type = driver.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+    prop.location.id = t.device.index
+    granularity = check(driver.cuMemGetAllocationGranularity(
+        prop, driver.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM
+    ))
+    mapped = -(-nbytes // granularity) * granularity
+    base = int(check(driver.cuMemAddressReserve(mapped + granularity, granularity, 0, 0)))
+    handle = check(driver.cuMemCreate(mapped, prop, 0))
+    check(driver.cuMemMap(base, mapped, 0, handle, 0))
+    access = driver.CUmemAccessDesc()
+    access.location = prop.location
+    access.flags = driver.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+    check(driver.cuMemSetAccess(base, mapped, [access], 1))
+
+    class _CudaArray:
+        __cuda_array_interface__ = {
+            "shape": (nbytes,), "typestr": "|u1", "data": (base + mapped - nbytes, False), "version": 3,
+        }
+
+    guarded = torch.as_tensor(_CudaArray(), device=t.device)
+    guarded.copy_(t.contiguous().view(-1).view(torch.uint8))
+
+    def release():
+        torch.cuda.synchronize(t.device)
+        check(driver.cuMemUnmap(base, mapped))
+        check(driver.cuMemRelease(handle))
+        check(driver.cuMemAddressFree(base, mapped + granularity))
+
+    return guarded.view(t.dtype).view(t.shape), release
+
+
+def _zero_mxfp8_2d_3d_inputs(G, M, N, K, device):
+    # Correctly shaped mxfp8 2d-3d inputs with zero data, for validation tests.
+    offs = torch.arange(1, G + 1, dtype=torch.int32, device=device) * (M // G)
+    scale_a_rows = G * ((M // G + 127) // 128 * 128)
+    scale_cols = (K // 32 + 3) // 4 * 4
+    xq = torch.zeros((M, K), dtype=torch.float8_e4m3fn, device=device)
+    wq = torch.zeros((G, N, K), dtype=torch.float8_e4m3fn, device=device)
+    xs = torch.zeros((scale_a_rows, scale_cols), dtype=torch.float8_e8m0fnu, device=device)
+    ws = torch.zeros((G, scale_cols * ((N + 127) // 128 * 128)), dtype=torch.float8_e8m0fnu, device=device)
+    return xq, wq, xs, ws, offs
+
+
+def _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs):
+    recipe = [ScalingType.BlockWise1x32]
+    swizzle = [SwizzleType.SWIZZLE_32_4_4]
+    return scaled_grouped_mm(
+        xq, wq.transpose(-2, -1), [xs], recipe, [ws], recipe,
+        swizzle_a=swizzle, swizzle_b=swizzle, offs=offs, output_dtype=torch.bfloat16,
+    )
+
 
 def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     # Build some standard args that are wordy
@@ -985,12 +1019,25 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device):
+        offs = generate_jagged_offs(G, K, multiple_of=32, device=device)
+        self._run_scaled_grouped_mm_2d_2d(G, M, N, K, format, use_out, device, offs)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_2d_2d_empty_groups(self, format, device):
+        # Groups with no K rows must produce zeros, also when the CTA ran a
+        # non-empty tile before, so there are more tiles than SMs. The C++
+        # path leaves such groups unwritten, so this targets CuTeDSL only.
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        offs = torch.tensor([128, 128, 256, 256, 384, 384, 512, 512], dtype=torch.int32, device=device)
+        self._run_scaled_grouped_mm_2d_2d(8, 2048, 2048, 512, format, False, device, offs)
+
+    def _run_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_out, device, input_group_end_offsets):
         torch.manual_seed(42)
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
-        input_group_end_offsets = generate_jagged_offs(
-            G, total_K, multiple_of=32, device=device
-        )
         X = torch.randn((M, total_K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((N, total_K), dtype=torch.bfloat16, device=device) * 0.01
 
@@ -1064,6 +1111,116 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
+        self._run_scaled_grouped_mm_2d_3d(G, M, N, K, format, use_out, device, compare_cpp=True)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_2d_3d_n64_tiles(self, format, device):
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        # Jagged groups averaging 64 rows select a 64-wide N tile, with some
+        # groups spanning several N tiles.
+        self._run_scaled_grouped_mm_2d_3d(16, 1024, 8192, 4096, format, False, device, compare_cpp=False)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @skipIfNoCuteDSL
+    def test_scaled_grouped_mm_2d_3d_input_at_mapping_end(self, format, device):
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        # Groups smaller than the N tile leave TMA boxes past the last group's
+        # rows; with the input ending at unmapped memory those must not fault.
+        offs = torch.tensor([32, 64, 96, 128], dtype=torch.int32, device=device)
+        self._run_scaled_grouped_mm_2d_3d(
+            4, 128, 4096, 2048, format, False, device, compare_cpp=False,
+            input_group_end_offsets=offs, guard_input_end=True,
+        )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @skipIfNoCuteDSL
+    @parametrize("layout", ["2d_2d", "2d_3d"])
+    def test_scaled_grouped_mm_empty_contraction(self, layout, device):
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        G, M, N = 4, 256, 512
+        xq, wq, xs, ws, offs = _zero_mxfp8_2d_3d_inputs(G, M, N, 0, device)
+        if layout == "2d_2d":
+            wq = torch.zeros((N, 0), dtype=wq.dtype, device=device)
+            xs = torch.zeros((M, 0), dtype=xs.dtype, device=device)
+            ws = torch.zeros((N, 0), dtype=ws.dtype, device=device)
+            offs = torch.zeros(G, dtype=torch.int32, device=device)
+        # K=0 tensors still need 16-byte row strides to pass ATen's checks.
+        xq = torch.zeros((M, 16), dtype=xq.dtype, device=device)[:, :0]
+        wq = torch.zeros((*wq.shape[:-1], 16), dtype=wq.dtype, device=device)[..., :0]
+        out = _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)
+        with torch.backends.python_native.operations_disabled("_scaled_grouped_mm_v2", "_scaled_grouped_mm_v2.out"):
+            out_cpp = _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)
+        self.assertEqual(out.shape, out_cpp.shape)
+        self.assertEqual(out, torch.zeros_like(out))
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @skipIfNoCuteDSL
+    @parametrize("case", ["scale_a_rows", "scale_b_size", "scale_b_3d", "offs_count", "offs_dtype", "mat_a_transposed"])
+    def test_scaled_grouped_mm_2d_3d_invalid_inputs(self, case, device):
+        # Inputs ATen rejects must raise here too, not compute on garbage.
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        G, M, N, K = 4, 512, 256, 256
+        xq, wq, xs, ws, offs = _zero_mxfp8_2d_3d_inputs(G, M, N, K, device)
+        if case == "scale_a_rows":
+            xs = xs[: M // 2]
+        elif case == "scale_b_size":
+            ws = ws[:, : ws.shape[1] // 2]
+        elif case == "scale_b_3d":
+            ws = ws.view(G, -1, 4)
+        elif case == "offs_count":
+            offs = offs[:-1]
+        elif case == "offs_dtype":
+            offs = offs.to(torch.int64)
+        else:
+            xq = xq.t().contiguous().t()
+        with self.assertRaises((ValueError, RuntimeError)):
+            _mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
+    @skipIfNoCuteDSL
+    @parametrize("case", ["offs_past_m", "offs_decreasing", "scale_a_rows_unpadded"])
+    def test_scaled_grouped_mm_2d_3d_device_asserts(self, case, device):
+        # Offsets live on the device, so like ATen's kernels the CuTeDSL kernel
+        # checks them there; a failed device assert ends the process.
+        self.assertIn("_scaled_grouped_mm_v2", torch.backends.python_native.get_dsl_operations("cutedsl"))
+        expected = {
+            "offs_past_m": "group offsets must not exceed mat_a.size(0)",
+            "offs_decreasing": "group offsets must be nondecreasing",
+            "scale_a_rows_unpadded": "scale_a must hold every group's rows padded to 128",
+        }[case]
+        code = "\n".join([
+            "import torch",
+            "from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType",
+            inspect.getsource(_zero_mxfp8_2d_3d_inputs),
+            inspect.getsource(_mxfp8_scaled_grouped_mm),
+            "xq, wq, xs, ws, offs = _zero_mxfp8_2d_3d_inputs(4, 256, 256, 256, 'cuda')",
+            "if CASE == 'offs_past_m':",
+            "    offs[-1] = 512",
+            "elif CASE == 'offs_decreasing':",
+            "    offs[1] = 32",
+            "else:",
+            "    xs = xs[:256]",
+            "_mxfp8_scaled_grouped_mm(xq, wq, xs, ws, offs)",
+            "torch.cuda.synchronize()",
+            "raise SystemExit('device assert did not fire')",
+        ]).replace("CASE", repr(case))
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertNotEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertNotIn("device assert did not fire", proc.stderr)
+        self.assertIn(expected, proc.stdout + proc.stderr)
+
+    def _run_scaled_grouped_mm_2d_3d(
+        self, G, M, N, K, format, use_out, device, compare_cpp,
+        input_group_end_offsets=None, guard_input_end=False,
+    ):
         torch.manual_seed(42)
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
@@ -1072,9 +1229,10 @@ class TestFP8Matmul(TestCase):
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
-        input_group_end_offsets = generate_jagged_offs(
-            G, total_M, multiple_of=32, device=device
-        )
+        if input_group_end_offsets is None:
+            input_group_end_offsets = generate_jagged_offs(
+                G, total_M, multiple_of=32, device=device
+            )
 
         # For each constituent 2d subtensor in the 3d weights, quantize and convert scale to blocked format separately,
         # as they each used for independent gemm in the grouped gemm.
@@ -1155,6 +1313,9 @@ class TestFP8Matmul(TestCase):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+        if guard_input_end:
+            xq, release = _copy_to_end_of_device_mapping(xq)
+            self.addCleanup(release)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -1193,6 +1354,13 @@ class TestFP8Matmul(TestCase):
             wq.transpose(-2, -1),
             **kwargs
         )
+        if compare_cpp:
+            with torch.backends.python_native.operations_disabled("_scaled_grouped_mm_v2", "_scaled_grouped_mm_v2.out"):
+                y_cpp = scaled_grouped_mm_wrap(
+                    xq,
+                    wq.transpose(-2, -1),
+                    **{k: v for k, v in kwargs.items() if k != "out"}
+                )
 
         if use_out:
             self.assertEqual(y_lp.data_ptr(), kwargs["out"].data_ptr())
@@ -1209,6 +1377,8 @@ class TestFP8Matmul(TestCase):
 
         # Assert outputs are close.
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
+        if compare_cpp:
+            torch.testing.assert_close(y_cpp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
