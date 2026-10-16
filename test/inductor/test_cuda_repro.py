@@ -1478,9 +1478,12 @@ class CudaReproTests(TestCase):
         FileCheck().check("libdevice.exp").run(code[0])
         self.assertEqual(foo(inp), out)
 
+        # On sm_10x, float32 exp is emitted as triton_helpers.exp_f32x2, which
+        # is bitwise identical to libdevice.exp.
         inp = inp.to(torch.float)
         out, code = run_and_get_code(torch.compile(foo), inp)
-        FileCheck().check_not("tl_math.exp").check("libdevice.exp").run(code[0])
+        self.assertNotIn("tl_math.exp", code[0])
+        self.assertRegex(code[0], r"libdevice\.exp|triton_helpers\.exp_f32x2")
         self.assertEqual(foo(inp), out)
 
         def foo(x):

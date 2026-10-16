@@ -206,6 +206,9 @@ class HeuristicType(Enum):
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
     SCALAR_ACCUMULATORS = 1
+    # Compute-heavy pointwise rows (e.g. paired exp): try one warp per
+    # 2048-wide row segment.
+    ONE_WARP_WIDE_TILE = 2
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
