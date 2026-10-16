@@ -119,8 +119,8 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    # The GHCR mirror of the image _linux-build selected. kubelet authenticates
-    # with the ghcr-pytorch pull secret the scale set puts on the job pod.
+    # The GHCR mirror of the image _linux-build selected. The node pulls it
+    # before any job step runs.
     container:
       image: ${{ needs.resolve-image.outputs.docker-image }}
     steps:
