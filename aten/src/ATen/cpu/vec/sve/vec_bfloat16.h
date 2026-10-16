@@ -242,7 +242,7 @@ convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
   return {Vectorized<float>(x1), Vectorized<float>(x2)};
 }
 
-#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+#if defined(__GNUC__) && \
     !defined(__clang__) &&                                             \
     ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
      (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
@@ -250,6 +250,7 @@ convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
 // (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
 // backported to only some 14.3 and 15.2 packages, so conservatively guard by
 // upstream minor version.
+// This workaround is applied to all SVE code, not just inductor precompiled headers.
 __attribute__((optimize("O0")))
 #endif
 inline Vectorized<c10::BFloat16>
