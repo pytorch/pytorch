@@ -11072,6 +11072,87 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(counters["frames"]["total"], 0)
 
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @parametrize("recursive", [False, True])
+    def test_recursive_precompile_skip_reports_skip_and_skips_callees(self, recursive):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def callee(x):
+            return x + 1
+
+        def fn(x):
+            return callee(x)
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__, recursive=recursive)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), x + 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+        # Only a non-recursive skip lets the callee reach Dynamo as its own frame.
+        self.assertEqual(cnt.frame_count, 0 if recursive else 1)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_recursive_precompile_skip_survives_a_recompile_that_traces_no_graph(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def callee(x):
+            return x + 1
+
+        # The int input never reaches callee, which Dynamo would otherwise
+        # mark skipped on its own for having no tensors.
+        def fn(x):
+            return x + 1 if isinstance(x, int) else callee(x)
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__, recursive=True)
+        guard_results = []
+        hook_result = GuardCollectiveState.MISS
+
+        def hook(state):
+            guard_results.append(state)
+            return hook_result
+
+        old_hook = set_guard_complete_hook(hook)
+        try:
+            # An int input traces no graph, so the recompile a peer's miss
+            # forces leaves the frame skipped, callees included.
+            self.assertEqual(compiled_fn(3), 4)
+            hook_result = GuardCollectiveState.HIT
+            self.assertEqual(compiled_fn(x), x + 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(
+            guard_results, [GuardCollectiveState.SKIP, GuardCollectiveState.SKIP]
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_skip_code_does_not_run_guard_complete_hook(self):
         from torch._C._dynamo.eval_frame import set_guard_complete_hook
 

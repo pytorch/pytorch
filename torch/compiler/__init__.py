@@ -488,17 +488,20 @@ def set_enable_guard_collectives(enabled: bool):
     compiled code to guard on, including entries installed from a loaded
     precompiled artifact; if this is the first time we encounter a frame or
     the frame is skipped, we don't issue collectives.  The exception is a frame
-    that a loaded artifact recorded with no compiled code and therefore skips:
-    it reports the skip, since another rank's artifact may have compiled that
-    frame.  A miss on any rank forces the miss path (recompilation) on every
-    rank; otherwise each rank runs its cached code (hit) or runs eagerly (skip),
-    so a mixture of hits and skips never recompiles.  Entries and skips
-    installed from a precompile artifact assume every rank installed the same
-    artifact.  A mixture of hits and skips further assumes the frames each rank
-    reaches next issue matching guard collectives: the skipping rank runs the
-    frame eagerly, so its callees may issue their own guard collectives, while
-    the hitting rank runs code with those callees inlined (or runs its own
-    resume functions after a graph break), and the ranks then mispair or hang.
+    that a loaded artifact skips (it recorded the frame with no compiled code,
+    or chose to run it and its callees eagerly): it reports the skip, since
+    another rank's artifact may have compiled that frame.  A miss on any rank
+    forces the miss path (recompilation) on every rank; otherwise each rank
+    runs its cached code (hit) or runs eagerly (skip), so a mixture of hits and
+    skips never recompiles.  Entries and skips installed from a precompile
+    artifact assume every rank installed the same artifact.  A mixture of hits
+    and skips further assumes the frames each rank reaches next issue matching
+    guard collectives: a rank that skips only the frame runs it eagerly, so its
+    callees may issue their own guard collectives, while the hitting rank runs
+    code with those callees inlined; and the hitting rank runs its own resume
+    functions after a graph break.  Either way the ranks then mispair or hang.
+    A skip that also covers the frame's callees runs them without Dynamo, which
+    leaves only the graph-break case.
 
     Returns the previous setting of enabled.
     """
