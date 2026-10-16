@@ -1,10 +1,12 @@
 # Test run reports
 
 `plugin.py` writes one JSON Lines file per test process for the `tests.*`
-ClickHouse tables: a report line, then one line per completed test run. Lines are
-flushed as tests finish; readers skip a torn last line. Split lines on `\n`, not
-with `str.splitlines()`, which also breaks at U+2028, U+2029 and U+0085 inside
-strings.
+ClickHouse tables: a report line, then one line per completed test run. A process
+that ends without starting a test removes its file, which would hold only the
+report line, unless an error turned the writer off first; one that started a test
+keeps it (see Crashes and timeouts). Lines are flushed as tests finish; readers
+skip a torn last line. Split lines on `\n`, not with `str.splitlines()`, which
+also breaks at U+2028, U+2029 and U+0085 inside strings.
 
 ## Path
 
