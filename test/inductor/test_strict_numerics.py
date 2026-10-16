@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     LazyVal,
     parametrize,
     run_tests,
@@ -286,6 +287,11 @@ class StrictNumericsCompileTest(TestCase):
     @parametrize("numerics", ("strict_pointwise", "strict"))
     @parametrize("upcast", (False, True))
     def test_relu_shared_predicate(self, device, dtype, op, numerics, upcast):
+        if IS_FBCODE and upcast and dtype in (torch.float16, torch.bfloat16):
+            # The generated where(x < 0, 0, x) is correct, but fbcode's Triton
+            # 3.8 returns +0.0 for relu(-0.0) after the fp32 upcast; OSS Triton
+            # 3.9 does not. Remove once fbcode moves to Triton 3.9.
+            self.skipTest("fbcode Triton 3.8 drops the sign of relu(-0.0) when upcast")
         if dtype in (torch.float16, torch.bfloat16):
             x = _exhaustive_16bit(dtype, device)
         elif dtype == torch.float32:

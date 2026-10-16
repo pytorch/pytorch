@@ -76,7 +76,7 @@ IterBounds<int32_t> get_pool_input_iter_bounds(
 // TODO: Support any number of pooling dims
 template <typename T>
 void max_pool_3d_input_iter(
-    constant T* input,
+    device const T* input,
     device T* output,
     device int64_t* indices,
     constant int32_t* input_strides,
@@ -126,7 +126,7 @@ void max_pool_3d_input_iter(
 
 template <typename T, bool return_indices>
 void max_pool_2d_input_iter(
-    constant T* input,
+    device const T* input,
     device T* output,
     device int64_t* indices,
     constant int32_t* input_strides,
@@ -262,7 +262,7 @@ PoolOffsets find_pool_offsets(
 // Kernel computes one element of the output per kernel call.
 template <typename T>
 kernel void max_pool(
-    constant T* input [[buffer(0)]],
+    device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     device int64_t* indices [[buffer(2)]],
     constant PoolingParams<5>& params [[buffer(3)]],
@@ -369,8 +369,8 @@ void max_pool_backward_impl(
 template <typename T>
 kernel void max_pool_backward(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
-    constant int64_t* indices [[buffer(2)]],
+    device const T* grad_output [[buffer(1)]],
+    device const int64_t* indices [[buffer(2)]],
     constant PoolingBackwardParams<5>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   auto pooling_dims = params.pooling_dims;
@@ -442,8 +442,8 @@ void max_unpool_impl(
 template <typename T>
 kernel void max_unpool(
     device T* output [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant int64_t* indices [[buffer(2)]],
+    device const T* input [[buffer(1)]],
+    device const int64_t* indices [[buffer(2)]],
     constant MaxUnpoolingParams<5>& params [[buffer(3)]],
     device c10::metal::ErrorMessages* error_buffer [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
@@ -510,7 +510,7 @@ AvgPoolIterBounds<int32_t> get_avg_pool_input_iter_bounds(
 // apply max to. Specialized for 3 pooling dimensions.
 template <typename T>
 void avg_pool_3d_input_iter(
-    constant T* input,
+    device const T* input,
     device T* output,
     constant int32_t* input_sizes,
     constant int32_t* input_strides,
@@ -568,7 +568,7 @@ void avg_pool_3d_input_iter(
 // apply max to. Specialized for 2 pooling dimensions.
 template <typename T>
 void avg_pool_2d_input_iter(
-    constant T* input,
+    device const T* input,
     device T* output,
     constant int32_t* input_sizes,
     constant int32_t* input_strides,
@@ -614,7 +614,7 @@ void avg_pool_2d_input_iter(
 template <typename T>
 void avg_pool_backward_3d_input_iter(
     device AtomicType_t<T>* grad_input,
-    constant T* grad_output,
+    device const T* grad_output,
     constant int32_t* grad_input_sizes,
     constant int32_t* grad_input_strides,
     int32_t grad_input_leading_offset,
@@ -672,7 +672,7 @@ void avg_pool_backward_3d_input_iter(
 // Kernel computes one element of the output per kernel call.
 template <typename T>
 kernel void avg_pool(
-    constant T* input [[buffer(0)]],
+    device const T* input [[buffer(0)]],
     device T* output [[buffer(1)]],
     constant AvgPoolingParams<5>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
@@ -739,7 +739,7 @@ kernel void avg_pool(
 template <typename T>
 kernel void avg_pool_backward(
     device AtomicType_t<T>* grad_input [[buffer(0)]],
-    constant T* grad_output [[buffer(1)]],
+    device const T* grad_output [[buffer(1)]],
     constant AvgPoolingParams<5>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
   auto pooling_dims = params.pooling_dims;
@@ -789,40 +789,40 @@ kernel void avg_pool_backward(
 
 #define REGISTER_POOL_OP(DTYPE)                                               \
   template [[host_name("max_pool_" #DTYPE)]] kernel void max_pool<DTYPE>(     \
-      constant DTYPE * input [[buffer(0)]],                                   \
-      device DTYPE * output [[buffer(1)]],                                    \
+      device const DTYPE* input [[buffer(0)]],                                \
+      device DTYPE* output [[buffer(1)]],                                     \
       device int64_t* indices [[buffer(2)]],                                  \
       constant PoolingParams<5>& params [[buffer(3)]],                        \
       uint tid [[thread_position_in_grid]]);                                  \
                                                                               \
   template [[host_name("max_unpool_" #DTYPE)]] kernel void max_unpool<DTYPE>( \
       device DTYPE * output [[buffer(0)]],                                    \
-      constant DTYPE * input [[buffer(1)]],                                   \
-      constant int64_t* indices [[buffer(2)]],                                \
+      device const DTYPE* input [[buffer(1)]],                                \
+      device const int64_t* indices [[buffer(2)]],                            \
       constant MaxUnpoolingParams<5>& params [[buffer(3)]],                   \
       device ::c10::metal::ErrorMessages* error_buffer [[buffer(4)]],         \
       uint tid [[thread_position_in_grid]]);                                  \
                                                                               \
   template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>(     \
-      constant DTYPE * input [[buffer(0)]],                                   \
-      device DTYPE * output [[buffer(1)]],                                    \
-      constant AvgPoolingParams<5> & params [[buffer(2)]],                    \
+      device const DTYPE* input [[buffer(0)]],                                \
+      device DTYPE* output [[buffer(1)]],                                     \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],                     \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_POOL_BACKWARD_OP(DTYPE)                       \
   template [[host_name("max_pool_backward_" #DTYPE)]]          \
   kernel void max_pool_backward<DTYPE>(                        \
       device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],   \
-      constant DTYPE * grad_output_ [[buffer(1)]],             \
-      constant int64_t* grad_indices_ [[buffer(2)]],           \
+      device const DTYPE* grad_output_ [[buffer(1)]],          \
+      device const int64_t* grad_indices_ [[buffer(2)]],       \
       constant PoolingBackwardParams<5>& params [[buffer(3)]], \
       uint tid [[thread_position_in_grid]]);                   \
                                                                \
   template [[host_name("avg_pool_backward_" #DTYPE)]]          \
   kernel void avg_pool_backward<DTYPE>(                        \
       device AtomicType_t<DTYPE> * grad_input [[buffer(0)]],   \
-      constant DTYPE * grad_output [[buffer(1)]],              \
-      constant AvgPoolingParams<5> & params [[buffer(2)]],     \
+      device const DTYPE* grad_output [[buffer(1)]],           \
+      constant AvgPoolingParams<5>& params [[buffer(2)]],      \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_POOL_OP(float);

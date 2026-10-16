@@ -8936,6 +8936,11 @@ class DistributedTest:
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
 
+            # The timed-out wait aborted nccl_pg's communicator on ranks != 0,
+            # so abort it on every rank. Finalizing it on rank 0 in
+            # destroy_process_group() runs an intra-node barrier with the
+            # aborted peers (NCCL >= 2.31), which fails.
+            dist.distributed_c10d._abort_process_group(nccl_pg)
             self._barrier(timeout=30)
 
         @with_nccl_blocking_wait

@@ -467,10 +467,6 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @unittest.skip(
-        "Disabled due to CI failures on B200; see "
-        "https://github.com/pytorch/pytorch/issues/190086"
-    )
     def test_scaled_mm(self):
         device_mesh = self.build_device_mesh()
         shrd0 = Shard(0)
@@ -507,8 +503,8 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             (repl, repl, repl, (m, 1), (n, 1), repl, repl),
             # Column-parallel
             (shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
-            # Row-parallel (which actually ends up doing sub-row-wise scaling)
-            (part, shrd1, shrd1, (m, ws), (n, ws), shrd1, shrd1),
+            # Row-parallel
+            (part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
         ]:
             full_ref_res = t1 @ t2.t()
 
@@ -563,6 +559,22 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             Shard(0), torch.Size([16, 1]), contracting_dim=1
         )
         self.assertEqual(result, Shard(0))
+
+        # --- 2D scale, shard on a size-1 (broadcast) dim -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([1, 64]), contracting_dim=0
+        )
+        self.assertEqual(result, Replicate())
+
+        # --- 2D scale + Partial -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Partial(), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
 
         # --- 1D blockwise + non-contracting shard -> Shard(0) ---
         # A (mk): dim 0 = m (non-contracting), dim 1 = k (contracting)
