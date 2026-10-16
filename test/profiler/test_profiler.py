@@ -4,6 +4,7 @@
 import collections
 import copy
 import gc
+import gzip
 import json
 import mmap
 import os
@@ -34,6 +35,7 @@ import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 from torch._inductor.utils import is_big_gpu
+from torch._utils import try_import
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -1758,6 +1760,98 @@ torch.ones(10) * 2
             self._schedule_helper(warmup=10, active=10, repeat=4, acc_events=False), 10
         )
 
+    def _run_trace_finalization_wait_counter(self, trace_ready_error=None):
+        clock_us = [0]
+        counter_start_us = [0]
+        durations_us = []
+        exit_exception_types = []
+        events = []
+        wait_counter = MagicMock()
+        guard = wait_counter.guard.return_value
+
+        def counter_enter():
+            counter_start_us[0] = clock_us[0]
+            events.append("counter_enter")
+
+        def counter_exit(exception_type, exception, traceback):
+            durations_us.append(clock_us[0] - counter_start_us[0])
+            exit_exception_types.append(exception_type)
+            events.append("counter_exit")
+
+        guard.__enter__.side_effect = counter_enter
+        guard.__exit__.side_effect = counter_exit
+
+        def on_trace_ready(profiler):
+            events.append("trace_ready")
+            clock_us[0] += 7
+            if trace_ready_error is not None:
+                raise trace_ready_error
+
+        profiler = profile(
+            activities=[ProfilerActivity.CPU],
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=1, repeat=1),
+            on_trace_ready=on_trace_ready,
+        )
+        original_stop_trace = profiler.stop_trace
+
+        def stop_trace():
+            original_stop_trace()
+            events.append("stop_trace")
+            clock_us[0] += 3
+
+        def run_profile():
+            with profiler:
+                for _ in range(3):
+                    profiler.step()
+
+        with (
+            patch.object(profiler, "stop_trace", side_effect=stop_trace),
+            patch(
+                "torch.profiler.profiler._WaitCounter", return_value=wait_counter
+            ) as wait_counter_type,
+        ):
+            if trace_ready_error is None:
+                run_profile()
+            else:
+                with self.assertRaisesRegex(
+                    type(trace_ready_error), str(trace_ready_error)
+                ):
+                    run_profile()
+
+        wait_counter_type.assert_called_once_with(
+            "pytorch.wait_counter.profiler.trace_finalization"
+        )
+        wait_counter.guard.assert_called_once_with()
+        guard.__enter__.assert_called_once_with()
+        guard.__exit__.assert_called_once()
+        return events, durations_us, exit_exception_types
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_trace_finalization_wait_counter_accounts_wall_time(self):
+        events, durations_us, exit_exception_types = (
+            self._run_trace_finalization_wait_counter()
+        )
+
+        self.assertEqual(
+            events, ["counter_enter", "stop_trace", "trace_ready", "counter_exit"]
+        )
+        self.assertEqual(durations_us, [10])
+        self.assertEqual(exit_exception_types, [None])
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_trace_finalization_wait_counter_accounts_wall_time_on_error(self):
+        events, durations_us, exit_exception_types = (
+            self._run_trace_finalization_wait_counter(
+                RuntimeError("trace export failed")
+            )
+        )
+
+        self.assertEqual(
+            events, ["counter_enter", "stop_trace", "trace_ready", "counter_exit"]
+        )
+        self.assertEqual(durations_us, [10])
+        self.assertEqual(exit_exception_types, [RuntimeError])
+
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_lazy_build_tree(self):
         with profile() as p:
@@ -2500,6 +2594,8 @@ class TestProfilerDevice(TestCase):
 
     @parametrize("use_kineto", [False, True])
     def test_profiler_tracing(self, device, use_kineto):
+        if device.startswith("xpu") and not use_kineto:
+            self.skipTest("Legacy profiling is not supported on XPU")
         if use_kineto and not kineto_available():
             self.skipTest("Kineto is required")
         device_type = device.split(":")[0]
@@ -4679,6 +4775,59 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 instantiate_device_type_tests(
     TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
 )
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@instantiate_parametrized_tests
+class TestProfilerTraceCompression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("use_python_export", [False, True])
+    @parametrize(
+        "suffix",
+        [".json", ".json.gz", ".json.zst", "", ".unknown", ".zst.bak", ".gz.bak"],
+    )
+    def test_export(self, use_python_export, suffix):
+        if suffix.endswith(".zst"):
+            zstd = try_import("pyzstd") or try_import("zstandard")
+            if zstd is None:
+                self.skipTest("requires zstandard or pyzstd")
+            opener = zstd.open
+        elif suffix.endswith(".gz"):
+            opener = gzip.open
+        else:
+            opener = open
+
+        value = "café 中"
+        escape_unicode = use_python_export and not suffix.endswith(".zst")
+        metadata = json.dumps(value, ensure_ascii=escape_unicode)
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            prof.add_metadata_json("compression_test", metadata)
+            torch.ones(8) + 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace" + suffix)
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            with opener(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertEqual(trace["compression_test"], value)
+
+    @parametrize("use_python_export", [False, True])
+    def test_missing_zstd(self, use_python_export):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with patch.dict(sys.modules, {"zstandard": None, "pyzstd": None}):
+                message = "requires zstandard or pyzstd.*pip install zstandard.*pip install pyzstd"
+                with self.assertRaisesRegex(ImportError, message):
+                    prof.export_chrome_trace(path, use_python_export=use_python_export)
+                self.assertFalse(os.path.exists(path))
+                # A missing dependency must not consume the native trace.
+                gzip_path = os.path.join(tmpdir, "trace.json.gz")
+                prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
+                with gzip.open(gzip_path, "rt") as f:
+                    self.assertIn("traceEvents", json.load(f))
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
