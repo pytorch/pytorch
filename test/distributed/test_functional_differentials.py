@@ -629,6 +629,19 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             input_tensor.grad, torch.full_like(input_tensor, (dst + 1) * scale)
         )
 
+    def test_reduce_backward_unsupported_op(self):
+        group_name = dist.group.WORLD.group_name
+        input_tensor = torch.ones(3, requires_grad=True)
+        output = fcols.reduce(input_tensor, 0, "max", group=group_name)
+        with self.assertRaisesRegex(RuntimeError, "only supports 'sum' and 'avg'"):
+            output.sum().backward()
+
+    def test_scatter_meta_checks_divisibility(self):
+        group_name = dist.group.WORLD.group_name
+        input_tensor = torch.ones(self.world_size + 1, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "divisible by the group size"):
+            torch.ops._c10d_functional.scatter(input_tensor, 0, group_name)
+
     @parametrize("device", devices)
     def test_gather(self, device):
         """Test gather forward and that backward scatters the dst grad."""

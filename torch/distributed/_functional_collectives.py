@@ -179,6 +179,8 @@ def reduce(
 
     Returns zeros on ranks other than ``dst``.
 
+    Backward is a collective: every rank must run backward through the output.
+
     Args:
         dst (int): Destination rank within the group
         reduceOp (str or ReduceOp): The reduction operation
@@ -199,6 +201,8 @@ def gather(self: torch.Tensor, dst: int, group: RANK_TYPES, tag: str = ""):
 
     Every rank returns a tensor of the gathered shape; it is zeros on ranks other than ``dst``.
 
+    Backward is a collective: every rank must run backward through the output.
+
     Args:
         dst (int): Destination rank within the group
         group (ProcessGroup or List[int]): The process group to work on.
@@ -214,6 +218,8 @@ def scatter(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     Splits the tensor on ``src`` along dim 0 and sends one chunk to each process.
 
     Every rank must pass a tensor of the same shape; its data is ignored on ranks other than ``src``.
+
+    Backward is a collective: every rank must run backward through the output.
 
     Args:
         src (int): Source rank within the group
@@ -1852,8 +1858,13 @@ def _gather_meta(self, dst, group_name):
 
 
 def _scatter_meta(self, src, group_name):
+    group_size = c10d._get_group_size_by_name(group_name)
+    torch._check(
+        self.dim() > 0 and self.size(0) % group_size == 0,
+        lambda: "scatter: the first dimension of the input must be divisible by the group size",
+    )
     out_size = list(self.size())
-    out_size[0] //= c10d._get_group_size_by_name(group_name)
+    out_size[0] //= group_size
     return self.new_empty(out_size)
 
 
