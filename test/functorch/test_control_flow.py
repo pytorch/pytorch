@@ -6345,7 +6345,7 @@ class AssociativeScanTestsDevice(TestCase):
                 )
             )
 
-    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     @parametrize(
@@ -6482,7 +6482,7 @@ class AssociativeScanTestsDevice(TestCase):
                 )
             )
 
-    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "triton")
     def test_associative_scan_pointwise_dependent_leaves_vmap_grads(self, device):
         def affine(left, right):
             (a_l, b_l), (a_r, b_r) = left, right
@@ -6505,7 +6505,7 @@ class AssociativeScanTestsDevice(TestCase):
 
     # torch.func.grad does not support HOPs yet
     @unittest.expectedFailure
-    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "triton")
     def test_associative_scan_pointwise_func_grad(self, device):
         def affine(left, right):
             (a_l, b_l), (a_r, b_r) = left, right
@@ -6540,7 +6540,7 @@ class AssociativeScanTestsDevice(TestCase):
         self.assertEqual(ys, ys_exp)
         self._check_autograd(list(ys), list(ys_exp), xs)
 
-    @skipCUDAIf(not SM70OrLater, "triton")
+    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "triton")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("reverse", [False, True])
     def test_associative_scan_different_input_size(self, device, compile_mode, reverse):

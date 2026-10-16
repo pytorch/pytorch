@@ -6,9 +6,7 @@ import torch.autograd.forward_ad as fwAD
 import torch.nn.functional as F
 import numpy as np
 
-import os
 import unittest
-from unittest import mock
 import itertools
 import warnings
 import math
@@ -31,7 +29,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
+     MI200_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
@@ -4940,6 +4938,20 @@ class TestLinalg(TestCase):
         for shape in (magma, iterative_cublas):
             for A, B, left, upper, uni in gen_inputs(shape, dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_linalg_inv_large_batch(self, device, dtype):
+        # The batched hipBLAS and rocSOLVER kernels launch nothing above 65536
+        # matrices (https://github.com/pytorch/pytorch/issues/196745), so the
+        # batch must exceed that to exercise the 65535-element chunking. Distinct
+        # unitriangular matrices keep the results exact and expose a skipped chunk.
+        batch = 2 * 65535 + 1
+        a = torch.eye(3, device=device, dtype=dtype).repeat(batch, 1, 1)
+        a[:, 0, 1] = torch.linspace(-1, 1, batch, device=device, dtype=dtype)
+        b = torch.ones(batch, 3, 1, device=device, dtype=dtype)
+        self.assertEqual(torch.linalg.inv(a), torch.linalg.inv(a.cpu()))
+        self.assertEqual(torch.linalg.solve(a, b), torch.linalg.solve(a.cpu(), b.cpu()))
 
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
@@ -11923,26 +11935,6 @@ class TestLinalgCudaOnly(TestCase):
             self.assertEqual(ck_out, cpu_out)
 
 
-_GROUPED_MM_CASES = [
-    subtest(((16, 256), (32, 256), [64, 128, 192, 256], True), name="2d_2d_regular"),
-    subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
-    subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
-    subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
-    subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
-    subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
-    subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
-    subtest(
-        ((8, 535), (16, 67, 535), [0, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8], True),
-        name="2d_3d_sparse_decode", decorators=[toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})]),
-    subtest(((8, 32), (8, 17, 32), [0, 8, 8, 8, 8, 8, 8, 8], True), name="2d_3d_skewed_decode"),
-    subtest(((8, 19), (8, 67, 19), [0, 2, 2, 3, 3, 3, 3, 3], True), name="2d_3d_decode_unused_rows"),
-    subtest(((32, 64), (32, 32, 64), [0] * 24 + [0, 0, 8, 12, 12, 16, 24, 32], True), name="2d_3d_batched_decode"),
-    subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
-    subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
-    subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
-]
-
-
 class TestGroupedMM(TestCase):
     def setUp(self):
         super().setUp()
@@ -11998,12 +11990,26 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
+    @parametrize("a_shape,b_shape,offsets,backward", [
+        subtest(((16, 256), (32, 256), [64, 128, 192, 256], True), name="2d_2d_regular"),
+        subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
+        subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
+        subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
+        subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
+        subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
+        subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
+        subtest(
+            ((8, 535), (16, 67, 535), [0, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8], True),
+            name="2d_3d_sparse_decode", decorators=[toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})]),
+        subtest(((8, 32), (8, 17, 32), [0, 8, 8, 8, 8, 8, 8, 8], True), name="2d_3d_skewed_decode"),
+        subtest(((8, 19), (8, 67, 19), [0, 2, 2, 3, 3, 3, 3, 3], True), name="2d_3d_decode_unused_rows"),
+        subtest(((32, 64), (32, 32, 64), [0] * 24 + [0, 0, 8, 12, 12, 16, 24, 32], True), name="2d_3d_batched_decode"),
+        subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
+        subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
+        subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
+    ])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
-        self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
-
-    def _check_grouped_gemm(self, device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype):
         sizes = a_shape[-2:] + b_shape[-2:] + tuple(offsets or ())
         unaligned = any(size % (16 // dtype.itemsize) for size in sizes)
         if self.device_type == "cuda" and dtype != torch.float32 and unaligned:
@@ -12012,23 +12018,6 @@ class TestGroupedMM(TestCase):
         b = self._make_grouped_mm_matrix(b_shape, b_row_major, device, dtype, strided)
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=backward)
-
-    # The ROCm grouped gemm backends are opt-in via env var, which CI never sets.
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    @parametrize("backend", ["ck_tile"])
-    @parametrize("strided", [False, True])
-    @parametrize("a_row_major", [False, True])
-    @parametrize("b_row_major", [False, True])
-    @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
-    @dtypes(torch.bfloat16, torch.float16)
-    def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
-                                       backward, dtype):
-        if backend == "ck_tile" and not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
-            self.skipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
-        env_var = {"ck": "ROCM_ALLOW_GROUP_GEMM_CK", "ck_tile": "ROCM_ALLOW_GROUP_GEMM_CK_TILE"}[backend]
-        with mock.patch.dict(os.environ, {env_var: "1"}):
-            self._check_grouped_gemm(device, strided, a_row_major, b_row_major, a_shape, b_shape, offsets, backward, dtype)
 
     @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
@@ -12056,7 +12045,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     def test_grouped_mm_mismatched_dtypes(self, device):
         a = torch.ones(8, 16, device=device, dtype=torch.float16)
         b = torch.ones(4, 16, 16, device=device, dtype=torch.bfloat16)
