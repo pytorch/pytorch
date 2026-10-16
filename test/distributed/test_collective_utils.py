@@ -157,7 +157,7 @@ class TestCollectiveUtilsDevice(MultiProcessTestCase):
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
         group = torch.distributed.distributed_c10d._get_default_group()
-        generator = torch.Generator(device=self.device_type)
+        generator = torch.Generator(device=device)
         generator.manual_seed(123)
         value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 1, value_ranks)
@@ -165,7 +165,7 @@ class TestCollectiveUtilsDevice(MultiProcessTestCase):
             self.assertEqual(actual, expected, actual)
 
         if torch.distributed.get_rank() == 1:
-            torch.randn((10,), device=self.device_type, generator=generator)
+            torch.randn((10,), device=device, generator=generator)
         value_ranks, _ = _check_rng_sync_internal(generator, group)
         self.assertEqual(len(value_ranks), 2, value_ranks)
         for actual, expected in zip(value_ranks.values(), [{0, 2, 3}, {1}]):
