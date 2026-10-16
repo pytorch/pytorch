@@ -311,6 +311,56 @@ def infer_flex_gemm_epilogue_arg_kinds(
     return tuple(epilogue_arg_kinds)
 
 
+def require_tma_loadable_tile_captures(
+    epilogue_args: list[TensorBox], output_size: list[Any]
+) -> list[TensorBox]:
+    """Give full-tile captures a layout QuACK's TMA ``TileLoad`` can read in place.
+
+    A tile load needs a 16-byte aligned base, one unit-stride matrix dim, and aligned outer strides.
+    Views such as ``h.view(m, n, 2)[..., 0]`` lack a unit-stride matrix dim and are copied to a
+    contiguous layout here instead of failing QuACK's launch-time stride check.
+    The copy's row stride is padded to the alignment, so an unaligned N (a bf16
+    ``[m, 12]`` tile) stays loadable.
+    Row-strided views such as ``h[:, :n]`` load in place when their base and row stride
+    are aligned. Unknown producer layouts are constrained to padded strides; symbolic
+    layouts can specialize on stride divisibility.
+    """
+    from torch._inductor.virtualized import V
+
+    sizevars = V.graph.sizevars
+
+    def loadable(arg: TensorBox, alignment: int) -> bool:
+        stride = arg.maybe_get_stride()
+        if stride is None:
+            return False
+        for unit in (-1, -2):
+            if statically_known_equal(stride[unit], 1) and all(
+                sizevars.statically_known_multiple_of(s, alignment)
+                for dim, s in enumerate(stride)
+                if dim != len(stride) + unit
+            ):
+                return True
+        return False
+
+    out = []
+    for arg in epilogue_args:
+        alignment = max(16 // arg.get_dtype().itemsize, 1)
+        is_tile = statically_known_shape_equal(arg.get_size(), output_size)
+        if is_tile and ir.is_unaligned(arg):
+            arg = ir.ExternKernel.copy_input(arg)
+        if is_tile and not loadable(arg, alignment):
+            *outer, n = arg.get_size()
+            padded = [*outer, ceildiv(n, alignment) * alignment]
+            arg = cast(
+                TensorBox,
+                ir.ExternKernel.require_exact_strides(
+                    arg, ir.FlexibleLayout.contiguous_strides(padded)
+                ),
+            )
+        out.append(arg)
+    return out
+
+
 CAPTURE_RESHAPE_TARGETS = frozenset(
     (
         torch.ops.aten.unsqueeze.default,
@@ -788,6 +838,9 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
+    epilogue_args = require_tma_loadable_tile_captures(
+        epilogue_args, logical_output_size
+    )
     epilogue_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in epilogue_args
     ]
