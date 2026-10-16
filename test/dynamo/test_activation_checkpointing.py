@@ -2932,6 +2932,28 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
         b = torch.randn(4, 4, requires_grad=True, device="cpu")
         self.assertEqual(opt_fn(a, b), fn(a, b))
 
+    def test_sac_with_nested_context_fn(self):
+        # A nested/closure context_fn defined inside the compiled frame should
+        # be accepted (same as a top-level UserFunctionVariable), not raise
+        # InternalTorchDynamoError. See #200444.
+        def g(x):
+            class Ctx:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+            def context_fn():
+                return Ctx(), contextlib.nullcontext()
+
+            return checkpoint(
+                lambda t: t.sin(), x, use_reentrant=False, context_fn=context_fn
+            )
+
+        x = torch.tensor(1.0, requires_grad=True)
+        self.assertEqual(torch.compile(g, backend="eager")(x), g(x))
+
     def test_sac_partial_context_fn_with_tensor_arg_graph_breaks(self):
         # A partial bound to a tensor cannot be resolved to a Python callable at
         # trace time. That is a graph break, not an internal error.
