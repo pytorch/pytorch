@@ -100,6 +100,15 @@ class Transport(ABC):
     while the transfer is in flight, and can be captured in CUDA graphs.
     Transfer failures terminate the process, since consumers may already be
     enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
+
+    Backends may support opaque byte notifications between mutually connected
+    endpoints. ``notification=payload`` sends a message to the peer after that
+    transfer succeeds. A WRITE notifies its destination; a READ notifies its
+    source. This orders only that transfer, not other operations or remote
+    application consumption. Timeouts do not suppress later notifications.
+    Receiving a notification does not establish CUDA stream ordering.
+    Captured transfers reuse their payload on every replay; receivers must
+    count replay completions to distinguish them.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
@@ -135,6 +144,47 @@ class Transport(ABC):
     def connected(self) -> bool:
         """Return whether the endpoint is connected to its peer."""
 
+    def supports_notifications(self) -> bool:
+        """Return whether this backend configuration supports notifications."""
+        return False
+
+    def send_notification(
+        self, payload: bytes, *, timeout: float | None = None
+    ) -> None:
+        """Submit a nonempty byte message to the connected peer.
+
+        Return does not acknowledge peer receipt. There is no implicit ordering
+        with transfers or other messages; wait for dependencies before sending.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    def poll_notifications(self, *, timeout: float | None = None) -> list[bytes]:
+        """Drain available messages from the connected peer, without arrival waits.
+
+        Return an empty list when none are available. Messages have no FIFO
+        guarantee and are returned once across concurrent polls. ``timeout``
+        bounds local waits such as lock acquisition, not message arrival.
+        Messages from other incoming peers are drained and discarded.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    def _check_notification(
+        self, payload: bytes, local_buffer: MemoryView | None = None
+    ) -> None:
+        if not isinstance(payload, bytes):
+            raise TypeError("notification payload must be bytes")
+        if not payload:
+            raise ValueError("notification payload cannot be empty")
+        if local_buffer is not None and local_buffer.size() == 0:
+            raise ValueError("zero-byte transfers cannot carry notifications")
+        self._check_notification_endpoint()
+
+    def _check_notification_endpoint(self) -> None:
+        if not self.connected():
+            raise RuntimeError("transport is not connected")
+        if not self.supports_notifications():
+            raise NotImplementedError("transport does not support notifications")
+
     @abstractmethod
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -166,6 +216,7 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
         """Write a local view; return Work for async_op=True, otherwise zero."""
 
@@ -177,6 +228,7 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
         """Read into a local view; return Work for async_op=True, otherwise zero."""
 
@@ -187,6 +239,7 @@ class Transport(ABC):
         *,
         stream: torch.cuda.Stream | None = None,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Write a local view in order on ``stream`` (default: current).
 
@@ -196,7 +249,14 @@ class Transport(ABC):
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=False)
-        submit = partial(self.write_async, local_buffer, remote_buffer, timeout=timeout)
+        # Omit the keyword when unused so legacy backend overrides still work.
+        kwargs: dict[str, Any] = {}
+        if notification is not None:
+            self._check_notification(notification, local_buffer)
+            kwargs["notification"] = notification
+        submit = partial(
+            self.write_async, local_buffer, remote_buffer, timeout=timeout, **kwargs
+        )
         self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
             submit, local_buffer
         )
@@ -208,13 +268,20 @@ class Transport(ABC):
         *,
         stream: torch.cuda.Stream | None = None,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Read into a local view in order on ``stream`` (default: current)."""
         _validate_timeout(timeout)
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=True)
-        submit = partial(self.read_async, local_buffer, remote_buffer, timeout=timeout)
+        kwargs: dict[str, Any] = {}
+        if notification is not None:
+            self._check_notification(notification, local_buffer)
+            kwargs["notification"] = notification
+        submit = partial(
+            self.read_async, local_buffer, remote_buffer, timeout=timeout, **kwargs
+        )
         self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
             submit, local_buffer
         )
@@ -251,14 +318,21 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Write a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
         timeout = self._default_timeout if timeout is None else timeout
         started = asyncio.get_running_loop().time()
+        kwargs: dict[str, Any] = {}
+        if notification is not None:
+            self._check_notification(notification, local_buffer)
+            kwargs["notification"] = notification
         work = cast(
             Work,
-            self.write(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.write(
+                local_buffer, remote_buffer, async_op=True, timeout=timeout, **kwargs
+            ),
         )
         remaining = (
             None
@@ -273,14 +347,21 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Read into a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
         timeout = self._default_timeout if timeout is None else timeout
         started = asyncio.get_running_loop().time()
+        kwargs: dict[str, Any] = {}
+        if notification is not None:
+            self._check_notification(notification, local_buffer)
+            kwargs["notification"] = notification
         work = cast(
             Work,
-            self.read(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.read(
+                local_buffer, remote_buffer, async_op=True, timeout=timeout, **kwargs
+            ),
         )
         remaining = (
             None

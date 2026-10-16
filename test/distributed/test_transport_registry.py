@@ -2,11 +2,15 @@
 
 import asyncio
 import json
+import os
 import threading
+import unittest
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+from transport_test_utils import NotificationInbox
 
 import torch
 from torch.distributed._transport import (
@@ -46,6 +50,7 @@ class _TestTransport(Transport):
         self.value = value
         self.operation = operation or (lambda local, remote: 0)
         self.closed = False
+        self.notifications = []
 
     @staticmethod
     def supported() -> bool:
@@ -63,13 +68,37 @@ class _TestTransport(Transport):
     def register_memory(self, tensor):
         return tensor
 
-    def write(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def write(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
+        if notification is not None:
+            self._check_notification(notification, local_buffer)
         self.operation(local_buffer, remote_buffer)
+        if notification is not None:
+            self.notifications.append(notification)
         return _completed_work() if async_op else 0
 
-    def read(self, local_buffer, remote_buffer, *, async_op=False, timeout=None):
+    def read(
+        self,
+        local_buffer,
+        remote_buffer,
+        *,
+        async_op=False,
+        timeout=None,
+        notification=None,
+    ):
         return self.write(
-            local_buffer, remote_buffer, async_op=async_op, timeout=timeout
+            local_buffer,
+            remote_buffer,
+            async_op=async_op,
+            timeout=timeout,
+            notification=notification,
         )
 
     def close(self) -> None:
@@ -104,6 +133,14 @@ class TestTransportRegistry(TestCase):
         with _TestTransport() as transport:
             with self.assertRaisesRegex(NotImplementedError, "unregistration"):
                 transport.unregister_memory(None)
+
+    def test_notifications_unsupported(self):
+        with _TestTransport() as transport:
+            self.assertFalse(transport.supports_notifications())
+            with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                transport.send_notification(b"ready")
+            with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                transport.poll_notifications()
 
     def test_mutable_view_protocol(self):
         readonly = SimpleNamespace(size=lambda: 8)
@@ -256,6 +293,59 @@ def _completed_work(error=None):
 
 @instantiate_parametrized_tests
 class TestTransportWork(TestCase):
+    @parametrize("operation", ["read", "write"])
+    @parametrize("supported", [False, True])
+    def test_stream_notification_submission(self, operation, supported):
+        with (
+            _TestTransport(operation=Mock()) as transport,
+            patch.object(transport, "supports_notifications", return_value=supported),
+            patch.object(transport, "_cuda_stream") as ordering,
+        ):
+            view = SimpleNamespace(size=lambda: 8)
+            stream = object()
+            if supported:
+                getattr(transport, operation + "_stream")(
+                    view, None, stream=stream, notification=b"ready"
+                )
+                ordering.assert_called_once_with(stream)
+                submit, retained = ordering.return_value.enqueue.call_args.args
+                self.assertIs(retained, view)
+                asyncio.run(submit())
+                transport.operation.assert_called_once_with(view, None)
+                self.assertEqual(transport.notifications, [b"ready"])
+            else:
+                with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                    getattr(transport, operation + "_stream")(
+                        view, None, stream=stream, notification=b"ready"
+                    )
+                ordering.assert_not_called()
+                transport.operation.assert_not_called()
+                self.assertEqual(transport.notifications, [])
+
+    @parametrize("operation", ["read", "write"])
+    @parametrize("supported", [False, True])
+    def test_async_notification_submission(self, operation, supported):
+        async def run():
+            with (
+                _TestTransport(operation=Mock()) as tx,
+                patch.object(tx, "supports_notifications", return_value=supported),
+            ):
+                view = SimpleNamespace(size=lambda: 8)
+                call = getattr(tx, operation + "_async")(
+                    view, None, notification=b"ready"
+                )
+                if supported:
+                    await call
+                    tx.operation.assert_called_once_with(view, None)
+                    self.assertEqual(tx.notifications, [b"ready"])
+                else:
+                    with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                        await call
+                    tx.operation.assert_not_called()
+                    self.assertEqual(tx.notifications, [])
+
+        asyncio.run(run())
+
     @parametrize("timeout", [-1, float("nan"), float("inf")])
     def test_invalid_timeout_does_not_submit(self, timeout):
         with _TestTransport() as transport:
@@ -371,6 +461,42 @@ class TestTransportWork(TestCase):
 
     def test_empty_batch(self):
         asyncio.run(wait_all([]))
+
+
+@unittest.skipUnless(hasattr(os, "sched_yield"), "native NIXL polling requires POSIX")
+class TestNotificationInbox(TestCase):
+    def test_coalesced_phases_are_preserved(self):
+        poll = Mock(return_value=[b"written", b"read", b"written"])
+        inbox = NotificationInbox(SimpleNamespace(poll_notifications=poll))
+        self.assertEqual(inbox.receive(1), [b"written"])
+        self.assertEqual(inbox.receive(1), [b"read"])
+        self.assertEqual(inbox.receive(1), [b"written"])
+        poll.assert_called_once()
+
+    def test_timeout_preserves_partial_batch(self):
+        poll = Mock(side_effect=[[b"first"], [b"second"]])
+        inbox = NotificationInbox(SimpleNamespace(poll_notifications=poll))
+        with patch("transport_test_utils.time.monotonic", side_effect=[0, 0, 1]):
+            with self.assertRaisesRegex(TimeoutError, "buffered.*first"):
+                inbox.receive(2, timeout=1)
+        self.assertEqual(inbox.receive(1, timeout=0), [b"first"])
+        self.assertEqual(inbox.receive(1), [b"second"])
+
+    def test_lock_contention_is_retried(self):
+        poll = Mock(
+            side_effect=[TimeoutError("transport lock wait timed out"), [b"done"]]
+        )
+        inbox = NotificationInbox(SimpleNamespace(poll_notifications=poll))
+        self.assertEqual(inbox.receive(1), [b"done"])
+        self.assertEqual(poll.call_count, 2)
+        for call in poll.call_args_list:
+            self.assertGreater(call.kwargs["timeout"], 0)
+
+    def test_poll_includes_buffered_messages(self):
+        poll = Mock(side_effect=[[b"written", b"read"], []])
+        inbox = NotificationInbox(SimpleNamespace(poll_notifications=poll))
+        self.assertEqual(inbox.receive(1), [b"written"])
+        self.assertEqual(inbox.poll(), [b"read"])
 
 
 if __name__ == "__main__":

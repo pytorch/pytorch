@@ -9,6 +9,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from transport_test_utils import NotificationInbox
+
 import torch
 from torch.distributed._transport.nixl import NIXLTransport
 from torch.distributed._transport.nixl._memory import NIXLRemoteBuffer
@@ -18,6 +20,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 def _worker(rank, pipe, capture=False):
     torch.cuda.set_device(rank)
     transport = NIXLTransport()
+    inbox = NotificationInbox(transport)
     stream = torch.cuda.Stream()
     source = torch.empty(1024, device="cuda")
     destination = torch.zeros(1024, device="cuda")
@@ -50,9 +53,13 @@ def _worker(rank, pipe, capture=False):
         write_graph, read_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
         with torch.cuda.graph(write_graph):
             source.copy_(producer, non_blocking=True)
-            transport.write_stream(local_source.to_view(), remote_destination)
+            transport.write_stream(
+                local_source.to_view(), remote_destination, notification=b"written"
+            )
         with torch.cuda.graph(read_graph):
-            transport.read_stream(local_destination.to_mutable_view(), remote_source)
+            transport.read_stream(
+                local_destination.to_mutable_view(), remote_source, notification=b"read"
+            )
             consumer.copy_(destination, non_blocking=True)
         torch.testing.assert_close(source, torch.zeros_like(source))
         torch.testing.assert_close(destination, torch.zeros_like(destination))
@@ -65,7 +72,7 @@ def _worker(rank, pipe, capture=False):
             pass
         else:
             raise AssertionError("graph registration was unregistered")
-        for iteration in range(3):
+        for iteration in range(10):
             producer.fill_(rank + 1.0 + 10 * iteration)
             # Replay on the default stream, not the original capture stream.
             write_graph.replay()
@@ -73,6 +80,8 @@ def _worker(rank, pipe, capture=False):
             pipe.send_bytes(b"written")
             if not (pipe.recv_bytes() == b"written"):
                 raise AssertionError("unexpected capture result or peer message")
+            if inbox.receive(1) != [b"written"]:
+                raise AssertionError("unexpected captured write notification")
             read_graph.replay()
             torch.cuda.synchronize()
             torch.testing.assert_close(
@@ -85,19 +94,28 @@ def _worker(rank, pipe, capture=False):
             pipe.send_bytes(b"iteration")
             if not (pipe.recv_bytes() == b"iteration"):
                 raise AssertionError("unexpected capture result or peer message")
+            if inbox.receive(1) != [b"read"]:
+                raise AssertionError("unexpected captured read notification")
     else:
         with torch.cuda.stream(stream):
             source.copy_(producer, non_blocking=True)
-            transport.write_stream(local_source.to_view(), remote_destination)
+            transport.write_stream(
+                local_source.to_view(), remote_destination, notification=b"written"
+            )
         stream.synchronize()
         # Local write completion does not imply peer write completion.
         pipe.send_bytes(b"written")
         if pipe.recv_bytes() != b"written":
             raise RuntimeError("unexpected control message")
+        if inbox.receive(1) != [b"written"]:
+            raise AssertionError("unexpected stream write notification")
         torch.testing.assert_close(destination, torch.full_like(destination, 2 - rank))
         # An explicit stream overrides the current stream.
         transport.read_stream(
-            local_destination.to_mutable_view(), remote_source, stream=stream
+            local_destination.to_mutable_view(),
+            remote_source,
+            stream=stream,
+            notification=b"read",
         )
         with torch.cuda.stream(stream):
             consumer.copy_(destination, non_blocking=True)
@@ -111,6 +129,10 @@ def _worker(rank, pipe, capture=False):
     # Stop peer accesses before closing local registrations.
     pipe.send_bytes(b"finished")
     pipe.recv_bytes()
+    if not capture and inbox.receive(1) != [b"read"]:
+        raise AssertionError("unexpected stream read notification")
+    if inbox.poll():
+        raise AssertionError("duplicate transfer notification")
     orderings = list(transport._cuda_streams.values())
     transport.close()
     if any(o._retained for o in orderings):
