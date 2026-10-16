@@ -330,6 +330,7 @@ def write_decl_impl(
     declarations = cpp_file_header + "#pragma once\n"
     # declarations += f"#ifndef {disable_def}\n"
     declarations += f"""#include {impl_file}\n"""
+    declarations += "#include <ATen/native/cuda/cutlass_common.cuh>\n"
     declarations += """using namespace PyTorchMemEffAttention;\n"""
 
     # Declaration of kernel functions
@@ -352,9 +353,15 @@ def write_decl_impl(
                 _call = f"if ({k.dispatch_cond}) {_call}"
             declarations += f"    {_call}"
         declarations += "}\n\n"
+        # Only instantiate the kernels of a category for its dtype, and only if
+        # some targeted arch gives them a body (see KERNEL_IMPL_TEMPLATE).
         dispatch_all += f"""
     if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc <= {cat_sm_max}) {{
-        {dispatch_category_fn}(cb, cc);
+        if constexpr (std::is_same_v<DT, {DTYPES[cat_dt]}> && at::cuda::detail::cuda_arch_list_has({cat_sm}0, {cat_sm_max + 1}0)) {{
+            {dispatch_category_fn}(cb, cc);
+        }} else {{
+            at::cuda::detail::cutlass_arch_not_built("memory-efficient attention");
+        }}
     }}"""
 
     declarations += f"""
