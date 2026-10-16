@@ -7,9 +7,17 @@
 import cutlass
 import cutlass.cute as cute
 from cutlass import Boolean, const_expr, Float32, Int32, Int64
+from cutlass._mlir.dialects import llvm
 
 
 WARP = 32
+
+
+def welford_nouts(key: str) -> int:
+    if key.startswith(("varmean", "stdmean")):
+        return 2
+    return int(key.startswith(("var", "std")))
+
 
 # Arg-reduction "no winner" sentinel. Use Int32 to reduce partial traffic unless the
 # extent requires Int64.
@@ -42,6 +50,7 @@ def _neg_id(acc):
 class SumOps:
     # acc = (sum,). Validates vs torch.sum(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -75,6 +84,7 @@ class SumOps:
 class NormOps:
     # acc = (sum(|x|**p),); project raises it to 1/p.
     nfields = 1
+    nouts = 1
 
     def __init__(self, p, acc=Float32):
         self.p = float(p)
@@ -97,6 +107,19 @@ class NormOps:
 
     @cute.jit
     def leaf(self, val, idx):
+        if const_expr(self.p == 2.0 and self.acc is Float32):
+            # Round each tree leaf before combining; contraction must not depend on mapping.
+            a = cute.math.absf(self.acc(val)).ir_value()
+            square = llvm.inline_asm(
+                a.type,
+                [a],
+                "mul.rn.f32 $0, $1, $1;",
+                "=f,f",
+                has_side_effects=False,
+                is_align_stack=False,
+                asm_dialect=llvm.AsmDialect.AD_ATT,
+            )
+            return (self.acc(square),)
         return (self._absp(val),)
 
     @cute.jit
@@ -136,6 +159,7 @@ class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
+    nouts = 1
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -143,6 +167,7 @@ class WelfordOps:
         self.return_mean = bool(return_mean)
         self.acc = acc
         self.fdtypes = (acc, acc, acc)
+        self.split_grid_mult = 8 if acc.width == 32 else 4
 
     def init(self):
         z = self.acc(0.0)
@@ -181,6 +206,29 @@ class WelfordOps:
         return (mean, m2, nn)
 
     @cute.jit
+    def combine_uniform(self, a, b, index, count: cutlass.Constexpr, weight=None):
+        # Preserve Chan's arithmetic; derive exact counts outside the accumulator chain.
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        na, nb = self.acc(index) * self.acc(count), self.acc(count)
+        nn = na + nb
+        nb_over_n = nb / nn if const_expr(weight is None) else weight
+        delta = mb - ma
+        mean = ma + delta * nb_over_n
+        m2 = m2a + m2b + delta * delta * na * nb_over_n
+        return (mean, m2, nn)
+
+    @cute.jit
+    def combine_equal(self, a, b, count: cutlass.Constexpr):
+        """Combine two nonempty states containing the same number of values."""
+        ma, m2a, _ = a
+        mb, m2b, _ = b
+        delta = mb - ma
+        mean = ma + delta * self.acc(0.5)
+        m2 = m2a + m2b + delta * delta * self.acc(count * 0.5)
+        return (mean, m2, self.acc(count * 2))
+
+    @cute.jit
     def shfl_down(self, acc, offset):
         return (
             cute.arch.shuffle_sync_bfly(acc[0], offset=offset),
@@ -203,6 +251,7 @@ class ArgMaxOps:
     # acc = (value, index). NaN wins, then larger value, with lower-index tie-breaking.
     # Indices use Int32 unless the extent can exceed its range.
     nfields = 2
+    nouts = 1
     has_index = True
 
     def __init__(self, acc=Float32, idx=Int32):
@@ -258,6 +307,7 @@ class ArgMaxOps:
 class ProdOps:
     # acc = (product,). Validates vs torch.prod(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -291,6 +341,7 @@ class ProdOps:
 class MeanOps:
     # acc = (sum,); factor applied in project. Validates vs torch.mean(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -324,6 +375,7 @@ class MeanOps:
 class NanSumOps:
     # acc = (sum,); NaN inputs map to 0. Validates vs torch.nansum(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -358,6 +410,7 @@ class NanSumOps:
 class AllOps:
     # acc is the product of 0/1 truth flags; NaN is truthy, matching torch.all.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -392,6 +445,7 @@ class AllOps:
 class AnyOps:
     # acc = (1.0 if any-true,). OR via max of 0/1 flags. Validates vs torch.any.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -426,6 +480,7 @@ class AnyOps:
 class CountNonzeroOps:
     # acc = (nonzero count,); also serves p=0 norm. NaN counts as nonzero.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -460,6 +515,7 @@ class CountNonzeroOps:
 class AbsMaxOps:
     # acc = (max|x|,). p=inf norm. Validates vs vector_norm(x, ord=inf, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -494,6 +550,7 @@ class AbsMaxOps:
 class AbsMinOps:
     # acc = (min|x|,). p=-inf norm. Validates vs vector_norm(x, ord=-inf, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -528,6 +585,7 @@ class AbsMinOps:
 class ArgMinOps:
     # acc = (value, index). NaN wins, then smaller value, with lower-index tie-breaking.
     nfields = 2
+    nouts = 1
     has_index = (
         True  # index dtype parametric (Int32 default / Int64 huge-N); see ArgMaxOps
     )
@@ -586,6 +644,7 @@ class AMaxOps:
     # acc = (max,). Avoiding an unused index halves shuffle/smem traffic and enables the
     # value-only cross-CTA path.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -624,6 +683,7 @@ class AMaxOps:
 class AMinOps:
     # acc = (min,), the single-field NaN-propagating AMaxOps mirror.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
