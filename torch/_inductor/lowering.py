@@ -6570,8 +6570,12 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
     w_window_size = ceildiv(pooled_width + width - 1, width)
     if V.graph.sizevars.statically_known_multiple_of(height, pooled_height):
         h_window_size = 1
+    elif V.graph.sizevars.statically_known_multiple_of(pooled_height, height):
+        h_window_size = pooled_height // height
     if V.graph.sizevars.statically_known_multiple_of(width, pooled_width):
         w_window_size = 1
+    elif V.graph.sizevars.statically_known_multiple_of(pooled_width, width):
+        w_window_size = pooled_width // width
 
     window_size = h_window_size * w_window_size
     if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
