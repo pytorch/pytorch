@@ -695,8 +695,9 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
 
 
 # XPU compiled-vs-eager numerics differ from CUDA/ROCm; tracked in
-# https://github.com/intel/torch-xpu-ops/issues/5168. test_batch_invariance
-# guards its cuBLASLt knobs to CUDA, so there is no XPU entry for it.
+# https://github.com/intel/torch-xpu-ops/issues/5168. Like ROCm, XPU does not
+# apply the CUDA-only split-k / cuBLASLt knobs that test_batch_invariance relies
+# on, so nn.functional.linear is not batch invariant on XPU and is xfailed below.
 XPU_EAGER_EQUIV_XFAILS = {
     "aot_eager_decomp_partition": {
         "nn.functional.gelu": {fp32},
@@ -769,11 +770,28 @@ XPU_UNARY_NUMERICAL_XFAILS = {
 
 XPU_BINARY_NUMERICAL_XFAILS = {}
 
+# XPU, like ROCm, does not apply the CUDA-only split-k / cuBLASLt knobs that
+# test_batch_invariance relies on, so nn.functional.linear is not batch
+# invariant across batch sizes on XPU. Tracked in
+# https://github.com/intel/torch-xpu-ops/issues/5168.
+XPU_BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_default": {
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_numerics": {
+        "nn.functional.linear": {ALL},
+    },
+}
+
 XPU_XFAIL_DICTS = {
     "eager_equivalence": XPU_EAGER_EQUIV_XFAILS,
     "determinism": XPU_DETERMINISM_XFAILS,
     "unary_numerical": XPU_UNARY_NUMERICAL_XFAILS,
     "binary_numerical": XPU_BINARY_NUMERICAL_XFAILS,
+    "batch_invariance": XPU_BATCH_INVARIANCE_XFAILS,
 }
 
 
