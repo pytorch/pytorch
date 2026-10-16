@@ -49,6 +49,7 @@ def _neg_id(acc):
 class SumOps:
     # acc = (sum,). Validates vs torch.sum(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -82,6 +83,7 @@ class SumOps:
 class NormOps:
     # acc = (sum(|x|**p),); project raises it to 1/p.
     nfields = 1
+    nouts = 1
 
     def __init__(self, p, acc=Float32):
         self.p = float(p)
@@ -143,6 +145,7 @@ class WelfordOps:
     # acc = (mean, m2, nf). `reduce` is the ONLINE Welford update and `combine` the PARALLEL Chan
     # merge -- deliberately different formulas. project divides m2 by the clamped dof.
     nfields = 3
+    nouts = 1
 
     def __init__(self, correction=1, take_sqrt=False, return_mean=False, acc=Float32):
         self.correction = float(correction)
@@ -234,6 +237,7 @@ class ArgMaxOps:
     # acc = (value, index). NaN wins, then larger value, with lower-index tie-breaking.
     # Indices use Int32 unless the extent can exceed its range.
     nfields = 2
+    nouts = 1
     has_index = True
 
     def __init__(self, acc=Float32, idx=Int32):
@@ -289,6 +293,7 @@ class ArgMaxOps:
 class ProdOps:
     # acc = (product,). Validates vs torch.prod(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -322,6 +327,7 @@ class ProdOps:
 class MeanOps:
     # acc = (sum,); factor applied in project. Validates vs torch.mean(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -355,6 +361,7 @@ class MeanOps:
 class NanSumOps:
     # acc = (sum,); NaN inputs map to 0. Validates vs torch.nansum(x, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -389,6 +396,7 @@ class NanSumOps:
 class AllOps:
     # acc is the product of 0/1 truth flags; NaN is truthy, matching torch.all.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -423,6 +431,7 @@ class AllOps:
 class AnyOps:
     # acc = (1.0 if any-true,). OR via max of 0/1 flags. Validates vs torch.any.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -457,6 +466,7 @@ class AnyOps:
 class CountNonzeroOps:
     # acc = (nonzero count,); also serves p=0 norm. NaN counts as nonzero.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -491,6 +501,7 @@ class CountNonzeroOps:
 class AbsMaxOps:
     # acc = (max|x|,). p=inf norm. Validates vs vector_norm(x, ord=inf, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -525,6 +536,7 @@ class AbsMaxOps:
 class AbsMinOps:
     # acc = (min|x|,). p=-inf norm. Validates vs vector_norm(x, ord=-inf, dim=-1).
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -559,6 +571,7 @@ class AbsMinOps:
 class ArgMinOps:
     # acc = (value, index). NaN wins, then smaller value, with lower-index tie-breaking.
     nfields = 2
+    nouts = 1
     has_index = (
         True  # index dtype parametric (Int32 default / Int64 huge-N); see ArgMaxOps
     )
@@ -617,6 +630,7 @@ class AMaxOps:
     # acc = (max,). Avoiding an unused index halves shuffle/smem traffic and enables the
     # value-only cross-CTA path.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -655,6 +669,7 @@ class AMaxOps:
 class AMinOps:
     # acc = (min,), the single-field NaN-propagating AMaxOps mirror.
     nfields = 1
+    nouts = 1
 
     def __init__(self, acc=Float32):
         self.acc = acc

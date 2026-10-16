@@ -82,6 +82,7 @@ FILE_TMPL = """\
 #include <torch/library.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 

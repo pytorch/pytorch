@@ -18,10 +18,12 @@ def _disabled():
 @skipIfNoCuteDSL
 class TestCuTeDSLReductionWiring(TestCase):
     def _fired_count(self, fn):
+        from torch import _native
         from torch._native.ops.reductions import kernel_general as kg
 
         names = ("reduce_dim", "reduce_all")
         orig = {nm: getattr(kg, nm) for nm in names}
+        aot_enabled = _native.aot_enabled()
         n = [0]
 
         def wrap(f):
@@ -34,8 +36,10 @@ class TestCuTeDSLReductionWiring(TestCase):
         for nm in names:
             setattr(kg, nm, wrap(orig[nm]))
         try:
+            _native.set_aot_enabled(False)
             fn()
         finally:
+            _native.set_aot_enabled(aot_enabled)
             for nm in names:
                 setattr(kg, nm, orig[nm])
         return n[0]
