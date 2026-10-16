@@ -97,7 +97,7 @@ If your new Docker image needs a library installed from a specific pinned commit
 2. Add the initial pinned commit in `.ci/docker/ci_commit_pins/`. The text filename should match the one defined in step 1
 
 3. When updating `rocm-preview.txt`, apply `ciflow/docker` and verify both
-   `pytorch-linux-noble-rocm-preview-py3.12` and
+   `pytorch-linux-noble-rocm-preview-py3.11` and
    `manylinux2_28-builder:rocm-preview`. The pin drives both images, and the
    content-addressed PR builders validate it before merge.
 
