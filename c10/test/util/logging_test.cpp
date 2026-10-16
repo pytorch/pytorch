@@ -223,4 +223,12 @@ TEST(LoggingTest, LazyBacktrace) {
   EXPECT_EQ(backtrace->invocations, 1);
 }
 
+TEST(LoggingTest, IsUsingGoogleLogging) {
+#if defined(C10_USE_GLOG) || defined(C10_USE_ABSL_LOG)
+  EXPECT_TRUE(c10::IsUsingGoogleLogging());
+#else
+  EXPECT_FALSE(c10::IsUsingGoogleLogging());
+#endif
+}
+
 } // namespace c10_test
