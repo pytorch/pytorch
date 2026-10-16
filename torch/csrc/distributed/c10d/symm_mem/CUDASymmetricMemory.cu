@@ -102,6 +102,15 @@ AllocationRef::~AllocationRef() {
 #endif
 }
 
+CUDAPeerAllocInfo::DevicePointerTables::~DevicePointerTables() {
+  // Device-wide synchronization must precede freeing tables used on other streams.
+  if (should_skip_cuda_cleanup(device_idx)) {
+    // Preserve the existing shutdown/error behavior: do not invoke CUDA deleters.
+    buffers.release_context();
+    signal_pads.release_context();
+  }
+}
+
 CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
     std::vector<void*> buffers,
@@ -126,14 +135,13 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       local_device_idx_(local_device_idx),
       rank_(rank),
       world_size_(world_size),
+      pointer_tables_(local_device_idx),
       group_name_(std::move(group_name)) {
-  const size_t arr_size = sizeof(void*) * world_size_;
-  buffers_dev_ = reinterpret_cast<void**>(
-      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-  signal_pads_dev_ = reinterpret_cast<void**>(
-      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-
   c10::cuda::CUDAGuard guard(local_device_idx);
+  const size_t arr_size = sizeof(void*) * world_size_;
+  auto* allocator = c10::cuda::CUDACachingAllocator::get();
+  pointer_tables_.buffers = allocator->allocate(arr_size);
+  pointer_tables_.signal_pads = allocator->allocate(arr_size);
   // Upload on the current stream, then sync. The sync is required because
   // callers may launch kernels that dereference these arrays on a stream other
   // than the one the copies were issued on; same-stream consumers alone would
@@ -141,9 +149,13 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
   auto stream = at::cuda::getCurrentCUDAStream(
       static_cast<c10::DeviceIndex>(local_device_idx));
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice, stream));
+      pointer_tables_.buffers.get(),
+      buffers_.data(),
+      arr_size,
+      cudaMemcpyHostToDevice,
+      stream));
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      signal_pads_dev_,
+      pointer_tables_.signal_pads.get(),
       signal_pads_.data(),
       arr_size,
       cudaMemcpyHostToDevice,
@@ -177,11 +189,11 @@ std::vector<void*> CUDASymmetricMemory::get_signal_pad_ptrs() {
 }
 
 void** CUDASymmetricMemory::get_buffer_ptrs_dev() {
-  return pai_->buffers_dev_;
+  return reinterpret_cast<void**>(pai_->pointer_tables_.buffers.get());
 }
 
 void** CUDASymmetricMemory::get_signal_pad_ptrs_dev() {
-  return pai_->signal_pads_dev_;
+  return reinterpret_cast<void**>(pai_->pointer_tables_.signal_pads.get());
 }
 
 size_t CUDASymmetricMemory::get_buffer_size() {
@@ -241,7 +253,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
         max(at::cuda::warp_size(), world_size_),
         0,
         at::cuda::getCurrentCUDAStream()>>>(
-        reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+        reinterpret_cast<uint32_t**>(pai_->pointer_tables_.signal_pads.get()),
         channel,
         rank_,
         world_size_,
@@ -277,7 +289,7 @@ void CUDASymmetricMemory::put_signal(
       at::cuda::warp_size(),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+      reinterpret_cast<uint32_t**>(pai_->pointer_tables_.signal_pads.get()),
       dst_rank,
       channel,
       rank_,
@@ -313,7 +325,7 @@ void CUDASymmetricMemory::wait_signal(
       at::cuda::warp_size(),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
+      reinterpret_cast<uint32_t**>(pai_->pointer_tables_.signal_pads.get()),
       src_rank,
       channel,
       rank_,
