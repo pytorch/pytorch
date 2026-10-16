@@ -2222,9 +2222,11 @@ static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
   out_sh.push_back(dim);
   out_sh.push_back(want);
   Tensor out = at::zeros(out_sh, proj.options());
+  // Pivot on the largest residual column norm, so columns of proj already in the span (e.g. zero ones) are skipped.
+  Tensor res = at::real(proj.diagonal(0, -2, -1)).unsqueeze(-2);
   int64_t got = 0;
   for (int64_t c = 0; c < dim && got < want; ++c) {
-    Tensor v = proj.narrow(-1, c, 1);
+    Tensor v = proj.take_along_dim(res.argmax(-1, true), -1);
     if (got > 0) {
       Tensor Qc = out.narrow(-1, 0, got);
       Tensor coeff = Qc.mH().matmul(v);
@@ -2234,6 +2236,7 @@ static Tensor mps_orthonormal_complement(const Tensor& proj, int64_t want) {
     Tensor safe = nrm.clamp_min(1e-12);
     Tensor vn = v.div(safe.to(v.dtype()));
     out.narrow(-1, got, 1).copy_(vn);
+    res = res.sub(vn.abs().square().mT());
     got += 1;
   }
   return out;
@@ -2382,7 +2385,7 @@ static void svd_kernel_mps(const Tensor& A,
       if (c10::isComplexType(proj.scalar_type())) {
         comp = mps_orthonormal_complement(proj, dim - kk);
       } else {
-        comp = std::get<0>(at::linalg_qr(proj, "reduced")).narrow(-1, 0, dim - kk);
+        comp = std::get<0>(at::linalg_qr(Q, "complete")).narrow(-1, kk, dim - kk);
       }
       M.narrow(-1, kk, dim - kk).copy_(comp);
     };

@@ -1608,6 +1608,15 @@ class TestFakeTensor(_TestFakeTensorHelpers, TestCase):
             # 0-D returns a scalar, not a list.
             self.assertNotIsInstance(torch.rand(()).tolist(), list)
 
+    def test_tolist_traces_unbind(self):
+        def f(x):
+            return x + sum(v for row in x.tolist() for v in row)
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randint(0, 9, (2, 2)))
+        targets = {n.target for n in gm.graph.nodes if n.op == "call_function"}
+        self.assertIn(torch.ops.aten.unbind.int, targets)
+        self.assertNotIn(torch.ops.aten.select.int, targets)
+
     # Propagate real tensors doesn't work with fake-on-fake
     @expectedFailurePropagateRealTensors
     def test_same_shape_env_preserved(self):

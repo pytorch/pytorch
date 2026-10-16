@@ -669,6 +669,7 @@ class SparseGradientModule(nn.Module):
 
 class CommonDistributedDataParallelTest:
     def tearDown(self):
+        super().tearDown()
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test

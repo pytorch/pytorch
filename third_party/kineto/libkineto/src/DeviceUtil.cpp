@@ -12,17 +12,16 @@
 
 namespace KINETO_NAMESPACE {
 
-bool amdGpuAvailable = false;
-bool cudaGpuAvailable = false;
+static bool amdGpuAvailable = false;
+static bool cudaGpuAvailable = false;
 
 bool isAMDGpuAvailable() {
 #ifdef HAS_ROCTRACER
   static std::once_flag once;
   std::call_once(once, [] {
     // determine AMD GPU availability on the system
-    hipError_t error;
-    int deviceCount;
-    error = hipGetDeviceCount(&deviceCount);
+    int deviceCount = 0;
+    hipError_t error = hipGetDeviceCount(&deviceCount);
     amdGpuAvailable = (error == hipSuccess && deviceCount > 0);
   });
 #endif
@@ -34,9 +33,8 @@ bool isCUDAGpuAvailable() {
   static std::once_flag once;
   std::call_once(once, [] {
     // determine CUDA GPU availability on the system
-    cudaError_t error;
-    int deviceCount;
-    error = cudaGetDeviceCount(&deviceCount);
+    int deviceCount = 0;
+    cudaError_t error = cudaGetDeviceCount(&deviceCount);
     cudaGpuAvailable = (error == cudaSuccess && deviceCount > 0);
   });
 #endif

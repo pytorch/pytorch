@@ -1,5 +1,6 @@
 #include <c10/xpu/XPUFunctions.h>
 
+#include <ATen/Context.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/DnnlExt.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>

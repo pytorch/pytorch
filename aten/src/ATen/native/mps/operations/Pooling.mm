@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/PoolingChecks.h>

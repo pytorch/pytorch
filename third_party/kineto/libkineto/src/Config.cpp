@@ -42,7 +42,7 @@ constexpr std::chrono::milliseconds Config::kControllerIntervalMsecs;
 #endif
 
 constexpr milliseconds kDefaultActivitiesProfileDurationMSecs(500);
-constexpr int64_t kDefaultActivitiesMaxGpuBufferSize(128 * 1024 * 1024);
+constexpr int64_t kDefaultActivitiesMaxGpuBufferSize(128LL * 1024 * 1024);
 constexpr seconds kDefaultActivitiesWarmupDurationSecs(5);
 constexpr seconds kMaxRequestAge(10);
 constexpr seconds kDefaultOnDemandConfigUpdateIntervalSecs(5);
@@ -433,19 +433,18 @@ bool Config::handleOption(const std::string& name, std::string& val) {
     maxEvents_ = toInt32(val);
   }
 
-  // TODO: Deprecate Client Interface
-  else if (!name.compare(kClientInterfaceEnableOpInputsCollection)) {
-    enableReportInputShapes_ = toBool(val);
-  } else if (!name.compare(kPythonStackTrace)) {
-    enableWithStack_ = toBool(val);
-  }
-
   // Profiler Config
-  else if (!name.compare(kProfileReportInputShapes)) {
+  else if (
+      !name.compare(kProfileReportInputShapes) ||
+      // TODO: Deprecate Client Interface
+      !name.compare(kClientInterfaceEnableOpInputsCollection)) {
     enableReportInputShapes_ = toBool(val);
   } else if (!name.compare(kProfileProfileMemory)) {
     enableProfileMemory_ = toBool(val);
-  } else if (!name.compare(kProfileWithStack)) {
+  } else if (
+      !name.compare(kProfileWithStack) ||
+      // TODO: Deprecate Client Interface
+      !name.compare(kPythonStackTrace)) {
     enableWithStack_ = toBool(val);
   } else if (!name.compare(kProfileWithFlops)) {
     enableWithFlops_ = toBool(val);

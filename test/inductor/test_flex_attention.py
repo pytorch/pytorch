@@ -55,6 +55,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
+    IS_SM10X,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
 )
@@ -4789,6 +4790,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
         self.run_test(_rel_bias, dtype, device, B, H, S, head_dim, B, H, S, head_dim)
+
+    @supported_platform
+    @skip_on_cpu
+    @skipUnless(IS_SM10X, "guards an sm_10x Triton miscompile")
+    @common_utils.parametrize("qk_head_dim", [64, 512])
+    def test_head_dim_512_default_configs(self, device, qk_head_dim):
+        # https://github.com/triton-lang/triton/issues/10309
+        self.run_test(_identity, torch.bfloat16, device, B, H, S, qk_head_dim, V_D=512)
 
     @supported_platform
     def test_GQA_causal_mask(self, device):

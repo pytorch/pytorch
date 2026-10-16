@@ -384,6 +384,7 @@ def call(args):
                     options={
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "TRITON",
+                        "triton.num_decompose_k_splits": 10,
                     },
                 )
         self.assertGreater(len(bench_calls), 0)  # benchmark lowerings actually ran

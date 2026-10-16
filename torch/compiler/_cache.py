@@ -340,3 +340,6 @@ class CacheArtifactManager:
         from torch._inductor.runtime.autotune_cache import (  # noqa: F401
             AutotuneCacheArtifact,
         )
+        from torch.compiler._runtime_cache import (  # noqa: F401
+            InductorTritonCacheArtifact,
+        )

@@ -329,15 +329,23 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Unlike the stock backend, plain ncclCommRegister of every private-pool
   // segment already happens unconditionally through NCCLCachingAllocatorHook,
   // so this only has to cover the segments the hook could not reach and -- for
-  // symm -- perform the collective NCCL_WIN_COLL_SYMMETRIC upgrade that the
-  // hook must not do from an allocator thread. Collective when symm is set:
-  // every rank must call it with the same pool contents, in the same order.
+  // symm -- upgrade the pool's existing segments to collective
+  // NCCL_WIN_COLL_SYMMETRIC windows. Segments the pool allocates afterwards are
+  // upgraded by register_address. Collective when symm is set: every rank must
+  // call it with the same pool contents, in the same order.
   void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
   void deregisterMemPool(at::cuda::MemPool* pool);
 
   // Caching-allocator segment registration (called by
-  // NCCLCachingAllocatorHook, potentially from allocator threads).
-  void register_address(void* addr, size_t len);
+  // NCCLCachingAllocatorHook, potentially from allocator threads). `pool` is
+  // the segment's owning pool, passed only for a fresh SEGMENT_ALLOC: if it was
+  // registered with symm=True the segment is also window-registered, which is
+  // collective, so every rank must allocate the pool's segments in the same
+  // order (the same contract as the stock backend).
+  void register_address(
+      void* addr,
+      size_t len,
+      const std::optional<c10::MempoolId_t>& pool = std::nullopt);
   // from_allocator_hook only controls diagnostics: tearing a symmetric window
   // down from the hook is the uncollective path worth warning about.
   void deregister_address(void* addr, bool from_allocator_hook = false);
@@ -431,6 +439,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
+  // another thread cannot still be inside commRevoke when the comm is aborted.
+  std::mutex revoke_mutex_;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
@@ -713,15 +724,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Caller must hold memory_registration_mutex_. Returns end() when ptr is not
   // inside a registered segment.
   RegistrationMap::iterator findContainingRegistrationLocked(const void* ptr);
+  // ensureSegmentWindow for a known registration; caller must hold
+  // memory_registration_mutex_.
+  ncclResult_t ensureSymmetricWindow(RegistrationMap::iterator it);
   // Guards memoryRegistrationHandles_ and registeredMemPools_:
   // register/deregister_address run on allocator threads while window ops look
   // segments up on the main thread.
   std::mutex memory_registration_mutex_;
-  // MemPools passed to registerMemPool, so deregisterMemPool can reject a pool
-  // that was never registered (stock does the same via its global
-  // ncclCommMemPoolMap). The symm mode is not tracked: a segment carries its
-  // own window handle, so teardown does not need to be told which mode to use.
-  std::set<c10::cuda::MempoolId_t> registeredMemPools_;
+  // MemPools passed to registerMemPool -> whether any registration asked for
+  // symm. deregisterMemPool uses it to reject a pool that was never registered
+  // (stock does the same via its global ncclCommMemPoolMap); register_address
+  // uses the symm flag to window-register segments the pool allocates later.
+  std::map<c10::cuda::MempoolId_t, bool> registeredMemPools_;
   // Caller must hold memory_registration_mutex_ and have checked that `addr`
   // is not already registered.
   void registerAddressLocked(void* addr, size_t len);

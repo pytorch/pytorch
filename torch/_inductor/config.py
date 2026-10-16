@@ -1875,6 +1875,14 @@ assume_aligned_inputs: bool = False
 # you know you only operate with 32-bit sizes.
 assume_32bit_indexing: bool = False
 
+# By default, when a dynamic size cannot be proven to fit in int32, inductor reads its
+# hint and, if the hint fits, uses 32-bit indexing and guards that the size stays in
+# range. A later input past the bound fails that guard and recompiles a 64-bit variant,
+# so a graph can end up with two variants split on a threshold no example has to
+# cross. With avoid_32bit_indexing_guards, an unprovable size gets 64-bit indexing and
+# no guard: one variant that serves every size, at the cost of 64-bit index math.
+avoid_32bit_indexing_guards: bool = False
+
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
@@ -2526,6 +2534,14 @@ class triton:
         os.environ.get(
             "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
         )
+    )
+
+    # Backends for the partial BMM nested inside a decompose-K subgraph. This
+    # is independent of max_autotune_gemm_backends, which gates the outer MM.
+    # TRITON adds the Blackwell persistent TMA partial BMM on datacenter
+    # Blackwell when enable_persistent_tma_matmul is also set.
+    decompose_k_bmm_backends = os.environ.get(
+        "TORCHINDUCTOR_DECOMPOSE_K_BMM_BACKENDS", "ATEN"
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables

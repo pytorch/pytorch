@@ -21,7 +21,12 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
-from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
+from torch._inductor.runtime.flydsl_cache import (
+    LazyFlyDSLLauncher,
+    precompile_flydsl_template,
+    run_cached_flydsl,
+    run_flydsl_template,
+)
 from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet, run_and_get_code
@@ -597,6 +602,86 @@ class TestFlyDSLTemplate(TestCase):
         cache_lock.__enter__.assert_not_called()
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
+
+    def test_lazy_template_launcher(self):
+        launchers = [object(), object(), object()]
+        factory = mock.Mock(side_effect=launchers)
+        lazy_launcher = LazyFlyDSLLauncher(factory)
+        device_0 = SimpleNamespace(type="cuda", index=0)
+        device_1 = SimpleNamespace(type="cuda", index=1)
+        with mock.patch("os.getpid", return_value=100):
+            self.assertIs(lazy_launcher.get(device_0), launchers[0])
+            self.assertIs(lazy_launcher.get(device_0), launchers[0])
+            self.assertIs(lazy_launcher.get(device_1), launchers[1])
+        with mock.patch("os.getpid", return_value=101):
+            self.assertIs(lazy_launcher.get(device_0), launchers[2])
+        self.assertEqual(factory.call_count, 3)
+
+    @parametrize("compile_only", (False, True))
+    def test_run_flydsl_template(self, compile_only):
+        jit_func = SimpleNamespace()
+        dispatch = mock.Mock()
+
+        def compiler(_jit_func, *args):
+            if not compile_only:
+                dispatch(*args)
+            return dispatch
+
+        compiler_mock = mock.Mock(side_effect=compiler)
+        converted = []
+
+        def convert(tensor):
+            converted.append(tensor)
+            return _CacheParam(str(id(tensor)))
+
+        tensor = SimpleNamespace(device=SimpleNamespace(index=0))
+        args = (tensor, object(), 0)
+        env = {
+            "COMPILE_ONLY": "1" if compile_only else "0",
+            "FLYDSL_COMPILE_ONLY": "1" if compile_only else "0",
+        }
+        with mock.patch.dict(os.environ, env):
+            run_flydsl_template(
+                jit_func,
+                args,
+                compiler=compiler_mock,
+                tensor_converter=convert,
+            )
+            run_flydsl_template(
+                jit_func,
+                args,
+                compiler=compiler_mock,
+                tensor_converter=convert,
+            )
+        self.assertEqual(compiler_mock.call_count, 2 if compile_only else 1)
+        self.assertEqual(dispatch.call_count, 0 if compile_only else 2)
+        self.assertEqual(len(converted), 4 if compile_only else 3)
+
+    def test_precompile_flydsl_template(self):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        def kernel(mat1, bias, output, stream):
+            self.assertIsInstance(mat1, FakeTensor)
+            self.assertEqual(mat1.shape, (2, 3))
+            self.assertEqual(bias.dtype, torch.float32)
+            self.assertEqual(output.stride(), (3, 1))
+            self.assertEqual(stream, 0)
+            self.assertEqual(os.environ["COMPILE_ONLY"], "1")
+            self.assertEqual(os.environ["FLYDSL_COMPILE_ONLY"], "1")
+
+        metadata = {
+            "mat1": ((2, 3), (4, 1), "bfloat16"),
+            "bias": ((3,), (1,), "float32"),
+            "output": ((2, 3), (3, 1), "bfloat16"),
+        }
+        precompile_flydsl_template(
+            kernel,
+            ("mat1", "bias"),
+            {name: values[0] for name, values in metadata.items()},
+            {name: values[1] for name, values in metadata.items()},
+            {name: values[2] for name, values in metadata.items()},
+            "gfx950",
+        )
 
     def test_compiled_cache_compiles_for_device_arch(self):
         """A cold compile targets the dispatch device's arch, not a guess."""

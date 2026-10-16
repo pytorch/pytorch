@@ -1494,11 +1494,13 @@ if(CUPTI_STUBS_GENERATED)
     PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
+# Kineto installs its own public headers to include/kineto.
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
   "${TORCH_SRC_DIR}/headeronly"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  REGEX "/csrc/profiler/kineto$" EXCLUDE)
 
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
@@ -1617,7 +1619,8 @@ if(USE_ROCM)
 
   message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND} rocshmem_VERSION=${rocshmem_VERSION}")
   if(USE_NVSHMEM)
-    if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.3.0")
+    # rocSHMEM >= 3.5.0 exports the device reduce used by Triton.
+    if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL "3.5.0")
       # rocSHMEM upstream ships device code for a subset of AMD gfx targets only.
       set(ROCSHMEM_SUPPORTED_ARCH gfx90a gfx942 gfx950 gfx1100 gfx1201)
       set(_torch_rocshmem_build_arches)
@@ -1691,7 +1694,7 @@ if(USE_ROCM)
       endif()
     elseif(rocshmem_FOUND)
       message(STATUS
-        "rocSHMEM found but skipped: requires rocSHMEM >= 3.3.0 "
+        "rocSHMEM found but skipped: requires rocSHMEM >= 3.5.0 "
         "(found '${rocshmem_VERSION}'). Building without rocSHMEM support.")
     else()
       message(WARNING "rocSHMEM not found (USE_NVSHMEM=ON). Building without rocSHMEM support.")

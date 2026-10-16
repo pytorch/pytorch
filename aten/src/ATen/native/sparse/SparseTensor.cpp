@@ -1,6 +1,7 @@
 // Basic functions on sparse tensors
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorUtils.h>

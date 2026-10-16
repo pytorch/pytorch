@@ -170,15 +170,22 @@ class InductorChoices:
         seq_len: sympy.Expr,
         dtype: torch.dtype,
         device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
+        return flex_heuristics.get_flex_attn_fwd_configs(
+            head_dim, seq_len, dtype, v_head_dim
+        )
 
     def get_flex_attention_bwd_configs(
-        self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
+        self,
+        head_dim: int,
+        dtype: torch.dtype,
+        device_type: str | None = "cuda",
+        v_head_dim: int | None = None,
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
-        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype)
+        return flex_heuristics.get_flex_attn_bwd_configs(head_dim, dtype, v_head_dim)
 
     def get_flex_decode_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"

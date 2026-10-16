@@ -81,7 +81,9 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
       std::unique_ptr<ActivityBuffers> buffers,
       int64_t endTime) override;
 
-  void finalizeMemoryTrace(const std::string&, const Config&) override;
+  void finalizeMemoryTrace(
+      const std::string& /*unused*/,
+      const Config& /*unused*/) override;
 
   std::string traceFileName() const {
     return fileName_;
@@ -228,11 +230,11 @@ class ChromeTraceLogger : public libkineto::ActivityLogger {
   std::string fileName_;
   std::string tempFileName_;
   std::ofstream traceOf_;
-  DistributedInfo distInfo_ = DistributedInfo();
+  DistributedInfo distInfo_;
   // Map of all observed process groups to their configs in trace. Key is
   // pg_name, value is pgConfig that will be used to populate pg_config in
   // distributedInfo of trace
-  std::unordered_map<std::string, pgConfig> pgMap_ = {};
+  std::unordered_map<std::string, pgConfig> pgMap_;
 
   // Offset added to stream ID for CUDA_SYNC events to place them on a
   // separate row from kernel events in the Chrome Trace JSON output.

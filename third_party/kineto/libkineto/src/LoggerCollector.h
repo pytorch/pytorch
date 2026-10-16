@@ -25,7 +25,7 @@ using namespace libkineto;
 
 class LoggerCollector : public ILoggerObserver {
  public:
-  LoggerCollector() : buckets_() {}
+  LoggerCollector() = default;
 
   void write(const std::string& message, LoggerOutputType ot = ERROR) override {
     // Skip STAGE output type which is only used by USTLoggerCollector.

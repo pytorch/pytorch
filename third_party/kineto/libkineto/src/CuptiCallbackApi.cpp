@@ -134,7 +134,7 @@ void CuptiCallbackApi::__callback_switchboard(
 
   // make a copy of the callback list so we avoid holding lock
   // in common case this should be just one func pointer copy
-  std::array<CuptiCallbackFn, MAX_CB_FNS_PER_CB> callbacks;
+  std::array<CuptiCallbackFn, MAX_CB_FNS_PER_CB> callbacks{};
   size_t num_cbs = 0;
   {
     ReaderLockGuard rl(callbackLock_);
@@ -177,7 +177,7 @@ void CuptiCallbackApi::initCallbackApi() {
 CuptiCallbackApi::CallbackList* CuptiCallbackApi::CallbackTable::lookup(
     CUpti_CallbackDomain domain,
     CuptiCallBackID cbid) {
-  size_t idx;
+  size_t idx = 0;
 
   switch (domain) {
     case CUPTI_CB_DOMAIN_RESOURCE:

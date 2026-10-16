@@ -527,7 +527,10 @@ class GroupedReduceBase(EpiOp):
     ``group``), or a callable applied once to the whole reduced fragment as a
     Float32 TensorSSA (the generated FlexGEMM finalizer). ``finalize_operands``
     names epilogue ``Scalar`` operands the callable also receives, as keyword
-    TensorSSAs broadcast to the fragment shape.
+    TensorSSAs broadcast to the fragment shape. ``fragment_reduced`` means the
+    values are already reduced and broadcast within each register fragment;
+    the op skips only that local fold and still combines subtiles, lanes, and
+    warps.
     """
 
     supports_swap_ab = False
@@ -541,6 +544,7 @@ class GroupedReduceBase(EpiOp):
         combine="add",
         finalize=None,
         finalize_operands=(),
+        fragment_reduced=False,
         output_layout: GroupedLocalReduceOutputLayout | None = None,
     ):
         super().__init__(name)
@@ -565,11 +569,16 @@ class GroupedReduceBase(EpiOp):
             raise TypeError("finalize_operands must name Scalar epilogue operands")
         if finalize_operands and not callable(finalize):
             raise TypeError("finalize_operands require a callable finalize")
+        if not isinstance(fragment_reduced, bool):
+            raise TypeError("fragment_reduced must be bool")
+        if fragment_reduced and combine is None:
+            raise ValueError("fragment_reduced requires a cross-fragment combine")
         self.axis = axis
         self.group = group
         self.combine = combine
         self.finalize: Any = finalize
         self.finalize_operands = finalize_operands
+        self.fragment_reduced = fragment_reduced
         self.output_layout = output_layout
 
     def config_key(self):
@@ -589,6 +598,7 @@ class GroupedReduceBase(EpiOp):
                         "combine",
                         "finalize",
                         "finalize_operands",
+                        "fragment_reduced",
                         "output_layout",
                     ]
                 )
@@ -608,6 +618,7 @@ class GroupedReduceBase(EpiOp):
             if self.finalize is None or isinstance(self.finalize, str)
             else _callable_config_key(self.finalize),
             self.finalize_operands,
+            self.fragment_reduced,
             None if self.output_layout is None else self.output_layout.cache_key(),
         )
 
@@ -1099,9 +1110,11 @@ class GroupedLocalReduce(GroupedReduceBase):
     The fn returns the per-element value under this op's name; the op folds each
     group physically (see the module docstring for the four geometries) and
     stores one element per ``(row, group)`` into the compressed aux tensor.
-    ``combine=None`` skips the fold: the values are expected to be group-reduced
+    ``combine=None`` skips every fold: the values are expected to be group-reduced
     and broadcast already (what FlexGEMM's generated TensorSSA does for N groups
     inside one fragment, and what :class:`GroupedLocalReduceFeed` produces).
+    ``fragment_reduced=True`` skips only the in-fragment fold because TensorSSA
+    or another producer already reduced and broadcast each fragment partial.
     """
 
     fn_port = "sink"
@@ -1227,7 +1240,7 @@ class GroupedLocalReduce(GroupedReduceBase):
         frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
         if const_expr(self.combine_fn is not None):
             if const_expr(geom.axis == 1):
-                if const_expr(geom.chunk > 1):
+                if const_expr(not self.fragment_reduced and geom.chunk > 1):
                     self._fold_fragment(frag, geom)
                 if const_expr(self._is_temporal(geom)):
                     # Only the group's last subtile completes a group value.
@@ -1235,7 +1248,10 @@ class GroupedLocalReduce(GroupedReduceBase):
                         return
                     frag = self._combine_subtiles(state, epi_coord, geom)
             else:
-                if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
+                if const_expr(
+                    not self.fragment_reduced
+                    and any(len(chunk) > 1 for chunk in geom.row_chunks)
+                ):
                     self._fold_rows(frag, geom)
                 if const_expr(min(self.group, geom.lanes_m) > 1):
                     self._butterfly_rows(frag, geom)

@@ -89,7 +89,7 @@ extern "C" void rocshmem_init() __attribute__((weak));
 
 bool is_nvshmem_available() {
   static const bool ok =
-      parse_rocshmem_version_ge(rocshmem::VERSION, 3, 3, 0);
+      parse_rocshmem_version_ge(rocshmem::VERSION, 3, 5, 0);
   return ok;
 }
 

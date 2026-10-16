@@ -4414,7 +4414,7 @@ class AOTInductorTestsTemplate:
             package = torch._inductor.aoti_compile_and_package(
                 ep, package_path=os.path.join(directory, "model.pt2")
             )
-            loaded = torch._inductor.aoti_load_package(package)
+            loaded = AOTIRunnerUtil.load_package(package)
             actual = loaded(x)
         self.assertIs(type(actual), type(expected))
         self.assertEqual(actual, expected)
@@ -7383,7 +7383,9 @@ class AOTInductorTestsTemplate:
                 "triton.enable_persistent_tma_matmul": True,
                 # Pin the choice: the workspace only exists on the TMA
                 # template, and which template wins is a timing outcome.
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                "test_configs.autotune_choice_name_regex": (
+                    "mm_persistent_tma|blackwell_ws_persistent_tma"
+                ),
             }
         ):
             _, code = run_and_get_cpp_code(

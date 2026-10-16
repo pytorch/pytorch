@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, NamedTuple
 
 
@@ -20,6 +21,24 @@ class TestId(NamedTuple):
     case_name: str
     language: str
     declared_case_name: str
+
+
+def gtest_identities(binary: str, listing: dict[str, Any]) -> dict[str, TestId]:
+    """Each test in a gtest binary's JSON test list, by its full name
+    ``<suite>.<test>``, which is also its pytest-cpp item's name.
+
+    gtest adds an instantiation's ``Prefix/`` and a typed suite's ``/<type>`` to
+    the suite, and a value-parameterized test's ``/<param>`` to the test name; the
+    declared name drops that ``/<param>``."""
+    file = f"cpp/{Path(binary).stem}"
+    identities = {}
+    for suite in listing["testsuites"]:
+        for test in suite["testsuite"]:
+            suite_name, name = suite["name"], test["name"]
+            declared = name.partition("/")[0] if "value_param" in test else name
+            test_id = TestId(file, suite_name, name, "cpp", declared)
+            identities[f"{suite_name}.{name}"] = test_id
+    return identities
 
 
 def report_path(prefix: str, report_uuid: str) -> str:

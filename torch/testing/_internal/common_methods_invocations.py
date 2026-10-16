@@ -9792,31 +9792,42 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
             torch.bfloat16,  # out_dtype
         )
     )
-    # two e4m3 rowwise
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((M, 1))
-    scale2 = make_scale((1, N))
-    samples.append(
-        SampleInput(
-            mat1,
-            mat2,
-            [scale1, ],
-            [ScalingType.RowWise, ],
-            [SwizzleType.NO_SWIZZLE, ],
-            [scale2, ],
-            [ScalingType.RowWise, ],
-            [SwizzleType.NO_SWIZZLE, ],
-            None,  # bias
-            torch.bfloat16,  # out_dtype
+    rowwise_supported = True
+    if torch.device(device).type == "cuda" and not torch.version.hip:
+        dmajor, dminor = torch.cuda.get_device_capability(torch.device(device))
+        cuda_version = _get_torch_cuda_version()
+        # Gate samples as the CUTLASS kernel in RowwiseScaledMM.cu isn't built on Windows
+        # (BUILD_ROWWISE_FP8_KERNEL is gated on !defined(_WIN32)). Mirrors the CUTLASS vs cuBLAS
+        # dispatch in _scaled_rowwise_rowwise() (aten/src/ATen/native/cuda/ScaledBlas.cpp); the
+        # scales below are 2-D so the !sizes().empty() check is omitted here.
+        is_cutlass_path = dmajor < 9 or cuda_version < (12, 9) or dmajor >= 10
+        rowwise_supported = not (is_cutlass_path and IS_WINDOWS)
+    if rowwise_supported:
+        # two e4m3 rowwise
+        mat1 = make_mat_e4m3((M, K))
+        mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+        scale1 = make_scale((M, 1))
+        scale2 = make_scale((1, N))
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.RowWise, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.RowWise, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
         )
-    )
     M, K, N = 256, 512, 768
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
 
     if torch.device(device).type == "cuda":
-        dmajor, dminor = torch.cuda.get_device_capability()
+        dmajor, dminor = torch.cuda.get_device_capability(torch.device(device))
 
         # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
         # See: https://github.com/pytorch/pytorch/issues/172227
@@ -12295,6 +12306,15 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
+               # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_strided_layout',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
@@ -12938,10 +12958,8 @@ op_db: list[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
-                                                       torch.float16: tol(atol=1e-4, rtol=1e-4),
-                                                       torch.bfloat16: tol(atol=1e-4, rtol=1e-4),
-                                                       torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
+                       # CPU (libc++) complex64 asinh is off by up to ~4e-4 relative; MPS is within a few ulp
+                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
                                     "TestConsistency", "test_output_match", device_type="mps"),
                    )),
     UnaryUfuncInfo('atan',
@@ -19124,8 +19142,6 @@ op_db: list[OpInfo] = [
                                     active_if=IS_MACOS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       DecorateInfo(toleranceOverride({torch.complex64: tol(atol=2e-5, rtol=3e-6)}),
-                                    "TestConsistency", "test_output_match", device_type="mps"),
                    )),
     UnaryUfuncInfo('square',
                    ref=np.square,
@@ -19338,9 +19354,6 @@ op_db: list[OpInfo] = [
                        DecorateInfo(
                            toleranceOverride({torch.float32: tol(atol=3e-5, rtol=1e-3)}),
                            'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
-                       DecorateInfo(
-                           toleranceOverride({torch.float32: tol(atol=5e-5, rtol=3e-4)}),
-                           'TestConsistency', 'test_output_grad_match', device_type='mps'),
                        ],
            skips=(
                # test does not work with passing lambda for op
@@ -23748,6 +23761,11 @@ python_ref_db = [
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
+            # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='xpu',
+                         dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='xpu',
+                         dtypes=(torch.complex64, torch.complex128)),
             # Tests that assume input is a tensor or sequence of tensors
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -24535,15 +24553,6 @@ python_ref_db = [
                          'test_reference_numerics_extremal',
                          dtypes=[torch.bfloat16, torch.float16, torch.float32,
                                  torch.float64]),
-            # TypeError: Trying to convert ComplexDouble to the MPS backend but it does not have support for that dtype.
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.complex32,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex32,)
-            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -24821,14 +24830,6 @@ python_ref_db = [
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
         supports_out=True,
-        skips=(
-            # MPS threshold maps NaN to `value` (uses x > threshold), but the
-            # reference keeps NaN; mismatch only on float dtypes.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -24973,17 +24974,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardsigmoid",

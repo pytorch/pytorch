@@ -3470,6 +3470,8 @@ def estimate_runtime(node: fx.Node) -> float:
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
             return True
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.device):
+            return x.meta["val"]
         else:
             return x
 

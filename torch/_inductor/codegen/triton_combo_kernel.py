@@ -161,6 +161,8 @@ def _default_custom_combo_kernel_horizontal_partition(
         1) nodes with the same number of block dimensions are grouped together.
         2) large pointwise nodes (numels greater than LARGE_NUMELS) are separated from other nodes.
         3) large reduce nodes are separated from other nodes.
+        4) without benchmark_combo_kernel or per-subkernel blocks, persistent and
+           non-persistent reduce nodes are separated from each other.
     """
 
     if len(nodes) < 1:
@@ -236,9 +238,18 @@ def _default_custom_combo_kernel_horizontal_partition(
             not_reduction = companion_nodes
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        nodes_per_ndim.extend(
-            g for g in (not_reduction, short_reduction, long_reduction) if g
-        )
+        reduction_partitions = [short_reduction, long_reduction]
+        if not (
+            config.benchmark_combo_kernel or config.combo_kernel_per_subkernel_blocks
+        ):
+            # Without benchmarking or per-subkernel blocks, sub-kernels share XBLOCK and
+            # num_warps, and persistent and looped reductions may want very different ones.
+            reduction_partitions = [
+                [n for n in group if node_info_map[n].is_persistent_reduction == p]
+                for group in reduction_partitions
+                for p in (True, False)
+            ]
+        nodes_per_ndim.extend(g for g in (not_reduction, *reduction_partitions) if g)
 
     if sum(len(p) for p in nodes_per_ndim) != len(nodes):
         raise AssertionError("partitioned node count must equal input node count")

@@ -10,7 +10,6 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
     _create_work_from_future,
-    Backend as C10DBackend,
     ErrorType,
     FakeStore,
     ReconfigureOptions,
@@ -75,7 +74,7 @@ if is_gloo_available():
     from torch._C._distributed_c10d import _ProcessGroupWrapper
 
 
-class RecordingWork(dist._Work):
+class RecordingWork(dist.Work):
     def __init__(self, result, backend):
         super().__init__()
         self.result_ = result
@@ -92,11 +91,11 @@ class RecordingWork(dist._Work):
         return self.future_
 
 
-class RecordingBackend(C10DBackend):
+class RecordingBackend(dist.BackendBase):
     def __init__(self, rank, world, name="python-backend"):
         super().__init__(rank, world)
         self._name = name
-        self._options = C10DBackend.Options(name, timeout=timedelta(seconds=5))
+        self._options = dist.BackendBase.Options(name, timeout=timedelta(seconds=5))
         self.wait_count = 0
         self.get_future_count = 0
         self.calls = []
@@ -660,6 +659,41 @@ class TestPyBackend(TestCase):
 
         self.assertGreater(backend.wait_count, 0)
 
+    def test_work_overrides(self) -> None:
+        calls = []
+
+        class OverrideWork(RecordingWork):
+            def is_completed(self):
+                return True
+
+            def synchronize(self):
+                calls.append("synchronize")
+
+            def source_rank(self):
+                return 3
+
+            def result(self):
+                return [torch.ones(1)]
+
+            def block_current_stream(self):
+                calls.append("block_current_stream")
+
+        backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+        work = group.allreduce([torch.zeros(2)])
+        self.assertFalse(work.is_completed())
+        with self.assertRaisesRegex(RuntimeError, "may only be called"):
+            work._source_rank()
+
+        backend._new_work = lambda result=None: OverrideWork(result, backend)
+        work = group.recv_anysource([torch.zeros(2)], 0)
+        self.assertTrue(work.is_completed())
+        self.assertEqual(work._source_rank(), 3)
+        self.assertEqual(work.result(), [torch.ones(1)])
+        work.synchronize()
+        work.block_current_stream()
+        self.assertEqual(calls, ["synchronize", "block_current_stream"])
+
     def test_collective_returns_none(self) -> None:
         backend = RecordingBackend(0, 1)
         backend.allreduce = lambda tensors, opts: [t.add_(2) for t in tensors] and None
@@ -739,7 +773,7 @@ class TestPyBackend(TestCase):
         self.assertTrue(backend.collectives_timing_enabled)
 
         store = dist.HashStore()
-        split_opts = C10DBackend.Options("split")
+        split_opts = dist.BackendBase.Options("split")
         split = group.split_group([0], opts=split_opts)
         self.assertEqual(
             split._get_backend(torch.device("cpu")).name(), "split-backend"
@@ -802,17 +836,17 @@ CAPABILITY_PROPERTIES = (
 )
 
 
-class BareBackend(C10DBackend):
+class BareBackend(dist.BackendBase):
     """Overrides none of the capability properties or options."""
 
     def getBackendName(self):
         return "bare-python-backend"
 
 
-class PropertyOverrideBackend(C10DBackend):
+class PropertyOverrideBackend(dist.BackendBase):
     def __init__(self, rank, world):
         super().__init__(rank, world)
-        self._options = C10DBackend.Options(
+        self._options = dist.BackendBase.Options(
             "property-override", timeout=timedelta(seconds=5)
         )
 
@@ -849,7 +883,7 @@ class PropertyOverrideBackend(C10DBackend):
         return self._options
 
 
-class ClassAttributeOverrideBackend(C10DBackend):
+class ClassAttributeOverrideBackend(dist.BackendBase):
     supports_splitting = True
     supports_coalescing = True
     _supports_time_estimate = True
@@ -857,7 +891,7 @@ class ClassAttributeOverrideBackend(C10DBackend):
     supports_reconfigure = True
     supports_window = True
     supports_abort_hooks = True
-    options = C10DBackend.Options("class-attribute", timeout=timedelta(seconds=5))
+    options = dist.BackendBase.Options("class-attribute", timeout=timedelta(seconds=5))
 
 
 class SuperDelegatingBackend(BareBackend):
@@ -984,7 +1018,7 @@ class TestPyBackendPropertyOverrides(TestCase):
         )
 
 
-class SplittableBackend(C10DBackend):
+class SplittableBackend(dist.BackendBase):
     """Minimal backend that only declares supports_splitting."""
 
     def getBackendName(self):
@@ -1026,7 +1060,8 @@ class TestPyBackendSplitGroup(TestCase):
             ):
                 dist.split_group(split_ranks=[[0]])
             split = dist.split_group(
-                split_ranks=[[0]], pg_options=C10DBackend.Options("pybackend_split")
+                split_ranks=[[0]],
+                pg_options=dist.BackendBase.Options("pybackend_split"),
             )
             backend = split._get_backend(torch.device("cpu"))
             self.assertIsInstance(backend, SplittableBackend)
@@ -1065,7 +1100,7 @@ class TestPyBackendProcessGroup(MultiProcessTestCase):
 
         pg = _get_default_group()
         backend = pg._get_backend(torch.device("cpu"))
-        self.assertIsInstance(backend, C10DBackend)
+        self.assertIsInstance(backend, dist.BackendBase)
         self.assertNotIsInstance(backend, dist.ProcessGroup)
         self.assertEqual(backend.name(), "registered-python-backend")
 

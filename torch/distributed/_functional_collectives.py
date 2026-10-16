@@ -218,9 +218,8 @@ def all_gather_single(
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
-    Note that it currently only supports gather_dim = 0.
-
     The input tensor is left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
@@ -267,8 +266,6 @@ def all_gather_single_autograd(
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
 
-    Note that it currently only supports gather_dim = 0.
-
     This function is the same as all_gather_single but will propagate the
     backwards gradient across workers.
 
@@ -293,12 +290,14 @@ def reduce_scatter_single(
 
 
     The input tensor is left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
         ProcessGroup: Will perform a collective using the ranks and tag of the PG.
         DeviceMesh: Do a SPMD collective over all ranks of the mesh
         (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
@@ -362,7 +361,7 @@ def all_gather_tensor(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_tensor` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -378,7 +377,7 @@ def all_gather_tensor_autograd(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_tensor_autograd` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single_autograd` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -397,7 +396,7 @@ def reduce_scatter_tensor(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -414,7 +413,7 @@ def reduce_scatter_tensor_autograd(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor_autograd` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_autograd` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -470,6 +469,7 @@ def all_gather_single_coalesced(
     Note that it currently only supports gather_dim = 0.
 
     The input tensor is left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
@@ -505,6 +505,7 @@ def reduce_scatter_single_coalesced(
     the final result, then scatter the results to corresponding ranks.
 
     The input tensors are left unmodified.
+
     Group can be one of:
         List[int]: ranks participating in the collective.
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
@@ -551,7 +552,7 @@ def all_gather_into_tensor_coalesced(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.all_gather_into_tensor_coalesced` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.all_gather_single_coalesced` instead.",
+            "Please use `torch.distributed.functional_collectives.all_gather_single_coalesced` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -568,7 +569,7 @@ def reduce_scatter_tensor_coalesced(
     if not torch.compiler.is_compiling():
         warnings.warn(
             "`torch.distributed._functional_collectives.reduce_scatter_tensor_coalesced` is deprecated. "
-            "Please use `torch.distributed._functional_collectives.reduce_scatter_single_coalesced` instead.",
+            "Please use `torch.distributed.functional_collectives.reduce_scatter_single_coalesced` instead.",
             FutureWarning,
             stacklevel=2,
         )
@@ -1219,7 +1220,7 @@ def permute_tensor(
         List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
         ProcessGroup: Will perform a collective using the ranks and tag of the PG.
         DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
     """
     t, rankset, group_size = _expand_group(group, tag)
     local_pg = c10d._find_or_create_pg_by_ranks_and_tag(t, rankset, group_size)
@@ -1239,11 +1240,12 @@ class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
     prior to first use of the underlying tensor.
-    Use it inside functional collective pytorch wrappers like the following:
-    def functional_collective(self, group, tag):
-        tag, rankset, group_size = _expand_group(group, tag)
-        tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
-        return _maybe_wrap_tensor(tensor)
+    Use it inside functional collective pytorch wrappers like the following::
+
+        def functional_collective(self, group, tag):
+            group_name = _resolve_group(group, tag)
+            tensor = torch.ops._c10d_functional.{collective}(self, ..., group_name)
+            return _maybe_wrap_tensor(tensor)
     """
 
     elem: torch.Tensor
@@ -1271,6 +1273,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
+        """Wait on the collective and return the result as a list."""
         return self.trigger_wait().tolist()
 
     @staticmethod
@@ -1294,6 +1297,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
+        """Wait on the collective if not yet completed and return the result tensor."""
         if not self.completed:
             out = wait_tensor(self.elem)
             self.completed = True
@@ -1302,6 +1306,7 @@ class AsyncCollectiveTensor(torch.Tensor):
             return self.elem
 
     def wait(self) -> torch.Tensor:
+        """Wait on the collective and return the result tensor."""
         return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
@@ -1348,6 +1353,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return out
 
     def numpy(self):  # type: ignore[override]
+        """Wait on the collective and return the result as a NumPy array."""
         return self.wait().numpy()
 
 
@@ -1881,7 +1887,7 @@ _ASYNC_OP_REMAP_ERROR = (
     "Dynamo can only remap synchronous torch.distributed collectives "
     "(async_op=False) to functional collectives. If your program does not need "
     "the Work handle, set async_op=False. Otherwise, rewrite the collective "
-    "with torch.distributed._functional_collectives and synchronize the "
+    "with torch.distributed.functional_collectives and synchronize the "
     "returned tensor with wait_tensor or wait_tensors. Tracking issue: "
     "https://github.com/pytorch/pytorch/issues/119890"
 )
@@ -2309,3 +2315,8 @@ class _LegacyToFunctionalCollectiveMode(torch.overrides.TorchFunctionMode):
             mapped_func, mapped_args, mapped_kwargs = remapped
             return mapped_func(*mapped_args, **mapped_kwargs)
         return func(*args, **(kwargs or {}))
+
+
+# Ensure the public module, which sets ``__module__`` on the public API, is
+# loaded: FX codegen resolves functions in graphs by their ``__module__`` path.
+import torch.distributed.functional_collectives

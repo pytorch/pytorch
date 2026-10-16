@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import _compat_pickle
 import copyreg
 import functools
 import importlib
@@ -215,6 +214,18 @@ def set_tensor_metadata(tensor, metadata):
     if not isinstance(tensor, torch.Tensor):
         raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
+
+
+def copy_backend_meta(src, dst, for_fake=False):
+    # Copy the backend-specific metadata (``c10::BackendMeta``) from ``src`` to
+    # ``dst``. When ``for_fake`` is set (copying onto a FakeTensor) the backend
+    # may drop or strip data that is not valid on a fake. See
+    # `get_tensor_metadata` / `set_tensor_metadata` above.
+    if not isinstance(src, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(src).__name__}")
+    if not isinstance(dst, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(dst).__name__}")
+    torch._C._copy_backend_meta(src, dst, for_fake)  # type: ignore[attr-defined]
 
 
 def _restore_device_fake_mode(tensor):
@@ -1159,16 +1170,6 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
-
-# Protocol 2 pickle (torch.save's default) maps builtin exceptions to the
-# Python 2 "exceptions" module via REVERSE_NAME_MAPPING; map them back so
-# allowlisted exception types resolve under their builtins.* names.
-NAME_MAPPING.update(
-    {
-        ("exceptions", name): ("builtins", name)
-        for name in _compat_pickle.PYTHON2_EXCEPTIONS
-    }
-)
 
 
 def _chunk_or_narrow_cat(
