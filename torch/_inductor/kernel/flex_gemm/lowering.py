@@ -343,9 +343,9 @@ def require_tma_loadable_tile_captures(
     out = []
     for arg in epilogue_args:
         alignment = max(16 // arg.get_dtype().itemsize, 1)
-        if statically_known_shape_equal(
-            arg.get_size(), output_size
-        ) and not loadable(arg, alignment):
+        if statically_known_shape_equal(arg.get_size(), output_size) and not loadable(
+            arg, alignment
+        ):
             *outer, n = arg.get_size()
             padded = [*outer, ceildiv(n, alignment) * alignment]
             arg = cast(
