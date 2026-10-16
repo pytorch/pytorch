@@ -696,47 +696,52 @@ def _build_multigraph_forward():
     entry = None
     if not any(_frame["is_entry"] for _frame in frames):
         raise _PrecompileError("precompile: artifact has no entry frame")
-    # Checked over every frame before anything is seeded, so a refusal leaves
+    # The modules _make_dispatcher opens a scope for.
+    opened = {
+        _frame["python_module"]
+        for _frame in frames
+        if _frame["variants"] or (_frame["trivial"] and _frame["resume_names"])
+    }
+    # A continuation is reached by LOAD_GLOBAL from the frame ahead of it: in
+    # the module it was compiled in, except under config.nested_graph_breaks,
+    # where a continuation of an inlined frame runs with the inlined function's
+    # globals but is loaded from the root frame's (``bound_in``). A name whose
+    # module no served frame opens has no frame left to load it, so it binds
+    # nothing.
+    bindings = [
+        (i, _name, module)
+        for i, _frame in enumerate(frames)
+        for _name in _frame["resume_names"]
+        if (module := _frame["bound_in"].get(_name, _frame["python_module"])) in opened
+    ]
+    # Checked over every binding before anything is seeded, so a refusal leaves
     # the module as it was: a resume name is rebound only over this artifact's
     # own dispatcher (a rebuild), never over another artifact's, a live
     # compile's or a user's binding, whose LOAD_GLOBAL it would repoint.
-    opened = set()
-    for _frame in frames:
-        module = _frame["python_module"]
-        # The frames _make_dispatcher opens a scope for.
-        if _frame["variants"] or (_frame["trivial"] and _frame["resume_names"]):
-            opened.add(module)
-        for _name in _frame["resume_names"] if module in opened else ():
-            existing = vars(_import(module)).get(_name)
-            other = getattr(existing, "__precompile_artifact__", None)
-            if existing is not None and other != tag:
-                what = f"precompile: {_name!r} in module {module!r}"
-                raise _PrecompileError(
-                    f"{what} is bound by artifact {other} and this artifact ({tag}) mints "
-                    f"the same resume name: only one standalone artifact per captured "
-                    f"module can serve continuations in a process."
-                    if other
-                    else f"{what} is a resume name this artifact ({tag}) mints and this "
-                    f"process already holds it (a live compile of the same function, or a "
-                    f"user binding); load the artifact in a fresh process."
-                )
+    for _, _name, module in bindings:
+        existing = vars(_import(module)).get(_name)
+        other = getattr(existing, "__precompile_artifact__", None)
+        if existing is not None and other != tag:
+            what = f"precompile: {_name!r} in module {module!r}"
+            raise _PrecompileError(
+                f"{what} is bound by artifact {other} and this artifact ({tag}) mints "
+                f"the same resume name: only one standalone artifact per captured "
+                f"module can serve continuations in a process."
+                if other
+                else f"{what} is a resume name this artifact ({tag}) mints and this "
+                f"process already holds it (a live compile of the same function, or a "
+                f"user binding); load the artifact in a fresh process."
+            )
+    dispatchers = []
     for _frame in frames:
         dispatcher = _make_dispatcher(_frame)
         if _frame["is_entry"]:
             entry = dispatcher
         else:
             dispatcher.__precompile_artifact__ = tag
-        # A continuation is reached by LOAD_GLOBAL from the frame ahead of it,
-        # in the module both were compiled in: Dynamo records a continuation
-        # under its parent's module, except under config.nested_graph_breaks
-        # (default False), where an inlined frame's continuation is recorded
-        # under the inlined function's module while the root frame's bytecode
-        # does the LOAD_GLOBAL. A dead record whose module no served frame
-        # opened has no frame left to name it, so it binds nothing.
-        scope = scopes.get(_frame["python_module"])
-        if scope is not None:
-            for _name in _frame["resume_names"]:
-                _seed(scope, _name, dispatcher)
+        dispatchers.append(dispatcher)
+    for i, _name, module in bindings:
+        _seed(scopes[module], _name, dispatchers[i])
     return entry
 
 
