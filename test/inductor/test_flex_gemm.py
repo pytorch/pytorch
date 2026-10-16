@@ -1246,9 +1246,21 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             lanes = [acc.unsqueeze(2), acc.sigmoid().unsqueeze(-1)]
             return torch.cat(lanes, dim=-1).reshape(4, 32)
 
+        def chunked_lanes(a, b):
+            acc = torch.mm(a, b)
+            return (torch.cat([acc, acc * 2], dim=1) * 0.5).to(torch.bfloat16)
+
         def three_lanes(a, b):
             acc = torch.mm(a, b)
             return torch.stack([acc, acc, acc], dim=-1).view(4, 48)
+
+        def chunked_three_lanes(a, b):
+            acc = torch.mm(a, b)
+            return torch.cat([acc, acc, acc], dim=-1)
+
+        def chunked_rows(a, b):
+            acc = torch.mm(a, b)
+            return torch.cat([acc, acc * 2], dim=0)
 
         def packed_aux(a, b):
             acc = torch.mm(a, b)
@@ -1262,7 +1274,10 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         for body, error in (
             (stacked_lanes_with_aux, None),
             (unsqueezed_lanes, None),
+            (chunked_lanes, None),
             (three_lanes, "output shape"),
+            (chunked_three_lanes, "output shape"),
+            (chunked_rows, "output shape"),
             (packed_aux, "before the lanes are packed"),
             (expanded_aux, "GEMM-shaped auxiliaries"),
         ):
@@ -1275,7 +1290,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     continue
                 analysis = analyze_flex_gemm_epilogue(graph_module, gemm)
                 self.assertEqual(
-                    analysis.outputs.output_transform, FlexGemmOutputExpansion()
+                    analysis.outputs.output_transform,
+                    FlexGemmOutputExpansion(chunked=body is chunked_lanes),
                 )
                 self.assertEqual(analysis.output_expansion.lanes[0], gemm)
                 self.assertIn("expansion", format_flex_gemm_analysis(analysis))
@@ -1732,7 +1748,7 @@ class TestFlexGemmAnalysis(TestCase):
             )
             self.assertTrue(inductor_config.max_autotune)
             self.assertEqual(inductor_config.max_autotune_gemm_backends, "NVGEMM")
-            # Without autotune, NVGEMM keeps only its top heuristic config.
+            # This limits each heuristic family, not the total candidate count.
             self.assertEqual(
                 inductor_config.nvgemm_max_profiling_configs, None if autotune else 1
             )
@@ -4171,11 +4187,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         torch._dynamo.reset()
 
-        # Chunked lanes interleave B, so the physical accumulator is not acc.
+        # Chunked lanes only save the unchanged accumulator auxiliary.
         def chunked_auxiliary(a, b):
             def epilogue(acc):
                 first, second = acc.chunk(2, dim=-1)
-                return first - second, acc
+                return first - second, acc + 1
 
             return flex_gemm(
                 torch.mm,
@@ -7544,7 +7560,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
-    @parametrize("layout", ("contiguous", "lane_view"))
+    @parametrize("layout", ("contiguous", "lane_view", "computed", "offset"))
     def test_mm_unaligned_n_bf16_tile_capture_matches_reference(self, layout):
         # N=12 is legal for a K-major B and fp32 output, but a bf16 [M, 12] tile
         # has a 24-byte row stride, so QuACK's TMA load needs a padded copy.
@@ -7555,22 +7571,33 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         cap = h.view(m, n, 2)[..., 0]
         if layout == "contiguous":
             cap = h[:, :n].contiguous()
+        elif layout == "offset":
+            cap = torch.randn(m, 16, device="cuda", dtype=torch.bfloat16)
 
-        def fn(a, b):
+        def capture(cap):
+            if layout == "computed":
+                return cap * 2
+            if layout == "offset":
+                return cap[:, 1 : n + 1]
+            return cap
+
+        def fn(a, b, cap):
+            tile = capture(cap)
             return flex_gemm(
                 torch.mm,
                 (a, b),
-                lambda acc: acc.float() * cap,
+                lambda acc: acc.float() * tile,
                 kernel_options={"backend": "QUACK"},
             )
 
         actual, (code,) = run_and_get_code(
-            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, cap
         )
+        tile = capture(cap)
 
         self.assertIn("flex_gemm_epilogue(", code)
         self.assertMatchesLowPrecisionEager(
-            actual, (a @ b).float() * cap, (a.double() @ b.double()) * cap.double(), k
+            actual, (a @ b).float() * tile, (a.double() @ b.double()) * tile.double(), k
         )
 
     @skipIfNoCuteDSL
@@ -9099,6 +9126,44 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         self.assertGroupedMmQuackCode(code)
         self.assertGroupedMmMatches(actual, x, w_t, offs, F.silu)
 
+    def test_grouped_mm_chunked_glu_saves_pre_activation(self, device):
+        x, w_t, offs = self.makeGroupedMm((201, 0, 129, 182), device, total_m=640)
+        w_t = w_t.mT.contiguous().mT
+
+        def epilogue_fn(acc):
+            gate, up = acc.float().chunk(2, dim=-1)
+            return (F.silu(gate) * up).to(acc.dtype), acc
+
+        def fn(x, w_t, offs):
+            return flex_gemm(
+                F.grouped_mm,
+                (x, w_t),
+                epilogue_fn,
+                gemm_kwargs={"offs": offs},
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, fullgraph=True), x, w_t, offs
+        )
+        self.assertGroupedMmQuackCode(code)
+        self.assertIsNone(re.search(r"'\*(bf16|fp16|fp32)'", code))
+        eager = epilogue_fn(F.grouped_mm(x, w_t, offs=offs))
+        reference = self.groupedReference(x, w_t, offs, epilogue_fn)
+        valid = offs[-1].item()
+        for result, low_precision, high_precision in zip(
+            actual, eager, reference, strict=True
+        ):
+            self.assertEqual(result.shape, low_precision.shape)
+            self.assertEqual(result.dtype, low_precision.dtype)
+            self.assertTrue(result[:valid].isfinite().all())
+            self.assertMatchesLowPrecisionEager(
+                result[:valid], low_precision[:valid], high_precision, self.K
+            )
+            self.assertWorstElementMatchesLowPrecisionEager(
+                result[:valid], low_precision[:valid], high_precision, self.K
+            )
+
     @parametrize("layout", ("chunked", "interleaved"))
     def test_grouped_mm_strided_tile_captures_match_reference(self, device, layout):
         # Both lanes of a saved [M, 2N] tensor: chunked views have a unit inner
@@ -9128,13 +9193,20 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         )
 
         self.assertGroupedMmQuackCode(code)
+        self.assertEqual(
+            re.search(r"'\*(bf16|fp16|fp32)'", code) is not None,
+            layout == "interleaved",
+        )
         self.assertGroupedMmMatches(actual, x, w_t, offs, epilogue_fn)
 
     @parametrize("layout", ("chunked", "interleaved"))
-    def test_grouped_mm_vjp_epilogue_writes_interleaved_grads(self, device, layout):
+    @parametrize("chunked_output", (False, True))
+    def test_grouped_mm_vjp_epilogue_writes_packed_grads(
+        self, device, layout, chunked_output
+    ):
         # MoE GLU backward in one kernel: g = dy @ w2[e], then the epilogue applies
         # torch.func.vjp of the GLU to tiles of the saved h and writes the
-        # interleaved dh[..., 2i + j]. Chunked gate/up views of h load in place,
+        # packed dh in either layout. Chunked gate/up views of h load in place,
         # and an interleaved h split inside the epilogue loads both lanes in place.
         x, w_t, offs = self.makeGroupedMm((201, 0, 129, 182), device)
         h = torch.randn(x.shape[0], 2 * self.N, device=device, dtype=torch.bfloat16)
@@ -9152,8 +9224,12 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
             )
             _, glu_vjp = torch.func.vjp(glu, gate.float(), up.float())
             d_gate, d_up = glu_vjp(acc.float())
-            dh = torch.stack([d_gate, d_up], dim=-1)
-            return dh.view(acc.shape[0], 2 * acc.shape[1]).to(acc.dtype)
+            dh = (
+                torch.cat([d_gate, d_up], dim=-1)
+                if chunked_output
+                else torch.stack([d_gate, d_up], dim=-1).view(acc.shape[0], -1)
+            )
+            return dh.to(acc.dtype)
 
         def fn(x, w_t, offs):
             return flex_gemm(
@@ -9171,7 +9247,7 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
         self.assertGroupedMmQuackCode(code)
         kinds = "('tile', 'tile')" if layout == "chunked" else "('interleaved',)"
         FileCheck().check(f"epilogue_arg_kinds={kinds}").check(
-            "output_transform=FlexGemmOutputExpansion()"
+            f"output_transform=FlexGemmOutputExpansion(chunked={chunked_output})"
         ).run(code)
         # Only the GEMM kernel touches h and dh: a capture copy or a separate
         # interleaving pass would add a Triton kernel over floating-point data.
@@ -9449,7 +9525,7 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
         actual, (code,) = self.compileMm(epilogue_fn, a, b)
 
         FileCheck().check("epilogue_arg_kinds=('interleaved',)").check(
-            "output_transform=FlexGemmOutputExpansion()"
+            "output_transform=FlexGemmOutputExpansion(chunked=False)"
         ).run(code)
         eager = epilogue_fn(a @ b)
         expected = epilogue_fn(a.double() @ b.double())
@@ -9489,8 +9565,83 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
             epilogue_fn, *args, gemm_op=op, gemm_kwargs=kwargs
         )
 
-        FileCheck().check("output_transform=FlexGemmOutputExpansion()").run(code)
+        FileCheck().check(
+            "output_transform=FlexGemmOutputExpansion(chunked=False)"
+        ).run(code)
         torch.testing.assert_close(actual, epilogue_fn(op(*args, **kwargs)))
+
+    @parametrize(
+        "out_dtype,swap_ab,valid_widths",
+        (
+            (torch.bfloat16, False, (136, 144)),
+            (torch.bfloat16, True, (136, 144)),
+            (torch.float32, False, (132, 136, 144)),
+            (torch.bool, False, (144,)),
+        ),
+    )
+    def test_mm_chunked_output(self, device, out_dtype, swap_ab, valid_widths):
+        def epilogue_fn(acc):
+            if out_dtype is torch.bool:
+                packed = torch.cat([acc > 0, acc <= 0], dim=-1)
+            else:
+                packed = torch.cat([acc.float(), acc.float() * 2], dim=-1)
+                packed = (packed * 0.5 + 1).to(out_dtype)
+            return packed, acc.relu().float()
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": {"swap_ab": swap_ab}},
+            )
+
+        a = self.makeTensor(self.M, self.K, device=device)
+        # Change N after compilation; column-major B does not itself require aligned N.
+        for n in (144, 136, 132):
+            b = self.makeTensor(n, self.K, device=device).t()
+            if n not in valid_widths:
+                with self.assertRaisesRegex(InductorError, "16-byte aligned halves"):
+                    fn(a, b)
+                continue
+            if n == 144:
+                actual, (code,) = run_and_get_code(fn, a, b)
+                self.assertIn("flex_gemm_epilogue(", code)
+                self.assertNotIn("extern_kernels.mm", code)
+                self.assertIsNone(re.search(r"'\*(bf16|fp16|fp32)'", code))
+            else:
+                actual = fn(a, b)
+            eager = epilogue_fn(a @ b)
+            reference = epilogue_fn(a.double() @ b.double())
+            for result, low_precision, high_precision in zip(
+                actual, eager, reference, strict=True
+            ):
+                self.assertEqual(result.shape, low_precision.shape)
+                self.assertEqual(result.dtype, low_precision.dtype)
+                self.assertTrue(result.isfinite().all())
+                if result.dtype is torch.bool:
+                    self.assertEqual(result, low_precision)
+                else:
+                    self.assertMatchesLowPrecisionEager(
+                        result, low_precision, high_precision, self.K
+                    )
+                    self.assertWorstElementMatchesLowPrecisionEager(
+                        result, low_precision, high_precision, self.K
+                    )
+
+    def test_mm_chunked_accumulator_aux_alignment(self, device):
+        a = self.makeTensor(self.M, self.K, device=device)
+        b = self.makeTensor(264, self.K, device=device).t()
+
+        def epilogue_fn(acc):
+            gate, up = acc.float().chunk(2, dim=-1)
+            return (F.silu(gate) * up).to(acc.dtype), acc
+
+        with self.assertRaisesRegex(
+            InductorError, "auxiliary requires 16-byte aligned halves"
+        ):
+            self.compileMm(epilogue_fn, a, b)
 
     def test_mm_interleaved_capture_negative_select_index(self, device):
         a = self.makeTensor(self.M, self.K, device=device)
@@ -9561,6 +9712,7 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
             ),
             ("add_neg_inf", lambda acc, full: acc + full(float("-inf"))),
             ("minimum_finite", lambda acc, full: torch.minimum(acc, full(0.01))),
+            ("clamp_scalar", lambda acc, full: acc.clamp(max=0.01)),
             # Both branches are constants: neither may inherit the Boolean dtype.
             (
                 "where_two_constants",
