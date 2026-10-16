@@ -5923,6 +5923,90 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_super_stored_in_local(self):
+        class A:
+            def tag(self):
+                return 1
+
+        class B(A):
+            def tag(self):
+                parent = super()
+                return parent.tag() * 10 + 2
+
+        class C(B):
+            def tag(self):
+                parent = super()
+                return parent.tag() * 10 + 3
+
+        c = C()
+
+        def fn(x):
+            return x + c.tag()
+
+        x = torch.ones(4)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, x + 123)
+
+    def test_super_passed_to_getattr(self):
+        class Parent:
+            def scale(self, x):
+                return x * 2
+
+        class Child(Parent):
+            def scale(self, x):
+                return getattr(super(), "scale")(x) + 1
+
+        child = Child()
+
+        def fn(x):
+            return child.scale(x)
+
+        x = torch.ones(4)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, x * 2 + 1)
+
+    def test_super_stored_in_local_after_graph_break(self):
+        class Parent:
+            def value(self):
+                return 2
+
+        class Child(Parent):
+            def value(self):
+                torch._dynamo.graph_break()
+                parent = super()
+                return parent.value() + 1
+
+        child = Child()
+
+        def fn(x):
+            return x * child.value()
+
+        x = torch.ones(4)
+        res = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(res, x * 3)
+
+    def test_super_without_class_cell_raises(self):
+        # Compiled outside any class body, so the function has no __class__ cell.
+        namespace = {}
+        exec("def no_class_cell(self):\n    return super()\n", namespace)
+        no_class_cell = namespace["no_class_cell"]
+
+        class A:
+            method = no_class_cell
+
+        obj = A()
+
+        def fn(x):
+            obj.method()
+            return x + 1
+
+        x = torch.ones(4)
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
+            fn(x)
+
+        with self.assertRaisesRegex(RuntimeError, r"super\(\)"):
+            torch.compile(fn, backend="eager")(x)
+
     def test_vc_bumped_in_inference_graph(self):
         @torch.compile(backend="eager")
         def f(x):
