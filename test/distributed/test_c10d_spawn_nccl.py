@@ -32,7 +32,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_broadcast(self, device):
+        def test_broadcast(self):
             self._test_broadcast("nccl")
 
         @requires_nccl()
@@ -40,7 +40,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_reduce(self, device):
+        def test_reduce(self):
             self._test_reduce("nccl")
 
         @requires_nccl()
@@ -48,7 +48,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_allreduce(self, device):
+        def test_allreduce(self):
             self._test_allreduce("nccl")
 
         @requires_nccl()
@@ -56,7 +56,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_all_gather(self, device):
+        def test_all_gather(self):
             self._test_all_gather("nccl")
 
         @requires_nccl()
@@ -64,7 +64,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_all_to_all(self, device):
+        def test_all_to_all(self):
             self._test_all_to_all("nccl")
 
         @requires_nccl()
@@ -72,7 +72,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_all_to_all_single(self, device):
+        def test_all_to_all_single(self):
             self._test_all_to_all_single("nccl")
 
         # Test Ops only supported in NCCL.
@@ -81,14 +81,14 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_reduce_scatter(self, device):
+        def test_reduce_scatter(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(torch.device(device).type, self.rank)
+            device = torch.device(f"cuda:{self.rank}")
             x0 = torch.ones(5, 5, device=device) + self.rank
             x1 = torch.ones(5, 5, device=device) + self.rank + 1
             x0.requires_grad = True
@@ -113,14 +113,14 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_reduce_scatter_non_contiguous(self, device):
+        def test_reduce_scatter_non_contiguous(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(torch.device(device).type, self.rank)
+            device = torch.device(f"cuda:{self.rank}")
 
             class NonContiguousGrad(torch.autograd.Function):
                 @staticmethod
@@ -144,14 +144,14 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_all_reduce_non_contiguous(self, device):
+        def test_all_reduce_non_contiguous(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
             # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
-            device = torch.device(torch.device(device).type, self.rank)
+            device = torch.device(f"cuda:{self.rank}")
 
             class NonContiguousGrad(torch.autograd.Function):
                 @staticmethod
@@ -172,13 +172,13 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
-        def test_all_gather_base(self, device):
+        def test_all_gather_base(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
             )
 
-            device = torch.device(torch.device(device).type, self.rank)
+            device = torch.device(f"cuda:{self.rank}")
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
 
