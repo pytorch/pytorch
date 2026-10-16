@@ -601,6 +601,42 @@ def data_to_nvfp4_scale(x, block_size=16):
     return scale.to(torch.float8_e4m3fn).reshape(orig_shape[0], -1)
 
 
+def data_to_nvfp4_with_global_scale(x, block_size):
+    # Simple (slow) reference implementation of NVFP4 two-level-scaling
+    orig_shape = x.shape
+    x = x.reshape(-1, block_size)
+
+    # Per-block-amax
+    block_max = torch.amax(torch.abs(x), 1) + 1e-12
+
+    # Per-tensor max
+    global_max = x.abs().max()
+
+    # Constants
+    # Global encoding scale for block-scales
+    S_enc = 6.0 * torch.finfo(torch.float8_e4m3fn).max / global_max
+    S_dec = 1. / S_enc
+
+    # Per-block decode-scale
+    S_dec_b = block_max / 6.0
+
+    # Stored scaled-e4m3 per-block decode scales
+    S_dec_b_e4m3 = (S_dec_b * S_enc).to(torch.float8_e4m3fn)
+
+    # Actual per-block encoding scale
+    S_enc_b = S_enc / S_dec_b_e4m3.float()
+
+    # scale & reshape input, reshape scales
+    x = (S_enc_b.unsqueeze(1) * x).bfloat16().reshape(orig_shape)
+    S_dec_b_e4m3 = S_dec_b_e4m3.reshape(orig_shape[0], -1)
+
+    # cast input
+    x_fp4 = _bfloat16_to_float4_e2m1fn_x2(x)
+
+    # fp4x2, fp8_e4m3, float respectively
+    return x_fp4, S_dec_b_e4m3, S_dec.float()
+
+
 # This function is extracted from https://github.com/pytorch/ao/blob/v0.12.0/torchao/prototype/mx_formats/mx_tensor.py#L142
 def to_mxfp(
     data_hp: torch.Tensor,

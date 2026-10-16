@@ -5,6 +5,7 @@ from . import (
     norm,
     polar,
     reductions,
+    scaled_grouped_mm,
     scatter_add,
     topk,
 )
