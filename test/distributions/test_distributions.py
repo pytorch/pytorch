@@ -1674,6 +1674,18 @@ class TestDistributions(DistributionsTestCase):
             rtol=0,
         )
 
+    def test_geometric_entropy_small_probs(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/200014:
+        # entropy() underflowed to exactly 0.0 for small probs in float32
+        # because binary_cross_entropy_with_logits(logits, probs) / probs
+        # loses the numerator; the xlog1py/xlogy form stays accurate.
+        # 19.4207 is scipy.stats.geom(1e-8, loc=-1).entropy().
+        for dtype in (torch.float32, torch.float64):
+            actual = Geometric(torch.tensor(1e-8, dtype=dtype)).entropy()
+            self.assertEqual(actual.item(), 19.4207, atol=1e-3, rtol=0)
+        # probs == 1 is degenerate with exactly 0 entropy (not nan).
+        self.assertEqual(Geometric(torch.tensor(1.0)).entropy().item(), 0.0)
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_geometric_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]

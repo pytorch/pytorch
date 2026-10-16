@@ -10,7 +10,6 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.types import _Number, Number
 
 
@@ -138,7 +137,12 @@ class Geometric(Distribution):
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):
-        return (
-            binary_cross_entropy_with_logits(self.logits, self.probs, reduction="none")
-            / self.probs
-        )
+        # Compute via xlog1py/xlogy for numerical stability (see #200014):
+        # the binary_cross_entropy_with_logits(logits, probs) / probs form
+        # underflows to 0 for small probs in float32, while
+        # (1 - p) * log1p(-p) stays accurate via log1p. xlog1py(0, -1) == 0
+        # also handles probs == 1 without producing nan.
+        return -(
+            torch.special.xlog1py(1 - self.probs, -self.probs)
+            + torch.special.xlogy(self.probs, self.probs)
+        ) / self.probs
