@@ -1696,16 +1696,6 @@ class Reduction(Loops):
         (_, reduction_vars), ranges1 = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
-        # Size-1 reduction dims appear in reduction_vars as the constant 0 (stride
-        # 0), so find the innermost reduction var that actually varies.
-        innermost = next(
-            (
-                k
-                for k in reversed(range(len(reduction_vars)))
-                if not isinstance(reduction_vars[k], sympy.Number)
-            ),
-            None,
-        )
         num_outer = 0
         num_inner = 0
         for i in indices:
@@ -1713,11 +1703,11 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            # A read that is constant along the innermost reduction var (e.g. a
-            # per-group mask broadcast within each group) hits the same address on
-            # consecutive reduction steps: it is neither contiguous nor strided
-            # along the reduction, so it abstains instead of voting OUTER.
-            if innermost is not None and strides[innermost] == 0:
+            # A read that is constant across the whole reduction (e.g. a per-group
+            # mask broadcast within each group) hits the same address on every
+            # reduction step: it is neither contiguous nor strided along the
+            # reduction, so it abstains instead of voting OUTER.
+            if all(s == 0 for s in strides):
                 continue
             # A 0 stride does not make a reduction contiguous.
             # This can happen when the reduction ranges contains a 1.
