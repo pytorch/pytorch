@@ -23032,16 +23032,44 @@ if RUN_GPU:
         def test_row_broadcast_pointwise_uses_2d_tiling(self):
             # Per-row operands of a pointwise kernel over long rows should be
             # loaded once per block row ([rows, cols] tiling) rather than
-            # gathered per element from a flattened index.
-            def fn(x, label, col):
-                return torch.where(col == label, x, 0)
+            # gathered per element from a flattened index, when they are at least
+            # as many as the inputs streamed along the row.
+            def normalize(x, mean, rstd):
+                return ((x.float() - mean) * rstd).to(x.dtype)
 
             x = torch.randn(64, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
-            label = torch.randint(0, 4096, (64, 1), device=GPU_TYPE)
-            col = torch.arange(4096, device=GPU_TYPE)
-            result, code = run_and_get_code(torch.compile(fn), x, label, col)
-            self.assertEqual(result, fn(x, label, col))
+            mean = torch.randn(64, 1, device=GPU_TYPE)
+            rstd = torch.rand(64, 1, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(normalize), x, mean, rstd)
+            self.assertEqual(result, normalize(x, mean, rstd))
             self.assertIn("ynumel", " ".join(code))
+
+            # Tiling is disabled with max_tiles=1.
+            torch._dynamo.reset()
+            with config.patch({"triton.max_tiles": 1}):
+                _, code = run_and_get_code(torch.compile(normalize), x, mean, rstd)
+            self.assertNotIn("ynumel", " ".join(code))
+
+            # A per-row read of a buffer that is also streamed does not count, so
+            # x * x[:, :1] keeps the flat 1D kernel.
+            def scale_by_first(x):
+                return x * x[:, :1]
+
+            torch._dynamo.reset()
+            result, code = run_and_get_code(torch.compile(scale_by_first), x)
+            self.assertEqual(result, scale_by_first(x))
+            self.assertNotIn("ynumel", " ".join(code))
+
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A size-1 innermost reduced dim is not "constant along the
+            # reduction": the contiguous read must still vote INNER (one kernel).
+            def fn(x):
+                return x.sum((1, 2))
+
+            x = torch.randn(64, 4096, 1, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(result, fn(x))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
         def test_small_strided_read_keeps_outer_reduction(self):
             # A transposed (strided) read votes OUTER even when it is a small
@@ -23071,6 +23099,10 @@ if RUN_GPU:
             self.assertEqual(result, fn(x, mask))
             self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
+        @unittest.skipIf(
+            GPU_TYPE != "cuda" or torch.version.hip is not None,
+            "the small-k topk decomposition is CUDA-only",
+        )
         def test_topk_small_k(self):
             def reference(x, k, dim):
                 # Stable descending order; as in ATen, NaN ranks highest and
@@ -23112,11 +23144,16 @@ if RUN_GPU:
                 (values, indices), code = run_and_get_code(
                     torch.compile(lambda t: torch.topk(t, k, dim=dim)), x
                 )
-                # Only the last dim decomposes; other dims keep the ATen fallback.
+                # Only the last dim decomposes; other dims keep the ATen fallback,
+                # called as aten.topk.default (Python wrapper) or
+                # aoti_torch_*_topk (C++ wrapper).
+                fallback = re.search(
+                    r"aten\.topk\.default\(|aoti_torch_\w+_topk\(", " ".join(code)
+                )
                 if dim in (-1, x.dim() - 1):
-                    self.assertNotIn("aten.topk.default(", " ".join(code))
+                    self.assertIsNone(fallback)
                 else:
-                    self.assertIn("aten.topk.default(", " ".join(code))
+                    self.assertIsNotNone(fallback)
                 ref_values, ref_indices = reference(x, k, dim)
                 self.assertEqual(indices, ref_indices)
                 self.assertTrue(
