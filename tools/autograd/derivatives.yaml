@@ -1401,8 +1401,16 @@
 - name: _philox_uniform.Tensor(Tensor self, Tensor key, Tensor low, Tensor high) -> Tensor
   self: zeros_like(grad)
   key: non_differentiable
-  low: at::sum_to(grad * (1 - at::empty_like(grad)._philox_uniform_(key)), low.sym_sizes())
-  high: at::sum_to(grad * at::empty_like(grad)._philox_uniform_(key), high.sym_sizes())
+  low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
+  result: (low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key)).to(result.scalar_type())
+
+# Separate in-place entry: a forward formula derived from the out-of-place one
+# would never read self_t.
+- name: _philox_uniform_.Tensor(Tensor(a!) self, Tensor key, Tensor low, Tensor high) -> Tensor(a!)
+  self: zeros_like(grad)
+  key: non_differentiable
+  low, high: philox_uniform_bounds_backward(grad, key, low, high, grad_input_mask)
+  result: self_t.copy_(low_t + (high_t - low_t) * at::empty_like(result)._philox_uniform_(key))
 
 - name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   input, tau: householder_product_backward(grad, result, input, tau)
