@@ -335,6 +335,12 @@ device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    """Device-specific snippets of generated Python and C++ code.
+
+    Each backend registers a subclass with register_device_op_overrides().
+    Unsupported methods raise NotImplementedError.
+    """
+
     def uses_gpu_cpp_wrapper(self) -> bool:
         """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
 
@@ -358,6 +364,45 @@ class DeviceOpOverrides:
 
     def device_guard(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
+
+    def device_exchange_functions(self) -> tuple[str, str] | None:
+        """Return the qualified names of an (exchange, restore) function pair, or
+        None.
+
+        exchange(idx) makes idx the current device and returns the previous one.
+        It must also do set_device()'s work. restore(prev_idx) switches back.
+        Generated Python code calls them in a try/finally instead of entering
+        device_guard() and calling set_device(), which avoids a Python context
+        manager on every call. None keeps device_guard() and set_device().
+        """
+        return None
+
+    @contextlib.contextmanager
+    def python_device_guard(
+        self, code: IndentedBuffer, device_idx: DeviceIdx
+    ) -> Iterator[None]:
+        """Context manager that writes a device guard into code: whatever is
+        written inside it runs on device_idx.
+
+        For standalone generated code, such as kernel benchmark harnesses. The
+        wrapper uses Enter/ExitDeviceContextManagerLine instead, which bind the
+        exchange functions to module globals once.
+        """
+        exchange_fns = self.device_exchange_functions()
+        if exchange_fns is None:
+            code.writeline(f"with {self.device_guard(device_idx)}:")
+            with code.indent():
+                code.writeline(self.set_device(device_idx))
+                yield
+            return
+        exchange, restore = exchange_fns
+        code.writeline(f"_prev_device = {exchange}({device_idx})")
+        code.writeline("try:")
+        with code.indent():
+            yield
+        code.writeline("finally:")
+        with code.indent():
+            code.writeline(f"{restore}(_prev_device)")
 
     def current_device_idx_expr(self) -> str:
         # Runtime expression evaluating to the current device index. Used under
