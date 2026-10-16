@@ -232,6 +232,24 @@ def filter_selected_test_configs(
     return filtered_test_matrix
 
 
+def apply_skip_on_pr(
+    test_matrix: dict[str, list[Any]], is_pr: bool
+) -> dict[str, list[Any]]:
+    """
+    Handle the skip_on_pr key, which marks entries that run only on pushes,
+    schedules and manual dispatches, e.g. slow tests sharing a build with the
+    PR's tests. On PRs those entries are dropped. The key is always removed,
+    since every matrix value shows up in the job name.
+    """
+    return {
+        "include": [
+            {k: v for k, v in entry.items() if k != "skip_on_pr"}
+            for entry in test_matrix.get("include", [])
+            if not (is_pr and entry.get("skip_on_pr", False))
+        ]
+    }
+
+
 def set_periodic_modes(
     test_matrix: dict[str, list[Any]], job_name: str | None
 ) -> dict[str, list[Any]]:
@@ -707,6 +725,8 @@ def main() -> None:
     else:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
+
+    filtered_test_matrix = apply_skip_on_pr(filtered_test_matrix, bool(pr_number))
 
     if args.selected_test_configs:
         selected_test_configs = {
