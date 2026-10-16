@@ -41,6 +41,33 @@ from torch.testing._internal.common_quantized import override_qengines
 from torch.testing._internal.common_utils import IS_ARM64, raise_on_run_directly
 
 
+# ---------------------------------------------------------------------------
+# Device-agnostic helper: resolve the currently available test device so that
+# data creation can run on the active accelerator (e.g. Ascend NPU) when one
+# is present, and fall back to CPU otherwise.
+# ---------------------------------------------------------------------------
+def _get_test_device():
+    """Return the currently available test device. Prefer torch.accelerator
+    (PyTorch's official device-agnostic API); fall back to CPU otherwise."""
+    try:
+        if torch.accelerator.is_available():
+            return torch.accelerator.current_device()
+    except (AttributeError, RuntimeError):
+        pass
+    return "cpu"
+
+
+class _DeviceAwareMixin:
+    """Base mixin providing a resolved test device for data creation."""
+    _test_device = None
+
+    @classmethod
+    def _resolve_test_device(cls):
+        if cls._test_device is None:
+            cls._test_device = _get_test_device()
+        return cls._test_device
+
+
 class SubModule(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -95,7 +122,11 @@ class ModelWithFunctionals(torch.nn.Module):
         return w
 
 
-class TestNumericSuiteEager(QuantizationTestCase):
+class TestNumericSuiteEager(_DeviceAwareMixin, QuantizationTestCase):
+    def setUp(self):
+        super().setUp()
+        self.test_device = self._resolve_test_device()
+
     @override_qengines
     def test_compare_weights_conv_static(self):
         r"""Compare the weights of float and static quantized conv layer"""
@@ -359,8 +390,8 @@ class TestNumericSuiteEager(QuantizationTestCase):
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == val.shape)
 
-        lstm_input = torch.rand((1, 1, 2))
-        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        lstm_input = torch.rand((1, 1, 2), device=self.test_device)
+        lstm_hidden = (torch.rand(1, 1, 2, device=self.test_device), torch.rand(1, 1, 2, device=self.test_device))
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
         module_swap_list = [nn.Linear, nn.LSTM]
@@ -500,8 +531,8 @@ class TestNumericSuiteEager(QuantizationTestCase):
                         self.assertTrue(v["float"][i][0].shape == val[0].shape)
                         self.assertTrue(v["float"][i][1].shape == val[1].shape)
 
-        lstm_input = torch.rand((1, 1, 2))
-        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        lstm_input = torch.rand((1, 1, 2), device=self.test_device)
+        lstm_hidden = (torch.rand(1, 1, 2, device=self.test_device), torch.rand(1, 1, 2, device=self.test_device))
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
         for model in model_list:
@@ -514,8 +545,8 @@ class TestNumericSuiteEager(QuantizationTestCase):
     @override_qengines
     def test_output_logger(self):
         r"""Compare output from OutputLogger with the expected results"""
-        x = torch.rand(2, 2)
-        y = torch.rand(2, 1)
+        x = torch.rand(2, 2, device=self.test_device)
+        y = torch.rand(2, 1, device=self.test_device)
 
         l = []
         l.append(x)
@@ -530,11 +561,11 @@ class TestNumericSuiteEager(QuantizationTestCase):
     @override_qengines
     def test_shadow_logger(self):
         r"""Compare output from ShawdowLogger with the expected results"""
-        a_float = torch.rand(2, 2)
-        a_quantized = torch.rand(2, 2)
+        a_float = torch.rand(2, 2, device=self.test_device)
+        a_quantized = torch.rand(2, 2, device=self.test_device)
 
-        b_float = torch.rand(3, 2, 2)
-        b_quantized = torch.rand(3, 2, 2)
+        b_float = torch.rand(3, 2, 2, device=self.test_device)
+        b_quantized = torch.rand(3, 2, 2, device=self.test_device)
 
         logger = ShadowLogger()
         logger.forward(a_float, a_quantized)
@@ -545,14 +576,14 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
     @skip_if_no_torchvision
     def _test_vision_model(self, float_model):
-        float_model.to("cpu")
+        float_model.to(self.test_device)
         float_model.eval()
         float_model.fuse_model()
         float_model.qconfig = torch.ao.quantization.default_qconfig
         img_data = [
             (
-                torch.rand(2, 3, 224, 224, dtype=torch.float),
-                torch.randint(0, 1, (2,), dtype=torch.long),
+                torch.rand(2, 3, 224, 224, dtype=torch.float, device=self.test_device),
+                torch.randint(0, 1, (2,), dtype=torch.long, device=self.test_device),
             )
             for _ in range(2)
         ]
