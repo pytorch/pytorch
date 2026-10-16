@@ -5152,6 +5152,7 @@ class TestPrecompileDynamoCapture(TestCase):
                 "def step(x):\n    return scale(x.sin())\n"
             )
         self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
         mod = importlib.import_module(name)
         tracer = DynamoTracer(
             guard_filter_fn=drop_factor,
@@ -5192,6 +5193,7 @@ class TestPrecompileDynamoCapture(TestCase):
         # step() reads a def of that name from its own file, a harmless drop.
         from torch._dynamo.eval_frame import _RefuseRecompileCallback
         from torch._dynamo.package import CompilePackage
+        from torch._dynamo.utils import counters
 
         names = [f"{self.module_name}_{n}" for n in ("lookup", "step")]
         sources = (
@@ -5236,6 +5238,15 @@ class TestPrecompileDynamoCapture(TestCase):
         context.callback = _RefuseRecompileCallback(context.callback)
         served = context(sys.modules[names[0]].lookup)
         self.assertEqual(served(torch.nn.Module(), 3), 6)
+        # The skip is process-global: until uninstall() an unrelated compile
+        # reaching lookup() as a frame never enters Dynamo, and after it does.
+        lookup_fn = torch.compile(sys.modules[names[0]].lookup, backend="eager")
+        for uninstalled in (False, True):
+            if uninstalled:
+                package.uninstall()
+            counters.clear()
+            self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
+            self.assertEqual(counters["frames"]["total"] > 0, uninstalled)
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:
