@@ -406,7 +406,11 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     install_torchao
   fi
 
-  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
+  # test.sh installs torchcomms for distributed configs and CUDA/ROCm default
+  # shards. Building its wheel once here saves each of them ~3 min.
+  tests_need_torchcomms='any(.include[].config; test("distributed") or (. == "default" and (env.BUILD_ENVIRONMENT | test("cuda|rocm"))))'
+  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]] ||
+      jq -e "$tests_need_torchcomms" <<< "${TEST_MATRIX:-}" > /dev/null; then
     install_torchcomms
   fi
 

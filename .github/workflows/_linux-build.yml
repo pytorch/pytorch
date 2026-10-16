@@ -248,6 +248,7 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
+          TEST_MATRIX: ${{ inputs.build-generates-artifacts && steps.filter.outputs.test-matrix || '' }}
           SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
         run: |
