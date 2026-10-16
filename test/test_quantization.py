@@ -75,11 +75,11 @@ except ImportError as e:
     log.warning(e)
 
 try:
-    from quantization.fx.test_quantize_fx import TestQuantizeFxAcceleratorCPU  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxModelsAcceleratorCPU  # noqa: F401
 except ImportError as e:
     log.warning(e)
 try:
-    from quantization.fx.test_quantize_fx import TestQuantizeFxAcceleratorCUDA  # noqa: F401
+    from quantization.fx.test_quantize_fx import TestQuantizeFxModelsAcceleratorCUDA  # noqa: F401
 except ImportError as e:
     log.warning(e)
 

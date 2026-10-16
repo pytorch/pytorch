@@ -164,6 +164,114 @@ REGISTER_SCALED_MM_WITH_OUT_T(half);
 REGISTER_SCALED_MM_WITH_OUT_T(bfloat);
 REGISTER_SCALED_MM_WITH_OUT_T(float8_e4m3fn);
 
+inline float4 scaled_mm_decode_scaled(uint bytes) {
+  // mask the sign bit
+  const uint magnitude = bytes & 0x7f7f7f7f;
+  const uint nan_mask = 0x80808080;
+  const uint nan_flags = (magnitude + 0x01010101) & nan_mask;
+  // payload to detect nans here, all nans will be 11111111
+  // this is done this way because 0 1111 111 and 1 1111 111 are both Nans in
+  // fp8
+  const uint payload = magnitude | nan_flags;
+  // Reusing E4M3FN exponent bits avoids per-value bias adjustment. FP16's
+  // bias is 15 instead of 7, so the decoded value is x * 2^(7 - 15) = x / 256.
+  const uint low = ((payload & 0x00ff00ff) << 7) | ((bytes & 0x00800080) << 8);
+  const uint high = ((payload & 0xff00ff00) >> 1) | (bytes & 0x80008000);
+  const float2 lo = float2(as_type<half2>(low));
+  const float2 hi = float2(as_type<half2>(high));
+  return float4(lo.x, hi.x, lo.y, hi.y);
+}
+
+// Every SIMD group computes one output column; its lanes take turns
+// streaming scaled_mm_few_rows_lane_chunk elements of K.
+template <typename T, uint32_t rows>
+[[max_total_threads_per_threadgroup(scaled_mm_threads)]]
+kernel void scaled_mm_few_rows(
+    device const float8_e4m3fn* a [[buffer(0)]],
+    device const float8_e4m3fn* b [[buffer(1)]],
+    device T* out [[buffer(2)]],
+    device const float* scale_a [[buffer(3)]],
+    device const float* scale_b [[buffer(4)]],
+    device const uchar* bias [[buffer(5)]],
+    constant ScaledMMParams<>& p [[buffer(6)]],
+    uint group [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
+  using load_t = uint4;
+  constexpr uint words = sizeof(load_t) / sizeof(uint);
+  static_assert(
+      sizeof(load_t) == scaled_mm_few_rows_load_bytes,
+      "scaled_mm_few_rows_load_bytes must match the packed load type");
+  static_assert(
+      scaled_mm_alignment % sizeof(load_t) == 0,
+      "loads must stay aligned and within K");
+  static_assert(
+      scaled_mm_alignment % scaled_mm_simdgroups == 0,
+      "N must be a whole number of threadgroups");
+  constexpr auto chunk = scaled_mm_few_rows_lane_chunk;
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, {}, {}};
+  const uint col = group * scaled_mm_simdgroups + sg;
+  const auto b_col = b + col * p.b_col_stride;
+  float4 accum[rows] = {};
+  for (uint base = lane * chunk; base < p.k;
+       base += c10::metal::simdgroup_size * chunk) {
+    for (uint k = base; k < min(base + chunk, p.k); k += sizeof(load_t)) {
+      const auto b_raw = *reinterpret_cast<device const load_t*>(b_col + k);
+      float4 bv[words];
+#pragma unroll
+      for (uint i = 0; i < words; ++i) {
+        bv[i] = scaled_mm_decode_scaled(b_raw[i]);
+      }
+#pragma unroll
+      for (uint r = 0; r < rows; ++r) {
+        const auto a_raw =
+            *reinterpret_cast<device const load_t*>(a + r * p.a_row_stride + k);
+#pragma unroll
+        for (uint i = 0; i < words; ++i) {
+          accum[r] = fma(scaled_mm_decode_scaled(a_raw[i]), bv[i], accum[r]);
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (uint r = 0; r < rows; ++r) {
+    const auto value = simd_sum(dot(accum[r], float4(1))) *
+        (scaled_mm_decode_scale * scaled_mm_decode_scale);
+    if (lane == 0) {
+      scaled_mm_store(value, r, col, args, p);
+    }
+  }
+}
+
+#define REGISTER_SCALED_MM_FEW_ROWS(T, ROWS)                             \
+  template [[host_name("scaled_mm_few_rows_" #ROWS "_" #T)]] kernel void \
+  scaled_mm_few_rows<T, ROWS>(                                           \
+      device const float8_e4m3fn*,                                       \
+      device const float8_e4m3fn*,                                       \
+      device T*,                                                         \
+      device const float*,                                               \
+      device const float*,                                               \
+      device const uchar*,                                               \
+      constant ScaledMMParams<>&,                                        \
+      uint,                                                              \
+      uint,                                                              \
+      uint);
+
+#define REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(T) \
+  REGISTER_SCALED_MM_FEW_ROWS(T, 1);              \
+  REGISTER_SCALED_MM_FEW_ROWS(T, 2);              \
+  REGISTER_SCALED_MM_FEW_ROWS(T, 3);              \
+  REGISTER_SCALED_MM_FEW_ROWS(T, 4);
+
+static_assert(
+    scaled_mm_few_rows_max == 4,
+    "register scaled_mm_few_rows for every row count up to the maximum");
+
+REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(float);
+REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(half);
+REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(bfloat);
+REGISTER_SCALED_MM_FEW_ROWS_WITH_OUT_T(float8_e4m3fn);
+
 #if C10_METAL_HAS_MPP
 
 template <typename T>

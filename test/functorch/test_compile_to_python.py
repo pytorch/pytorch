@@ -255,6 +255,33 @@ class TestAOTCompileToPython(TestCase):
             with torch.no_grad():
                 self.assertEqual(fn(_flat_inputs(m, xi))[0], m(xi))
 
+    def test_dynamo_dynamic_graph_runs_at_multiple_shapes(self):
+        # The Dynamo counterpart of the test above, and the regression test for the
+        # "example_value" read in _graph_has_dynamic_shapes: a dynamic=True Dynamo backend
+        # graph keeps its fakes under that key only, so a "val"-only probe read it as static
+        # and the artifact specialized to the example sizes (assert_size_stride failed at
+        # every other size). The graph's flat inputs are its SymInt size placeholders, then x.
+        recorded = []
+
+        def record(gm, example_inputs):
+            recorded.append((gm, example_inputs))
+            return gm.forward
+
+        m = _Pointwise().eval()
+        torch.compile(m, backend=record, dynamic=True)(torch.randn(8, 4))
+        ((gm, example_inputs),) = recorded
+        self.assertEqual(
+            [type(v) for v in example_inputs],
+            [torch.SymInt, torch.SymInt, torch.Tensor],
+        )
+        src, _cache = compile_to_python(gm, example_inputs)
+        _assert_composed(self, src)
+        fn = _exec(src)
+        for n in (8, 16, 5):
+            xi = torch.randn(n, 4)
+            with torch.no_grad():
+                self.assertEqual(fn([n, 4, xi])[0], m(xi))
+
     def test_multi_output_runs_like_eager(self):
         # Exercises the output epilogue's multi-output count/ordering: the composed module
         # must return all outputs in the captured order, each equal to eager.
@@ -709,26 +736,34 @@ class TestComposerHelpers(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_graph_has_dynamic_shapes_reads_either_key(self):
-        # make_fx stashes the placeholder fake under "val", Dynamo under "example_value";
-        # a symbolic fake under either key must read as dynamic, a static one as static.
+        # make_fx stashes the placeholder fake under "val", the graph Dynamo hands a
+        # backend under "example_value"; a symbolic fake under either key must read as
+        # dynamic, a static one as static.
         g = fx.Graph()
         node = g.placeholder("x")
         g.output(node)
         gm = fx.GraphModule(torch.nn.Module(), g)
         self.assertFalse(_graph_has_dynamic_shapes(gm))
         mode = FakeTensorMode(shape_env=ShapeEnv())
-        node.meta["val"] = mode.from_tensor(torch.randn(3), static_shapes=True)
-        self.assertFalse(_graph_has_dynamic_shapes(gm))
+        static = mode.from_tensor(torch.randn(3), static_shapes=True)
         dyn = mode.from_tensor(torch.randn(3), static_shapes=False)
+        node.meta["val"] = static
+        self.assertFalse(_graph_has_dynamic_shapes(gm))
         node.meta["example_value"] = dyn
         self.assertTrue(_graph_has_dynamic_shapes(gm))
         del node.meta["val"]
         self.assertTrue(_graph_has_dynamic_shapes(gm))
+        # The union in the other direction: a symbolic "val" beside a static
+        # "example_value" is dynamic too.
+        node.meta["val"] = dyn
+        node.meta["example_value"] = static
+        self.assertTrue(_graph_has_dynamic_shapes(gm))
 
     def test_graph_has_dynamic_shapes_on_dynamo_graph(self):
-        # Pin the contract the "example_value" read relies on against real Dynamo output:
-        # a dynamic=True capture stores a symbolic fake under exactly that key (and no
-        # "val"), and the probe reads it as dynamic; a dynamic=False capture reads static.
+        # Pin the contract the "example_value" read relies on against a real torch.compile
+        # backend graph: a dynamic=True capture stores a symbolic fake under exactly that
+        # key (and no "val"), and the probe reads it as dynamic; a dynamic=False capture
+        # reads static.
         def f(x):
             return x * 2
 

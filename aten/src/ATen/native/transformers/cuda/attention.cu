@@ -1355,6 +1355,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
+#ifdef USE_ROCM
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
@@ -1363,6 +1364,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                 "Efficient attention cannot produce valid seed and offset outputs when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
+#endif
   auto process_chunk = [&](const Tensor& q_chunk,
                            const Tensor& k_chunk,
                            const Tensor& v_chunk,
@@ -1398,6 +1400,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                            std::move(offset));
   };
 
+#ifdef USE_ROCM
   // when bs is larger than allowed maximum, process in chunks
   if (batch_size > MAX_BATCH_SIZE) {
     int64_t start = 0;
@@ -1457,10 +1460,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
               std::move(seed),
               std::move(offset));
   }
-  // when bs is within the allowed size, no need to chunk it
-  else {
-    return process_chunk(query, key, value, attn_bias);
-  }
+#endif
+  return process_chunk(query, key, value, attn_bias);
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
@@ -1716,6 +1717,26 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   // Need this in both aot and CK case
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   res = at::empty({B, M, num_heads, Kv}, query.options());
+
+  // Neither ROCm backend tolerates an empty launch (CK rejects the dtype
+  // before looking at sizes, AOTriton fails with hipErrorInvalidValue), and
+  // there is nothing to compute; the CUTLASS path returns early for zero
+  // heads the same way. The logsumexp is zero-filled rather than left
+  // uninitialized because it can be non-empty when only Kv is zero.
+  if (res.numel() == 0) {
+    const auto lse_batch_size =
+        seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
+    logsumexp = at::zeros(
+        {lse_batch_size, num_heads, compute_logsumexp ? max_seqlen_q : 0},
+        query.options().dtype(at::ScalarType::Float));
+    return std::make_tuple(
+        std::move(res),
+        std::move(logsumexp),
+        std::move(seed_t),
+        std::move(offset_t),
+        max_seqlen_q,
+        max_seqlen_k_.has_value() ? max_seqlen_k_.value() : max_seqlen_k);
+  }
 
   if(at::globalContext().getROCmFAPreferredBackend() ==
     at::ROCmFABackend::Ck) {
@@ -2060,12 +2081,21 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       AT_CUDA_CHECK(err);
     }
     auto blocks = p.getBlocksGrid();
-    if (blocks.x * blocks.y * blocks.z == 0 || key.size(1) == 0) {
+    if (blocks.x == 0 || blocks.y == 0 || blocks.z == 0 || key.size(1) == 0) {
       res.zero_();
       return;
     }
     Kernel::check_supported(p);
-    kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    // Keep full tensor dimensions for strides, GQA, and dropout RNG indexing.
+    // Only the launch grid is chunked to fit CUDA's y/z limits.
+    for (p.batch_offset = 0; p.batch_offset < p.num_batches; p.batch_offset += blocks.z) {
+      blocks.z = std::min(65535, p.num_batches - p.batch_offset);
+      for (p.head_offset = 0; p.head_offset < p.num_heads; p.head_offset += blocks.y) {
+        blocks.y = std::min(65535, p.num_heads - p.head_offset);
+        kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    }
   };
 
   // Dispatch to the right kernel

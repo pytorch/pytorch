@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y \
     cmake \
     sudo \
     lsb-release \
+    zip \
+    protobuf-compiler \
     gcc-${GCC_VERSION}-riscv64-linux-gnu \
     g++-${GCC_VERSION}-riscv64-linux-gnu \
     pkg-config \
@@ -135,6 +137,13 @@ RUN wget -c https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_
 FROM base as final
 COPY --from=python             /opt/sysroot                       /opt/sysroot
 
+# Pre-built RISC-V wheels, for target packages with no wheel on PyPI. Set for this
+# image in .ci/docker/build.sh, the same way the native riscv64 image does it.
+ARG PIP_EXTRA_INDEX_URL
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ARG PIP_PREFER_BINARY
+ENV PIP_PREFER_BINARY=${PIP_PREFER_BINARY}
+
 # Install crossenv and cmake
 RUN pip install crossenv cmake==4.0.0 --break-system-packages \
     && /usr/bin/python3 -m crossenv ${SYSROOT}/bin/python3 /opt/riscv-cross-env
@@ -144,8 +153,15 @@ ENV PATH="/usr/local/bin:${PATH}"
 
 # Set up cross Python environment
 SHELL ["/bin/bash", "-c"]
+# build, scikit-build-core, packaging and six are pure Python and come from PyPI;
+# they run in the cross environment because its interpreter is the host one with
+# the target's sysconfig. numpy needs a target wheel, which PIP_EXTRA_INDEX_URL
+# supplies; 1.26.4 matches the Python 3.12 pin in .ci/docker/requirements-ci.txt
+# and is the newest numpy published on that index under a plain linux_riscv64 tag,
+# so it does not depend on pip resolving manylinux glibc tags for the target.
 RUN source /opt/riscv-cross-env/bin/activate \
-    && pip install setuptools pyyaml typing_extensions wheel
+    && pip install setuptools pyyaml typing_extensions wheel \
+                   build "scikit-build-core>=1.0" packaging six numpy==1.26.4
 
 # Set default environment variables for PyTorch build
 ENV Python_ROOT_DIR=${SYSROOT}

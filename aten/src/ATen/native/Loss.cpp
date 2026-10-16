@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
@@ -89,12 +90,24 @@ TORCH_META_FUNC(smooth_l1_loss)
 
 TORCH_META_FUNC(mse_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction) {
-  build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
+    build_borrowing_binary_op(maybe_get_output(), input, target);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+  // declare_static_shape skips broadcasting, so check the input shapes here.
+  infer_size(input.sizes(), target.sizes());
+  build(TensorIteratorConfig()
+      .add_output(maybe_get_output())
+      .add_const_input(input)
+      .add_const_input(target)
+      .allow_cpu_scalars(true)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .resize_outputs(false)
+      .declare_static_shape({}));
   maybe_get_output().resize_({});
 }
 

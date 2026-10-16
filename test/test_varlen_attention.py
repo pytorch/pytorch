@@ -1564,7 +1564,7 @@ class TestVarlenAttention(NNTestCase):
             if use_cudnn
             else nullcontext()
         )
-        # fa4 and cuDNN are batch invariant by default
+        # cuDNN is batch invariant by default
         with (
             _use_backend(backend),
             _use_cudnn_varlen(use_cudnn, device),

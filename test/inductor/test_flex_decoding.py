@@ -9,7 +9,9 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.device_interface import CudaInterface
 from torch._inductor.exc import InductorError
+from torch._inductor.kernel.flex.flex_decoding import get_split_k
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -1000,6 +1002,26 @@ class TestFlexDecoding(InductorTestCase):
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
         )
+
+    @supported_platform
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @with_tf32_off
+    def test_pointwise_query_producer(self, device, head_dims):
+        # https://github.com/pytorch/pytorch/issues/198513
+        # The pointwise producer's layout follows its [B, S, H, D] input, not the
+        # contiguous [B, H, S, D] strides it has when flex decoding is lowered.
+        Hq, Hkv = head_dims
+        Q_S, D = 4, 16
+        x = torch.randn(2, Q_S, Hq * D, device=device)
+        scale = torch.rand(D, device=device) + 0.5
+        k = torch.randn(2, Hkv, Q_S, D, device=device)
+        v = torch.randn(2, Hkv, Q_S, D, device=device)
+
+        def f(x, k, v):
+            q = x.view(2, Q_S, Hq, D).transpose(1, 2) * scale
+            return flex_attention(q, k, v, enable_gqa=Hq != Hkv)
+
+        self.assertEqual(torch.compile(f)(x, k, v), f(x, k, v))
 
     @supported_platform
     @parametrize_device_dtype("dtypes_fast")
@@ -2403,6 +2425,23 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             # Checkout output
             self._check_equal(golden_outs, ref_outs, paged_out, fudge_factor, "Out")
+
+
+class TestGetSplitKDeviceRouting(common_utils.TestCase):
+    # Regression guard: get_split_k must query the SM count from the kernel's
+    # own device via DeviceInterface, not from ambient backend state.
+    def test_split_k_queries_kernel_device(self):
+        calls = []
+
+        def fake_mp_count(device=None):
+            calls.append(device)
+            return 80
+
+        with patch.object(CudaInterface, "get_multi_processor_count", fake_mp_count):
+            split_k = get_split_k(2, 4, 128, torch.device("cuda", 1))
+
+        self.assertEqual(calls, [torch.device("cuda", 1)])
+        self.assertEqual(split_k, 80 // (2 * 4) * 2)
 
 
 instantiate_device_type_tests(

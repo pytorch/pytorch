@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -27,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -125,6 +126,16 @@ class _Missing:
     # so we add a dummy __call__ here to bypass TypeError from partial().
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return _Missing()
+
+
+# The one persistent id a guards state may carry: a guards-state pickler emits it
+# for a pruned value that the C pickler saves by type (an exact builtin
+# container) without ever consulting reducer_override, and _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a
+# bug. An artifact is only ever read by the torch that wrote it (SystemInfo's
+# check_compatibility runs before load_guards_state), so no reader from before
+# this id existed sees one.
+_PRUNED_VALUE_PID = "pruned"
 
 
 class FunctionPicklerBase(pickle.Pickler):
@@ -488,6 +499,22 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def __init__(self, file: IO[bytes]) -> None:
+        super().__init__(file)
+        # One sentinel per load for every pruned container, aliases and distinct
+        # ones alike (reducer_override's memo would keep distinct ones distinct;
+        # a _Missing carries nothing but its reason, so collapsing them loses
+        # nothing). Per load rather than per process: loaded values are keyed
+        # by id elsewhere, and one artifact's sentinel has no business in another.
+        self._pruned = _Missing(_PRUNED_VALUE_PID)
+
+    def persistent_load(self, pid: str) -> _Missing:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return self._pruned
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -496,7 +523,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -653,6 +680,30 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     return fn
 
 
+def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
+    """The functions a descriptor wraps, as (attribute name, function) pairs.
+
+    ``getattr`` on the CLASS returns the descriptor itself, not the function
+    inside it, so a code object defined under ``@property`` resolves to a
+    ``property`` object that nothing downstream can descend into. The attribute
+    name is what makes the path round-trip: the loader replays it with plain
+    ``getattr``, and ``property.fget`` is an ordinary attribute.
+    """
+    if isinstance(obj, property):
+        return [
+            (name, fn)
+            for name, fn in (
+                ("fget", obj.fget),
+                ("fset", obj.fset),
+                ("fdel", obj.fdel),
+            )
+            if fn is not None
+        ]
+    if isinstance(obj, functools.cached_property):
+        return [("func", obj.func)]
+    return []
+
+
 def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
         f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
@@ -683,7 +734,14 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            if (
+                inspect.isfunction(toplevel)
+                or inspect.ismethod(toplevel)
+                or _descriptor_functions(toplevel)
+            ):
+                # Stop at a descriptor too, and let _find_code_source unwrap it.
+                # The remaining parts of a qualname like "C.prop.<locals>.inner"
+                # are not attributes of the property object.
                 break
     seen = set()
 
@@ -699,9 +757,20 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if obj is code:
                 return ""
 
+            # Only a code constant can hold `code`. Adding the others to `seen`
+            # compares b"" with 0 (equal hashes), an error under python -bb.
             for i, const in enumerate(obj.co_consts):
+                if not inspect.iscode(const):
+                    continue
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
+
+        for attr, wrapped in _descriptor_functions(obj):
+            if (res := _find_code_source(wrapped)) is not None:
+                # No `toplevel = obj` here: the recursive call sets it to the
+                # wrapped function, whose __qualname__ is the descriptor's own
+                # dotted name, which is what the loader walks to.
+                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -746,14 +815,22 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         value = getattr(obj, name)
                     except AttributeError:
                         continue
+                    # A descriptor is what getattr on the CLASS returns for
+                    # anything defined under @property or @cached_property, so
+                    # excluding it here hides every code object inside one.
+                    wrapped = _descriptor_functions(value)
                     if not (
                         inspect.isfunction(value)
                         or inspect.isclass(value)
                         or inspect.ismethod(value)
+                        or wrapped
                     ):
                         continue
                     if (res := _find_code_source(value)) is not None:
-                        if value.__name__ != name:
+                        # A descriptor has no __name__; the functions it wraps
+                        # carry the attribute's name instead.
+                        actual = wrapped[0][1].__name__ if wrapped else value.__name__
+                        if actual != name:
                             _raise_resolution_error(code, toplevel)
                         return res
         return None
@@ -1169,6 +1246,11 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
+
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        """The entry of the code object being compiled inside ``code_context``."""
+        return self._current_entry
 
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
@@ -1723,7 +1805,9 @@ class DiskDynamoCache(DiskDynamoStore):
                 return result
             except Exception:
                 counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning("Failed to load package from path %s", exc_info=True)
+                logger.warning(
+                    "Failed to load package from path %s", path, exc_info=True
+                )
                 return None
         logger.info("No package found for %s", key)
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1

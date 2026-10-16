@@ -788,6 +788,114 @@ def my_is_pinned(self) -> bool:
     return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
 
 
+def my_sort(self, dim=-1, descending=False) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort.default(self, dim, descending)
+
+
+def my_sort_stable(
+    self, stable=None, dim=-1, descending=False
+) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        stable: bool | None - if True, equal elements keep their relative order
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort_stable.default(
+        self, stable, dim, descending
+    )
+
+
+def my_masked_select(self, mask) -> Tensor:
+    """
+    Selects the elements of the input tensor where the mask is True.
+
+    Args:
+        self: Tensor - input tensor
+        mask: Tensor - boolean tensor broadcastable with self
+
+    Returns: Tensor - a 1-D tensor of the selected elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_masked_select.default(self, mask)
+
+
+def my_mm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out.default(out, self, mat2)
+
+
+def my_bmm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out.default(out, self, mat2)
+
+
+def my_mm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_bmm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

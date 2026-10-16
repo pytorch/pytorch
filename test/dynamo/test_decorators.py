@@ -37,6 +37,10 @@ def tensor_constant_result():
     return torch.tensor([4.0])
 
 
+class CodelessCallPartial(functools.partial):
+    pass
+
+
 class DecoratorTests(PytreeRegisteringTestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -639,6 +643,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -935,6 +940,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1268,6 +1274,41 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(y, torch.ones(3) + 3)
 
+    @parametrize("attr", ["__torch_dynamo_polyfill__", "__wrapped__"])
+    @parametrize("registered", [False, True])
+    def test_substitute_in_graph_callable_attribute(self, attr, registered):
+        def original(x):
+            return x + 1
+
+        def polyfill(x):
+            return x + 2
+
+        if registered:
+
+            def replacement(x):
+                return x + 3
+
+            self.addCleanup(
+                torch._dynamo.decorators._unregister_substitute_in_graph, polyfill
+            )
+            polyfill = torch.compiler.substitute_in_graph(polyfill)(replacement)
+
+        wrapped = torch.compiler.substitute_in_graph(original)(polyfill)
+        self.addCleanup(
+            torch._dynamo.decorators._unregister_substitute_in_graph, original
+        )
+
+        def fn(x):
+            return getattr(wrapped, attr)(x)
+
+        x = torch.randn(3)
+        self.assertEqual(wrapped(x), x + 1)
+        self.assertEqual(fn(x), x + 2)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(compiled(x), x + (3 if registered else 2))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
@@ -1345,6 +1386,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 return polyfill(data, newline=newline)
 
         wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+
+        unregister = torch._dynamo.decorators._unregister_substitute_in_graph
+        self.addCleanup(unregister, binascii.b2a_base64)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = binascii.b2a_base64
@@ -1579,6 +1623,32 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(Foo.bar(x), expected)
         self.assertEqual(Foo().bar(x), expected)
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_compile_class_caching_precompile(self):
+        # Regression: @torch.compile on a class under caching_precompile=True
+        # crashed in _TorchDynamoContext.__call__ before reaching the isclass
+        # branch — the caching_precompile block accessed fn.__code__ on the
+        # class and raised `AttributeError: type object 'Foo' has no attribute
+        # '__code__'` at decoration time. Third-party libs decorate autograd
+        # Function subclasses this way at import.
+        from torch._dynamo.package import DynamoCache
+
+        DynamoCache.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        class Foo:
+            def __call__(self, x):
+                return x.sin()
+
+        x = torch.randn(4)
+        expected = x.sin()
+        self.assertEqual(Foo()(x), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+        CompiledPartial = torch.compile(backend="eager")(CodelessCallPartial)
+        self.assertEqual(CompiledPartial(torch.sin)(x), expected)
 
     def test_class_methods(self):
         class A:

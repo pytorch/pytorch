@@ -1,6 +1,7 @@
 # Owner(s): ["module: mps"]
 import importlib
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -8,20 +9,15 @@ from unittest.mock import patch
 import numpy as np
 
 import torch
+from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import all_mps_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MACOS_VERSION,
     parametrize,
 )
 
-
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
-    [torch.bfloat16] if MACOS_VERSION < 14.0 else []
-)
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 importlib.import_module("filelock")
 
@@ -46,7 +42,7 @@ class MPSBasicTests(TestCase):
     common = check_model_gpu
     device = "mps"
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_add(self, dtype):
         self.common(
             lambda a, b: a + b,
@@ -59,6 +55,13 @@ class MPSBasicTests(TestCase):
 
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
+
+    def test_prims_nextafter(self):
+        x = torch.tensor([0.0, 1.0], device=self.device)
+        y = torch.tensor([1.0, 2.0], device=self.device)
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
 
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
@@ -124,7 +127,7 @@ class MPSBasicTests(TestCase):
 
         self.common(foo, (torch.rand(1024),))
 
-    @parametrize("dtype", MPS_DTYPES)
+    @parametrize("dtype", all_mps_types_and(torch.bool, torch.complex64))
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
@@ -230,6 +233,13 @@ class MPSBasicTests(TestCase):
                 b,
             ),
         )
+
+    def test_argmax_bf16(self):
+        def fn(x):
+            return x.argmax(-1)
+
+        x = torch.randn(1, 65536, dtype=torch.bfloat16)
+        self.common(fn, (x,), check_lowp=False)
 
     @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
     def test_welford_reduction_dynamic_shape(self, shape):
@@ -555,6 +565,50 @@ class MPSBasicTestsAOTI(TestCase):
             RuntimeError, "Failed to create function state object"
         ):
             m(*inp)
+
+    def test_compiled_model_does_not_depend_on_unused_openmp(self):
+        # An MPS model runs on the GPU and calls no OpenMP function, but
+        # _get_openmp_args asks for OpenMP on every macOS build, so without
+        # -dead_strip_dylibs the library ends up in the load commands under the
+        # absolute path it had on this machine. The artifact then loads nowhere
+        # else. Reading the load commands rather than the link line is what
+        # makes this fail if the flag stops having the effect it is added for.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(8, device="mps"),)
+        ep = torch.export.export(Model(), example_inputs)
+        # Without libtorch is the configuration the stray dependency actually
+        # hurts, an artifact meant to be opened somewhere else, and it is the
+        # only one the flag is added for. At the default the flag does not
+        # apply and this would be asserting against a build it says nothing
+        # about.
+        with inductor_config.patch({"aot_inductor.link_libtorch": False}):
+            so_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        listed = subprocess.run(
+            ["otool", "-L", so_path], capture_output=True, check=True
+        ).stdout.decode()
+        deps = [
+            line.split(" (compatibility", 1)[0].strip()
+            for line in listed.splitlines()
+            if " (compatibility" in line
+        ]
+        if not deps:
+            raise AssertionError(f"otool reported no dependencies for {so_path}")
+
+        # Named rather than counted, because a bare count tells whoever reads
+        # the failure nothing about which library came back.
+        openmp = [d for d in deps if "omp" in os.path.basename(d).lower()]
+        if openmp:
+            raise AssertionError(f"unused OpenMP dependency in {so_path}: {openmp}")
+
+        # The other half of the property: a library the model does reach has to
+        # survive. Every Mach-O object links libSystem, so if that is gone the
+        # flag is stripping things it should not.
+        if not any(os.path.basename(d).startswith("libSystem") for d in deps):
+            raise AssertionError(f"expected libSystem among {deps}")
 
 
 if __name__ == "__main__":

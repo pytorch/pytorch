@@ -32,9 +32,11 @@ typedef struct THPPyInterpreterFrame {
 THPPyInterpreterFrame* THPPyInterpreterFrame_New(
     THP_EVAL_API_FRAME_OBJECT* frame);
 
-extern bool is_skip_guard_eval_unsafe;
-extern int fullgraph_compiled_frame_count;
-extern bool fullgraph_error_on_nested_compile;
+// Per-thread state describing the Dynamo region the calling thread is in.
+bool get_skip_guard_eval_unsafe(void);
+int get_fullgraph_compiled_frame_count(void);
+void bump_fullgraph_compiled_frame_count(void);
+bool get_fullgraph_error_on_nested_compile(void);
 
 #if IS_PYTHON_3_13_PLUS
 #define clear_old_frame_if_python_312_plus _PyEval_FrameClearAndPop
