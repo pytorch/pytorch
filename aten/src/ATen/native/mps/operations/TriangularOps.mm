@@ -4,6 +4,7 @@
 #include <ATen/mps/EmptyTensor.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/TriangularOpsUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
@@ -41,6 +42,7 @@ static void triu_tril_impl(const Tensor& self, int64_t k, const Tensor& out, con
   if (self.numel() == 0) {
     return;
   }
+  checkTrilTriuMatrixOverlap(out);
   auto sizes = reverse_array<uint32_t>(self.sizes());
   auto inp_strides = reverse_array<int32_t>(self.strides());
   auto out_strides = reverse_array<int32_t>(out.strides());
