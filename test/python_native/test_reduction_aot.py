@@ -82,34 +82,75 @@ for fn, expected in (
 print("RESULTS=" + json.dumps(results))
 """
 
+_EXTENDED_AOT_PROBE = r"""
+import json
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+x = torch.randn(8, 1536, device="cuda")
+ref = x.cpu()
+cases = (
+    (lambda t: torch.var(t, dim=-1, correction=1), lambda t: torch.var(t, dim=-1, correction=1)),
+    (lambda t: torch.std(t, dim=-1, correction=1), lambda t: torch.std(t, dim=-1, correction=1)),
+    (lambda t: torch.linalg.vector_norm(t, ord=2, dim=-1), lambda t: torch.linalg.vector_norm(t, ord=2, dim=-1)),
+    (lambda t: torch.all(t, dim=-1), lambda t: torch.all(t, dim=-1)),
+    (lambda t: torch.any(t, dim=-1), lambda t: torch.any(t, dim=-1)),
+    (lambda t: torch.count_nonzero(t, dim=-1), lambda t: torch.count_nonzero(t, dim=-1)),
+    (lambda t: torch.var_mean(t, dim=-1, correction=1), lambda t: torch.var_mean(t, dim=-1, correction=1)),
+    (lambda t: torch.std_mean(t, dim=-1, correction=1), lambda t: torch.std_mean(t, dim=-1, correction=1)),
+    (lambda t: torch.aminmax(t, dim=-1), lambda t: torch.aminmax(t, dim=-1)),
+)
+results = []
+for run, reference in cases:
+    expected = reference(ref)
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        out = run(x)
+        torch.cuda.synchronize()
+    launches = sum(
+        "torch_nativeopsreductions" in event.name
+        for event in prof.events()
+        if event.device_type.name == "CUDA"
+    )
+    values = tuple(out) if isinstance(out, tuple) else (out,)
+    refs = tuple(expected) if isinstance(expected, tuple) else (expected,)
+    correct = all(torch.allclose(a.cpu(), b, atol=1e-5, rtol=1e-4) for a, b in zip(values, refs))
+    results.append((launches, correct))
+print("RESULTS=" + json.dumps(results))
+"""
+
 
 class TestReductionAOT(TestCase):
     def test_core_family_grid(self):
         declarations = load_declarations(str(_DECL))
+        expected_counts = {
+            "sum.dim_IntList": 135,
+            "mean.dim": 135,
+            "amax": 18,
+            "amin": 18,
+            "prod.dim_int": 135,
+            "argmax": 15,
+            "argmin": 15,
+            "max.dim": 15,
+            "min.dim": 15,
+            "var.correction": 90,
+            "std.correction": 90,
+            "var_mean.correction": 90,
+            "std_mean.correction": 90,
+            "linalg_vector_norm": 540,
+            "all.dim": 18,
+            "any.dim": 18,
+            "count_nonzero.dim_IntList": 18,
+            "aminmax": 18,
+        }
         self.assertEqual(
             [declaration.ATEN_OP for declaration in declarations],
-            [
-                "sum.dim_IntList",
-                "mean.dim",
-                "amax",
-                "amin",
-                "prod.dim_int",
-                "argmax",
-                "argmin",
-                "max.dim",
-                "min.dim",
-            ],
+            list(expected_counts),
         )
         for declaration in declarations:
             grid = expand_specs(declaration.kernel_precompile_grid())
-            ordered = declaration.ATEN_OP in {
-                "sum.dim_IntList",
-                "mean.dim",
-                "prod.dim_int",
-            }
+            ordered = any(point["order"] == "inner_tree" for point in grid)
             index = declaration.ATEN_OP in {"argmax", "argmin", "max.dim", "min.dim"}
-            expected = 135 if ordered else 15 if index else 18
-            self.assertEqual(len(grid), expected)
+            self.assertEqual(len(grid), expected_counts[declaration.ATEN_OP])
             paths = {"row"} if index else {"row", "xcta"}
             if ordered:
                 paths.update({"itree_multirow", "itree_looped", "itree_split"})
@@ -172,6 +213,21 @@ class TestReductionAOTCUDA(TestCase):
         self.assertEqual(
             json.loads(line.removeprefix("RESULTS=")), [[1, True], [1, True]]
         )
+
+    @skipIfNoNativeAot("var.correction")
+    def test_embedded_extended_callables_own_reduction_launches(self, device):
+        proc = subprocess.run(
+            [sys.executable, "-c", _EXTENDED_AOT_PROBE],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, TORCH_DISABLE_NATIVE_JIT="1"),
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        line = next(
+            line for line in proc.stdout.splitlines() if line.startswith("RESULTS=")
+        )
+        self.assertEqual(json.loads(line.removeprefix("RESULTS=")), [[1, True]] * 9)
 
     @skipIfNoCuteDSL
     def test_dynamic_row_builder_converts_output(self, device):
@@ -387,6 +443,39 @@ class TestReductionAOTCUDA(TestCase):
         self.assertEqual(out, x.sum(dim=1, dtype=torch.float32), atol=2e-2, rtol=1e-4)
 
     @skipIfNoCuteDSL
+    def test_xcta_builder_uses_trait_scratch_and_outputs(self, device):
+        import cutlass.cute as cute
+
+        from torch._native.ops.reductions import aot_kernel
+
+        built = aot_kernel.build(
+            {
+                "path": "xcta",
+                "trait": "varmean1",
+                "dtype": "float32",
+                "out_dtypes": ("float32", "float32"),
+                "order": "linear",
+            }
+        )
+        compiled = cute.compile(built["fn"], *built["fake_args"])
+        m, n, subrow = 4, 131072, 8192
+        partials = n // subrow
+        x = torch.randn(m, n, device=device)
+        parts = [torch.empty(m * partials, device=device) for _ in range(3)]
+        outs = [torch.empty(m, device=device) for _ in range(2)]
+        compiled(
+            x.view(m * partials, subrow),
+            parts,
+            outs,
+            m * partials,
+            partials,
+            m,
+            n,
+            torch.cuda.current_stream().cuda_stream,
+        )
+        self.assertEqual(tuple(outs), torch.var_mean(x, dim=1))
+
+    @skipIfNoCuteDSL
     def test_trailing_dims_and_inner_tree_coverage(self, device):
         declarations = {
             declaration.ATEN_OP: declaration
@@ -413,6 +502,14 @@ class TestReductionAOTCUDA(TestCase):
                     wide, [-1], dtype=torch.float32
                 )["path"],
                 "xcta",
+            )
+            self.assertIsNone(
+                declarations["var.correction"].covered_axes(x, [-1], correction=2)[
+                    "path"
+                ]
+            )
+            self.assertIsNone(
+                declarations["linalg_vector_norm"].covered_axes(x, 3, [-1])["path"]
             )
 
         gates["PYTORCH_NATIVE_INNER_TREE"] = "1"
