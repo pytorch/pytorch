@@ -16,7 +16,7 @@ from cutlass import const_expr, Float32, Float64, Int32, Int64
 
 import torch
 
-from ...cutedsl import launch as _L
+from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
@@ -24,6 +24,7 @@ from . import (  # safe: kernel_general imports us only lazily
     kernel_rowtile as _rt,
     tile,
 )
+from .traits import welford_nouts
 
 
 _PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
@@ -193,13 +194,32 @@ def _reduce_row_xcta(
         x = x.view(1, -1)
     M, N = x.shape
     cfg = _XctaConfig()
+    size = N * x.element_size()
+    if (
+        M == 1
+        and _hw.caps(x.device).cc == (10, 0)
+        and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and size in (256 << 20, 2 << 30)
+        and trait.nfields == 3
+        and welford_nouts(trait_key) == nouts
+    ):
+        cfg = _XctaConfig(subrow_target=16384)
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
     # M only sizes grid and scratch, so one plan serves any batch size. Stage 1 uses Int64
     # tile coordinates beyond 2**31. subrow_target belongs in the geometry key because it changes C.
     out_dtypes = tuple(out_dtypes)
-    gkey = (trait_key, x.dtype, out_dtypes, N, block, subrow_target, str(x.device))
+    gkey = (
+        trait_key,
+        x.dtype,
+        out_dtypes,
+        N,
+        block,
+        subrow_target,
+        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT),
+        str(x.device),
+    )
     geom = _GEOM.get(gkey)
     if geom is None and gkey not in _GEOM:
         geom = _GEOM[gkey] = _build_geom(
@@ -271,6 +291,7 @@ def _build_geom(
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
     unroll = 16 if svec == 1 else 4  # scalar sub-rows want more loads in flight
+    align = _L.supported_alignment(x, svec * elsize)
     pkey = (
         "xcta",
         trait_key,
@@ -281,9 +302,9 @@ def _build_geom(
         threads_per_block,
         unroll,
         block,
+        align,
         str(device),
     )
-    align = svec * elsize
     # Stage-1 rolled-loop counts: vector groups, then waves of threads_per_row.
     s1_counts = (Int32(s // svec), Int32(-(-(s // svec) // threads_per_row)))
 
