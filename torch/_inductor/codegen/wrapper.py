@@ -2355,8 +2355,9 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
                 empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+                empty_strided_mps = torch._C._dynamo.guards._empty_strided_mps
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
+                alloc_from_pool = torch._C._dynamo.guards._alloc_from_pool
                 async_compile = AsyncCompile()
             """,
             strip=True,
@@ -5597,42 +5598,27 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
+        sizes = f"{codegen_allocation_shape_tuple}, {codegen_stride_tuple}"
+        # The fast paths allocate plain TensorImpls, which reinterpret_tensor can view
+        fast = False
         if torch._inductor.config.test_configs.track_memory_lifecycle:
-            out = (
-                f"{name} = tracked_empty_strided("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"dtype={dtype}, "
-                f"device='{device.type}', "
-                f"name='{name}')"
-            )
+            alloc = f"tracked_empty_strided({sizes}, dtype={dtype}, device='{device.type}', name='{name}')"
         elif device.type == "cpu" and is_pinned:
-            out = (
-                f"{name} = empty_strided_cpu_pinned("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"{dtype})"
-            )
-        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
+            alloc, fast = f"empty_strided_cpu_pinned({sizes}, {dtype})", True
+        elif device.type in ("cpu", "cuda", "xpu", "mtia", "mps"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            out = (
-                f"{name} = empty_strided_{device.type}("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"{dtype})"
-            )
+            alloc, fast = f"empty_strided_{device.type}({sizes}, {dtype})", True
         # all other devices:
         else:
-            out = (
-                f"{name} = empty_strided("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"device='{device.type}', dtype={dtype})"
-            )
-        if codegen_shape_tuple != codegen_allocation_shape_tuple:
-            # need an extra as_strided call
-            out = out + f".as_strided({codegen_shape_tuple}, {codegen_stride_tuple})"
-        return out
+            alloc = f"empty_strided({sizes}, device='{device.type}', dtype={dtype})"
+        if codegen_shape_tuple == codegen_allocation_shape_tuple:
+            return f"{name} = {alloc}"
+        view = f"{codegen_shape_tuple}, {codegen_stride_tuple}"
+        if fast:
+            # A fresh tensor has offset 0, so this matches as_strided at far lower cost
+            return f"{name} = reinterpret_tensor({alloc}, {view})"
+        # as_strided preserves backend-specific TensorImpl subclasses
+        return f"{name} = {alloc}.as_strided({view})"
 
     def make_comment(self, line):
         self.writeline(CommentLine(line))
