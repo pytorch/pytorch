@@ -215,12 +215,9 @@ class BitwiseOpNode : public BinaryOpNode<Op> {
       : BinaryOpNode<Op>(std::move(lhs), std::move(rhs), type) {}
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
-    if (!lhs.dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (lhs.dtype() != rhs.dtype()) {
-      throw malformed_input("lhs/rhs dtype mismatch");
-    }
+    TORCH_CHECK(lhs.dtype().is_integral(), "UNSUPPORTED DTYPE");
+    TORCH_CHECK(
+        lhs.dtype() == rhs.dtype(), "MALFORMED INPUT: lhs/rhs dtype mismatch");
     return BinaryOpNode<Op>::make(lhs, rhs);
   }
 };
@@ -335,7 +332,7 @@ ExprPtr getImmediateByType(ScalarType immType, T initialVal) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
   return nullptr;
 }
@@ -377,7 +374,7 @@ T immediateAs(const ExprPtr& e) {
   }
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
-  throw unsupported_dtype();
+  TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   return 0;
 }
 
@@ -394,7 +391,7 @@ bool immediateEquals(const ExprPtr& e, T val) {
   }
   AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
-  throw unsupported_dtype();
+  TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   return false;
 }
 
@@ -427,9 +424,8 @@ class TORCH_API Ramp : public ExprNode<Ramp> {
       const ExprHandle& base,
       const ExprHandle& stride,
       int64_t lanes) {
-    if (stride.dtype() != base.dtype()) {
-      throw malformed_input("Bad stride in Ramp");
-    }
+    TORCH_CHECK(
+        stride.dtype() == base.dtype(), "MALFORMED INPUT: Bad stride in Ramp");
     return ExprHandle(alloc<Ramp>(base.node(), stride.node(), lanes));
   }
   int64_t lanes() const {
@@ -546,15 +542,10 @@ class TORCH_API IfThenElse : public ExprNode<IfThenElse> {
       const ExprHandle& c,
       const ExprHandle& t,
       const ExprHandle& f) {
-    if (!c.dtype().is_integral()) {
-      throw unsupported_dtype();
-    }
-    if (c.dtype().lanes() != 1) {
-      throw unsupported_dtype();
-    }
-    if (t.dtype() != f.dtype()) {
-      throw malformed_input("Bad dtype in IfThenElse");
-    }
+    TORCH_CHECK(c.dtype().is_integral(), "UNSUPPORTED DTYPE");
+    TORCH_CHECK(c.dtype().lanes() == 1, "UNSUPPORTED DTYPE");
+    TORCH_CHECK(
+        t.dtype() == f.dtype(), "MALFORMED INPUT: Bad dtype in IfThenElse");
     return ExprHandle(alloc<IfThenElse>(c.node(), t.node(), f.node()));
   }
 
@@ -613,9 +604,9 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& rhs,
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased) {
-    if (lhs.dtype() != rhs.dtype()) {
-      throw malformed_input("bad dtype in CompareSelect");
-    }
+    TORCH_CHECK(
+        lhs.dtype() == rhs.dtype(),
+        "MALFORMED INPUT: bad dtype in CompareSelect");
     return ExprHandle(alloc<CompareSelect>(
         lhs.node(),
         rhs.node(),
@@ -632,9 +623,9 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
       const ExprHandle& ret_val2,
       CompareSelectOperation cmp_op,
       CompareSelectBias bias = kUnbiased) {
-    if (lhs.dtype() != rhs.dtype() || ret_val1.dtype() != ret_val2.dtype()) {
-      throw malformed_input("bad dtype in CompareSelect");
-    }
+    TORCH_CHECK(
+        lhs.dtype() == rhs.dtype() && ret_val1.dtype() == ret_val2.dtype(),
+        "MALFORMED INPUT: bad dtype in CompareSelect");
     return ExprHandle(alloc<CompareSelect>(
         lhs.node(),
         rhs.node(),
@@ -818,8 +809,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
       case kIsNan:
         return "isnan";
       default:
-        throw std::runtime_error(
-            "invalid op_type: " + std::to_string(op_type()));
+        TORCH_CHECK(false, "invalid op_type: " + std::to_string(op_type()));
     }
   }
 
@@ -827,45 +817,45 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
         params_({}),
         op_type_(op_type) {
-    if (OpArgCount(op_type) != 0) {
-      throw malformed_input("bad arg count in Intrinsics");
-    }
+    TORCH_CHECK(
+        OpArgCount(op_type) == 0,
+        "MALFORMED INPUT: bad arg count in Intrinsics");
   }
 
   Intrinsics(IntrinsicsOp op_type, ExprPtr v1)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype())),
         params_({std::move(v1)}),
         op_type_(op_type) {
-    if (OpArgCount(op_type) != 1) {
-      throw malformed_input("bad arg count in Intrinsics");
-    }
+    TORCH_CHECK(
+        OpArgCount(op_type) == 1,
+        "MALFORMED INPUT: bad arg count in Intrinsics");
   }
 
   Intrinsics(IntrinsicsOp op_type, ExprPtr v1, ExprPtr v2)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype(), v2->dtype())),
         params_({std::move(v1), std::move(v2)}),
         op_type_(op_type) {
-    if (OpArgCount(op_type) != 2) {
-      throw malformed_input("bad arg count in Intrinsics");
-    }
+    TORCH_CHECK(
+        OpArgCount(op_type) == 2,
+        "MALFORMED INPUT: bad arg count in Intrinsics");
   }
 
   Intrinsics(IntrinsicsOp op_type, const std::vector<ExprPtr>& params)
       : ExprNodeBase(IntrinsicsDtype(op_type, params)),
         params_(params),
         op_type_(op_type) {
-    if (OpArgCount(op_type) != nparams()) {
-      throw malformed_input("bad arg count in Intrinsics");
-    }
+    TORCH_CHECK(
+        OpArgCount(op_type) == nparams(),
+        "MALFORMED INPUT: bad arg count in Intrinsics");
   }
 
   Intrinsics(IntrinsicsOp op_type, Dtype dtype, std::vector<ExprPtr> params)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
         params_(std::move(params)),
         op_type_(op_type) {
-    if (OpArgCount(op_type) != nparams()) {
-      throw malformed_input("bad arg count in Intrinsics");
-    }
+    TORCH_CHECK(
+        OpArgCount(op_type) == nparams(),
+        "MALFORMED INPUT: bad arg count in Intrinsics");
   }
 
   bool isPure() const {

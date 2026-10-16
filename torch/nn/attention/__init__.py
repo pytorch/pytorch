@@ -3,6 +3,7 @@
 
 import contextlib
 from collections.abc import Iterable
+from contextvars import ContextVar
 from typing import Union
 from warnings import warn
 
@@ -54,6 +55,7 @@ r"""An enum-like class that contains the different backends for scaled dot produ
 """
 SDPBackend.__module__ = __name__
 SDPBackend.__name__ = "SDPBackend"
+SDPBackend.__qualname__ = "SDPBackend"
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:
@@ -77,6 +79,12 @@ _backend_names = {
     "math": "MATH",
     "overrideable": "OVERRIDEABLE",
 }
+_sdpa_kernel_uses_priority = ContextVar("sdpa_kernel_uses_priority", default=False)
+
+
+def _is_sdp_priority_order_active() -> bool:
+    """Return whether an enclosing sdpa_kernel context set backend priority."""
+    return _sdpa_kernel_uses_priority.get()
 
 
 def _backend_from_string(name: str):
@@ -156,10 +164,14 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
     backends = list(dict.fromkeys(backends))
 
     previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
+    priority_token = _sdpa_kernel_uses_priority.set(
+        set_priority or _sdpa_kernel_uses_priority.get()
+    )
     try:
         _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
+        _sdpa_kernel_uses_priority.reset(priority_token)
         _sdpa_kernel(previous_backends, set_priority)
 
 
