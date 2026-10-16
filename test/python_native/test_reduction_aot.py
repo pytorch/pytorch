@@ -118,6 +118,47 @@ for run, reference in cases:
 print("RESULTS=" + json.dumps(results))
 """
 
+_OVERLOAD_AOT_PROBE = r"""
+import json
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+x = torch.randn(8, 1536, device="cuda")
+x[0, 0] = float("nan")
+ref = x.cpu()
+sum_out = torch.empty(8, device="cuda")
+all_out = torch.empty(8, device="cuda", dtype=torch.bool)
+cases = (
+    (lambda: torch.sum(x), lambda: torch.sum(ref)),
+    (lambda: torch.mean(x), lambda: torch.mean(ref)),
+    (lambda: torch.nansum(x, dim=-1), lambda: torch.nansum(ref, dim=-1)),
+    (lambda: torch.prod(x), lambda: torch.prod(ref)),
+    (lambda: torch.max(x), lambda: torch.max(ref)),
+    (lambda: torch.min(x), lambda: torch.min(ref)),
+    (lambda: torch.all(x), lambda: torch.all(ref)),
+    (lambda: torch.any(x), lambda: torch.any(ref)),
+    (lambda: torch.all(x, dim=(-2, -1)), lambda: torch.all(ref, dim=(-2, -1))),
+    (lambda: torch.any(x, dim=(-2, -1)), lambda: torch.any(ref, dim=(-2, -1))),
+    (lambda: torch.count_nonzero(x), lambda: torch.count_nonzero(ref)),
+    (lambda: torch.sum(x, dim=-1, out=sum_out), lambda: torch.sum(ref, dim=-1)),
+    (lambda: torch.all(x, dim=-1, out=all_out), lambda: torch.all(ref, dim=-1)),
+)
+results = []
+for run, reference in cases:
+    expected = reference()
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        out = run()
+        torch.cuda.synchronize()
+    launches = sum(
+        "torch_nativeopsreductions" in event.name
+        for event in prof.events()
+        if event.device_type.name == "CUDA"
+    )
+    correct = torch.allclose(out.cpu(), expected, atol=1e-5, rtol=1e-4, equal_nan=True)
+    results.append((launches, correct))
+print("RESULTS=" + json.dumps(results))
+"""
+
 
 class TestReductionAOT(TestCase):
     def test_core_family_grid(self):
@@ -141,6 +182,17 @@ class TestReductionAOT(TestCase):
             "any.dim": 18,
             "count_nonzero.dim_IntList": 18,
             "aminmax": 18,
+            "max": 18,
+            "min": 18,
+            "all.dims": 18,
+            "any.dims": 18,
+            "all": 18,
+            "any": 18,
+            "count_nonzero": 18,
+            "sum": 135,
+            "mean": 135,
+            "nansum": 135,
+            "prod": 135,
         }
         self.assertEqual(
             [declaration.ATEN_OP for declaration in declarations],
@@ -228,6 +280,21 @@ class TestReductionAOTCUDA(TestCase):
             line for line in proc.stdout.splitlines() if line.startswith("RESULTS=")
         )
         self.assertEqual(json.loads(line.removeprefix("RESULTS=")), [[1, True]] * 9)
+
+    @skipIfNoNativeAot("nansum")
+    def test_embedded_overload_callables_own_reduction_launches(self, device):
+        proc = subprocess.run(
+            [sys.executable, "-c", _OVERLOAD_AOT_PROBE],
+            capture_output=True,
+            text=True,
+            env=dict(os.environ, TORCH_DISABLE_NATIVE_JIT="1"),
+            timeout=120,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        line = next(
+            line for line in proc.stdout.splitlines() if line.startswith("RESULTS=")
+        )
+        self.assertEqual(json.loads(line.removeprefix("RESULTS=")), [[1, True]] * 13)
 
     @skipIfNoCuteDSL
     def test_dynamic_row_builder_converts_output(self, device):

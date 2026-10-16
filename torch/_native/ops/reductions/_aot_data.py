@@ -11,6 +11,39 @@ CORE_OPS = (
     ("prod.dim_int", "prod", True, "int"),
 )
 
+AOT_ALIASES = {
+    "sum.dim_IntList": ("sum.IntList_out",),
+    "mean.dim": ("mean.out",),
+    "amax": ("amax.out",),
+    "amin": ("amin.out",),
+    "prod.dim_int": ("prod.int_out",),
+    "argmax": ("argmax.out",),
+    "argmin": ("argmin.out",),
+    "max.dim": ("max.dim_max",),
+    "min.dim": ("min.dim_min",),
+    "linalg_vector_norm": ("linalg_vector_norm.out",),
+    "all.dim": ("all.out",),
+    "any.dim": ("any.out",),
+    "aminmax": ("aminmax.out",),
+    "all.dims": ("all.dims_out",),
+    "any.dims": ("any.dims_out",),
+    "all": ("all.all_out",),
+    "any": ("any.all_out",),
+}
+
+KERNEL_SOURCES = {
+    "sum": "sum.dim_IntList",
+    "mean": "mean.dim",
+    "prod": "prod.dim_int",
+    "max": "amax",
+    "min": "amin",
+    "all.dims": "all.dim",
+    "all": "all.dim",
+    "any.dims": "any.dim",
+    "any": "any.dim",
+    "count_nonzero": "count_nonzero.dim_IntList",
+}
+
 # aten op, trait key, dimension spelling, projected output dtypes, impl outputs
 INDEX_OPS = (
     ("argmax", "argmax", "optional_int", ("int64",), ("out",)),
@@ -29,15 +62,42 @@ WELFORD_OPS = (
 
 # aten op, trait key, dimension spelling, projected output dtypes, impl outputs
 PLAIN_OPS = (
-    ("all.dim", "all", "int", ("bool",), ("out",)),
-    ("any.dim", "any", "int", ("bool",), ("out",)),
-    ("count_nonzero.dim_IntList", "cnz", "list", ("int64",), ()),
-    ("aminmax", "aminmax", "optional_int", ("input", "input"), ("min", "max")),
+    ("all.dim", "all", "int", ("bool",), ("out",), True),
+    ("any.dim", "any", "int", ("bool",), ("out",), True),
+    ("count_nonzero.dim_IntList", "cnz", "list", ("int64",), (), False),
+    (
+        "aminmax",
+        "aminmax",
+        "optional_int",
+        ("input", "input"),
+        ("min", "max"),
+        True,
+    ),
+    ("max", "amax", "full", ("input",), (), False),
+    ("min", "amin", "full", ("input",), (), False),
+    ("all.dims", "all", "optional_list", ("bool",), ("out",), True),
+    ("any.dims", "any", "optional_list", ("bool",), ("out",), True),
+    ("all", "all", "full", ("bool",), ("out",), False),
+    ("any", "any", "full", ("bool",), ("out",), False),
+    ("count_nonzero", "cnz", "optional_int", ("int64",), (), False),
+)
+
+DTYPE_OPS = (
+    ("sum", "sum", "full", False),
+    ("mean", "mean", "full", False),
+    ("nansum", "nansum", "optional_list", True),
+    ("prod", "prod", "full", False),
 )
 
 NORM_TRAITS = ("vnorm1", "vnorm2", "vnorminf", "vnormninf")
 TRAIT_NFIELDS = {
     **{f"{stem}{correction}": 3 for _, stem, _ in WELFORD_OPS for correction in (0, 1)},
+    "sum": 1,
+    "mean": 1,
+    "nansum": 1,
+    "prod": 1,
+    "amax": 1,
+    "amin": 1,
     "vnorm1": 1,
     "vnorm2": 1,
     "vnorminf": 1,
@@ -60,6 +120,7 @@ ORDER_SENSITIVE_TRAITS = frozenset(
     (
         "sum",
         "mean",
+        "nansum",
         "prod",
         *NORM_TRAITS,
         *(f"{stem}{correction}" for _, stem, _ in WELFORD_OPS for correction in (0, 1)),

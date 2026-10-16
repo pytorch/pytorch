@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
 # runs as ordinary Python, so defaults and dim normalization are plain code.
 DECLARATION = """\
 ATEN_OP = "fakeop"
+ATEN_ALIASES = ("fakeop.values",)
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "kernel.py"
 
@@ -134,7 +135,7 @@ class TestCovers(TestCase):
                 torch.use_deterministic_algorithms(prior)
             self.assertTrue(aot_manifest.covers("fakeop", "CUDA", (x, 8), {}))
 
-    def test_overload_shares_base_manifest(self):
+    def test_declared_alias_shares_manifest(self):
         with ManifestFixture():
             self.assertTrue(
                 aot_manifest.covers(
@@ -182,12 +183,11 @@ class TestGetCoverage(TestCase):
             self.assertIsNone(aot_manifest.get_coverage("otherop", "CUDA"))
             self.assertIsNone(aot_manifest.get_coverage("fakeop", "CPU"))
 
-    def test_variant_symbols_share_base_coverage(self):
-        # One structured wrapper serves every variant, so all resolve to the base.
+    def test_only_declared_aliases_share_coverage(self):
         with ManifestFixture():
             base = aot_manifest.get_coverage("fakeop", "CUDA")
             self.assertIs(aot_manifest.get_coverage("fakeop.values", "CUDA"), base)
-            self.assertIs(aot_manifest.get_coverage("fakeop_", "CUDA"), base)
+            self.assertIsNone(aot_manifest.get_coverage("fakeop_", "CUDA"))
 
     def test_router_declines_covered_calls_once(self):
         # With two registered override paths, a covered call must run covered_axes

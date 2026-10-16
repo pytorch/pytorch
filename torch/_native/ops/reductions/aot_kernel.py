@@ -25,6 +25,7 @@ _DTYPE_TAG = {
 _TRAITS = {
     "sum": lambda: traits.SumOps(acc=Float32),
     "mean": lambda: traits.MeanOps(acc=Float32),
+    "nansum": lambda: traits.NanSumOps(acc=Float32),
     "amax": lambda: traits.AMaxOps(acc=Float32),
     "amin": lambda: traits.AMinOps(acc=Float32),
     "prod": lambda: traits.ProdOps(acc=Float32),
