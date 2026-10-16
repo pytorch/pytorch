@@ -27,6 +27,10 @@
 
 #include "RocLogger.h"
 
+namespace libkineto {
+class RocprofActivityApiTest;
+}
+
 struct ThreadTraceBuffer {
   explicit ThreadTraceBuffer(uint64_t bufferGeneration)
       : generation(bufferGeneration) {}
@@ -127,4 +131,5 @@ class RocprofLogger {
   std::chrono::milliseconds dispatchRecordWait_{20};
 
   friend class libkineto::RocprofActivityApi;
+  friend class libkineto::RocprofActivityApiTest;
 };
