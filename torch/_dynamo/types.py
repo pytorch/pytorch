@@ -135,8 +135,8 @@ class GuardCollectiveState(IntEnum):
     """A rank's guard result for one frame, as exchanged by guard collectives.
 
     MISS and HIT keep the values of the ``False`` / ``True`` a guard-complete
-    hook used to take and return. SKIP is a frame a loaded artifact recorded
-    with no compiled variants, which runs eagerly.
+    hook used to take and return. SKIP is a frame a loaded artifact skips (no
+    compiled code, or bypassed/lossy, with its callees), which runs eagerly.
     """
 
     MISS = 0
