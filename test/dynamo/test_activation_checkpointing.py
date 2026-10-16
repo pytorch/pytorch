@@ -12,6 +12,7 @@ import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch._inductor.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
@@ -4154,6 +4155,119 @@ def forward(self, x_1):
     alias_4 = torch.ops.aten.alias.default(sum_1);  sum_1 = None
     return (alias_4, mul_1)""",
         )
+
+
+class ActivationCheckpointingIdentityTests(torch._dynamo.test_case.TestCase):
+    @parametrize(
+        "case", ("mul1", "add0", "sin_mul1", "sin_add0", "dropout_mul1", "sin", "mul2")
+    )
+    @parametrize("use_reentrant", (False, True))
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_issue_199258_identity(self, device, case, use_reentrant):
+        def body(x):
+            if case == "mul1":
+                return x * 1
+            if case == "add0":
+                return x + 0
+            if case == "sin_mul1":
+                return (x * 1).sin()
+            if case == "sin_add0":
+                return (x + 0).sin()
+            if case == "dropout_mul1":
+                return F.dropout(x * 1, p=0.25, training=True)
+            if case == "mul2":
+                return x * 2
+            return x.sin()
+
+        def fn(x):
+            return checkpoint(body, x, use_reentrant=use_reentrant)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(32, device=device, requires_grad=True)
+        ref = x.detach().clone().requires_grad_()
+        torch.manual_seed(123)
+        expected = fn(ref)
+        expected.sum().backward()
+        torch.manual_seed(123)
+        actual = compiled(x)
+        actual.sum().backward()
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, ref.grad)
+
+    @parametrize(
+        "policy",
+        (
+            CheckpointPolicy.MUST_SAVE,
+            CheckpointPolicy.MUST_RECOMPUTE,
+            CheckpointPolicy.PREFER_RECOMPUTE,
+        ),
+    )
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_issue_199258_selective_checkpoint(self, device, policy):
+        def policy_fn(ctx, op, *args, **kwargs):
+            return policy
+
+        def fn(x):
+            return checkpoint(
+                lambda y: (y * 1).sin(),
+                x,
+                use_reentrant=False,
+                context_fn=functools.partial(
+                    create_selective_checkpoint_contexts, policy_fn
+                ),
+            )
+
+        x = torch.randn(32, device=device, requires_grad=True)
+        ref = x.detach().clone().requires_grad_()
+        expected = fn(ref)
+        expected.sum().backward()
+        actual = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        actual.sum().backward()
+        self.assertEqual(actual, expected)
+        self.assertEqual(x.grad, ref.grad)
+
+    @parametrize("use_reentrant", (False, True))
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_issue_199258_residual_training(self, device, use_reentrant):
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(16, 16)
+
+            def forward(self, x):
+                def body(y):
+                    return F.dropout(self.linear(y * 1).sin(), p=0.25, training=True)
+
+                return x + checkpoint(body, x, use_reentrant=use_reentrant)
+
+        model = Block().to(device)
+        ref = copy.deepcopy(model)
+        compiled = torch.compile(model, backend="inductor", fullgraph=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        ref_optimizer = torch.optim.SGD(ref.parameters(), lr=0.01)
+        for step in range(3):
+            x = torch.randn(4, 16, device=device, requires_grad=True)
+            ref_x = x.detach().clone().requires_grad_()
+            optimizer.zero_grad()
+            ref_optimizer.zero_grad()
+            torch.manual_seed(123 + step)
+            expected = ref(ref_x)
+            expected.square().mean().backward()
+            torch.manual_seed(123 + step)
+            actual = compiled(x)
+            actual.square().mean().backward()
+            self.assertEqual(actual, expected)
+            self.assertEqual(x.grad, ref_x.grad)
+            for parameter, ref_parameter in zip(model.parameters(), ref.parameters()):
+                self.assertEqual(parameter.grad, ref_parameter.grad)
+            optimizer.step()
+            ref_optimizer.step()
+            self.assertEqual(model.state_dict(), ref.state_dict())
+
+
+instantiate_device_type_tests(
+    ActivationCheckpointingIdentityTests, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":

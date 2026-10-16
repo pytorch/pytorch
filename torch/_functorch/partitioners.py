@@ -175,7 +175,7 @@ class MinCutOptions:
 
 
 def must_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", None) in [
+    return node.op != "placeholder" and node.meta.get("recompute", None) in [
         CheckpointPolicy.MUST_RECOMPUTE,
         CheckpointPolicy.PREFER_RECOMPUTE,
     ]
@@ -2702,6 +2702,7 @@ def solve_min_cut(
             return mem_sz * 2, None
 
     nx_graph = nx.DiGraph()
+    nx_graph.add_nodes_from(("source", "sink"))
     banned_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     def ban_recomputation_if_allowed(node: fx.Node, reason: str = "") -> bool:
