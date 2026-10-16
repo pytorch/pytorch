@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <torch/library.h>
@@ -182,7 +183,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
   }
 
-  auto desc = ideep::convolution_forward::expected_weights_desc(
+  auto desc = mkldnn::convolution_forward_expected_weights_desc(
       w.get_dims(),
       w.get_data_type(),
       stride_expanded,
@@ -229,7 +230,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
-  auto desc = ideep::convolution_forward::expected_weights_desc(
+  auto desc = mkldnn::convolution_forward_expected_weights_desc(
       w.get_dims(),
       w.get_data_type(),
       stride_expanded,
