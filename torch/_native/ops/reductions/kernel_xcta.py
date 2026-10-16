@@ -16,7 +16,7 @@ from cutlass import const_expr, Float32, Float64, Int32, Int64
 
 import torch
 
-from ...cutedsl import launch as _L
+from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
@@ -24,6 +24,7 @@ from . import (  # safe: kernel_general imports us only lazily
     kernel_rowtile as _rt,
     tile,
 )
+from .traits import welford_nouts
 
 
 _PART_TORCH = {Float32: torch.float32, Float64: torch.float64, Int32: torch.int32}
@@ -193,6 +194,16 @@ def _reduce_row_xcta(
         x = x.view(1, -1)
     M, N = x.shape
     cfg = _XctaConfig()
+    size = N * x.element_size()
+    if (
+        M == 1
+        and _hw.caps(x.device).cc == (10, 0)
+        and x.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and size in (256 << 20, 2 << 30)
+        and trait.nfields == 3
+        and welford_nouts(trait_key) == nouts
+    ):
+        cfg = _XctaConfig(subrow_target=16384)
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
