@@ -67,6 +67,7 @@ class TestTraitProtocol(TestCase):
                 t = self._make(trait)
                 self.assertEqual(len(t.fdtypes), t.nfields)
                 self.assertGreaterEqual(t.nfields, 1)
+                self.assertGreaterEqual(t.nouts, 1)
 
     def test_init_returns_one_accumulator(self):
         # init must return exactly the accumulator tuple combine expects, so the two compose.
