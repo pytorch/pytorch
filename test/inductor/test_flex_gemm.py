@@ -7480,6 +7480,38 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @parametrize("layout", ("contiguous", "lane_view"))
+    def test_mm_unaligned_n_bf16_tile_capture_matches_reference(self, layout):
+        # N=12 is legal for a K-major B and fp32 output, but a bf16 [M, 12] tile
+        # has a 24-byte row stride, so QuACK's TMA load needs a padded copy.
+        m, k, n = 128, 64, 12
+        a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(n, k, device="cuda", dtype=torch.bfloat16).t()
+        h = torch.randn(m, 2 * n, device="cuda", dtype=torch.bfloat16)
+        cap = h.view(m, n, 2)[..., 0]
+        if layout == "contiguous":
+            cap = h[:, :n].contiguous()
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: acc.float() * cap,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b
+        )
+
+        self.assertIn("flex_gemm_epilogue(", code)
+        self.assertMatchesLowPrecisionEager(
+            actual, (a @ b).float() * cap, (a.double() @ b.double()) * cap.double(), k
+        )
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM100OrLater, "SM100+ required")
     def test_mm_1d_capture_unsqueeze_inside_matches_hoisted(self):
         import re
 
@@ -8732,6 +8764,40 @@ instantiate_device_type_tests(
 @skipIfNoCuteDSL
 @unittest.skipIf(not SM100OrLater, "SM100+ required")
 class TestFlexGemmFastMathDevice(FlexGemmTestCase):
+    @parametrize("dtype", (torch.float32, torch.float16))
+    @parametrize("fast_math", (False, True))
+    def test_mm_constant_division_keeps_reciprocal_in_range(
+        self, device, dtype, fast_math
+    ):
+        # 1 / divisor overflows dtype, so a reciprocal multiply would turn 0 into NaN.
+        divisor = 2.0**-20 if dtype == torch.float16 else 2.0**-128
+
+        def epilogue_fn(acc):
+            value = acc.float()
+            if dtype == torch.float16:
+                # Ordinary casts compute in fp32; inline asm keeps an fp16 value.
+                value = inline_asm_elementwise(
+                    value,
+                    asm_str="cvt.rn.f16.f32 $0, $1;",
+                    constraints="=h,f",
+                    dtype=torch.float16,
+                )
+            return value / divisor
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "fast_math": fast_math},
+            )
+
+        a = torch.zeros(128, 64, device=device, dtype=torch.bfloat16)
+        b = torch.ones(64, 128, device=device, dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+        self.assertIn("flex_gemm_epilogue(", code)
+        self.assertEqual(actual, torch.zeros_like(actual), atol=0, rtol=0)
+
     def test_mm_fast_math_kernel_option_controls_cutedsl_math(self, device):
         def epilogue_fn(acc):
             magnitude = acc.abs() + 1.0
