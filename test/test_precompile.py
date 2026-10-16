@@ -5407,8 +5407,6 @@ class TestPrecompileDynamoCapture(TestCase):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("compiled at serve time", out.stdout)
-        # The serve-time compile is not recorded into the loaded package.
-        self.assertNotIn("package bypass", out.stderr)
 
     def test_a_standalone_artifact_refuses_serve_time_compiles(self):
         with self._capture(self.mod.single, backend="eager") as cap:

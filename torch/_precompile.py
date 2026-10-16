@@ -3516,10 +3516,10 @@ def load(
     ``allow_serve_time_compiles=True`` opts an installed artifact out of the
     refusal: a call no captured variant covers compiles with the artifact's
     backend, as ``torch.compile`` would, under the process-wide stance like any
-    other compile. The captured
-    variants are still served first, and they count toward
-    ``torch._dynamo.config.recompile_limit`` for their frame, so a frame that
-    already holds that many runs a missed call eagerly instead of compiling it.
+    other compile. The captured variants are still served first and do not
+    count toward ``torch._dynamo.config.recompile_limit``, so each frame gets
+    that many serve-time compiles on top of them; a missed call past the limit
+    runs eagerly instead of compiling.
     Serve-time compiles are recorded nowhere, but they are built under the
     process's Dynamo config: with ``torch._dynamo.config.caching_precompile`` on
     they drop identity guards (``ID_MATCH``, ``CLOSURE_MATCH``, ...) exactly as
