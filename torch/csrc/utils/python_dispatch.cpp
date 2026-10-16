@@ -678,6 +678,35 @@ static std::vector<c10::impl::LocalDispatchKeySet>& dynamoDispatchKeySetStack() 
   return stack;
 }
 
+// Save the current local dispatch key set onto a C++ thread-local stack, to be
+// restored by _dynamo_restore_local_dispatch_key_set. torch.compile's per-call
+// wrapper uses these to preserve dispatch state across the compiled call, so
+// they are raw C functions rather than pybind11 bindings, whose dispatch costs
+// more than the work.
+static PyObject* dynamo_save_local_dispatch_key_set(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
+  HANDLE_TH_ERRORS
+  dynamoDispatchKeySetStack().push_back(
+      c10::impl::tls_local_dispatch_key_set());
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* dynamo_restore_local_dispatch_key_set(
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
+  HANDLE_TH_ERRORS
+  auto& stack = dynamoDispatchKeySetStack();
+  TORCH_CHECK(
+      !stack.empty(),
+      "_dynamo_restore_local_dispatch_key_set called with an empty stack");
+  c10::impl::_force_tls_local_dispatch_key_set(stack.back());
+  stack.pop_back();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -1326,22 +1355,21 @@ void initDispatchBindings(PyObject* module) {
     auto* impl = tensor.unsafeGetTensorImpl();
     return impl->key_set();
   });
-  // Save the current local dispatch key set onto a C++ thread-local stack, to
-  // be restored by _dynamo_restore_local_dispatch_key_set. Used by
-  // torch.compile's per-call wrapper to preserve dispatch state across the
-  // compiled call without constructing pybind11 DispatchKeySet instances.
-  m.def("_dynamo_save_local_dispatch_key_set", []() {
-    dynamoDispatchKeySetStack().push_back(
-        c10::impl::tls_local_dispatch_key_set());
+  static auto dynamo_dispatch_key_set_methods = std::to_array<PyMethodDef>({
+      {"_dynamo_save_local_dispatch_key_set",
+       dynamo_save_local_dispatch_key_set,
+       METH_NOARGS,
+       nullptr},
+      {"_dynamo_restore_local_dispatch_key_set",
+       dynamo_restore_local_dispatch_key_set,
+       METH_NOARGS,
+       nullptr},
+      {nullptr, nullptr, 0, nullptr},
   });
-  m.def("_dynamo_restore_local_dispatch_key_set", []() {
-    auto& stack = dynamoDispatchKeySetStack();
-    TORCH_CHECK(
-        !stack.empty(),
-        "_dynamo_restore_local_dispatch_key_set called with an empty stack");
-    c10::impl::_force_tls_local_dispatch_key_set(stack.back());
-    stack.pop_back();
-  });
+  TORCH_CHECK(
+      PyModule_AddFunctions(module, dynamo_dispatch_key_set_methods.data()) ==
+          0,
+      "failed to add dispatch key set functions to torch._C");
   m.def("_dispatch_tls_local_include_set", []() {
     return c10::impl::tls_local_dispatch_key_set().included_;
   });
