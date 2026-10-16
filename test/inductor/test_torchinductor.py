@@ -22952,6 +22952,17 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A size-1 innermost reduced dim is not "constant along the
+            # reduction": the contiguous read must still vote INNER (one kernel).
+            def fn(x):
+                return x.sum((1, 2))
+
+            x = torch.randn(64, 4096, 1, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(fn), x)
+            self.assertEqual(result, fn(x))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
         def test_small_strided_read_keeps_outer_reduction(self):
             # A transposed (strided) read votes OUTER even when it is a small
             # dtype: its per-element cost does not shrink with itemsize.
