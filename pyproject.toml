@@ -77,13 +77,6 @@ cmake.define.CMAKE_GENERATOR = "Ninja"
 env.CC = "cl"
 env.CXX = "cl"
 
-[[tool.scikit-build.overrides]]
-# Install CMake artifacts into a persistent tree the editable redirect loads
-# from, instead of zipping multi-GB libraries into every editable wheel. Before
-# 1.1, rebuild-dir forces rebuild-on-import. See CONTRIBUTING.md for caveats.
-if.scikit-build-version = ">=1.1"
-editable.rebuild-dir = "build/editable-install/{wheel_tag}"
-
 # Other than CMAKE_GENERATOR above (win32), cmake.define is intentionally absent
 # -- all BUILD_*/USE_* env vars and additional passthrough variables are
 # forwarded by cmake/EnvVarForwarding.cmake so there is a single source of truth.
