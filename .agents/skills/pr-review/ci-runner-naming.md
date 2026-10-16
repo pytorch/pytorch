@@ -6,7 +6,7 @@ Every self-hosted runner label that a PR adds or changes is checked against the 
 
 ## Which Labels This Covers
 
-The rule covers every self-hosted label: OSDC ARC labels, legacy EC2 labels (`linux.*`, `windows.*`), partner fleets (ROCm, XPU, TPU, DGX, s390x), and the self-hosted macOS fleets (`macos-m1-stable`, `macos-m1-15`, `macos-m2-15`, `macos-m2-26`).
+The rule covers every self-hosted label: OSDC ARC labels, legacy EC2 labels (`linux.*`, `windows.*`), partner fleets (ROCm, XPU, TPU, DGX, s390x), and the self-hosted macOS fleets (`macos-m1-stable`, `macos-m1-15`, `macos-m2-26`).
 
 GitHub-hosted runners are exempt. These label families are GitHub-hosted:
 
