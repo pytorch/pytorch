@@ -181,6 +181,7 @@ struct ExpandableSegment {
 
   // Maps a virtual memory range to physical memory.
   SegmentRange map(SegmentRange range) {
+    namespace syclex = sycl::ext::oneapi::experimental;
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
     TORCH_INTERNAL_ASSERT(ptr() + begin * segment_size_ == range.ptr);
@@ -198,10 +199,16 @@ struct ExpandableSegment {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
       auto& handle = handles_.at(i);
       try {
-        handle.emplace(Handle{sycl::ext::oneapi::experimental::physical_mem(
-            xpu::get_raw_device(device_),
-            xpu::get_device_context(),
-            segment_size_)});
+        handle.emplace(Handle{
+            .handle = syclex::physical_mem(
+                xpu::get_raw_device(device_),
+                xpu::get_device_context(),
+                segment_size_
+#if SYCL_COMPILER_VERSION >= 20260200
+                ,
+                syclex::properties{syclex::enable_ipc{true}}
+#endif
+                )});
         auto& mem = handle->handle;
         mem.map(
             ptr_ + i * segment_size_,
@@ -250,6 +257,86 @@ struct ExpandableSegment {
   // Returns the total size of the virtual memory segment.
   size_t size() const {
     return max_handles_ * segment_size_;
+  }
+
+  // Serializes the IPC handles covering `range` into `ss`.
+  SegmentRange share(SegmentRange range, std::ostream& ss) {
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    auto begin = segmentLeft(range.ptr);
+    auto end = segmentRight(range.ptr + range.size);
+    TORCH_INTERNAL_ASSERT(begin < end);
+
+    auto get_handle_data = [&](size_t i) -> syclex::ipc::handle_data_t {
+      auto& maybe_handle = handles_.at(i);
+      TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
+      if (!maybe_handle->shareable_handle) {
+        maybe_handle->shareable_handle =
+            syclex::ipc::physical_memory::get(maybe_handle->handle).data();
+      }
+      return *maybe_handle->shareable_handle;
+    };
+
+    // All handles have the same size; reuse the first one for the header.
+    auto first_handle_data = get_handle_data(begin);
+    const auto handle_size = first_handle_data.size();
+
+    ShareHeader header{};
+    header.segment_size = segment_size_;
+    header.num_handles = end - begin;
+    header.handle_size = handle_size;
+    ss.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
+    ss.write(
+        reinterpret_cast<const char*>(first_handle_data.data()), handle_size);
+    for (const auto i : c10::irange(begin + 1, end)) {
+      auto handle_data = get_handle_data(i);
+      TORCH_INTERNAL_ASSERT(
+          handle_data.size() == handle_size,
+          "Expected all IPC handles have the same size.");
+      ss.write(reinterpret_cast<const char*>(handle_data.data()), handle_size);
+    }
+    return rangeFromHandles(begin, end);
+#else
+    TORCH_CHECK(
+        false,
+        "Expandable segment IPC sharing requires SYCL compiler 2026.2 or later.");
+#endif
+  }
+
+  // Creates an ExpandableSegment instance from a shared IPC handle.
+  static std::unique_ptr<ExpandableSegment> fromShared(
+      c10::DeviceIndex device,
+      std::istream& ss) {
+#if SYCL_COMPILER_VERSION >= 20260200
+    namespace syclex = sycl::ext::oneapi::experimental;
+    ShareHeader header{};
+    ss.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
+    TORCH_CHECK(
+        header.num_handles > 0,
+        "IPC share header describes an empty expandable segment");
+    auto segment = std::make_unique<ExpandableSegment>(
+        device, std::nullopt, header.segment_size);
+
+    for (const auto i : c10::irange(header.num_handles)) {
+      std::vector<std::byte> data(header.handle_size);
+      ss.read(
+          reinterpret_cast<char*>(data.data()),
+          static_cast<std::streamsize>(header.handle_size));
+      syclex::ipc::handle_data_t handle_data(data.begin(), data.end());
+      syclex::physical_mem mem = syclex::ipc::physical_memory::open(
+          handle_data, xpu::get_device_context(), xpu::get_raw_device(device));
+      mem.map(
+          segment->ptr_ + i * segment->segment_size_,
+          segment->segment_size_,
+          syclex::address_access_mode::read_write);
+      segment->handles_.emplace_back(Handle{.handle = std::move(mem)});
+    }
+    return segment;
+#else
+    TORCH_CHECK(
+        false,
+        "Expandable segment IPC sharing requires SYCL compiler 2026.2 or later.");
+#endif
   }
 
   ~ExpandableSegment() {
@@ -347,7 +434,17 @@ struct ExpandableSegment {
   size_t max_handles_{0};
   struct Handle {
     sycl::ext::oneapi::experimental::physical_mem handle;
+#if SYCL_COMPILER_VERSION >= 20260200
+    std::optional<sycl::ext::oneapi::experimental::ipc::handle_data_t>
+        shareable_handle;
+#endif
   };
+  struct ShareHeader {
+    size_t segment_size = 0;
+    size_t num_handles = 0;
+    size_t handle_size = 0;
+  };
+  static_assert(std::has_unique_object_representations_v<ShareHeader>);
   // Physical memory handles for the segments.
   std::vector<std::optional<Handle>> handles_;
 };
