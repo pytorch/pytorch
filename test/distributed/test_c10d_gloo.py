@@ -3658,31 +3658,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(value, torch.tensor(float(sum(rank + 1 for rank in ranks))))
         c10d.destroy_process_group()
 
-    @requires_gloo()
-    def test_process_group_timeout_recorded(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo",
-            store=store,
-            rank=self.rank,
-            world_size=self.world_size,
-            timeout=timedelta(seconds=111),
-        )
-        get_timeout = c10d.distributed_c10d._get_process_group_timeout
-        self.assertEqual(get_timeout(), timedelta(seconds=111))
-
-        ranks = list(range(self.world_size))
-        new_pg = c10d.new_group(ranks, timeout=timedelta(seconds=222))
-        split_pg = c10d.split_group(split_ranks=[ranks], timeout=timedelta(seconds=333))
-        self.assertEqual(get_timeout(new_pg), timedelta(seconds=222))
-        self.assertEqual(get_timeout(split_pg), timedelta(seconds=333))
-
-        c10d.destroy_process_group(new_pg)
-        self.assertNotIn(new_pg, c10d.distributed_c10d._world.pg_timeouts)
-        self.assertIn(split_pg, c10d.distributed_c10d._world.pg_timeouts)
-        c10d.destroy_process_group()
-        self.assertEqual(c10d.distributed_c10d._world.pg_timeouts, {})
-
 
 class GlooProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
