@@ -6,8 +6,10 @@
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import Boolean, const_expr, Float32, Int32, Int64
+from cutlass import const_expr, Float32, Int32, Int64
 from cutlass._mlir.dialects import llvm
+
+from . import minmax as _mm
 
 
 WARP = 32
@@ -152,7 +154,7 @@ def _welford_denom(acc_dtype, nf, correction):
     # variance. nf is runtime, so use a select rather than Python max().
     d = nf - acc_dtype(correction)
     z = acc_dtype(0.0)
-    return d if d > z else z  # noqa: FURB136 -- see the note above _maxnan
+    return d if d > z else z  # noqa: FURB136
 
 
 class WelfordOps:
@@ -266,12 +268,9 @@ class ArgMaxOps:
     def _pick(self, bv, bi, cv, ci):
         cand_nan = cv != cv
         best_nan = bv != bv
-        repl = (
-            ((ci < bi) if best_nan else Boolean(True))
-            if cand_nan
-            else (
-                Boolean(False) if best_nan else ((ci < bi) if (cv == bv) else (cv > bv))
-            )
+        lower = ci < bi
+        repl = (cand_nan & (lower | ~best_nan)) | (
+            ~cand_nan & ~best_nan & (((cv == bv) & lower) | (cv > bv))
         )
         nv = cv if repl else bv
         ni = ci if repl else bi
@@ -600,14 +599,12 @@ class ArgMinOps:
 
     @cute.jit
     def _pick(self, bv, bi, cv, ci):
+        # The ArgMaxOps mirror, same flat predicate algebra (see there).
         cand_nan = cv != cv
         best_nan = bv != bv
-        repl = (
-            ((ci < bi) if best_nan else Boolean(True))
-            if cand_nan
-            else (
-                Boolean(False) if best_nan else ((ci < bi) if (cv == bv) else (cv < bv))
-            )
+        lower = ci < bi
+        repl = (cand_nan & (lower | ~best_nan)) | (
+            ~cand_nan & ~best_nan & (((cv == bv) & lower) | (cv < bv))
         )
         nv = cv if repl else bv
         ni = ci if repl else bi
@@ -655,8 +652,7 @@ class AMaxOps:
 
     @cute.jit
     def _maxnan(self, a, b):
-        # Keep the explicit NaN-propagating max: an autofix to max() changed emitted bits.
-        return b if ((b > a) or (b != b)) else a
+        return _mm.fmax_nan(a, b, self.acc)
 
     @cute.jit
     def leaf(self, val, idx):
@@ -694,7 +690,7 @@ class AMinOps:
 
     @cute.jit
     def _minnan(self, a, b):
-        return b if ((b < a) or (b != b)) else a
+        return _mm.fmin_nan(a, b, self.acc)
 
     @cute.jit
     def leaf(self, val, idx):
@@ -827,12 +823,11 @@ class AMinMaxOps:
 
     @cute.jit
     def _fmin(self, a, b):
-        # Keep the explicit NaN truth table; see AMaxOps._maxnan.
-        return (a if a != a else (a if a < b else b)) if b == b else b  # noqa: FURB136
+        return _mm.fmin_nan(a, b, self.acc)
 
     @cute.jit
     def _fmax(self, a, b):
-        return (a if a != a else (a if a > b else b)) if b == b else b  # noqa: FURB136
+        return _mm.fmax_nan(a, b, self.acc)
 
     @cute.jit
     def leaf(self, val, idx):
