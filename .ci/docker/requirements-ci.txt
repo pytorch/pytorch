@@ -15,7 +15,7 @@ build==1.5.0
 #Pinned versions: 1.5.0
 #test that import:
 
-click
+click==8.3.3
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
@@ -42,8 +42,10 @@ expecttest==0.3.0
 #Pinned versions: 0.3.0
 #test that import:
 
-fbscribelogger==0.1.7
+fbscribelogger==0.1.7 ; python_version < "3.14"
 #Description: write to scribe from authenticated jobs on CI
+#fbscribelogger caps thriftpy2<0.6.0, which has no cp314/cp315 wheel; skip on 3.14+
+#(no-op on OSS/ROCm CI anyway) to avoid a source build in the compiler-less test image
 #Pinned versions: 0.1.6
 #test that import:
 
@@ -68,7 +70,7 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
-librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x" and platform_machine != "riscv64"
+librosa==0.11.0 ; python_version < "3.11" and platform_machine != "s390x" and platform_machine != "riscv64"
 librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x" and platform_machine != "riscv64"
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
@@ -147,11 +149,12 @@ numpy==1.23.2; python_version == "3.10"
 numpy==1.26.4; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version == "3.14"
-numpy==2.4.6; python_version >= "3.15"
+numpy==2.5.2; python_version >= "3.15"
 
 pandas==2.0.3; python_version < "3.12"
 pandas==2.2.3; python_version >= "3.12" and python_version < "3.14"
-pandas==2.3.3; python_version >= "3.14"
+pandas==2.3.3; python_version == "3.14"
+pandas==3.0.6; python_version >= "3.15"
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
@@ -164,7 +167,8 @@ opt-einsum==3.3
 #test that import: test_linalg.py
 
 optree==0.13.0 ; python_version < "3.14"
-optree==0.17.0 ; python_version >= "3.14"
+optree==0.17.0 ; python_version == "3.14"
+optree==0.20.0 ; python_version >= "3.15"
 #Description: A library for tree manipulation
 #Pinned versions: 0.13.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
@@ -187,7 +191,7 @@ protobuf==6.33.5
 #Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
 
-psutil
+psutil==7.2.2
 #Description: information on running processes and system utilization
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
@@ -207,7 +211,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures>=10.3
+pytest-rerunfailures==14.0
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
@@ -253,10 +257,11 @@ pygments==2.20.0
 #test that import:
 
 scikit-image==0.22.0 ; python_version < "3.13" and platform_machine != "s390x"
-scikit-image==0.26.0 ; python_version >= "3.13" or platform_machine == "s390x"
+scikit-image==0.26.0 ; (python_version >= "3.13" and python_version < "3.15") or platform_machine == "s390x"
 # 0.22.0 has no cp313/cp314 wheel, so pip builds it from source and picks up an
 # unpinned pythran that no longer compiles under the -std=c++14 its meson build
 # uses. 0.26.0 ships cp313/cp313t/cp314/cp314t wheels, so there is no source build.
+# No scikit-image release ships a cp315 wheel yet, so skip it on 3.15.
 # There are no binaries for scikit-image for s390x, but scikit-image 0.26.0
 # builds without any issues
 #Description: image processing routines
@@ -296,7 +301,7 @@ typing-extensions==4.15.0 ; python_version >= "3.14"
 #Pinned versions:
 #test that import:
 
-unittest-xml-reporting<=3.2.0,>=2.0.0
+unittest-xml-reporting==3.2.0
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
@@ -313,7 +318,7 @@ spin==0.17
 #Pinned versions: 0.17
 #test that import:
 
-redis>=4.0.0
+redis==8.1.0
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
 
@@ -344,9 +349,12 @@ tensorboard==2.18.0 ; python_version >= "3.13"
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.7.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12" and python_version < "3.14"
+pywavelets==1.9.0 ; python_version == "3.14"
+pywavelets==1.10.0 ; python_version >= "3.15"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
+# 1.7.0 has no cp314 wheel; 1.9.0 ships wheels for 3.14, 1.10.0 for 3.15
 #Pinned versions: 1.4.1
 #test that import:
 
@@ -393,10 +401,11 @@ pwlf==2.2.1
 # To build PyTorch itself
 pip==26.1.2
 pyyaml==6.0.3
-pyzstd
+pyzstd==0.19.1 ; python_version < "3.11"
+pyzstd==0.20.0 ; python_version >= "3.11"
 setuptools==78.1.1
 packaging==24.2
-six
+six==1.17.0
 
 scons==4.5.2 ; platform_machine == "aarch64"
 
@@ -419,11 +428,11 @@ tlparse==0.4.0
 filelock==3.20.3
 #Description: required for inductor testing
 
-cuda-bindings>=13.0,<14.0 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin" and python_version < "3.15"
+cuda-bindings==13.4.4 ; platform_machine != "s390x" and platform_machine != "riscv64" and platform_system != "Darwin" and python_version < "3.15"
 #Description: required for testing CUDAGraph::raw_cuda_graph(). See https://nvidia.github.io/cuda-python/cuda-bindings/latest/support.html for how this version was chosen. PyTorch CI CUDA builds use CUDA 13, so depend on the matching cuda-bindings major while allowing minor updates within that major.
 #test that import: test_cuda.py
 
-cupti-python>13.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
+cupti-python==13.4.0 ; platform_system == "Linux" and (platform_machine == "x86_64" or platform_machine == "aarch64") and python_version < "3.14"
 #Description: required for Cuspy, the experimental in-process CUPTI activity collector (torch.profiler._cuspy). >13.0 to match CUDA 13.x toolkits. cupti-python only ships Linux x86_64/aarch64 CPython wheels (no 3.14/free-threaded yet), so guard to those.
 #test that import: test_profiler.py
 
@@ -437,11 +446,12 @@ pyre-extensions==0.0.32
 tabulate==0.9.0
 #Description: These package are needed to build FBGEMM and torchrec on PyTorch CI
 
-tqdm>=4.66.0
+tqdm==4.70.1
 #Description: progress bar library required for dynamo benchmarks
 #test that import: benchmarks/dynamo/*
 
-aiohttp==3.14.3
+aiohttp==3.14.3 ; python_version < "3.15"
+aiohttp==3.14.4 ; python_version >= "3.15"
 #Description: required for torch.distributed.debug
 
 spin==0.17
@@ -449,7 +459,7 @@ spin==0.17
 #Pinned versions: 0.17
 #test that import: spincli/test_spin.py
 
-uv
+uv==0.13.1
 #Description: required for running spin commands via uvx
 #Pinned version:
 #test that import:
