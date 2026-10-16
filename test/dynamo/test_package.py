@@ -35,7 +35,7 @@ from torch._dynamo.package import (
 )
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import default_guard_filter_fn
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -1020,7 +1020,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
             for name in load_guards_state(
                 guarded.guards_state
             ).output_graph.global_scope
-            if name.startswith("___unnamed_scope_")
+            if name.startswith(UNNAMED_SCOPE_PREFIX)
         }
         self.assertTrue(names)
         for backend_id, backend in package.cached_backends.items():
