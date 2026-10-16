@@ -13,6 +13,14 @@ CORE_OPS = (
     ("prod.dim_int", "prod", True, "int"),
 )
 
+# aten op, trait key, dimension spelling, projected output dtypes, impl outputs
+INDEX_OPS = (
+    ("argmax", "argmax", "optional_int", ("int64",), ("out",)),
+    ("argmin", "argmin", "optional_int", ("int64",), ("out",)),
+    ("max.dim", "maxdim", "int", ("input", "int64"), ("max", "max_values")),
+    ("min.dim", "mindim", "int", ("input", "int64"), ("min", "min_indices")),
+)
+
 DTYPES = ("float16", "bfloat16", "float32")
 DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4}
 ORDER_SENSITIVE_TRAITS = frozenset(("sum", "mean", "prod"))

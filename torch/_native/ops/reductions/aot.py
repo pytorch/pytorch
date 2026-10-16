@@ -26,6 +26,7 @@ def _load_data():
 _DATA = _load_data()
 ARCHS = _DATA.ARCHS
 CORE_OPS = _DATA.CORE_OPS
+INDEX_OPS = _DATA.INDEX_OPS
 DTYPES = _DATA.DTYPES
 ROW_CLASSES = _DATA.ROW_CLASSES
 ORDER_SENSITIVE_TRAITS = _DATA.ORDER_SENSITIVE_TRAITS
@@ -35,6 +36,7 @@ _DTYPE_CPP = {
     "float16": "at::kHalf",
     "bfloat16": "at::kBFloat16",
     "float32": "at::kFloat",
+    "int64": "at::kLong",
 }
 _INNER_TREE_ENVS = ("PYTORCH_NATIVE_INNER_TREE", "PYTORCH_SUM_INNER_TREE")
 
@@ -76,6 +78,20 @@ def _geometry_cpp(style):
       int64_t N = 0;
       if (self.dim() > 0) {
         const int64_t wrapped = c10::maybe_wrap_dim(dim, self.dim());
+        row_dims = wrapped == self.dim() - 1;
+        if (row_dims) N = self.size(wrapped);
+      }
+    """
+
+    if style == "optional_int":
+        return """
+      const bool reduce_all = !dim.has_value();
+      bool row_dims = self.dim() > 0;
+      int64_t N = 0;
+      if (reduce_all) {
+        N = self.numel();
+      } else if (row_dims) {
+        const int64_t wrapped = c10::maybe_wrap_dim(*dim, self.dim());
         row_dims = wrapped == self.dim() - 1;
         if (row_dims) N = self.size(wrapped);
       }
@@ -477,5 +493,127 @@ inline _NaotInnerTreePlan _naot_inner_tree_plan(
     """
 
 
+class _IndexReduction:
+    DISPATCH_KEY = "CUDA"
+    KERNEL_MODULE = "aot_kernel.py"
+    ARCHS = ARCHS
+
+    def __init__(self, aten_op, trait, dim_style, out_specs, outputs):
+        self.ATEN_OP = aten_op
+        self._trait = trait
+        self._dim_style = dim_style
+        self._out_specs = out_specs
+        self._outputs = outputs
+
+    def _out_dtypes(self, dtype):
+        return tuple(dtype if value == "input" else value for value in self._out_specs)
+
+    def kernel_precompile_grid(self):
+        return [
+            {
+                "path": "row",
+                "trait": self._trait,
+                "dtype": dtype,
+                "out_dtypes": self._out_dtypes(dtype),
+                "row_class": row_class,
+                "order": "linear",
+            }
+            for dtype in DTYPES
+            for row_class in ROW_CLASSES
+        ]
+
+    def covered_axes(self, self_t, dim=None, keepdim=False):
+        import torch
+
+        names = {
+            torch.float16: "float16",
+            torch.bfloat16: "bfloat16",
+            torch.float32: "float32",
+        }
+        dtype_name = names.get(self_t.dtype)
+        geometry = _row_geometry(self_t, dim, self._dim_style)
+        row_class = None
+        if geometry is not None and dtype_name is not None:
+            n, m, reduce_all = geometry
+            row_class = _DATA.row_class(dtype_name, n, m, reduce_all)
+        eligible = (
+            self_t.is_cuda
+            and self_t.is_contiguous()
+            and dtype_name is not None
+            and self_t.storage_offset() * self_t.element_size() % 16 == 0
+            and row_class is not None
+        )
+        return {
+            "path": "row" if eligible else None,
+            "trait": self._trait,
+            "dtype": self_t.dtype,
+            "row_class": row_class,
+            "order": "linear",
+        }
+
+    def _output_checks(self, *, output):
+        checks = []
+        for name, out_spec in zip(self._outputs, self._out_specs):
+            dtype = "st" if out_spec == "input" else _DTYPE_CPP[out_spec]
+            access = f"{name}." if output else f"{name}->"
+            check = (
+                f"{access}scalar_type() != {dtype} || !{access}is_contiguous() || "
+                f"reinterpret_cast<uintptr_t>({access}const_data_ptr()) % 16 != 0"
+            )
+            if output:
+                checks.append(f"      if ({check}) return false;")
+            else:
+                checks.append(
+                    f"      if ({name}.has_value() && ({check})) return false;"
+                )
+        return "\n".join(checks)
+
+    def _front(self, *, output):
+        dtype_accept = " || ".join(f"st == {_DTYPE_CPP[dtype]}" for dtype in DTYPES)
+        return f"""
+      const auto st = self.scalar_type();
+      if (!({dtype_accept})) return false;
+      if (self.dim() < 1 || !self.is_contiguous()) return false;
+      if (reinterpret_cast<uintptr_t>(self.const_data_ptr()) % 16 != 0) return false;
+{self._output_checks(output=output)}
+      {_geometry_cpp(self._dim_style)}
+      {_classifier_cpp()}
+      if (!use_row) return false;
+    """
+
+    def cpp_covers(self):
+        return f"{self._front(output=False)}\n      return true;"
+
+    def cpp_dispatch_prelude(self):
+        return self._front(output=True)
+
+    def cpp_dispatch(self, spec):
+        threads_per_row, threads_per_block = ROW_CLASSES[spec["row_class"]]
+        return (
+            f"st == {_DTYPE_CPP[spec['dtype']]} && "
+            f"threads_per_row == {threads_per_row} && "
+            f"threads_per_block == {threads_per_block}"
+        )
+
+    def cpp_launch(self, spec, launch_fn):
+        vec = 16 // _DATA.DTYPE_BYTES[spec["dtype"]]
+        threads_per_row, _ = ROW_CLASSES[spec["row_class"]]
+        output_views = "\n".join(
+            f"      auto {name}_1d = {name}.view({{M}});" for name in self._outputs
+        )
+        launch_outputs = ", ".join(f"{name}_1d" for name in self._outputs)
+        return f"""
+      auto self_2d = self.view({{M, N}});
+{output_views}
+      const int32_t nchunks = static_cast<int32_t>(N / {vec});
+      const int32_t nwaves = (nchunks + {threads_per_row - 1}) / {threads_per_row};
+      {launch_fn}(self_2d, {launch_outputs}, nchunks, nwaves,
+                  static_cast<int32_t>(N), at::cuda::getCurrentCUDAStream());
+    """
+
+
 def declarations():
-    return [_RowReduction(*row) for row in CORE_OPS]
+    return [
+        *(_RowReduction(*row) for row in CORE_OPS),
+        *(_IndexReduction(*row) for row in INDEX_OPS),
+    ]
