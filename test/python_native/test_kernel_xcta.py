@@ -6,7 +6,13 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 if not TEST_CUTEDSL:
@@ -40,6 +46,14 @@ class TestKernelXcta(TestCase):
         )
         self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
 
+    def test_bool_storage(self):
+        x = torch.zeros(1, 1 << 20, device="cuda", dtype=torch.bool)
+        x[:, 123] = True
+        out = kernel_xcta.reduce_row_xcta(
+            T.AnyOps(acc=cutlass.Float32), "smoke_bool", x, torch.bool
+        )
+        self.assertEqual(out, x.any(dim=1))
+
     def test_two_output_split(self):
         # Stage 2 projects both outputs from one accumulator; this path rejects index traits.
         x = torch.randn(2, 1 << 20, device="cuda")
@@ -54,6 +68,29 @@ class TestKernelXcta(TestCase):
         want = torch.aminmax(x, dim=1)
         self.assertEqual(lo, want.min)
         self.assertEqual(hi, want.max)
+
+    @parametrize("dtype", [torch.complex32, torch.complex64, torch.complex128])
+    def test_complex_two_output_split(self, dtype):
+        acc = cutlass.Float64 if dtype is torch.complex128 else cutlass.Float32
+        real_dtype = dtype.to_real()
+        x = torch.randn(2, 1 << 16, device="cuda", dtype=dtype)
+        got = kernel_xcta.reduce_row_xcta_2out(
+            T.ComplexVarMeanOps(acc=acc),
+            "complex_2out",
+            x,
+            [real_dtype, dtype],
+        )
+        self.assertIsNotNone(got)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.var_mean(x, dim=1)
+        tol = (
+            1e-2
+            if dtype is torch.complex32
+            else 1e-3
+            if dtype is torch.complex64
+            else 1e-10
+        )
+        self.assertEqual(got, expected, rtol=tol, atol=tol)
 
     def test_one_kernel_per_vec_class(self):
         # Runtime sub-row geometry lets one kernel serve every M and N in a vector class.
@@ -101,6 +138,9 @@ class TestKernelXcta(TestCase):
                 torch.float32,
             )
         )
+
+
+instantiate_parametrized_tests(TestKernelXcta)
 
 
 if __name__ == "__main__":

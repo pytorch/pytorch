@@ -245,6 +245,34 @@ class TestKernelRowTile(TestCase):
         )
         self.assertEqual(idx, x.argmax(dim=1).to(torch.int32))
 
+    def test_tma_staged_complex_rows(self):
+        """Move complex row payloads through staged TMA without splitting logical values."""
+        for dtype, acc, n in (
+            (torch.complex32, cutlass.Float32, 32),
+            (torch.complex64, cutlass.Float32, 32),
+            (torch.complex128, cutlass.Float64, 128),
+        ):
+            with self.subTest(dtype=dtype):
+                x = torch.randn(4097, n, device="cuda", dtype=dtype)
+                (got,) = rt.reduce_row_tile(
+                    T.ComplexSumOps(acc=acc),
+                    f"complex_tma_{dtype}",
+                    x,
+                    [dtype],
+                    threads_per_row=1,
+                    use_tma=True,
+                )
+                with torch.backends.python_native.cutedsl.disabled():
+                    expected = x.sum(dim=1)
+                tol = (
+                    1e-2
+                    if dtype is torch.complex32
+                    else 1e-5
+                    if dtype is torch.complex64
+                    else 1e-12
+                )
+                self.assertEqual(got, expected, atol=tol, rtol=tol)
+
     def test_narrow_row_and_tma_gates(self):
         # Pin the measured narrow-row tiers and TMA's direct-load stride cliff.
         # Width ceiling applies at any M.
@@ -261,7 +289,7 @@ class TestKernelRowTile(TestCase):
                 self.assertFalse(
                     rt.narrow_row(n + 4, 4, min_rows), "budget did not bite"
                 )
-        # TMA requires fp32, power-of-two N, and a lane stride of at least 128 bytes.
+        # TMA requires a supported descriptor, power-of-two N, and at least 128 bytes per row.
         self.assertFalse(
             rt.tma_ok(16, 4, 1 << 20)
         )  # 64B lane stride: direct load is at SOL
@@ -270,6 +298,9 @@ class TestKernelRowTile(TestCase):
         self.assertFalse(
             rt.tma_ok(32, 2, 1 << 20)
         )  # bf16 does not map one element per 4-byte bank
+        self.assertTrue(rt.tma_ok(32, 4, 1 << 20, storage_itemsize=2))
+        self.assertTrue(rt.tma_ok(16, 8, 1 << 20, storage_itemsize=4))
+        self.assertTrue(rt.tma_ok(16, 16, 1 << 20, storage_itemsize=8))
         with mock.patch.object(rt._hw, "caps") as caps:
             caps.return_value.cc = (9, 0)
             self.assertTrue(rt.one_thread_row_ok(92, 4, 1 << 16, "cuda"))
@@ -414,6 +445,37 @@ class TestKernelRowTile(TestCase):
         torch.testing.assert_close(
             got, x.double().sum(dim=1).float(), atol=1e-5, rtol=1e-5
         )
+
+    def test_dispatcher_auto_selects_complex_tma(self):
+        """Auto-select TMA for eligible complex rows using storage element sizes."""
+        m = 1 << 16
+        for dtype, acc, storage_itemsize, n in (
+            (torch.complex32, cutlass.Float32, 2, 32),
+            (torch.complex64, cutlass.Float32, 4, 16),
+            (torch.complex128, cutlass.Float64, 8, 16),
+        ):
+            with self.subTest(dtype=dtype):
+                x = torch.randn(m, n, device="cuda", dtype=dtype)
+                with mock.patch.object(rt, "tma_ok", wraps=rt.tma_ok) as gate:
+                    got = kg.reduce_dim(
+                        T.ComplexSumOps(acc=acc),
+                        f"disp_complex_tma_{dtype}",
+                        x,
+                        -1,
+                        dtype,
+                    )
+                self.assertTrue(gate.called)
+                self.assertEqual(gate.call_args.args[-1], storage_itemsize)
+                with torch.backends.python_native.cutedsl.disabled():
+                    expected = x.sum(dim=1)
+                tol = (
+                    1e-2
+                    if dtype is torch.complex32
+                    else 1e-5
+                    if dtype is torch.complex64
+                    else 1e-12
+                )
+                self.assertEqual(got, expected, atol=tol, rtol=tol)
 
     def test_use_tma_rejects_a_non_power_of_two_row(self):
         # The rotation mask requires power-of-two N; forced N=24 silently erred by 13.2,

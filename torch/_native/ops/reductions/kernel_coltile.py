@@ -16,7 +16,7 @@ import torch
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
-from . import tile
+from . import _storage, tile
 from .kernel_general import _flat, _launch, ReduceBlock
 from .traits import WARP, welford_nouts
 
@@ -552,9 +552,16 @@ class _OrderedColReduce:
         if column_pack not in (1, 2, 4):
             raise ValueError("column_pack must be one of 1, 2, 4")
         if column_pack > 1 and (
-            trait.nfields != 1 or trait.acc.width != 32 or nouts != 1 or C % column_pack
+            trait.nfields != 1
+            or trait.acc.width != 32
+            or nouts != 1
+            or C % column_pack
+            or getattr(trait, "complex_input", False)
+            or any(w != 1 for w in (getattr(trait, "output_widths", None) or (1,)))
         ):
-            raise ValueError("column packing requires complete single-field outputs")
+            raise ValueError(
+                "column packing requires complete single-field real outputs"
+            )
         self.trait = trait
         self.plan = plan
         self.R = R
@@ -581,6 +588,12 @@ class _OrderedColReduce:
             )
         ):
             raise ValueError("ordered-column partition range is out of bounds")
+        self.complex_input = getattr(trait, "complex_input", False)
+        self.output_widths = (
+            (1,) * nouts
+            if plan.shape == "split"
+            else tuple(getattr(trait, "output_widths", None) or (1,) * nouts)
+        )
         # Each worker traverses an original warp tree, even with fewer column lanes.
         self.workers = 1 if plan.shape == "multirow" else min(worker_warps, plan.wpr)
         self.outputs_per_block = 128 if plan.shape == "multirow" else tile_columns
@@ -594,6 +607,7 @@ class _OrderedColReduce:
             self.B,
             self.trait.nfields,
             self.nouts,
+            self.output_widths,
             self.workers,
             self.outputs_per_block,
             self.full_tiles,
@@ -662,7 +676,12 @@ class _OrderedColReduce:
                 + Int64(safe_red) * Int64(self.C)
                 + Int64(col)
             )
-            got = trait.leaf(trait.acc(mIn[index]), safe_red)
+            got = trait.leaf(
+                tile._load_reduction_value(
+                    trait, mIn, index, const_expr(self.complex_input)
+                ),
+                safe_red,
+            )
         ident = self._identity()
         return tuple(got[f] if valid else ident[f] for f in range(self.state_fields))
 
@@ -857,13 +876,27 @@ class _OrderedColReduce:
             if (Int32(ty) == Int32(0)) & active:
                 if const_expr(self.column_pack > 1):
                     for i in cutlass.range_constexpr(self.column_pack):
-                        index = output * Int32(self.column_pack) + Int32(i)
-                        mOuts[0][index] = mOuts[0].element_type(projected[i])
+                        tile._store_reduction_value(
+                            mOuts[0],
+                            output * Int32(self.column_pack) + Int32(i),
+                            projected[i],
+                            1,
+                        )
                 elif const_expr(self.nouts == 1):
-                    mOuts[0][output] = mOuts[0].element_type(projected)
+                    tile._store_reduction_value(
+                        mOuts[0],
+                        output,
+                        projected,
+                        const_expr(self.output_widths[0]),
+                    )
                 else:
                     for k in cutlass.range_constexpr(self.nouts):
-                        mOuts[k][output] = mOuts[k].element_type(projected[k])
+                        tile._store_reduction_value(
+                            mOuts[k],
+                            output,
+                            projected[k],
+                            const_expr(self.output_widths[k]),
+                        )
 
 
 def _split_p(R: int) -> int:
@@ -1013,7 +1046,7 @@ def reduce_ordered_col(
             for d in trait.fdtypes
         ]
         if split
-        else [out.reshape(-1) for out in outs]
+        else [_storage.flat_view(out) for out in outs]
     )
     fake_in = _L.fake_compact(
         torch2cute[kernel_x.dtype],
@@ -1069,7 +1102,7 @@ def reduce_ordered_col(
             tuple(out_dtypes),
             tuple(part.dtype for part in kernel_outs),
         ) + s2.cache_sig
-        _launch(s2, key2, kernel_outs, [out.reshape(-1) for out in outs])
+        _launch(s2, key2, kernel_outs, [_storage.flat_view(out) for out in outs])
     return tuple(outs)
 
 
@@ -1201,8 +1234,8 @@ def _reduce_col_tile(
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
-    kernel_x = rows
-    kernel_outs = [out.reshape(-1) for out in outs]
+    kernel_x = _storage.row_view(rows)
+    kernel_outs = [_storage.flat_view(out) for out in outs]
     total = B * C
     nchunks = Int32(total // vec)
     batch_chunks = Int32(C // vec) if x.dim() == 3 else None
@@ -1237,7 +1270,7 @@ def _reduce_col_tile(
         ]
     )
     dsts = outs if single else parts
-    kernel_dsts = [dst.reshape(-1) for dst in dsts]
+    kernel_dsts = [_storage.flat_view(dst) for dst in dsts]
 
     def _fake():
         # Dynamic descriptors require vec divisibility; None avoids a 1.27x unused argument.
@@ -1245,7 +1278,7 @@ def _reduce_col_tile(
             [
                 _L.fake_compact(
                     torch2cute[kernel_x.dtype],
-                    (_L.sym(), _L.sym(vec)),
+                    (_L.sym(), _L.sym(vec * (2 if x.is_complex() else 1))),
                     stride_order=(1, 0),
                     align=align,
                 )

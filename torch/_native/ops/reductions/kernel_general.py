@@ -546,7 +546,13 @@ def _try_fast_row(
             order="linear",
             ragged_vector=True,
         )
-    if rt.one_thread_row_ok(N, itemsize, M, x.device):
+    if rt.one_thread_row_ok(
+        N,
+        itemsize,
+        M,
+        x.device,
+        itemsize // 2 if x.is_complex() else itemsize,
+    ):
         return rt.reduce_row_tile(
             trait,
             trait_key,
@@ -806,16 +812,12 @@ def _reduce(
     out_shape = [s for i, s in enumerate(x.shape) if i not in red_axes]
     num_o = max(1, math.prod(out_shape))
     count = x.numel() // num_o
-    complex_input = getattr(trait, "complex_input", False)
-
     from . import kernel_rowtile as rt
 
     order = rt.reduction_order(order)
     tune = block is None
     block = _K0_BLOCK if block is None else block
     if order == "inner_tree" and count > 0:
-        if complex_input:
-            raise ValueError("inner-tree reduction cannot serve this geometry")
         if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
             raise ValueError("inner-tree reduction requires 32-bit logical extents")
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
@@ -880,12 +882,7 @@ def _reduce(
 
     # Reshape dense TensorIterator row/column views onto fast kernels; general remains
     # the fallback for other layouts and declines.
-    if (
-        not complex_input
-        and len(out_shape) > 0
-        and count < _INT32_LIMIT
-        and num_o < _INT32_LIMIT
-    ):
+    if len(out_shape) > 0 and count < _INT32_LIMIT and num_o < _INT32_LIMIT:
         kind = fast_kind(red_pairs, kept_pairs, nouts)
         red_n = x.numel() // max(1, math.prod(out_shape))
         if kind == "row" and x.is_contiguous():
@@ -1085,7 +1082,6 @@ def _reduce_all(
                 trait, trait_key, x, None, out_dtypes, nouts, block=block, order=order
             )
     L = x.numel()
-    complex_input = getattr(trait, "complex_input", False)
     xf = x.reshape(-1)
     if L == 1 and xf.stride(0) != 1:
         # A single element is contiguous at any stride; the wrap still requires unit stride.
@@ -1093,10 +1089,7 @@ def _reduce_all(
     # Keep one-shot inputs out of xcta, which adds a ~1.9us launch or declines them.
     # Direct routing measured 1.2-2.1x over ATen.
     x2 = xf.view(1, -1)
-
     if order == "inner_tree" and L > 0:
-        if complex_input:
-            raise ValueError("inner-tree reduction cannot serve this geometry")
         if L >= _INT32_LIMIT:
             raise ValueError("inner-tree reduction requires 32-bit logical extents")
         outs = rt.reduce_row_tile(
@@ -1110,7 +1103,7 @@ def _reduce_all(
         return tuple(_as_shape(o, ()) for o in outs)
     if order == "inner_tree":
         order = "unordered"
-    if not complex_input and _oneshot_ok(x2):
+    if _oneshot_ok(x2):
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
         outs = rt.reduce_row_tile(
@@ -1126,16 +1119,13 @@ def _reduce_all(
         return tuple(_as_shape(o, ()) for o in outs)
     from . import kernel_xcta as xc
 
-    if not complex_input:
-        if nouts == 1:
-            res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
-            res = None if res is None else (res,)
-        else:
-            res = xc.reduce_row_xcta_2out(
-                trait, trait_key, xf, out_dtypes, flatten=True
-            )
-        if res is not None:
-            return res
+    if nouts == 1:
+        res = xc.reduce_row_xcta(trait, trait_key, xf, out_dtypes[0], flatten=True)
+        res = None if res is None else (res,)
+    else:
+        res = xc.reduce_row_xcta_2out(trait, trait_key, xf, out_dtypes, flatten=True)
+    if res is not None:
+        return res
     # If xcta declines, grid-stride any L without reshaping or extent-dependent compile cost.
     sm = _hw.caps(x.device).sm_count
     G = _grid_size(L, block, sm, grid_mult)

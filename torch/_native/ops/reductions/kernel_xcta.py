@@ -20,6 +20,7 @@ from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import (  # safe: kernel_general imports us only lazily
+    _storage,
     kernel_general as _RB,
     kernel_rowtile as _rt,
     tile,
@@ -133,7 +134,15 @@ class FusedTwoStage:
             kstrides,
             cutlass.Int64(0),
             cutlass.Int64(count),
-        ).launch(grid=[mOuts[0].shape[0], 1, 1], block=[s2.block, 1, 1], stream=stream)
+        ).launch(
+            grid=[
+                mOuts[0].shape[0] // const_expr(s2.tile.output_widths[0]),
+                1,
+                1,
+            ],
+            block=[s2.block, 1, 1],
+            stream=stream,
+        )
 
 
 # Cache kernels by vector class/config and geometry, boxed arguments (~6us), and declines by N.
@@ -201,6 +210,12 @@ def _reduce_row_xcta(
         and welford_nouts(trait_key) == nouts
     ):
         cfg = _XctaConfig(subrow_target=16384)
+    elif (
+        x.element_size() == 16
+        and getattr(trait, "complex_abs_max", False)
+        and _hw.caps(x.device).cc == (10, 0)
+    ):
+        cfg = _XctaConfig(block=512, subrow_target=512 if M > 1 else cfg.subrow_target)
     block = cfg.block if block is None else block
     subrow_target = cfg.subrow_target if subrow_target is None else subrow_target
 
@@ -227,7 +242,7 @@ def _reduce_row_xcta(
     C, s, fn, rexts, rstrides, kexts, kstrides, cnt, pn, s1nc, s1nw = geom
 
     # Size scratch per M; all operands keep M dynamic for plan reuse.
-    sub = x.reshape(M * C, s)
+    sub = _storage.row_view(x.reshape(M * C, s))
     parts = [
         torch.empty(M * C, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
         for f in range(trait.nfields)
@@ -236,7 +251,7 @@ def _reduce_row_xcta(
     fn(
         _L.read_only(sub),
         list(parts),
-        list(outs),
+        [_storage.flat_view(out) for out in outs],
         rexts,
         rstrides,
         kexts,
@@ -281,7 +296,7 @@ def _build_geom(
     svec = math.gcd(s, 128 // (elsize * 8))  # the sub-row's OWN vec class
 
     # Runtime rolled-loop length lets one stage-1 kernel serve a vector class, so omit N.
-    cfg = _rt.row_config(s, elsize * 8)
+    cfg = _rt.trait_row_config(s, elsize * 8, trait, nouts)
     threads_per_row = max(_rt.WARP, cfg.threads_per_row)
     threads_per_block = max(threads_per_row, cfg.threads_per_block)
     threads_per_block -= (
@@ -308,7 +323,7 @@ def _build_geom(
     def _make_s1():
         return tile.TileReduce(
             trait,
-            torch2cute[x.dtype],
+            torch2cute[_storage.real_dtype(x.dtype)],
             "row",
             s,
             threads_per_row=threads_per_row,
@@ -316,19 +331,20 @@ def _build_geom(
             nouts=nouts,
             final=False,
             unroll=unroll,
+            vec=svec,
         )
 
     def _fake_in():
         # Dynamic 2D row-major descriptor, with inner extent divisible by vector width.
         return _L.fake_compact(
-            torch2cute[x.dtype],
-            (_L.sym(), _L.sym(svec)),
+            torch2cute[_storage.real_dtype(x.dtype)],
+            (_L.sym(), _L.sym(svec * (2 if x.is_complex() else 1))),
             stride_order=(1, 0),
             align=align,
         )
 
     def _fake_1d(dtype):
-        return _L.fake_compact(torch2cute[dtype], (_L.sym(),))
+        return _L.fake_compact(torch2cute[_storage.real_dtype(dtype)], (_L.sym(),))
 
     def _build():
         s1 = _make_s1()

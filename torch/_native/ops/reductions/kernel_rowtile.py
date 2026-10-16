@@ -13,7 +13,7 @@ import torch
 from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
-from . import tile
+from . import _storage, tile
 from .traits import WARP, welford_nouts
 
 
@@ -46,9 +46,8 @@ _MAX_NARROW_N = min(256, tile.MAX_UNROLL)
 # at M=4096, up to 33.7x at M=262144.
 _CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
 
-# Direct threads_per_row=1 loads over-fetch once adjacent rows no longer share a 128-byte line:
-# 7001 GB/s at N=16 versus 4584 at N=32. TMA with smem rotation gains 1.49-1.86x;
-# the rotation mask requires power-of-two fp32 N.
+# Direct threads_per_row=1 loads over-fetch once adjacent rows no longer share a 128-byte line.
+# TMA with smem rotation gains 1.5-2x for fp32/fp64 storage; its mask needs power-of-two N.
 _TMA_MIN_STRIDE = 128
 # H100 direct loads win below this; wider one-thread rows need TMA.
 _HOPPER_DIRECT_ROW_BYTES = 384
@@ -70,9 +69,19 @@ def tma_ok(
     itemsize: int,
     M: int,
     device: torch.device | int | str | None = None,
+    storage_itemsize: int | None = None,
 ) -> bool:
-    """Should this geometry stage its load through TMA rather than load direct?"""
-    if itemsize != 4 or N <= 0 or N & (N - 1) or N * itemsize < _TMA_MIN_STRIDE:
+    """Should this geometry use TMA? itemsize is logical; storage_itemsize is descriptor width."""
+    storage_itemsize = itemsize if storage_itemsize is None else storage_itemsize
+    if (
+        (
+            storage_itemsize not in (4, 8)
+            and not (storage_itemsize == 2 and itemsize == 4)
+        )
+        or N <= 0
+        or N & (N - 1)
+        or N * itemsize < _TMA_MIN_STRIDE
+    ):
         return False
     if not narrow_row(N, itemsize, M):
         return False
@@ -88,13 +97,14 @@ def one_thread_row_ok(
     itemsize: int,
     M: int,
     device: torch.device | int | str,
+    storage_itemsize: int | None = None,
 ) -> bool:
     if not narrow_row(N, itemsize, M):
         return False
     return (
         _hw.caps(device).cc != (9, 0)
         or N * itemsize < _HOPPER_DIRECT_ROW_BYTES
-        or tma_ok(N, itemsize, M, device)
+        or tma_ok(N, itemsize, M, device, storage_itemsize)
     )
 
 
@@ -596,16 +606,23 @@ def trait_itree_plan(
         return plan
     from . import traits as T
 
-    if itemsize > 2 or not isinstance(
-        trait,
-        (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps),
+    if isinstance(trait, T.ComplexNormOps):
+        thread_elems = 16
+    elif isinstance(trait, T.ComplexSumOps) or (
+        itemsize <= 2
+        and isinstance(
+            trait,
+            (T.SumOps, T.NanSumOps, T.ProdOps, T.MeanOps, T.NormOps),
+        )
     ):
+        thread_elems = 32
+    else:
         return plan
     return itree_plan(
         N,
         M,
         itemsize,
-        thread_elems=32,
+        thread_elems=thread_elems,
         stage=stage,
         device=device,
         arch=arch,
@@ -716,6 +733,40 @@ def row_config(N: int, dtype_width: int) -> _RowConfig:
     return _RowConfig(
         threads_per_row=threads_per_row, threads_per_block=threads_per_block
     )
+
+
+def trait_row_config(
+    N: int,
+    dtype_width: int,
+    trait: Any,
+    nouts: int,
+    device: torch.device | int | str | None = None,
+) -> _RowConfig:
+    """Reduce threads for expensive complex accumulators."""
+    cfg = row_config(N, dtype_width)
+    if not getattr(trait, "complex_input", False):
+        return cfg
+    if (
+        dtype_width == 128
+        and cfg.threads_per_row > 64
+        and (
+            trait.nfields >= 4
+            or (
+                getattr(trait, "complex_abs_max", False)
+                and device is not None
+                and _hw.caps(device).cc == (10, 0)
+            )
+        )
+    ):
+        return _RowConfig(threads_per_row=64, threads_per_block=128)
+    if (
+        dtype_width == 64
+        and trait.nfields >= 4
+        and nouts == 2
+        and cfg.threads_per_row > 128
+    ):
+        return _RowConfig(threads_per_row=128, threads_per_block=128)
+    return cfg
 
 
 def single_row_config(N: int, dtype_width: int) -> _RowConfig | None:
@@ -829,9 +880,23 @@ def _run_itree(
             return list(out)
         return [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
 
-    dt = torch2cute[x.dtype]
     # Storage offsets may underalign; declare and key the supported width.
     itemsize = x.element_size()
+    if x.is_complex() and (itree.stage_e or itree.stage_rows):
+        itree = cast(
+            _ItreePlan,
+            itree_plan(
+                N,
+                M,
+                itemsize,
+                kchunk=itree.kchunk,
+                stage=False,
+                device=x.device,
+                arch=arch,
+            ),
+        )._replace(stage_rows=False)
+    kernel_x = _storage.row_view(x)
+    dt = torch2cute[kernel_x.dtype]
     natural = tile.align_bytes(N, itemsize)
     align = _L.supported_alignment(x, natural)
     compact = x.stride(0) == N
@@ -856,13 +921,16 @@ def _run_itree(
             ),
         )
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
+    storage_width = N * (2 if x.is_complex() else 1)
     if compact:
-        fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
+        fake_in = _L.fake_compact(
+            dt, (_L.sym(), storage_width), stride_order=(1, 0), align=align
+        )
     else:
         fake_in = cute.runtime.make_fake_tensor(
             dt,
-            (_L.sym(), N),
-            (cute.sym_int64(divisibility=align // itemsize), 1),
+            (_L.sym(), storage_width),
+            (cute.sym_int64(divisibility=align // kernel_x.element_size()), 1),
             assumed_align=align,
         )
 
@@ -874,7 +942,8 @@ def _run_itree(
 
     if itree.shape != "split":
         outs = results()
-        strided_outs = tuple(o.stride(0) != 1 for o in outs)
+        kernel_outs = [_storage.flat_view(out) for out in outs]
+        strided_outs = tuple(o.stride(0) != 1 for o in kernel_outs)
         _launch_itree(
             trait,
             trait_key,
@@ -882,9 +951,9 @@ def _run_itree(
             dt,
             (
                 [fake_in],
-                [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
+                [fake_1d(o, strided) for o, strided in zip(kernel_outs, strided_outs)],
             ),
-            ([_L.read_only(x)], list(outs)),
+            ([_L.read_only(kernel_x)], kernel_outs),
             N,
             "rowitree",
             x.device,
@@ -907,7 +976,7 @@ def _run_itree(
         itree,
         dt,
         ([fake_in], [fake_1d(p) for p in parts]),
-        ([_L.read_only(x)], list(parts)),
+        ([_L.read_only(kernel_x)], list(parts)),
         N,
         "rowitree1",
         x.device,
@@ -917,10 +986,11 @@ def _run_itree(
         compact,
     )
     outs = results()
+    kernel_outs = [_storage.flat_view(out) for out in outs]
     # DECLARE the partials' alignment or stage 2 reads them one element at a time: autovec_copy
     # cannot widen past what the descriptor claims. Keyed on the BATCH COUNT, a row's stride.
     palign = tile.align_bytes(nbatch, parts[0].element_size())
-    strided_outs = tuple(o.stride(0) != 1 for o in outs)
+    strided_outs = tuple(o.stride(0) != 1 for o in kernel_outs)
     _launch_itree(
         trait,
         trait_key,
@@ -935,9 +1005,9 @@ def _run_itree(
         dt,
         (
             [fake_1d(p, align=palign) for p in parts],
-            [fake_1d(o, strided) for o, strided in zip(outs, strided_outs)],
+            [fake_1d(o, strided) for o, strided in zip(kernel_outs, strided_outs)],
         ),
-        ([_L.read_only(p) for p in parts], list(outs)),
+        ([_L.read_only(p) for p in parts], kernel_outs),
         N,
         "rowitree2",
         x.device,
@@ -1007,7 +1077,7 @@ def reduce_row_tile(
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts, arch=arch)
-    cfg = row_config(N, x.element_size() * 8)
+    cfg = trait_row_config(N, x.element_size() * 8, trait, nouts, x.device)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
     # the measured optimum across 4/8/16/32.
     if unroll is None:
@@ -1017,9 +1087,10 @@ def reduce_row_tile(
     threads_per_row = (
         max(WARP, cfg.threads_per_row) if threads_per_row is None else threads_per_row
     )
+    default_threads_per_block = threads_per_block is None
     threads_per_block = (
         max(threads_per_row, cfg.threads_per_block)
-        if threads_per_block is None
+        if default_threads_per_block
         else threads_per_block
     )
     threads_per_block -= (
@@ -1036,7 +1107,13 @@ def reduce_row_tile(
             threads_per_row == 1
             and tma_base_aligned
             and tma_stride_aligned
-            and tma_ok(N, isz, M, x.device)
+            and tma_ok(
+                N,
+                isz,
+                M,
+                x.device,
+                isz // 2 if x.is_complex() else isz,
+            )
         )
     elif use_tma and not tma_base_aligned:
         raise ValueError(f"TMA requires a {tile.TRANSFER_ALIGNMENT}-byte aligned input")
@@ -1045,7 +1122,27 @@ def reduce_row_tile(
             f"TMA requires a {tile.TRANSFER_ALIGNMENT}-byte aligned row stride, "
             f"got {tma_stride_bytes} bytes"
         )
-    dt = torch2cute[x.dtype]
+    if use_tma:
+        smem_bytes = _hw.caps(x.device).smem_per_block_optin
+        max_tma_threads = (smem_bytes - 2 * 8) // (N * isz)
+        max_tma_threads -= max_tma_threads % WARP
+        if threads_per_block > max_tma_threads:
+            if not default_threads_per_block or max_tma_threads < WARP:
+                raise ValueError(
+                    f"TMA staging needs {threads_per_block * N * isz + 2 * 8} "
+                    f"bytes of shared memory, device limit is {smem_bytes}"
+                )
+            threads_per_block = max_tma_threads
+    kernel_x = _storage.row_view(x)
+    kernel_isz = kernel_x.element_size()
+    dt = torch2cute[kernel_x.dtype]
+    load_vec = (
+        tile.vec_size(N, isz)
+        if x.is_complex()
+        else 128 // (isz * 8)
+        if ragged_vector
+        else None
+    )
     op = tile.TileReduce(
         trait,
         dt,
@@ -1057,13 +1154,14 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
-        vec=128 // (isz * 8) if ragged_vector else None,
+        vec=load_vec,
         ragged_vector=ragged_vector,
     )
 
     # Final projects nouts; stage 1 stores one raw buffer per field.
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
+    kernel_outs = [_storage.flat_view(out) for out in outs]
     nchunks = Int32(N // op.vec)
     nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
@@ -1081,9 +1179,9 @@ def reduce_row_tile(
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
-                (_L.sym(), N),
+                (_L.sym(), N * (2 if x.is_complex() else 1)),
                 (
-                    cute.sym_int64(divisibility=tile.TRANSFER_ALIGNMENT // isz),
+                    cute.sym_int64(divisibility=tile.TRANSFER_ALIGNMENT // kernel_isz),
                     1,
                 ),
                 assumed_align=align,
@@ -1098,13 +1196,13 @@ def reduce_row_tile(
         else:
             fake_in = _L.fake_compact(
                 dt,
-                (_L.sym(), _L.sym(op.vec)),
+                (_L.sym(), _L.sym(op.vec * (2 if x.is_complex() else 1))),
                 stride_order=(1, 0),
                 align=align,
             )
         return _row_args(
             [fake_in],
-            [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],
+            [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in kernel_outs],
             nchunks,
             nwaves,
             Int32(N),
@@ -1122,5 +1220,13 @@ def reduce_row_tile(
     ) + op.cache_sig
     build = lambda: _compile(op, *_fake())  # noqa: E731
     fn = cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")
-    fn(*_row_args([_L.read_only(x)], list(outs), nchunks, nwaves, Int32(N)))
+    fn(
+        *_row_args(
+            [_L.read_only(kernel_x)],
+            kernel_outs,
+            nchunks,
+            nwaves,
+            Int32(N),
+        )
+    )
     return tuple(outs)
