@@ -669,7 +669,7 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
 
 
 def _lookup_code_path(
-    python_module: str, function_name: str, code_source: str
+    python_module: str, function_name: str, code_source: str | None
 ) -> types.CodeType:
     entry = (python_module, function_name, code_source)
     fn: Any = sys.modules[python_module]
