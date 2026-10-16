@@ -4,6 +4,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/EmptyTensor.h>
@@ -217,7 +218,7 @@ TensorCheck::TensorCheck(
     std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
     bool device_index_is_current)
     : pytype(pt),
-      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
+      dispatch_key_(state.apply_for_tensor(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
       device_index_(
           device_index_is_current
@@ -241,7 +242,7 @@ TensorCheck::TensorCheck(
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
     : pytype(pt),
-      dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
+      dispatch_key_(state.apply_for_tensor(dispatch_key_set).raw_repr()),
       dtype_(dtype),
       device_index_(device_index),
       requires_grad_(requires_grad),
@@ -293,7 +294,7 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+  if (dispatch_key_ != state.apply_for_tensor(dispatch_key_set).raw_repr() ||
       dtype_ != dtype || !deviceIndexMatches(device) ||
       requires_grad_ != requires_grad) {
     return false;
@@ -329,12 +330,12 @@ std::string TensorCheck::check_verbose(
     const std::string& tensor_name) {
   std::stringstream fail_reason;
   fail_reason << "tensor '" << tensor_name << "' ";
-  if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
+  if (dispatch_key_ != state.apply_for_tensor(v.key_set()).raw_repr()) {
     // return fmt::format("tensor dispatch key mismatch. expected {}, actual
-    // {}", dispatch_key_, state.apply(v.key_set()).raw_repr());
+    // {}", dispatch_key_, state.apply_for_tensor(v.key_set()).raw_repr());
     fail_reason << "dispatch key set mismatch. expected "
                 << c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_)
-                << ", actual " << state.apply(v.key_set());
+                << ", actual " << state.apply_for_tensor(v.key_set());
     return std::move(fail_reason).str();
   } else if (dtype_ != v.dtype().toScalarType()) {
     // return fmt::format("tensor dtype mismatch. expected {}, actual {}",
@@ -486,8 +487,8 @@ static int TensorGuards_init(
     return -1;
   }
 
-  // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
-  // an optimization to avoid invoking .size()/.stride() in python needlessly
+  // dynamic_dims_strides/sizes_py may be None - this is an optimization to
+  // avoid invoking .size()/.stride() in python needlessly
   std::vector<std::vector<std::optional<c10::SymInt>>>
       per_tensor_dynamic_dims_sizes = get_dynamic_dims(dynamic_dims_sizes_py);
   std::vector<std::vector<std::optional<c10::SymInt>>>
@@ -4483,13 +4484,18 @@ class RootGuardManager : public GuardManager {
     // Dynamo should only be adding guards on values without
     // torch function at this point, because if there
     // was a torch function, we should've traced through it
+    // Restored by scope exit so a C++ throw out of an accessor (a TORCH_CHECK
+    // in TENSOR_MATCH on a nested tensor, say) cannot leave the calling thread
+    // ALL_DISABLED.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
 
     if (!GuardManager::check_accessors_nopybind(value)) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -4497,13 +4503,11 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
 
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -4547,16 +4551,19 @@ class RootGuardManager : public GuardManager {
       return debug_info_leaf;
     }
 
+    // Same scope-exit restore as check_nopybind_template above.
     const at::impl::TorchFunctionDisabledState old_state =
         at::impl::PythonTorchFunctionTLS::get_disabled_state();
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    auto restore_torch_function = c10::make_scope_exit([old_state] {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+    });
     const GuardDebugInfo& debug_info_accessors =
         GuardManager::check_accessors_verbose_nopybind(
             value, num_guards_executed);
 
     if (!debug_info_accessors.result) {
-      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return debug_info_accessors;
     }
@@ -4567,7 +4574,6 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
-        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false,
@@ -4576,7 +4582,6 @@ class RootGuardManager : public GuardManager {
             tmp_debug_info.user_stack);
       }
     }
-    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }

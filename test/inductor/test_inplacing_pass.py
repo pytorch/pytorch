@@ -11,6 +11,7 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
+from torch._inductor import inductor_prims
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
@@ -149,6 +150,63 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x2 = x.clone()
         self.assertEqual(f(x), torch.compile(f)(x2))
         self.assertEqual(x, x2)
+
+    def test_dont_reinplace_index_put_that_reads_its_input(self):
+        # https://github.com/pytorch/pytorch/issues/198567
+        def f(x):
+            r = x + 1
+            return torch.put(r, r, r, accumulate=True)
+
+        # r[i] = n - 1 - i, so every element is scattered to the other end: an
+        # index_put_ reinplaced onto r would read indices and values it has
+        # already written.
+        n = 256
+        x = torch.arange(n - 2, -2, -1, device=device)
+        self.assertEqual(f(x), torch.compile(f)(x))
+
+    @parametrize(
+        "op",
+        [
+            subtest(aten.index_put.default, name="index_put"),
+            subtest(aten._unsafe_index_put.default, name="unsafe_index_put"),
+        ],
+    )
+    @parametrize("aliased", ["indices", "values_view", "none"])
+    def test_index_put_reinplace_with_aliased_operand(self, op, aliased):
+        inplace_op = {
+            aten.index_put.default: aten.index_put_.default,
+            aten._unsafe_index_put.default: inductor_prims._unsafe_index_put_,
+        }[op]
+
+        def f(x, idx, val):
+            x = x + 1
+            if aliased == "indices":
+                idx = x
+            elif aliased == "values_view":
+                # a different node, but the same storage as x
+                idx, val = idx[:4], x[4:]
+            return op(x, [idx], val, True)
+
+        inputs = (
+            torch.tensor([6, 4, 2, 0, 5, 3, 1, -1]),
+            torch.tensor([0, 2, 4, 6, 1, 3, 5, 7]),
+            torch.ones(8, dtype=torch.int64),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        if aliased == "none":
+            self.assertIn(inplace_op, targets)
+            self.assertNotIn(op, targets)
+        else:
+            self.assertIn(op, targets)
+            self.assertNotIn(inplace_op, targets)
+            # Only run the graph when it is still functional:
+            # prims._unsafe_index_put_ can't be run outside of Inductor.
+            self.assertEqual(gm(*inputs), f(*inputs))
 
     def test_view_index_put_should_reinplace_copy_to_base(self):
         def f(input_pos, val, cache):
