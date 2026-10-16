@@ -1453,6 +1453,33 @@ static PyObject* _empty_strided_mps(
   return _empty_strided_device<c10::DeviceType::MPS>(args, nargs);
 }
 
+static PyObject* _alloc_from_pool(
+    PyObject* /*self*/,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  HANDLE_TH_ERRORS;
+  TORCH_CHECK(
+      nargs == 5, "expects 5 args: pool, offset_bytes, dtype, size, stride");
+
+  TORCH_CHECK(THPVariable_Check(args[0]));
+  const auto& pool{THPVariable_Unpack(args[0])};
+
+  auto offset_bytes{PyLong_AsLongLong(args[1])};
+  if (offset_bytes == -1 && PyErr_Occurred()) {
+    return nullptr;
+  }
+
+  TORCH_CHECK(THPDtype_Check(args[2]));
+  auto dtype{reinterpret_cast<THPDtype*>(args[2])->scalar_type};
+
+  auto sizes{unwrap_size_tuple(args[3])};
+  auto strides{unwrap_size_tuple(args[4])};
+
+  return THPVariable_Wrap(torch::inductor::_alloc_from_pool(
+      pool, offset_bytes, dtype, sizes, strides));
+  END_HANDLE_TH_ERRORS;
+}
+
 static PyObject* _reinterpret_tensor(
     PyObject* /*self*/,
     PyObject* const* args,
@@ -7784,7 +7811,7 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  static std::array<PyMethodDef, 15> _methods{
+  static std::array<PyMethodDef, 16> _methods{
       {{"check_type_id",
         castPyCFunctionFast(check_type_id),
         METH_FASTCALL,
@@ -7829,6 +7856,10 @@ PyObject* torch_c_dynamo_guards_init() {
         nullptr},
        {"_empty_strided_mps",
         castPyCFunctionFast(_empty_strided_mps),
+        METH_FASTCALL,
+        nullptr},
+       {"_alloc_from_pool",
+        castPyCFunctionFast(_alloc_from_pool),
         METH_FASTCALL,
         nullptr},
        {"_reinterpret_tensor",
