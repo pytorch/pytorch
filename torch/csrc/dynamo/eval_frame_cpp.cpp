@@ -526,7 +526,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // A frame a loaded artifact skips takes part in the guard collective, since
   // another rank's artifact may have compiled it. Its skip only answers calls
-  // its cache entries miss: those exist once a peer's miss compiled it.
+  // its cache entries miss: those exist once a peer's miss compiled it. When
+  // it runs eagerly, its recursive action applies as for any SKIP frame.
   const bool precompile_skip = strategy.cur_action == FrameAction::SKIP &&
       guard_complete_hook != nullptr && is_precompile_skip(code);
 
@@ -589,10 +590,11 @@ PyObject* dynamo__custom_eval_frame(
   // this region. Counting precompile entries and skips assumes every rank
   // installed the same artifact; a rank without them skips the collective the
   // others wait in. It also assumes the frames each rank reaches next issue
-  // matching collectives: a rank that skips runs the frame eagerly, so its
-  // callees may join their own collectives, while a rank that hit runs code
-  // with those callees inlined (or its own resume functions), and the ranks
-  // then mispair.
+  // matching collectives: a rank that skips non-recursively runs the frame
+  // eagerly, so its callees may join their own collectives, while a rank that
+  // hit runs code with those callees inlined (or its own resume functions),
+  // and the ranks then mispair. A recursive skip runs its callees without
+  // Dynamo, which leaves only the resume-function case.
   if (guard_complete_hook != nullptr &&
       (precompile_skip ||
        has_relevant_cache_entries(
@@ -686,7 +688,16 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // recursive frame action
-  if (strategy.recursive_action == FrameAction::DEFAULT) {
+  if (precompile_skip) {
+    // A peer's miss forced this compile. With a graph, callees run like the
+    // peers' compiled code (their graph breaks and resume functions go through
+    // Dynamo); with none, the frame keeps the artifact's skip, callees too.
+    if (new_strategy.cur_action == FrameAction::SKIP) {
+      new_strategy.recursive_action = strategy.recursive_action;
+    }
+    recursive_callback =
+        _callback_from_action(callback, new_strategy.recursive_action);
+  } else if (strategy.recursive_action == FrameAction::DEFAULT) {
     // old recursive action overrides new recursive action
     recursive_callback = _callback_from_action(
         recursive_callback, new_strategy.recursive_action);

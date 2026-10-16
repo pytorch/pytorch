@@ -1180,13 +1180,9 @@ def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None
         set_code_exec_strategy(
             code, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
         )
-    elif any(holds):
-        set_code_exec_strategy(
-            code, FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
-        )
     else:
-        # {SKIP, DEFAULT} that also reports SKIP to the guard collective.
-        _load_precompile_skip(code)
+        # A SKIP strategy that also reports SKIP to the guard collective.
+        _load_precompile_skip(code, recursive=any(holds))
 
 
 class CompilePackage:
@@ -1649,9 +1645,10 @@ class CompilePackage:
                         )
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
-                # in these cases. A recursive skip is not reported to the guard
-                # collective: like it, this assumes every rank installed the
-                # same artifact, so every rank skips the frame and its callees.
+                # in these cases. Both kinds of skip are reported to the guard
+                # collective: each is this rank's capture decision (a frame
+                # with no graph, or a bypassed or lossy one), so another rank's
+                # artifact may hold compiled entries for the same frame.
                 if entry.skip_recursive or len(entry.guarded_codes) == 0:
                     _update_skip_hold(target_code, entry.skip_recursive, hold=True)
                     self._skipped_codes.append((target_code, entry.skip_recursive))
