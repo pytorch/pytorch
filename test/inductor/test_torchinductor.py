@@ -15847,6 +15847,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
+    def test_where_int64_scalar(self):
+        # The scalar must not narrow the int64 result to 32 bits
+        def fn(x):
+            return torch.where(x < 0, 0, x)
+
+        self.common(fn, (torch.tensor([2**40 + 7, -5, 3_000_000_000]),))
+
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:
@@ -18046,7 +18053,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if self.device != "mps"
             or name
             not in [
-                "airy_ai",
                 "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
@@ -23236,6 +23242,28 @@ if RUN_GPU:
             expected = fn(x)
             for a, e in zip(actual, expected):
                 torch.testing.assert_close(a, e)
+
+        @unittest.skipIf(not SM90OrLater, "TMA requires SM90+")
+        @config.patch(
+            {
+                "triton.use_tensor_descriptor": True,
+                "assume_aligned_inputs": True,
+            }
+        )
+        def test_tma_descriptor_aoti_eager_scratch_buffer(self):
+            # Regression test: when TMA generates a kernel with a scratch buffer,
+            # the AOTI cpp wrapper must emit CACHE_TORCH_DEVICE(cuda) so the
+            # cached_torch_device_type_cuda variable is declared before use.
+            # The out= overload triggers the scratch buffer allocation path.
+            a = torch.randn(128, device=GPU_TYPE)
+            out = torch.empty_like(a)
+            ref = torch.clamp(a, min=-0.5, max=0.5)
+
+            with _scoped_library("aten", "IMPL") as lib:
+                register_ops_with_aoti_compile("aten", ["clamp"], "CUDA", lib)
+                torch.clamp(a, min=-0.5, max=0.5, out=out)
+
+            self.assertEqual(ref, out)
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
