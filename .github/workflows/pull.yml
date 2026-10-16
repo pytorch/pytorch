@@ -323,6 +323,9 @@ jobs:
           { config: "default", shard: 17, num_shards: 18, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "default", shard: 18, num_shards: 18, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", skip_on_pr: true, unstable: "unstable" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", skip_on_pr: true, unstable: "unstable" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", skip_on_pr: true, unstable: "unstable" },
         ]}
       python-version: "3.11"
       compiler: clang21
@@ -393,6 +396,8 @@ jobs:
           { config: "dynamo_wrapped", shard: 6, num_shards: 6, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "einops", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "slow", shard: 1, num_shards: 2, runner: "mt-l-x86iavx512-8-64", skip_on_pr: true, unstable: "unstable" },
+          { config: "slow", shard: 2, num_shards: 2, runner: "mt-l-x86iavx512-8-64", skip_on_pr: true, unstable: "unstable" },
         ]}
       python-version: "3.11"
       compiler: clang21

@@ -9,6 +9,7 @@ from unittest import main, mock, TestCase
 
 import yaml
 from filter_test_configs import (
+    apply_skip_on_pr,
     enforce_lf_allowlist,
     filter,
     filter_selected_test_configs,
@@ -347,6 +348,19 @@ class TestConfigFilter(TestCase):
                 yaml.safe_load(case["test_matrix"]), selected_test_configs
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
+
+    def test_apply_skip_on_pr(self) -> None:
+        test_matrix = yaml.safe_load(
+            '{include: [{config: "default"}, {config: "slow", skip_on_pr: true}, {config: "foo", skip_on_pr: false}]}'
+        )
+        self.assertEqual(
+            '{"include": [{"config": "default"}, {"config": "foo"}]}',
+            json.dumps(apply_skip_on_pr(test_matrix, is_pr=True)),
+        )
+        self.assertEqual(
+            '{"include": [{"config": "default"}, {"config": "slow"}, {"config": "foo"}]}',
+            json.dumps(apply_skip_on_pr(test_matrix, is_pr=False)),
+        )
 
     def test_set_periodic_modes(self) -> None:
         testcases: list[dict[str, str]] = [
