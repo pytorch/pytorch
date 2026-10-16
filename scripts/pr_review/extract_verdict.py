@@ -828,9 +828,8 @@ def sanitize_findings(  # noqa: C901
             "severity": severity.lower(),
             "message": clean_message,
         }
-        # The publish job drops a finding that fails this, so drop it HERE,
-        # where validate_findings.py reports it to the model while it can
-        # still rewrite. Only a bug in the producer above reaches it.
+        # The publish job drops a finding that fails this, so drop it HERE.
+        # Only a bug in the producer above reaches it.
         if not is_publishable_finding(finding):
             drop({"path": path, "line": line, "reason": "failed_publish_check"})
             continue
@@ -868,8 +867,7 @@ def build(obj: dict, touched: dict[str, set[int]]) -> dict:
     summary = neutralize(summary_raw, MAX_SUMMARY).strip()[:MAX_SUMMARY].strip()
     if not summary:
         raise Rejected("summary is empty after neutralization")
-    # The publish job refuses the whole review on this, so refuse it here,
-    # where validate_findings.py reports it while the model can still rewrite.
+    # The publish job refuses the whole review on this, so refuse it here.
     if not is_neutral_prose(summary, MAX_SUMMARY):
         raise Rejected("summary fails the publish-side check")
 
