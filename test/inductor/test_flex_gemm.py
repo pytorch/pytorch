@@ -1255,7 +1255,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
 
         def chunked_lanes(a, b):
             acc = torch.mm(a, b)
-            return (torch.cat([acc, acc * 2], dim=1) * 0.5).to(torch.bfloat16)
+            packed = torch.cat([acc, acc * 2], dim=1).view(4, 32)
+            return (packed * 0.5).reshape(4, 32).to(torch.bfloat16)
 
         def three_lanes(a, b):
             acc = torch.mm(a, b)
@@ -10111,6 +10112,8 @@ class TestFlexGemmInterleavedDevice(FlexGemmTestCase):
             else:
                 packed = torch.cat([acc.float(), acc.float() * 2], dim=-1)
                 packed = (packed * 0.5 + 1).to(out_dtype)
+            if out_dtype is torch.float32:
+                packed = packed.view(acc.shape[0], 2 * acc.shape[1])
             return packed, acc.relu().float()
 
         @torch.compile(fullgraph=True, dynamic=True)
