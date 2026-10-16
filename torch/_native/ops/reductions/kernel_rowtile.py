@@ -865,6 +865,7 @@ def reduce_row_tile(
     unroll: int | None = None,
     use_tma: bool | None = None,
     order: Literal["linear", "inner_tree"] | None = None,
+    ragged_vector: bool = False,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
@@ -876,6 +877,8 @@ def reduce_row_tile(
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
+    if ragged_vector and order != "linear":
+        raise ValueError("ragged vectors require explicit order='linear'")
     itree, arch = None, None
     if (order == "inner_tree" or (order is None and inner_tree_order_enabled())) and (
         final and threads_per_row is None
@@ -896,7 +899,9 @@ def reduce_row_tile(
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
     # the measured optimum across 4/8/16/32.
     if unroll is None:
-        unroll = 16 if tile.vec_size(N, x.element_size()) == 1 else 4
+        unroll = (
+            4 if ragged_vector else 16 if tile.vec_size(N, x.element_size()) == 1 else 4
+        )
     threads_per_row = (
         max(WARP, cfg.threads_per_row) if threads_per_row is None else threads_per_row
     )
@@ -940,6 +945,8 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
+        vec=128 // (isz * 8) if ragged_vector else None,
+        ragged_vector=ragged_vector,
     )
 
     # Final projects nouts; stage 1 stores one raw buffer per field.
@@ -952,6 +959,8 @@ def reduce_row_tile(
     align = (
         tile.TRANSFER_ALIGNMENT
         if use_tma
+        else _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
+        if ragged_vector
         else _L.supported_alignment(x, tile.align_bytes(N, isz))
     )
 
@@ -966,6 +975,13 @@ def reduce_row_tile(
                     1,
                 ),
                 assumed_align=align,
+            )
+        elif ragged_vector:
+            fake_in = _L.fake_compact(
+                dt,
+                (_L.sym(), N),
+                stride_order=(1, 0),
+                align=align,
             )
         else:
             fake_in = _L.fake_compact(
