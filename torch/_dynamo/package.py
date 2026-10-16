@@ -557,6 +557,27 @@ def _names_from_code(code: types.CodeType) -> set[str]:
     return names
 
 
+def _guards_read_only_builtins(guards: Any, name: str, scope: dict[Any, Any]) -> bool:
+    from .source import ChainedSource, DictGetItemSource, GlobalSource
+
+    # Walk each guard's source down to the item it reads out of `name`; guards
+    # rooted elsewhere, or on the dict itself, don't read the copy's entries.
+    for guard in guards:
+        source = guard.originating_source
+        while isinstance(source, ChainedSource):
+            base = source.base
+            if isinstance(base, GlobalSource) and base.global_name == name:
+                break
+            source = base
+        else:
+            continue
+        if not isinstance(source, DictGetItemSource):
+            return False
+        if not isinstance(scope.get(source.index), types.BuiltinFunctionType):
+            return False
+    return True
+
+
 def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
     for name in code.co_names:
         if is_compiled_fn_name(name):
@@ -1539,8 +1560,8 @@ class CompilePackage:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
-        CleanupHook.disown(module.__dict__, name)
-        record = not (record_only_if_new and name in module.__dict__)
+        owned = CleanupHook.disown(module.__dict__, name)
+        record = owned or not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
         if record:
             self._installed_globals.setdefault(module, []).append(name)
@@ -1675,13 +1696,22 @@ class CompilePackage:
                     # the dict, with tensors faked and unguarded values pruned.
                     # That copy is only fit for the guards, so a key the
                     # bytecode reads (a graph input or a replayed store) stays
-                    # unbound and misses as before. A binding already here (a
-                    # live compile's, or anyone else's) is kept and not
-                    # recorded, so uninstall() leaves it alone, and the guards
-                    # check whatever it holds.
+                    # unbound and misses as before. So does a key whose
+                    # guards read anything but a builtin function out of it
+                    # (e.g. EQUALS_MATCH on a constant): the copy is frozen,
+                    # so those guards would keep passing after the live
+                    # namespace changed. A binding already here is kept and
+                    # the guards check whatever it holds; a live compile's is
+                    # taken over from its CleanupHook, so uninstall() drops
+                    # it, and anyone else's is left alone.
                     reads = _names_from_code(bytecode)
+                    guards = guards_state.output_graph.guards
                     for name, value in guards_state.output_graph.global_scope.items():
-                        if name.startswith(UNNAMED_SCOPE_PREFIX) and name not in reads:
+                        if (
+                            name.startswith(UNNAMED_SCOPE_PREFIX)
+                            and name not in reads
+                            and _guards_read_only_builtins(guards, name, value)
+                        ):
                             self._install_global(
                                 module,
                                 name,
