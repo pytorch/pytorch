@@ -444,6 +444,29 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ != "Muon":
                     self.assertEqual(bias, bias_c)
 
+    @parametrize("num_dim", [0, 1, 2])
+    @optims(
+        [o for o in optim_db if o.optim_cls.__name__ in ("Adam", "AdamW")],
+        dtypes=[torch.float32],
+    )
+    def test_tensor_betas(self, device, dtype, optim_info, num_dim):
+        # foreach needs capturable for Tensor betas, so the default must fall
+        # back to the for-loop implementation instead of raising (#110205).
+        optim_cls = optim_info.optim_cls
+        weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+        weight_c = weight.detach().clone().requires_grad_(True)
+        inpt = torch.randn(5, device=device, dtype=dtype)
+        betas = (0.9, 0.99)
+        tensor_betas = tuple(torch.tensor(b).reshape([1] * num_dim) for b in betas)
+        optimizer_r = optim_cls([weight], betas=betas)
+        optimizer = optim_cls([weight_c], betas=tensor_betas)
+        for _ in range(5):
+            for optim, w in ((optimizer_r, weight), (optimizer, weight_c)):
+                optim.zero_grad()
+                w.mv(inpt).pow(2).sum().backward()
+                optim.step()
+            self.assertEqual(weight, weight_c)
+
     @parametrize("with_lrsched", [True, False])
     @optims(
         [o for o in optim_db if o.supports_sparse or o.only_supports_sparse_grads],
