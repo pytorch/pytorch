@@ -397,6 +397,40 @@ TestUnittest    | test_unittest            | test_unittest""",
             ],
         )
 
+    def test_session_without_tests_leaves_no_report(self) -> None:
+        # Like run_test.py's serial pass over a file without serial tests. A session
+        # interrupted after its test started keeps its report for run_test.py
+        # (TestReportCrashes.test_interrupt_leaves_the_run_in_flight).
+        with tempfile.TemporaryDirectory() as tmp:
+            for args in ([], ["-n", "1"]):
+                prefix = Path(tmp) / f"empty{len(args)}"
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pytest",
+                        "xdist_report.py",
+                        "-k",
+                        "no_such_test",
+                        *args,
+                        "-p",
+                        "torch.testing._internal.torchci.plugin",
+                        f"--torchci-report-prefix={prefix}",
+                        "-p",
+                        "no:cacheprovider",
+                        "-q",
+                    ],
+                    cwd=_REPORT_TESTDATA,
+                    env=_REPORT_CHILD_ENV,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                # 5: no tests ran.
+                self.assertEqual(proc.returncode, 5, proc.stdout + proc.stderr)
+                self.assertNotIn("torchci:", proc.stderr)
+                self.assertEqual(_report_files(prefix), [])
+
 
 @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
 @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
