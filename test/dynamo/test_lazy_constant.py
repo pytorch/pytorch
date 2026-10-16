@@ -683,7 +683,7 @@ class ComputedLazyConstantTests(TestCase):
             return t.relu() * d[str(idx)]
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn, backend=counter)
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
         for idx in range(4):
             self.assertEqual(fn(t, idx), opt_fn(t, idx))
         self.assertGreater(counter.frame_count, 1)
