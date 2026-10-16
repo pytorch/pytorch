@@ -64,9 +64,9 @@ class TestReductionConfig(TestCase):
         with self.assertRaisesRegex(ValueError, "order"):
             rt.reduction_order("linear")
 
-    @parametrize("cc", [(9, 0), (10, 3), (11, 0)])
+    @parametrize("cc", [(10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
-        """Prevent Rubin tuning tables from changing other architecture defaults."""
+        """Prevent SM107 tuning tables from changing neighboring architectures."""
         self.assertEqual(self.general(cc=cc), kg._GeneralConfig())
         self.assertEqual(
             rt.select_row_order(
@@ -83,6 +83,87 @@ class TestReductionConfig(TestCase):
         )
         self.assertEqual(
             self.general(cc=cc, order="inner_tree").kernel_order, "inner_tree"
+        )
+
+    @parametrize(
+        "dtype,width,mib,key,fields,nouts,expected",
+        [
+            (torch.float32, 256, 64, "mean", 1, 1, "inner_tree"),
+            (torch.bfloat16, 256, 16, "sum", 1, 1, "inner_tree"),
+            (torch.bfloat16, 256, 64, "sum", 1, 1, "linear"),
+            (torch.bfloat16, 1024, 64, "argmaxi32", 2, 1, "inner_tree"),
+            (torch.float32, 4096, 16, "varmean0", 3, 2, "inner_tree"),
+        ],
+    )
+    def test_sm107_row_profiles(self, dtype, width, mib, key, fields, nouts, expected):
+        """Pin one representative from every SM107 row-policy branch."""
+        rows = (mib << 20) // (width * dtype.itemsize)
+        self.assertEqual(
+            rt.select_row_order(
+                (10, 7),
+                dtype,
+                key,
+                width,
+                rows,
+                order="unordered",
+                nfields=fields,
+                nouts=nouts,
+            ),
+            expected,
+        )
+
+    @parametrize(
+        "dtype,mib,key,fields,rule",
+        [
+            (torch.float32, 256, "sum", 1, "rubin_strided_sum"),
+            (torch.bfloat16, 16, "var0", 3, "rubin_strided_welford"),
+            (torch.float32, 64, "mean", 1, "rubin_strided_inner"),
+            (torch.bfloat16, 64, "argmaxi32", 2, "rubin_strided_argmax"),
+        ],
+    )
+    def test_sm107_general_profiles(self, dtype, mib, key, fields, rule):
+        """Pin each distinct SM107 strided policy."""
+        rows = (mib << 20) // (1024 * dtype.itemsize)
+        cfg = kg.select_general_config(
+            (10, 7),
+            dtype,
+            key,
+            1024,
+            rows,
+            ((1024, 2),),
+            ((rows, 2048),),
+            order="unordered",
+            nfields=fields,
+            nouts=1,
+        )
+        self.assertEqual(cfg.rule, rule)
+        self.assertEqual(cfg.block, 64 if key == "sum" else 128)
+        self.assertEqual(cfg.kernel_order, "linear" if key == "sum" else "inner_tree")
+
+    def test_sm107_config_guards(self):
+        """Keep calls outside SM107 policy contracts on generic policies."""
+        self.assertEqual(
+            self.general(
+                cc=(10, 7),
+                count=1023,
+                red_pairs=((1023, 2),),
+                kept_pairs=((65536, 2046),),
+            ),
+            kg._GeneralConfig(),
+        )
+        self.assertEqual(
+            rt.select_row_order(
+                (10, 7),
+                torch.float32,
+                "var0",
+                1024,
+                order="unordered",
+                M=65536,
+                nfields=3,
+                nouts=1,
+                alignment=8,
+            ),
+            "linear",
         )
 
     def test_inner_tree_cannot_decline_into_unordered_row(self):
