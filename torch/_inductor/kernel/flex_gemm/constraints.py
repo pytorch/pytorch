@@ -239,9 +239,12 @@ class FlexGemmOutputContraction:
             raise ValueError("grouped main-output group must be greater than one")
 
     @property
-    def concat_layout(self) -> tuple[str, ...]:
-        """Return QuACK inputs whose contiguous chunks must be interleaved."""
-        return ("B",) if self.chunked else ()
+    def concat_layout(self) -> tuple[str, ...] | None:
+        """Return QuACK inputs whose contiguous chunks must be interleaved.
+
+        ``None`` rather than ``()``: QuACK's warm launch cache requires it.
+        """
+        return ("B",) if self.chunked else None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -255,8 +258,8 @@ class FlexGemmOutputExpansion:
     chunked: bool = False
 
     @property
-    def concat_layout(self) -> tuple[str, ...]:
-        return ()
+    def concat_layout(self) -> None:
+        return None
 
 
 FlexGemmOutputTransform = FlexGemmOutputContraction | FlexGemmOutputExpansion
