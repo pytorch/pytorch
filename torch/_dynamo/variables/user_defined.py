@@ -181,6 +181,15 @@ def _safe_c_slots() -> OrderedSet[object]:
     return _SAFE_C_SLOTS
 
 
+def _normalize_custom_hash(value: int) -> int:
+    # slot_tp_hash preserves in-range Py_hash_t values, hashes overflowing
+    # integers, and reserves -1 for errors. Bypass int-subclass overrides.
+    value = int.__index__(value)
+    if not -sys.maxsize - 1 <= value <= sys.maxsize:
+        value = int.__hash__(value)
+    return -2 if value == -1 else value
+
+
 def _safe_c_tp_hash_funcs() -> OrderedSet[object]:
     """Backward compat: returns the unified set (hash funcs are a subset)."""
     return _safe_c_slots()
@@ -4323,7 +4332,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if isinstance(result, FakeIdVariable):
                     return result.as_python_constant(), True
                 if isinstance(result, variables.SymNodeVariable):
-                    return int(result.evaluate_expr()), False
+                    return _normalize_custom_hash(int(result.evaluate_expr())), False
                 # CPython's slot_tp_hash validates PyLong_Check(res):
                 # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L9543-L9548
                 try:
@@ -4350,10 +4359,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             *graph_break_hints.USER_ERROR,
                         ],
                     )
-                # Normalize int subclasses to a plain int (mirrors CPython's
-                # own PyLong_AsSsize_t-style coercion in slot_tp_hash), since
-                # `ConstantVariable` only holds plain literal types.
-                return int(result.as_python_constant()), False
+                return _normalize_custom_hash(result.as_python_constant()), False
             try:
                 in_allowlist = type_hash in _safe_c_tp_hash_funcs()
             except TypeError:

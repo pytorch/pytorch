@@ -6,9 +6,17 @@ import sys
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
+@instantiate_parametrized_tests
 class TpHashTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_hash_equals(self, value):
         """Assert Dynamo's hash(value) matches eager Python's hash(value)."""
         expected = hash(value)
@@ -297,6 +305,123 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
                 return self.x * 31
 
         self._assert_hash_equals(MyObj(7))
+
+    @parametrize(
+        "value",
+        [
+            -1,
+            -2,
+            0,
+            1,
+            sys.maxsize,
+            -sys.maxsize - 1,
+            sys.hash_info.modulus,
+            sys.maxsize + 1,
+            -sys.maxsize - 2,
+            2**100,
+            -(2**100),
+        ],
+    )
+    def test_custom_hash_normalization(self, value):
+        class CustomHash:
+            def __hash__(self):
+                return value
+
+        def fn(x, obj):
+            return x + 1, hash(obj), obj.__hash__()
+
+        x = torch.ones(1)
+        obj = CustomHash()
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+        self.assertEqual(expected[2], value)
+
+    @parametrize("value", [-1, 2**100, -(2**100)])
+    def test_custom_hash_normalization_container_lookup(self, value):
+        class CustomHash:
+            def __hash__(self):
+                return value
+
+            def __eq__(self, other):
+                return other == normalized
+
+        normalized = hash(CustomHash())
+        obj = CustomHash()
+
+        def fn(x, obj):
+            return (
+                x + {obj: 7}.get(normalized, 0),
+                normalized in {obj},
+                obj in {normalized},
+                {normalized: 9}.get(obj, 0),
+            )
+
+        x = torch.ones(1)
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+        self.assertEqual(expected[1:], (True, True, 9))
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_custom_hash_normalization_symbolic(self):
+        class ShapeHash:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __hash__(self):
+                return self.tensor.size(0) - 6
+
+        def fn(x):
+            return x + 1, hash(ShapeHash(x))
+
+        x = torch.ones(5)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(fn(x)[1], -2)
+
+    @parametrize("value", [-1, sys.maxsize, 2**100])
+    def test_custom_hash_int_subclass_ignores_overrides(self, value):
+        class HashInt(int):
+            def __index__(self):
+                raise AssertionError("must not call __index__")
+
+            def __hash__(self):
+                raise AssertionError("must not call returned int's __hash__")
+
+        returned = HashInt(value)
+
+        class CustomHash:
+            def __hash__(self):
+                return returned
+
+        obj = CustomHash()
+
+        def fn(x, obj):
+            return x + 1, hash(obj)
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_custom_hash_normalizer_bypasses_int_override(self):
+        from torch._dynamo.variables.user_defined import _normalize_custom_hash
+
+        class HashInt(int):
+            def __int__(self):
+                raise AssertionError("must not call __int__")
+
+            def __index__(self):
+                raise AssertionError("must not call __index__")
+
+            def __hash__(self):
+                raise AssertionError("must not call returned int's __hash__")
+
+        for value in (-1, sys.maxsize, 2**100):
+            expected = -2 if value == -1 else value
+            if value > sys.maxsize:
+                expected = int.__hash__(value)
+            self.assertEqual(_normalize_custom_hash(HashInt(value)), expected)
 
     def test_hash_user_class_custom_hash_as_dict_key(self):
         """Custom __hash__ works for dict key usage."""
