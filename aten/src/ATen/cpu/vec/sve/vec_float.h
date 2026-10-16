@@ -54,6 +54,58 @@ static inline svfloat32_t exp_u20_fast_path(svfloat32_t values) {
   return svmla_x(svptrue_b32(), scale, scale, poly);
 }
 
+// Implementation is picked from
+// https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
+template <typename ExpU20>
+#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
+    !defined(__clang__) &&                                             \
+    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
+     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
+// GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
+// (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
+// backported to only some 14.3 and 15.2 packages, so conservatively guard by
+// upstream minor version.
+__attribute__((optimize("O0")))
+#endif
+static inline svfloat32_t
+tanh_impl(svfloat32_t values, svbool_t pg, ExpU20 exp_u20) {
+  // Constants used for the tanh calculation.
+  const svfloat32_t CONST_1 =
+      svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
+  const svfloat32_t CONST_2 =
+      svdup_n_f32(2.f); // Constant 2.0f for the tanh formula (used in exp(2x)).
+  const svfloat32_t CONST_MIN_TANH = svdup_n_f32(
+      -10.f); // Minimum threshold for input values to prevent overflow.
+  const svfloat32_t CONST_MAX_TANH = svdup_n_f32(
+      10.f); // Maximum threshold for input values to prevent overflow.
+
+  // Step 1: Clamp the values within the range [-10, 10] to prevent overflow
+  // during exponentiation. The tanh function approaches ±1 rapidly as the
+  // input grows large, so we limit the input range to avoid numerical
+  // instability. svmax_f32_z ensures values are greater than -10, and
+  // svmin_f32_z ensures they are less than 10.
+  svfloat32_t x =
+      svmin_f32_z(pg, svmax_f32_z(pg, values, CONST_MIN_TANH), CONST_MAX_TANH);
+
+  // Step 2: Calculate exp(2 * x), where x is the clamped value.
+  svfloat32_t exp2x = exp_u20(svmul_f32_z(pg, CONST_2, x));
+
+  // Step 3: Calculate the numerator of the tanh function, which is exp(2x)
+  // - 1.
+  svfloat32_t num = svsub_f32_z(pg, exp2x, CONST_1);
+
+  // Step 4: Calculate the denominator of the tanh function, which is exp(2x)
+  // + 1.
+  svfloat32_t den = svadd_f32_z(pg, exp2x, CONST_1);
+
+  // Step 5: Calculate the tanh function as the ratio of the numerator and
+  // denominator: num / den.
+  svfloat32_t tanh = svdiv_f32_z(pg, num, den);
+
+  // Return the calculated tanh values.
+  return tanh;
+}
+
 // Implementation from Arm Optimized Routines:
 // https://github.com/ARM-software/optimized-routines/blob/v26.01/math/aarch64/experimental/sve/sv_expf_inline.h
 static inline svfloat32_t fexp_u20(svfloat32_t values) {
@@ -526,59 +578,11 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_tanfx_u10sve(values)), map(std::tan));
   }
-  // Implementation is picked from
-  // https://github.com/ARM-software/ComputeLibrary/blob/v25.01/src/core/NEON/SVEMath.inl#L179
-#if defined(TORCH_INDUCTOR_PRECOMPILE_HEADERS) && defined(__GNUC__) && \
-    !defined(__clang__) &&                                             \
-    ((__GNUC__ == 14 && __GNUC_MINOR__ < 4) ||                         \
-     (__GNUC__ == 15 && __GNUC_MINOR__ < 3))
-  // GCC 14/15 can ICE when compiling AArch64 SVE intrinsics with PCH enabled
-  // (GCC PR target/123457). The fix is expected in GCC 14.4 and 15.3, and is
-  // backported to only some 14.3 and 15.2 packages, so conservatively guard by
-  // upstream minor version.
-  __attribute__((optimize("O0")))
-#endif
-  Vectorized<float>
-  tanh() const {
-    // Constants used for the tanh calculation.
-    const svfloat32_t CONST_1 =
-        svdup_n_f32(1.f); // Constant 1.0f for the tanh formula.
-    const svfloat32_t CONST_2 = svdup_n_f32(
-        2.f); // Constant 2.0f for the tanh formula (used in exp(2x)).
-    const svfloat32_t CONST_MIN_TANH = svdup_n_f32(
-        -10.f); // Minimum threshold for input values to prevent overflow.
-    const svfloat32_t CONST_MAX_TANH = svdup_n_f32(
-        10.f); // Maximum threshold for input values to prevent overflow.
-
-    // Step 1: Clamp the values within the range [-10, 10] to prevent overflow
-    // during exponentiation. The tanh function approaches ±1 rapidly as the
-    // input grows large, so we limit the input range to avoid numerical
-    // instability. svmax_f32_z ensures values are greater than -10, and
-    // svmin_f32_z ensures they are less than 10.
-    svfloat32_t x = svmin_f32_z(
-        ptrue, svmax_f32_z(ptrue, values, CONST_MIN_TANH), CONST_MAX_TANH);
-
-    // Step 2: Calculate exp(2 * x), where x is the clamped value.
-    // svmul_f32_z computes 2 * x, and exp_u20() computes the exponential of
-    // the result (via Vectorized<float>, then auto-converts back to
-    // svfloat32_t).
-    svfloat32_t exp2x =
-        Vectorized<float>(svmul_f32_z(ptrue, CONST_2, x)).exp_u20();
-
-    // Step 3: Calculate the numerator of the tanh function, which is exp(2x)
-    // - 1.
-    svfloat32_t num = svsub_f32_z(ptrue, exp2x, CONST_1);
-
-    // Step 4: Calculate the denominator of the tanh function, which is exp(2x)
-    // + 1.
-    svfloat32_t den = svadd_f32_z(ptrue, exp2x, CONST_1);
-
-    // Step 5: Calculate the tanh function as the ratio of the numerator and
-    // denominator: num / den.
-    svfloat32_t tanh = svdiv_f32_z(ptrue, num, den);
-
-    // Return the calculated tanh values.
-    return tanh;
+  Vectorized<float> tanh() const {
+    return at::vec::tanh_impl(
+        values, svptrue_b32(), [](svfloat32_t input) -> svfloat32_t {
+          return Vectorized<float>(input).exp_u20();
+        });
   }
 #endif
   Vectorized<float> trunc() const {
