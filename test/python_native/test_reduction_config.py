@@ -24,7 +24,11 @@ if not TEST_CUTEDSL:
         sys.exit(0)
     raise unittest.SkipTest("CuTeDSL not available")
 
-from torch._native.ops.reductions import kernel_general as kg, kernel_rowtile as rt
+from torch._native.ops.reductions import (
+    kernel_coltile as ct,
+    kernel_general as kg,
+    kernel_rowtile as rt,
+)
 
 
 class TestReductionConfig(TestCase):
@@ -60,7 +64,7 @@ class TestReductionConfig(TestCase):
         with self.assertRaisesRegex(ValueError, "order"):
             rt.reduction_order("linear")
 
-    @parametrize("cc", [(9, 0), (10, 0), (10, 3), (11, 0)])
+    @parametrize("cc", [(9, 0), (10, 3), (11, 0)])
     def test_architecture_isolation(self, cc):
         """Prevent Rubin tuning tables from changing other architecture defaults."""
         self.assertEqual(self.general(cc=cc), kg._GeneralConfig())
@@ -97,6 +101,106 @@ class TestReductionConfig(TestCase):
                 rt.reduce_row_tile(
                     object(), "sum", x, [torch.float32], order="inner_tree"
                 )
+
+    def test_b200_full_reduction_config(self):
+        """Pin B200 full-reduction launch choices at measured operation and size anchors."""
+        count = (256 << 20) // torch.float16.itemsize
+        args = (torch.float16, "argmaxi32", count)
+        kwargs = dict(nfields=2, nouts=1)
+        self.assertEqual(
+            kg.select_all_config((10, 0), *args, **kwargs),
+            kg._AllConfig(block=512, grid_mult=8),
+        )
+        self.assertEqual(kg.select_all_config((9, 0), *args, **kwargs), kg._AllConfig())
+
+    @parametrize(
+        "count,trait_key,nfields,expected",
+        [
+            (
+                257,
+                "sum",
+                1,
+                kg._GeneralConfig(kernel_order="inner_tree", rule="b200_strided_c256"),
+            ),
+            (
+                1024,
+                "argmaxi32",
+                2,
+                kg._GeneralConfig(block=32, rule="b200_strided_index"),
+            ),
+            (
+                4095,
+                "var1",
+                3,
+                kg._GeneralConfig(
+                    block=64,
+                    rule="b200_strided_welford",
+                    uniform_tree=True,
+                ),
+            ),
+            (
+                4096,
+                "mean",
+                1,
+                kg._GeneralConfig(block=32, rule="b200_strided_one_field"),
+            ),
+        ],
+    )
+    def test_b200_strided_config(self, count, trait_key, nfields, expected):
+        """Pin B200 general-kernel choices for measured strided geometries."""
+        num_o = 4096
+        self.assertEqual(
+            kg.select_general_config(
+                (10, 0),
+                torch.float16,
+                trait_key,
+                count,
+                num_o,
+                ((count, 2),),
+                ((num_o, 2 * count),),
+                order="unordered",
+                nfields=nfields,
+                nouts=1,
+            ),
+            expected,
+        )
+
+    @parametrize(
+        "dtype,columns,trait_key,nfields,expected_rule",
+        [
+            (torch.float16, 257, "sum", 1, "b200_ragged_c257"),
+            (torch.float16, 257, "std1", 3, "b200_ragged_welford_c257"),
+            (
+                torch.float32,
+                4095,
+                "argmaxi32",
+                2,
+                "b200_ragged_argmax_c4095_small",
+            ),
+            (torch.float16, 4095, "mean", 1, "b200_ragged_c4095_ordered"),
+        ],
+    )
+    def test_b200_ragged_column_config(
+        self, dtype, columns, trait_key, nfields, expected_rule
+    ):
+        """Pin B200 ragged column choices where tail handling changes the best mapping."""
+        itemsize = dtype.itemsize
+        rows = (16 << 20) // (columns * itemsize)
+        cfg = ct.select_col_config(
+            (10, 0),
+            dtype,
+            rows,
+            columns,
+            1,
+            nfields,
+            trait_key,
+            itemsize=itemsize,
+            acc_bits=32,
+            nouts=1,
+            alignment=16,
+            contiguous=True,
+        )
+        self.assertEqual(cfg.rule, expected_rule)
 
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "CuTeDSL requires Hopper or later")

@@ -80,6 +80,25 @@ class TestColumnConfig(TestCase):
                 None, "sum", None, [torch.float32], 1, order="unordered"
             )
 
+    def test_b200_ordered_column_packing(self):
+        """Pin B200 packing separately so Rubin guards cannot reject its valid rule."""
+        cfg = ct.select_ordered_col_config(
+            (10, 0),
+            torch.bfloat16,
+            "mean",
+            4096,
+            1,
+            16,
+            field_bits=(32,),
+            out_dtypes=(torch.float32,),
+            rows=262144,
+            full_tiles=True,
+        )
+        self.assertEqual(
+            cfg,
+            ct.OrderedColConfig(0, tile_columns=8, full_tiles=True, column_pack=4),
+        )
+
 
 class TestColumnCombine(TestCase):
     @onlyCUDA
