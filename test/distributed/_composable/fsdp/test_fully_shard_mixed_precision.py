@@ -332,12 +332,6 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
     def _test_reduce_dtype_fp32_reduce(
         self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
     ):
-        if (
-            self.world_size > 2
-            and isinstance(reshard_after_forward, int)
-            and use_shard_placement_fn
-        ):
-            return
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             reshard_after_forward,

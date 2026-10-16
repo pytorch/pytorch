@@ -95,33 +95,33 @@ jobs:
       rocm-arch-list: gfx950
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 1, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 2, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 3, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 4, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_huggingface_perf_rocm_mi350", shard: 5, num_shards: 5, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 1, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 2, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 3, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 4, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 5, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 6, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_timm_perf_rocm_mi350", shard: 7, num_shards: 7, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 1, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 2, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 3, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 4, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 5, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 6, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 7, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 8, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
-          { config: "inductor_torchbench_perf_rocm_mi350", shard: 9, num_shards: 9, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 1, num_shards: 5, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 2, num_shards: 5, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 3, num_shards: 5, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 4, num_shards: 5, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_huggingface_perf_rocm_mi350", shard: 5, num_shards: 5, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 1, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 2, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 3, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 4, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 5, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 6, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_timm_perf_rocm_mi350", shard: 7, num_shards: 7, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 1, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 2, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 3, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 4, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 5, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 6, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 7, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 8, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
+          { config: "inductor_torchbench_perf_rocm_mi350", shard: 9, num_shards: 9, runner: "linux.rocm.gpu.mi350.1" },
         ]}
     secrets: inherit
 
   test-periodically:
     name: linux-jammy-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: github.event.schedule == '15 0 * * 1-6'
     with:
@@ -138,7 +138,7 @@ jobs:
 
   test-weekly:
     name: linux-jammy-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: github.event.schedule == '0 7 * * 0'
     with:
@@ -155,7 +155,7 @@ jobs:
 
   test:
     name: linux-jammy-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: linux-jammy-rocm-py3_11-inductor-benchmark-build
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     with:
