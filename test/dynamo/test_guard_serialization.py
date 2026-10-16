@@ -5687,7 +5687,12 @@ class TestGuardSerializationAccelerator(TestGuardSerializationBase):
         )
 
 
-instantiate_device_type_tests(TestGuardSerializationAccelerator, globals())
+instantiate_device_type_tests(
+    TestGuardSerializationAccelerator,
+    globals(),
+    allow_xpu=True,
+    allow_mps=True,
+)
 
 
 class SimpleModule(torch.nn.Module):
