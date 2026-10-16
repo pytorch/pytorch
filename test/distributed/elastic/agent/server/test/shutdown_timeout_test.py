@@ -132,6 +132,25 @@ class ShutdownTimeoutTest(TestCase):
             # Verify close was called with correct timeout
             mock_pcontext.close.assert_called_once_with(signal.SIGTERM, 150)
 
+    def test_stop_workers_uses_configured_shutdown_timeout(self):
+        mock_spec = Mock(spec=WorkerSpec)
+        mock_spec.max_restarts = 3
+        mock_spec.rdzv_handler = Mock()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
+            agent = LocalElasticAgent(
+                spec=mock_spec,
+                logs_specs=logs_specs,
+                start_method="spawn",
+                shutdown_timeout=150,
+            )
+            agent._pcontext = MagicMock()
+
+            agent._stop_workers(agent.get_worker_group())
+
+            agent._pcontext.close.assert_called_once_with(signal.SIGTERM, 150)
+
     @patch("torch.distributed.elastic.multiprocessing.api.PContext")
     def test_pcontext_close_receives_timeout(self, mock_pcontext_class):
         mock_pcontext = MagicMock()
