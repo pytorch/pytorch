@@ -47,6 +47,7 @@ class ReduceBlock:
         block: int = 128,
         order: Literal["linear", "inner_tree"] = "linear",
         itree: Any = None,
+        tree_count: int = 0,
     ) -> None:
         self.trait = trait
         self.count = count  # elements reduced per output (= prod red exts)
@@ -95,6 +96,7 @@ class ReduceBlock:
             ragged_chunk=ragged_chunk,
             order=order,
             itree=itree,
+            general_tree_count=tree_count,
         )
 
     @property
@@ -330,6 +332,7 @@ class _GeneralConfig(NamedTuple):
     block: int = _K0_BLOCK
     kernel_order: Literal["linear", "inner_tree"] = "linear"
     rule: str = "general_default"
+    uniform_tree: bool = False
 
 
 def select_general_config(
@@ -820,6 +823,7 @@ def _reduce(
         in_base=cast(int, x.storage_offset()),
         nouts=nouts,
         block=block,
+        tree_count=count if config.uniform_tree else 0,
     )
     key = (
         "reduce",
