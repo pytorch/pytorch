@@ -249,7 +249,13 @@ class SparseBitVector {
   using ElementListConstIter = typename ElementList::const_iterator;
   enum { BITWORD_SIZE = SparseBitVectorElement<ElementSize>::BITWORD_SIZE };
 
+ protected:
+  // Subclasses must keep elements nonzero and strictly ordered by index().
+  // Do not directly erase elements or replace the list, which can invalidate
+  // the private CurrElementIter.
   ElementList Elements;
+
+ private:
   // Pointer to our current Element. This has no visible effect on the external
   // state of a SparseBitVector, it's just used to improve performance in the
   // common case of testing/modifying bits with similar indices.
