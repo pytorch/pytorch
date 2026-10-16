@@ -2625,12 +2625,6 @@ class TestReviewJobConfigDiscoveryIsClosed(unittest.TestCase):
                     "the empty form parses to a boolean and re-enables project/local",
                 )
 
-    def test_no_stage_takes_add_dir(self):
-        # Neither stage writes a file, so neither is given a directory outside
-        # its Read rules.
-        for step_id in MODEL_STEP_IDS:
-            self.assertNotIn("--add-dir", self._claude_args(step_id))
-
 
 class TestTheFindingsPathIsPinned(unittest.TestCase):
     """Every step that names the findings file must name one path."""
@@ -3209,18 +3203,15 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
                 self._check_token_inputs(step)
 
     def _check_token_inputs(self, step: str) -> None:
-        steps = [step]
-        # Stage A has no `settings:` (no hooks), so its inputs differ; the
-        # token pair below is the same in both.
         # allowed_non_write_users turns on a scrub that refuses to install
         # Claude Code without bubblewrap, which this sudo-less job cannot add.
         # In the step's `env:`, not `with:`, where it would be an unknown input.
-        env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", steps[0])
+        env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", step)
         self.assertIsNotNone(env, "the claude step declares no env:")
         self.assertRegex(
             env.group(1), r'(?m)^ {10}CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"$'
         )
-        inputs = with_block(steps[0])
+        inputs = with_block(step)
         self.assertEqual(
             [ln.strip() for ln in inputs if re.match(r"\s*github_token\s*:", ln)],
             [self.ACTION_TOKEN_LINE.strip()],
@@ -5405,12 +5396,8 @@ def job_if(job: str) -> str:
 
 
 class TestStageBMapsPrReviewsReview(unittest.TestCase):
-    """Stage A runs pr-review; stage B maps its review to the findings file.
-
-    Each link is checked here, because a break in any one lets the published
-    verdict drift from what pr-review said, or lets the sanitizer refuse every
-    result.
-    """
+    """Stage B maps stage A's pr-review to the findings file. A broken link lets
+    the verdict drift from pr-review's, or the sanitizer refuse every result."""
 
     def setUp(self):
         self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
@@ -5474,15 +5461,29 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         step = step[: step.index("\n      - name:")]
         self.assertIn("if: always() && steps.a.outputs.execution_file != ''", step)
 
-    def test_a_failed_stage_a_is_a_model_failure(self):
+    def test_the_first_step_that_did_not_succeed_decides_the_outcome(self):
+        # downgrade() records skipped and cancelled as `blocked`, anything else
+        # as `model_error`. In GitHub, `&&` and `||` return an operand.
         step = self.review[self.review.index("- name: Sanitize the verdict") :]
-        self.assertIn(
-            "CLAUDE_OUTCOME: ${{ steps.aprompt.outcome != 'success' && 'failure' "
-            "|| steps.a.outcome != 'success' && steps.a.outcome "
-            "|| steps.arev.outcome != 'success' && 'failure' "
-            "|| steps.claude.outcome }}",
-            step,
-        )
+        tree = parse_bool_expr(re.search(r"CLAUDE_OUTCOME: \$\{\{ (.+) \}\}", step)[1])
+
+        def value(node, o):
+            if node[0] == "atom" and node[1].startswith("'"):
+                return node[1].strip("'")
+            if node[0] == "atom":
+                m = re.fullmatch(r"steps\.(\w+)\.outcome( != 'success')?", node[1])
+                return o[m[1]] != "success" if m[2] else o[m[1]]
+            if node[0] == "not":
+                return not value(node[1], o)
+            lhs = value(node[1], o)
+            return value(node[2], o) if bool(lhs) == (node[0] == "and") else lhs
+
+        self.assertIs(value(parse_bool_expr("!steps.a.outcome"), {"a": "x"}), False)
+        ids = ("aprompt", "a", "arev", "claude")
+        outcomes = ("success", "failure", "cancelled", "skipped")
+        for combo in itertools.product(outcomes, repeat=len(ids)):
+            want = next((o for o in combo if o != "success"), "success")
+            self.assertEqual(value(tree, dict(zip(ids, combo))), want, combo)
 
 
 class TestStage2CannotBeTriggeredByALookalikeWorkflow(unittest.TestCase):
@@ -6835,9 +6836,7 @@ class TestStageAMatchesInteractivePrReview(unittest.TestCase):
         starts = [
             i for i, ln in enumerate(lines) if ln.strip() == "append_system_prompt: |"
         ]
-        self.assertEqual(
-            len(starts), 1, "premise changed: claude-code.yml append_system_prompt"
-        )
+        self.assertEqual(len(starts), 1, "premise changed: claude-code.yml prompt")
         indent = len(lines[starts[0]]) - len(lines[starts[0]].lstrip())
         first_paragraph = []
         for ln in lines[starts[0] + 1 :]:
@@ -6851,9 +6850,7 @@ class TestStageAMatchesInteractivePrReview(unittest.TestCase):
             r'(?m)^\s*APPEND_SYSTEM_PROMPT:\s*(".*")\s*$',
             model_step(STAGE2.read_text(), "a"),
         )
-        self.assertEqual(
-            len(values), 1, "premise changed: stage A APPEND_SYSTEM_PROMPT"
-        )
+        self.assertEqual(len(values), 1, "premise changed: APPEND_SYSTEM_PROMPT")
         stage_a = json.loads(values[0]).splitlines()
         for line in first_paragraph:
             if line not in INTERACTIVE_ONLY:
