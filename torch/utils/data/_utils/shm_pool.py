@@ -214,6 +214,37 @@ def _ensure_attached() -> None:
         _SLOTS.append(shm)
 
 
+def _has_slots(obj: Any) -> bool:
+    """Whether *obj* (or any class in its MRO) declares ``__slots__``."""
+    for cls in type(obj).__mro__:
+        if getattr(cls, "__slots__", None):
+            return True
+    return False
+
+
+def _instance_attrs(obj: Any) -> dict:
+    """Collect all per-instance attributes of *obj* (``__dict__`` + ``__slots__``).
+
+    Objects may carry state in ``__slots__`` (e.g. ZeusKeyedJaggedTensor stores
+    ``_zeus_show_click_stats`` there) which ``vars()`` misses because slot
+    attributes are not stored in ``__dict__``.  Walk every class in the MRO,
+    union its ``__slots__`` entries with ``vars(obj)``, and return the merged
+    dict so pooled views are restored for *all* instance attributes.
+    """
+    attrs = {}
+    d = getattr(obj, "__dict__", None)
+    if d:
+        attrs.update(d)
+    for cls in type(obj).__mro__:
+        slots = getattr(cls, "__slots__", ())
+        if isinstance(slots, str):
+            slots = (slots,)
+        for s in slots:
+            if hasattr(obj, s):
+                attrs[s] = getattr(obj, s)
+    return attrs
+
+
 class _BatchTooLarge(Exception):
     """Internal sentinel: the batch overflowed the slot mid-walk."""
 
@@ -302,17 +333,20 @@ def copy_batch_into_slot(batch: Any) -> Any:
         elif isinstance(obj, list):
             return [walk(v, path + (i,)) for i, v in enumerate(obj)]
         elif isinstance(obj, tuple):
-            return tuple(walk(v, path + (i,)) for i, v in enumerate(obj))
-        elif hasattr(obj, "__dict__") and not isinstance(
+            # tuple is immutable — can't setitem views on rebuild.  Carry it as
+            # a marked mutable list so _set_leaf/_descend work, then convert
+            # back to tuple at the end of rebuild_batch_from_slot.
+            return ("__tuple__", [walk(v, path + (i,)) for i, v in enumerate(obj)])
+        elif not isinstance(
             obj, (str, bytes, int, float, bool, type(None))
-        ):
-            # Arbitrary object (e.g. KJT): recurse into __dict__ like pickle.
-            # Tensors found inside are pooled; the object is preserved and
-            # tensors are restored as zero-copy views on the pin side via
-            # setattr.  This mirrors how pickle/reduce_storage discovers
-            # tensors inside arbitrary containers.
-            obj_vars = vars(obj)
-            walked = {k: walk(v, path + (k,)) for k, v in obj_vars.items()}
+        ) and (hasattr(obj, "__dict__") or _has_slots(obj)):
+            # Arbitrary object (e.g. KJT/SparseBatch): recurse into all instance
+            # attributes (``__dict__`` + ``__slots__``) like pickle.  Tensors
+            # found inside are pooled; the object is preserved and tensors are
+            # restored as zero-copy views on the pin side via setattr.  This
+            # mirrors how pickle/reduce_storage discovers tensors inside
+            # arbitrary containers.
+            walked = {k: walk(v, path + (k,)) for k, v in _instance_attrs(obj).items()}
             return ("__obj__", type(obj), walked)
         return obj
 
@@ -347,7 +381,7 @@ def rebuild_batch_from_slot(stub: SlotStub) -> Any:
             cur = _descend(cur, key)
         _set_leaf(cur, path[-1], view)
 
-    return data
+    return _finalize_tuples(data)
 
 
 def _materialize(obj: Any) -> Any:
@@ -355,6 +389,9 @@ def _materialize(obj: Any) -> Any:
 
     Recursively turns ``("__obj__", cls, walked_dict)`` back into ``cls``
     instances with their (already-materialized) attributes set via setattr.
+    ``("__tuple__", walked_list)`` is kept as-is (its list is materialized)
+    so views can be setitem'd; ``_finalize_tuples`` converts them back at the
+    end.
     """
     if isinstance(obj, tuple) and len(obj) == 3 and obj[0] == "__obj__":
         _, cls, walked = obj
@@ -366,6 +403,8 @@ def _materialize(obj: Any) -> Any:
         for k, v in walked.items():
             setattr(instance, k, _materialize(v))
         return instance
+    elif isinstance(obj, tuple) and len(obj) == 2 and obj[0] == "__tuple__":
+        return ("__tuple__", [_materialize(v) for v in obj[1]])
     elif isinstance(obj, dict):
         return {k: _materialize(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -375,17 +414,49 @@ def _materialize(obj: Any) -> Any:
     return obj
 
 
+def _finalize_tuples(obj: Any) -> Any:
+    """Convert ``("__tuple__", list)`` placeholders back to real tuples.
+
+    Called after all views have been setitem'd into the mutable lists.
+    """
+    if isinstance(obj, tuple) and len(obj) == 2 and obj[0] == "__tuple__":
+        return tuple(_finalize_tuples(v) for v in obj[1])
+    if isinstance(obj, dict):
+        return {k: _finalize_tuples(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_finalize_tuples(v) for v in obj]
+    # real objects (incl. SparseBatch/KJT): recurse into __dict__ so nested
+    # tuples inside attributes are finalized too.
+    if hasattr(obj, "__dict__") and not isinstance(
+        obj, (str, bytes, int, float, bool, type(None))
+    ):
+        for k, v in list(vars(obj).items()):
+            obj.__dict__[k] = _finalize_tuples(v)
+    return obj
+
+
 def _descend(container: Any, key: Any) -> Any:
-    """Descend into *container* at *key*."""
-    if isinstance(container, tuple) and len(container) == 3 and container[0] == "__obj__":
-        return container[2][key]
-    return container[key]
+    """Descend into *container* at *key*.
+
+    After ``_materialize`` the ``__obj__`` placeholders are already real
+    objects, so descend via ``getattr`` for arbitrary objects and ``[]`` for
+    dict/list (the only container types ``walk`` produces for non-leaf paths).
+    ``__tuple__`` placeholders carry a mutable list (tuples were converted so
+    views can be setitem'd); descend into that list.
+    """
+    if isinstance(container, tuple) and len(container) == 2 and container[0] == "__tuple__":
+        return container[1][key]
+    if isinstance(container, dict):
+        return container[key]
+    if isinstance(container, list):
+        return container[key]
+    return getattr(container, key)
 
 
 def _set_leaf(container: Any, key: Any, value: Any) -> None:
     """Set *value* at *key* in *container*."""
-    if isinstance(container, tuple) and len(container) == 3 and container[0] == "__obj__":
-        container[2][key] = value
+    if isinstance(container, tuple) and len(container) == 2 and container[0] == "__tuple__":
+        container[1][key] = value
     elif isinstance(container, (list, dict)):
         container[key] = value
     else:
