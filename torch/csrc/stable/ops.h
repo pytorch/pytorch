@@ -1591,31 +1591,4 @@ inline torch::stable::Tensor from_file(
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-
-/// Stable version of the add.Tensor op.
-///
-/// Adds the other tensor to self, scaled by alpha: self + alpha * other.
-/// Unlike at::add, alpha is a double rather than a Scalar. Adding two
-/// integral or boolean tensors is not supported.
-///
-/// Minimum compatible version: PyTorch 2.16.
-/// Build time minimum version: PyTorch 2.16.
-///
-/// @param self The input tensor.
-/// @param other The tensor to add.
-/// @param alpha The scaling factor for other. Defaults to 1.0.
-/// @return The result of self + alpha * other.
-inline torch::stable::Tensor add(
-    const torch::stable::Tensor& self,
-    const torch::stable::Tensor& other,
-    double alpha = 1.0) {
-  AtenTensorHandle ret0;
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_aten_add_Tensor(self.get(), other.get(), alpha, &ret0));
-  return torch::stable::Tensor(ret0);
-}
-
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
-
 HIDDEN_NAMESPACE_END(torch, stable)
