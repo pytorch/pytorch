@@ -540,10 +540,9 @@ class ProfilerObserver(WindowFinalizerMixin, CuspyObserver):
             if w is None:
                 return
             w["cpu"] = os.fspath(cpu_trace_path)
-            # Cuspy traces are always gzipped (chrome JSON or .pftrace alike); the writer
-            # keys gzip + format off the suffix.
+            # Default to gzip unless a compression suffix was requested.
             out = os.fspath(output_path)
-            w["out"] = out if out.endswith(".gz") else out + ".gz"
+            w["out"] = out if out.endswith((".gz", ".zst")) else out + ".gz"
         self._maybe_write(window_id)
 
     def join(self, *, force: bool = True, timeout_s: float = 30.0) -> None:
