@@ -10911,6 +10911,33 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @torch._dynamo.config.patch(
         debug_force_nested_calls=False, nested_graph_breaks=False
     )
+    @parametrize("hook_result", [True, 1])
+    def test_precompile_skip_runs_eagerly_when_guard_collective_hits(self, hook_result):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        # A bool hook's True, or a peer's HIT, is not a miss.
+        old_hook = set_guard_complete_hook(lambda state: hook_result)
+        try:
+            for _ in range(3):
+                self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     def test_precompile_skip_compiles_when_guard_collective_misses(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_skip,

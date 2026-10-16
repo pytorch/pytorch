@@ -629,9 +629,10 @@ class _DynamoCodeCacheEntry:
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
-      11. Whether install() skips the frame and everything it calls. Set on a
-         frame a precompile capture serves as plain Python: its variants
-         inlined its Python callees, which hold no entries of their own.
+      11. Whether install() skips the frame and everything it calls, until
+         uninstall(). Set on a frame a precompile capture serves as plain
+         Python: its variants inlined its Python callees, which hold no entries
+         of their own.
     """
 
     python_code: SerializedCode
@@ -647,14 +648,19 @@ class _DynamoCodeCacheEntry:
     skip_recursive: bool = False
 
 
-def _globals_module_name(namespace: dict[str, Any]) -> str | None:
+def _globals_module_name(
+    namespace: dict[str, Any], preferred: str | None = None
+) -> str | None:
     """The ``sys.modules`` key of the module whose namespace IS ``namespace``.
 
     A file imported under two names is two modules sharing one file, and
     ``inspect.getmodule`` maps a code object to a module by its file, so it can
     answer with the other alias, whose globals and functions are not the frame's.
+    ``preferred`` is tried first, so a key that already names the owner (e.g. an
+    importable alias of ``__main__``) is kept.
     """
     for name in (
+        preferred,
         namespace.get("__name__"),
         getattr(namespace.get("__spec__"), "name", None),
     ):
@@ -1178,6 +1184,9 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # Codes install() gave a SKIP strategy, which uninstall() resets: a
+        # strategy is process-global and would outlive this package.
+        self._skipped_codes: list[types.CodeType] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1254,11 +1263,9 @@ class CompilePackage:
             # set would: the re-saved string is never below the loaded one.
             self._device_types = frozenset((dynamo.device_type,))
         else:
-            self._add_function(
-                self._innermost_fn.__code__,
-                _globals_module_name(self._innermost_fn.__globals__)
-                or self._innermost_fn.__module__,
-            )
+            fn = self._innermost_fn
+            module_name = _globals_module_name(fn.__globals__, fn.__module__)
+            self._add_function(fn.__code__, module_name or fn.__module__)
         self._initialized = True
 
     def _add_function(
@@ -1487,7 +1494,12 @@ class CompilePackage:
             self._installed_globals.setdefault(module, []).append(name)
 
     def uninstall(self) -> None:
-        from torch._C._dynamo.eval_frame import _reset_precompile_entries
+        from torch._C._dynamo.eval_frame import (
+            _reset_precompile_entries,
+            set_code_exec_strategy,
+        )
+
+        from .types import FrameAction, FrameExecStrategy
 
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in uninstall")
@@ -1496,6 +1508,10 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
+        default = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        for code in self._skipped_codes:
+            set_code_exec_strategy(code, default)
+        self._skipped_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1604,10 +1620,12 @@ class CompilePackage:
                     # rank skips the frame and its callees.
                     skip_all = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
                     set_code_exec_strategy(target_code, skip_all)
+                    self._skipped_codes.append(target_code)
                 elif len(entry.guarded_codes) == 0:
                     # Dynamo generates empty graph for trivial functions, should just skip them
                     # in these cases.
                     _load_precompile_skip(target_code)
+                    self._skipped_codes.append(target_code)
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):

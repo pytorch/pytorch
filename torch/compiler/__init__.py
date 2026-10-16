@@ -492,8 +492,13 @@ def set_enable_guard_collectives(enabled: bool):
     it reports the skip, since another rank's artifact may have compiled that
     frame.  A miss on any rank forces the miss path (recompilation) on every
     rank; otherwise each rank runs its cached code (hit) or runs eagerly (skip),
-    so a mixture of hits and skips never recompiles.  Entries and skips installed from a precompile artifact assume
-    every rank installed the same artifact.
+    so a mixture of hits and skips never recompiles.  Entries and skips
+    installed from a precompile artifact assume every rank installed the same
+    artifact.  A mixture of hits and skips further assumes the frames each rank
+    reaches next issue matching guard collectives: the skipping rank runs the
+    frame eagerly, so its callees may issue their own guard collectives, while
+    the hitting rank runs code with those callees inlined (or runs its own
+    resume functions after a graph break), and the ranks then mispair or hang.
 
     Returns the previous setting of enabled.
     """
