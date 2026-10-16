@@ -12,7 +12,9 @@ from unittest.mock import patch
 import torch
 import torch.compiler.config as compiler_config
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
@@ -2197,10 +2199,12 @@ instantiate_parametrized_tests(TestCompileOnOneRankDeviceAsParameter)
 
 
 def _baked_pg_constants(gm):
-    """get_attr nodes that resolve to a torchbind ProcessGroup baked onto the gm.
+    """get_attr nodes that resolve to a ProcessGroup baked onto the gm.
 
-    These are unserializable: torch.classes.c10d.ProcessGroup has no
-    __getstate__, so GraphPickler.dumps fails on them.
+    make_fx bakes a torchbind ProcessGroup; Dynamo + AOTAutograd bakes the
+    Python ProcessGroup as an opaque object. Both are unserializable:
+    torch.classes.c10d.ProcessGroup has no __getstate__, so GraphPickler.dumps
+    fails on them.
     """
     out = []
     for node in gm.graph.nodes:
@@ -2209,7 +2213,9 @@ def _baked_pg_constants(gm):
         val = gm
         for part in node.target.split("."):
             val = getattr(val, part)
-        if isinstance(val, torch.ScriptObject) and "ProcessGroup" in val._type().name():
+        if isinstance(val, dist.ProcessGroup) or (
+            isinstance(val, torch.ScriptObject) and "ProcessGroup" in val._type().name()
+        ):
             out.append(node.target)
     return out
 
@@ -2311,6 +2317,84 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         gm = make_fx(self._fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
         self.assertIn("c10d.allreduce_.default", _call_targets(gm))
         self.assertTrue(_baked_pg_constants(gm))
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+@instantiate_parametrized_tests
+class TestCompileOnOneRankMeshGroup(TestCase):
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        self.mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("replicate",))
+        self.mesh_2d = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+        self.mesh_2d["dp", "tp"]._flatten("dp_tp")
+
+    def tearDown(self):
+        dist.destroy_process_group()
+        torch._dynamo.reset()
+        super().tearDown()
+
+    @staticmethod
+    def _fn(x, mesh, dim):
+        return funcol.all_reduce(x, "sum", mesh.get_group(dim))
+
+    @parametrize(
+        "mesh_attr,dim,dim_index",
+        [
+            ("mesh", None, 0),
+            ("mesh", 0, 0),
+            ("mesh", "replicate", 0),
+            ("mesh_2d", 1, 1),
+            ("mesh_2d", "tp", 1),
+            ("mesh_2d", "dp_tp", 0),
+        ],
+    )
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_mesh_group_aot_uses_live_mesh(self, mesh_attr, dim, dim_index):
+        mesh = getattr(self, mesh_attr)
+        x = torch.ones(4)
+        expected = self._fn(x, mesh, dim)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(self._fn, backend=backend, fullgraph=True)
+
+        self.assertEqual(compiled(x, mesh, dim), expected)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        graph = backend.fw_graphs[0]
+        lookups = [
+            node
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+            and node.target is torch.ops._dtensor.mesh_get_process_group.default
+        ]
+        self.assertEqual(len(lookups), 1)
+        self.assertEqual(lookups[0].args[0].op, "placeholder")
+        self.assertEqual(lookups[0].args[1], dim_index)
+        self.assertEqual(_baked_pg_constants(graph), [])
+
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_mesh_group_live_across_graph_break(self):
+        def fn(x, mesh):
+            pg = mesh.get_group()
+            torch._dynamo.graph_break()
+            return funcol.all_reduce(x + 1, "sum", pg)
+
+        x = torch.ones(4)
+        expected = fn(x, self.mesh)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+
+        self.assertEqual(compiled(x, self.mesh), expected)
+        # The looked-up group is returned from the first graph and fed back
+        # into the resume frame as an input.
+        self.assertEqual(len(backend.fw_graphs), 2)
+        first = backend.fw_graphs[0]
+        (lookup,) = [
+            node
+            for node in first.graph.nodes
+            if node.target is torch.ops._dtensor.mesh_get_process_group.default
+        ]
+        self.assertEqual(lookup.args[0].op, "placeholder")
+        self.assertIn(lookup, first.graph.output_node().args[0])
 
 
 if __name__ == "__main__":
