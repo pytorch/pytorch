@@ -93,6 +93,55 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y), tol=1e-3)
         self._check_code(f, (x, y), 1, 1)
 
+    def test_mm_out_dtype(self):
+        # fp16 inputs with out_dtype=fp32 must give an fp32 result. Inputs are
+        # scaled so outputs (std sqrt(K) * 1e4) often exceed fp16's max (65504):
+        # any fp16 rounding of the result shows up as inf rather than hiding
+        # within the tolerance.
+        def f(x, y):
+            return torch.mm(x, y, out_dtype=torch.float32)
+
+        M, K, N = 128, 64, 128
+        x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE) * 100
+        y = rand_strided((K, N), (N, 1), dtype=torch.float16, device=GPU_TYPE) * 100
+
+        self._check_equal(f, (x, y))
+        self._check_code(f, (x, y), 1, 1)
+
+    def test_bmm_out_dtype(self):
+        def f(x, y):
+            return torch.bmm(x, y, out_dtype=torch.float32)
+
+        B, M, K, N = 2, 128, 64, 128
+        # Scaled past fp16's range, as in test_mm_out_dtype.
+        x = (
+            rand_strided((B, M, K), (M * K, K, 1), dtype=torch.float16, device=GPU_TYPE)
+            * 100
+        )
+        y = (
+            rand_strided((B, K, N), (K * N, N, 1), dtype=torch.float16, device=GPU_TYPE)
+            * 100
+        )
+
+        self._check_equal(f, (x, y))
+
+    def test_mm_out_dtype_chain(self):
+        # The fp32 output of the first mm is stored (it is also returned) and
+        # then cast to fp16 for the second; it must not be stored as fp16.
+        def f(x, y, z):
+            h = torch.mm(x, y, out_dtype=torch.float32)
+            return torch.mm((h / 1e4).half(), z, out_dtype=torch.float32), h
+
+        M, K, N = 128, 64, 128
+        # Scaled past fp16's range, as in test_mm_out_dtype.
+        x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE) * 100
+        y = rand_strided((K, N), (N, 1), dtype=torch.float16, device=GPU_TYPE) * 100
+        z = rand_strided((N, N), (N, 1), dtype=torch.float16, device=GPU_TYPE)
+
+        # h / 1e4 can round to a neighbouring fp16 value when h differs in its
+        # last bits, hence the fp16 tolerance used in test_matmul_fp16.
+        self._check_equal(f, (x, y, z), tol=1e-3)
+
     def test_reduction_mask_zeroout(self):
         def f(x, y):
             return (x + 1) @ (y - 2)
