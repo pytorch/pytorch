@@ -15,8 +15,13 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
-    skipIfRocm,
+    TEST_WITH_ROCM,
 )
+
+
+# So that tests are written in device-agnostic way
+device_type = "cuda"
+device_module = torch.get_device_module(device_type)
 
 
 @contextmanager
@@ -48,14 +53,13 @@ class P2PIpcTest(MultiProcContinuousTest):
         # consumer allocates before fromShared(), that allocation would
         # "prime" the legacy process-global handle_type and mask the
         # #179220 (EBADF) bug we are guarding against.
-        self._dev = torch.device(self.device_type, self.rank)
-        torch.get_device_module(self.device_type).set_device(self._dev)
+        device_module.set_device(self.device)
         if allocate:
-            torch.empty(1, device=self._dev)
+            torch.empty(1, device=self.device)
 
     @property
     def device(self) -> torch.device:
-        return self._dev
+        return torch.device(device_type, self.rank)
 
     def _test_p2p_ipc_impl(
         self,
@@ -117,7 +121,7 @@ class P2PIpcTest(MultiProcContinuousTest):
         if self.rank == 0:
             tensor.fill_(1)
 
-        torch.get_device_module(self.device_type).synchronize()
+        device_module.synchronize()
         torch.distributed.barrier()
 
         if self.rank == 0 or is_consumer:
@@ -132,7 +136,7 @@ class P2PIpcTest(MultiProcContinuousTest):
             # producer's now-unreferenced segment -> unmapHandles.
             if is_consumer:
                 del tensor
-                torch.get_device_module(self.device_type).synchronize()
+                device_module.synchronize()
             torch.distributed.barrier()  # consumer released before producer frees
             if self.rank == 0:
                 del tensor_meta, tensor
@@ -141,7 +145,7 @@ class P2PIpcTest(MultiProcContinuousTest):
 
         torch.distributed.barrier()
 
-    def test_p2p_ipc(self, device) -> None:
+    def test_p2p_ipc(self) -> None:
         """Test P2P IPC with regular cudaMalloc allocations."""
         self._test_p2p_ipc_impl()
 
@@ -151,8 +155,10 @@ class P2PIpcTest(MultiProcContinuousTest):
         "unconditionally skipped elsewhere (deadlocks on B200, see "
         "https://github.com/pytorch/pytorch/issues/189879)",
     )
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
-    def test_p2p_ipc_expandable_segments(self, device) -> None:
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
+    )
+    def test_p2p_ipc_expandable_segments(self) -> None:
         """
         Test P2P IPC with expandable segments enabled. Exercises the
         SHAREABLE_CUDA_EXPANDABLE_SEGMENT path in ExpandableSegment::share /
@@ -175,7 +181,7 @@ class P2PIpcTest(MultiProcContinuousTest):
         # Enable IPC handles for expandable segments (disabled by default in
         # fbcode). Use a scoped env so state does not leak across tests.
         with _scoped_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC", "1"):
-            torch._C._accelerator_setAllocatorSettings("expandable_segments:True")  # type: ignore[attr-defined]
+            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
             torch.cuda.empty_cache()
             # 8MB > the 2MB default segment size, forcing an expandable segment.
             self._test_p2p_ipc_impl(
@@ -186,7 +192,7 @@ class P2PIpcTest(MultiProcContinuousTest):
 
     @classmethod
     def tearDownClass(cls):
-        torch._C._accelerator_setAllocatorSettings("expandable_segments:False")  # type: ignore[attr-defined]
+        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
         super().tearDownClass()
 
 
