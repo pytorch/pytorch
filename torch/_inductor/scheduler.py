@@ -504,23 +504,13 @@ class MixOrderReduction:
             # fully cached by L2
             size_thres = 5 * 2**20
 
-            # Call evaluate_expr rather than statically_known_geq since nrow can
-            # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow * ncol, size_thres),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # Need enough rows to split the other reduction across; too few
             # gives insufficient parallelism to justify the fusion overhead.
-            if not V.graph.sizevars.evaluate_expr(
-                sympy.Ge(nrow, 4096),
-                size_oblivious=True,
-                fallback_value=False,
-            ):
+            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow, 4096)):
                 return False
 
         # Equal groups can be true square inner+outer reductions, but also
