@@ -549,35 +549,6 @@ _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
 
-def _names_from_code(code: types.CodeType) -> set[str]:
-    names = set(code.co_names)
-    for const in code.co_consts:
-        if isinstance(const, types.CodeType):
-            names |= _names_from_code(const)
-    return names
-
-
-def _guards_read_only_builtins(guards: Any, name: str, scope: dict[Any, Any]) -> bool:
-    from .source import ChainedSource, DictGetItemSource, GlobalSource
-
-    # Walk each guard's source down to the item it reads out of `name`; guards
-    # rooted elsewhere, or on the dict itself, don't read the copy's entries.
-    for guard in guards:
-        source = guard.originating_source
-        while isinstance(source, ChainedSource):
-            base = source.base
-            if isinstance(base, GlobalSource) and base.global_name == name:
-                break
-            source = base
-        else:
-            continue
-        if not isinstance(source, DictGetItemSource):
-            return False
-        if not isinstance(scope.get(source.index), types.BuiltinFunctionType):
-            return False
-    return True
-
-
 def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
     for name in code.co_names:
         if is_compiled_fn_name(name):
@@ -1529,7 +1500,6 @@ class CompilePackage:
 
         from .convert_frame import input_codes
         from .output_graph import get_builtins_dict
-        from .symbolic_convert import UNNAMED_SCOPE_PREFIX
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1614,33 +1584,28 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    bytecode = SerializedCode.to_code_object(guarded_code.dynamo_code)
                     # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
                     # in the tracing process, so a fresh process has no binding
-                    # for it; the artifact carries the guard pickler's copy of
-                    # the dict, with tensors faked and unguarded values pruned.
-                    # That copy is only fit for the guards, so a key the
-                    # bytecode reads (a graph input or a replayed store) stays
-                    # unbound and misses as before. So does a key whose
-                    # guards read anything but a builtin function out of it
-                    # (e.g. EQUALS_MATCH on a constant): the copy is frozen,
-                    # so those guards would keep passing after the live
-                    # namespace changed. A binding already here is kept and
-                    # the guards check whatever it holds; a live compile's is
-                    # taken over from its CleanupHook, so uninstall() drops
-                    # it, and anyone else's is left alone.
-                    reads = _names_from_code(bytecode)
-                    guards = guards_state.output_graph.guards
-                    for name, value in guards_state.output_graph.global_scope.items():
-                        if (
-                            name.startswith(UNNAMED_SCOPE_PREFIX)
-                            and name not in reads
-                            and _guards_read_only_builtins(guards, name, value)
-                        ):
+                    # for it. Bind it to the live namespace, found again through
+                    # the inlined function's source, so the guards and the
+                    # bytecode see what they saw while tracing; the artifact's
+                    # copy of the dict is frozen and has its tensors faked. A
+                    # key whose source does not resolve here (e.g. one rooted at
+                    # a frame local) stays unbound and misses as before. A
+                    # binding already here is kept; a live compile's is taken
+                    # over from its CleanupHook, so uninstall() drops it, and
+                    # anyone else's is left alone.
+                    sources = guards_state.output_graph.unnamed_scope_sources
+                    for name, source in sources.items():
+                        try:
+                            namespace = eval(source.name, {"G": runtime_global_scope})
+                        except (AttributeError, KeyError, NameError):
+                            continue
+                        if isinstance(namespace, dict):
                             self._install_global(
                                 module,
                                 name,
-                                runtime_global_scope.get(name, value),
+                                runtime_global_scope.get(name, namespace),
                                 record_only_if_new=True,
                             )
                     # The installed builtins dict might be absent from the runtime
@@ -1673,7 +1638,11 @@ class CompilePackage:
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
                         )
-                    _load_precompile_entry(target_code, guard_manager, bytecode)
+                    _load_precompile_entry(
+                        target_code,
+                        guard_manager,
+                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                    )
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
