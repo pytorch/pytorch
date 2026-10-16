@@ -629,6 +629,9 @@ class _DynamoCodeCacheEntry:
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
+      11. Whether install() skips the frame and everything it calls. Set on a
+         frame a precompile capture serves as plain Python: its variants
+         inlined its Python callees, which hold no entries of their own.
     """
 
     python_code: SerializedCode
@@ -641,6 +644,7 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    skip_recursive: bool = False
 
 
 def _globals_module_name(namespace: dict[str, Any]) -> str | None:
@@ -737,9 +741,9 @@ def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
     return []
 
 
-def _raise_resolution_error(code: types.CodeType, scope: Any, note: str = "") -> Never:
+def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
-        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}{note}"
+        f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
     )
 
 
@@ -1502,12 +1506,16 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        from torch._C._dynamo.eval_frame import _load_precompile_entry
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            set_code_exec_strategy,
+        )
 
         from .convert_frame import input_codes
         from .decorators import _nonrecursive_disable_wrapper_code
         from .output_graph import get_builtins_dict
         from .symbolic_convert import UNNAMED_SCOPE_PREFIX
+        from .types import FrameAction, FrameExecStrategy
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -1589,7 +1597,10 @@ class CompilePackage:
                             torch._dynamo.disable(backend),
                         )
 
-                if len(entry.guarded_codes) == 0:
+                if entry.skip_recursive:
+                    skip_all = FrameExecStrategy(FrameAction.SKIP, FrameAction.SKIP)
+                    set_code_exec_strategy(target_code, skip_all)
+                elif len(entry.guarded_codes) == 0:
                     # Dynamo generates empty graph for trivial functions, should just skip them
                     # in these cases.
                     torch._dynamo.eval_frame.skip_code(target_code)
