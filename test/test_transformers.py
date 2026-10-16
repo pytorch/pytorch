@@ -6732,7 +6732,7 @@ class TestSDPAAccelerator(NNTestCase):
     def test_mem_eff_backward_outside_capture_after_graph_replay(self, device):
         # A forward captured in a CUDA graph returns its dropout seed/offset on
         # device; running backward on them outside capture used to segfault.
-        q, k, v = (torch.randn(2, 4, 128, 64, device=device, dtype=torch.bfloat16) for _ in range(3))
+        q, k, v = (torch.randn(2, 4, 128, 64, device=device, dtype=torch.float16) for _ in range(3))
         fwd = torch.ops.aten._scaled_dot_product_efficient_attention
         bwd = torch.ops.aten._scaled_dot_product_efficient_attention_backward
         dropout_p = 0.1
