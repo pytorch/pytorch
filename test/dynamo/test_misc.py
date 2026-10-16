@@ -16496,20 +16496,39 @@ fn
                 dynamic_sizes=[DimDynamic.DYNAMIC]
             ),
         )
-        self.assertEqual(
-            shape_env.var_to_range[offset.node.expr], ValueRanges(0, int_oo)
-        )
+        expr = offset.node.expr
+        self.assertEqual(shape_env.var_to_range[expr], ValueRanges(0, int_oo))
+        self.assertTrue(expr.is_nonnegative)
+        self.assertIsNone(expr.is_positive)
 
         def fn(x):
             if x.storage_offset() > 0:
                 return x * 2
             return x + 1
 
-        opt_fn = torch.compile(fn, backend="eager", dynamic=True)
         buf = torch.randn(64)
-        for offset in (5, 0):
+        # (0, 5): the offset-0 graph refines the symbol to 0, which still needs a guard.
+        for offsets in ((5, 0, 1), (0, 5)):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", dynamic=True)
+            for offset in offsets:
+                x = buf[offset : offset + 8]
+                self.assertEqual(opt_fn(x), fn(x), offsets)
+
+    def test_storage_offset_refined_to_constant_is_guarded(self):
+        def fn(x):
+            if x.storage_offset() > 2:
+                return x * 2
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True)
+        buf = torch.randn(64)
+        # Offset 2 refines the offset symbol's [2, int_oo] range to the constant 2.
+        for offset in (2, 5):
             x = buf[offset : offset + 8]
             self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):
