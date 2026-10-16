@@ -406,9 +406,10 @@ class SACEstimator(TorchDispatchMode):
         out_storages_cuda: set[UntypedStorage] = set()
         out_storages_cpu: set[UntypedStorage] = set()
         cuda_devices: set[torch.device] = set()
+        accelerator = torch.accelerator.current_accelerator()
         for o in flat_outs:
             if isinstance(o, torch.Tensor):
-                if o.device.type == "cuda":
+                if accelerator is not None and o.device.type == accelerator.type:
                     out_storages_cuda.update(get_untyped_storages(o))
                     cuda_devices.add(o.device)
                 else:
@@ -417,7 +418,7 @@ class SACEstimator(TorchDispatchMode):
         # Check if there's more than 1 CUDA device
         if len(cuda_devices) > 1:
             raise AssertionError(
-                f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+                f"{func.__name__}'s output has more than 1 accelerator devices {cuda_devices}"
             )
 
         # 2. Get the memory consumed by output
