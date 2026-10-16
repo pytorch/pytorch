@@ -141,6 +141,9 @@ def _capture_config() -> Iterator[None]:
         functorch_patch["strict_autograd_cache"] = True
     import torch._inductor.config as inductor_config
 
+    # TODO: drop the bundled_autotune_remote_cache patch once
+    # AutotuneCacheBundler keeps one bundle per compiled module rather than one
+    # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
         inductor_config.patch(bundled_autotune_remote_cache=False),
@@ -184,7 +187,7 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
         # stance path (eval_frame._create_wrapped_callback, behind set_stance)
         # rebuilds a plain ConvertFrame with no package and is outside a capture
         # session's contract.
-        if self._inner_convert._package is None:
+        if self._package is None:
             return lambda backend: type(self)(
                 backend, self._hooks, recompile_limit=self._recompile_limit
             )
@@ -1905,8 +1908,9 @@ class PrecompileSession(Generic[_P, _R]):
         Running its original bytecode instead is always correct and gives up
         no compiled code, which is how torch.compile treats a frame that traced
         no ops. Such a frame is rendered with no variants and not bypassed:
-        install() skip_code()s it and the standalone driver runs it as plain
-        Python. The entry frame is left alone, since the artifact serves it.
+        install() skips it and everything it calls (its variants inlined its
+        Python callees, which have no entries of their own to serve), and the
+        standalone driver runs it as plain Python. The entry frame is left alone, since the artifact serves it.
         """
         entry = self._package.cache_entry()
         lossy = {frame for frames in self._drop_frames.values() for frame in frames}
@@ -1920,7 +1924,9 @@ class PrecompileSession(Generic[_P, _R]):
                 and key not in computing
                 and (code.bypassed or (code.guarded_codes and key in lossy))
             ):
-                codes[i] = dataclasses.replace(code, guarded_codes=[], bypassed=False)
+                codes[i] = dataclasses.replace(
+                    code, guarded_codes=[], bypassed=False, skip_recursive=True
+                )
                 eager.add(key)
         return dataclasses.replace(entry, codes=codes), frozenset(eager)
 
