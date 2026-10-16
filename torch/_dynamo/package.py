@@ -652,7 +652,8 @@ def _globals_module_name(
     ``inspect.getmodule`` maps a code object to a module by its file, so it can
     answer with the other alias, whose globals and functions are not the frame's.
     ``preferred`` is tried first, so a key that already names the owner (e.g. an
-    importable alias of ``__main__``) is kept.
+    importable alias of ``__main__``) is kept. A module that rebinds ``__name__``
+    is still registered under ``__spec__.name``, so that is tried last.
     """
     for name in (
         preferred,
@@ -1302,6 +1303,13 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
+    @property
+    def _entry_module_name(self) -> str | None:
+        # Frames sharing the entry's globals keep the key the entry was recorded
+        # under, e.g. an importable alias of __main__ the driver can import.
+        entry = next(iter(self._codes.values()), None)
+        return entry.python_module if entry is not None else None
+
     def _add_user_function(
         self,
         code: types.CodeType,
@@ -1326,7 +1334,8 @@ class CompilePackage:
             function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            _globals_module_name(vars(module)) or module.__name__,
+            _globals_module_name(vars(module), self._entry_module_name)
+            or module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
@@ -1418,7 +1427,8 @@ class CompilePackage:
     ) -> None:
         self._add_function(
             python_code,
-            _globals_module_name(global_scope) or global_scope["__name__"],
+            _globals_module_name(global_scope, self._entry_module_name)
+            or global_scope["__name__"],
             function_name=_FunctionId(function_name),
             install_to_global=True,
         )
@@ -1595,7 +1605,7 @@ class CompilePackage:
                             self._install_global(
                                 module,
                                 name,
-                                module.__dict__.get(name, value),
+                                runtime_global_scope.get(name, value),
                                 record_only_if_new=True,
                             )
                     # The installed builtins dict might be absent from the runtime
