@@ -12,7 +12,6 @@
 #include <ck_tile/ops/gemm.hpp>
 
 #include <array>
-#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <type_traits>
@@ -127,26 +126,20 @@ namespace at::hip::detail {
 		template <typename T>
 		constexpr index_t vector16_elems() { return 16 / sizeof(T); }
 
-		// One size set, tried in this order: the first class whose condition holds and whose config fits is launched.
+		// Configs for one GEMM type (forward, dX or dW), tried in this order: the first class whose condition holds and
+		// whose config fits is launched.
 		//   N256 / N128 / N64: output dims divisible by 256 / 128 / 64 (dW: both M and N), so a tile that wide fits exactly
 		//   Aligned:           every contiguous dim of A, B and C is a whole number of 16-byte vectors
 		//   Unaligned:         any shape; must pad M, N and K and use 1-element C vectors
 		// A specialization missing a name fails its static_assert.
-		template <typename S>
-		concept ConfigSizeSet = requires {
-			typename S::N256;
-			typename S::N128;
-			typename S::N64;
-			typename S::Aligned;
-			typename S::Unaligned;
-		};
-
-		// One GEMM type (forward, dX or dW). FewTokens is used when the average tokens per expert is below
-		// kFewTokensBelow; it is the slot for shorter tiles, which waste less of each expert's last partial tile.
 		template <typename G>
 		concept GemmTypeConfigs = requires {
-			{ G::kFewTokensBelow } -> std::convertible_to<int64_t>;
-		} && ConfigSizeSet<typename G::Main> && ConfigSizeSet<typename G::FewTokens>;
+			typename G::N256;
+			typename G::N128;
+			typename G::N64;
+			typename G::Aligned;
+			typename G::Unaligned;
+		};
 
 		template <typename T>
 		concept GroupGemmConfigs = GemmTypeConfigs<typename T::Forward> && GemmTypeConfigs<typename T::GradInput> &&
@@ -166,43 +159,31 @@ namespace at::hip::detail {
 
 			// Forward (2D x 3D, 3D x 3D): row-major A, column-major B
 			struct Forward {
-				static constexpr int64_t kFewTokensBelow = 0;
-				struct Main {
-					// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs
-					using N256 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false>;
-					using N128 = N256;
-					using N64 = N256;
-					using Aligned = N256;
-					using Unaligned = AnyShape;
-				};
-				using FewTokens = Main;
+				// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs
+				using N256 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false>;
+				using N128 = N256;
+				using N64 = N256;
+				using Aligned = N256;
+				using Unaligned = AnyShape;
 			};
 
 			// dX (2D x 3D, 3D x 3D): row-major A and B
 			struct GradInput {
-				static constexpr int64_t kFewTokensBelow = 0;
-				struct Main {
-					// eight waves split 256x256 into 128 accumulators per lane
-					using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>;
-					using N128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
-					using N64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
-					using Aligned = N64;
-					using Unaligned = AnyShape;
-				};
-				using FewTokens = Main;
+				// eight waves split 256x256 into 128 accumulators per lane
+				using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>;
+				using N128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
+				using N64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
+				using Aligned = N64;
+				using Unaligned = AnyShape;
 			};
 
 			// dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K
 			struct GradWeight {
-				static constexpr int64_t kFewTokensBelow = 0;
-				struct Main {
-					using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, true>;
-					using N128 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, true, true, true>;
-					using N64 = N128;
-					using Aligned = N128;
-					using Unaligned = AnyShape;
-				};
-				using FewTokens = Main;
+				using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, true>;
+				using N128 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, true, true, true>;
+				using N64 = N128;
+				using Aligned = N128;
+				using Unaligned = AnyShape;
 			};
 
 			// Layouts none of the three cover, e.g. column-major A with jagged M or jagged N (3D x 2D)
@@ -220,8 +201,7 @@ namespace at::hip::detail {
 		// Host-side view of one launch, for picking a config. -1 marks the jagged dim.
 		struct GemmProblem {
 			int64_t M, N, K;
-			int64_t avg_tokens;  // average tokens per expert: the jagged dim's total / groups, or M for 3D x 3D
-			bool aligned;        // every contiguous dim of A, B and C is a whole number of 16-byte vectors
+			bool aligned;       // every contiguous dim of A, B and C is a whole number of 16-byte vectors
 			bool classes_test_m; // dW: M is an output dim and A's contiguous dim, so the classes test it too
 		};
 
@@ -236,27 +216,19 @@ namespace at::hip::detail {
 
 		template <GemmTypeConfigs Type, typename Run>
 		void run_gemm_type(const GemmProblem& p, Run&& run) {
-			const auto run_size_set = [&](auto size_set) { // runs either the FewTokens or the Main config
-				using Set = decltype(size_set);
-				const auto divisible = [&](int64_t d) { return p.aligned && p.N % d == 0 && (!p.classes_test_m || p.M % d == 0); };
-				const auto try_run = [&](auto config) {
-					if (!config_fits<decltype(config)>(p)) {
-						return false;
-					}
-					run(config);
-					return true;
-				};
-				if (divisible(256) && try_run(typename Set::N256{})) return;
-				if (divisible(128) && try_run(typename Set::N128{})) return;
-				if (divisible(64) && try_run(typename Set::N64{})) return;
-				if (p.aligned && try_run(typename Set::Aligned{})) return;
-				TORCH_CHECK(try_run(typename Set::Unaligned{}), "ck_tile group gemm: the Unaligned config must accept every shape");
+			const auto divisible = [&](int64_t d) { return p.aligned && p.N % d == 0 && (!p.classes_test_m || p.M % d == 0); };
+			const auto try_run = [&](auto config) {
+				if (!config_fits<decltype(config)>(p)) {
+					return false;
+				}
+				run(config);
+				return true;
 			};
-			if (p.avg_tokens < Type::kFewTokensBelow) {
-				run_size_set(typename Type::FewTokens{});
-			} else {
-				run_size_set(typename Type::Main{});
-			}
+			if (divisible(256) && try_run(typename Type::N256{})) return;
+			if (divisible(128) && try_run(typename Type::N128{})) return;
+			if (divisible(64) && try_run(typename Type::N64{})) return;
+			if (p.aligned && try_run(typename Type::Aligned{})) return;
+			TORCH_CHECK(try_run(typename Type::Unaligned{}), "ck_tile group gemm: the Unaligned config must accept every shape");
 		}
 
 		using Strides = std::array<int64_t, 3>;
@@ -393,8 +365,7 @@ namespace at::hip::detail {
 				int32_t M,                           // -1 if jagged, see prepare_grouped_gemm_data
 				int32_t N,
 				int32_t K,
-				int32_t group_count,
-				int64_t avg_tokens) {                // average tokens per expert, see group_gemm_ck_tile
+				int32_t group_count) {
 			const hipStream_t stream = c10::hip::getCurrentHIPStream().stream();
 
 			auto to_strides = [](at::IntArrayRef values) {
@@ -435,7 +406,7 @@ namespace at::hip::detail {
 			// Contiguous dims: A's is K (row-major) or M, B's is N (row-major) or K, C's is N. A jagged dim (-1) is never contiguous.
 			const auto vectors_fit = [](int64_t extent, index_t elems) { return extent < 0 || extent % elems == 0; };
 			const GemmProblem problem{
-				M, N, K, avg_tokens,
+				M, N, K,
 				vectors_fit(a_row_major ? K : M, vector16_elems<InputType>()) &&
 						vectors_fit(b_row_major ? N : K, vector16_elems<InputType>()) &&
 						vectors_fit(N, vector16_elems<OutputType>()),
@@ -503,15 +474,11 @@ namespace at::hip::detail {
 		int64_t K = mat_a.size(-1);
 		int64_t N = mat_b.size(-1);
 		int64_t group_count = 0;
-		// Average tokens per expert, known without reading offs: the jagged dim's total over the groups, else M.
-		int64_t avg_tokens = M;
 		if (a_is_2d && b_is_2d) {
 			group_count = offs->size(0);
-			avg_tokens = group_count > 0 ? K / group_count : 0;
 			K = -1;
 		} else if (a_is_2d) {
 			group_count = mat_b.size(0);
-			avg_tokens = group_count > 0 ? M / group_count : 0;
 			M = -1;
 		} else if (b_is_2d) {
 			group_count = mat_a.size(0);
@@ -574,7 +541,7 @@ namespace at::hip::detail {
 					with_ck_type(out.scalar_type(), [&](auto output_tag) {
 						launch_ck_tile_group_gemm<Arch, InputType, decltype(output_tag)>(
 								mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
-								static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count), avg_tokens);
+								static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count));
 					});
 				} else {
 					TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no configs for ", mat_a.scalar_type(), " inputs on ",
