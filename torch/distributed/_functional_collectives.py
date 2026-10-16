@@ -1053,6 +1053,24 @@ torch.library.register_autograd(
 )
 
 
+def broadcast_backward(ctx, grad_output: torch.Tensor):
+    output = torch.ops._c10d_functional.reduce(
+        grad_output.contiguous(), ctx.src, "sum", ctx.group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def broadcast_setup_context(ctx, inputs, output):
+    _, ctx.src, ctx.group_name = inputs
+
+
+torch.library.register_autograd(
+    "_c10d_functional::broadcast",
+    broadcast_backward,
+    setup_context=broadcast_setup_context,
+)
+
+
 def reduce_backward(ctx, grad_output: torch.Tensor):
     reduce_op = _reduce_op_type(ctx.reduce_op)
     if reduce_op not in ("sum", "avg", ReduceOp.SUM, ReduceOp.AVG):
