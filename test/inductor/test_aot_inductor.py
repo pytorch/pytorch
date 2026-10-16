@@ -4748,7 +4748,10 @@ class AOTInductorTestsTemplate:
     @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
-    def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
+    @common_utils.parametrize("autotune_with_sample_inputs", [False, True])
+    def test_triton_kernel_tma_descriptor_2d(
+        self, dynamic, tma_version, autotune_with_sample_inputs
+    ):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
         if tma_version == "new" and not has_triton_tensor_descriptor_host_tma():
@@ -4807,11 +4810,14 @@ class AOTInductorTestsTemplate:
                 "b": {0: dim0_ab, 1: None},
             }
 
-        self.check_model(
-            Model(),
-            example_inputs=example_inputs,
-            dynamic_shapes=dynamic_shapes,
-        )
+        with config.patch(
+            "triton.autotune_with_sample_inputs", autotune_with_sample_inputs
+        ):
+            self.check_model(
+                Model(),
+                example_inputs=example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
 
     def test_triton_kernel_sympy_expr_arg(self):
         if self.device != GPU_TYPE:
