@@ -4217,6 +4217,91 @@ if HAS_GPU:
 class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
+    def _add_kernel_mutated_tensors(self, constant_args, launch_kwargs):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            get_mutated_tensors,
+            kernel_side_table,
+        )
+
+        t = torch.randn(4)
+        return get_mutated_tensors(
+            kernel_side_table.add_kernel(add_kernel),
+            kernel_side_table.add_constant_args(constant_args),
+            {"in_ptr0": t, "in_ptr1": t, "out_ptr": t, "n_elements": 4},
+            {},
+            launch_kwargs,
+        )
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU), "requires gpu or triton cpu"
+    )
+    def test_mutation_analysis_ignores_non_parameter_launch_kwargs(self):
+        # A launch kwarg that is not a kernel parameter is a backend option. The
+        # active backend need not know it (e.g. a capture on one backend for
+        # another target), and it must not change which tensors are mutated.
+        constant_args = {"BLOCK_SIZE": 128, "unknown_backend_option": True}
+        with self.assertNoLogs("torch._dynamo", level="WARNING"):
+            mutated = self._add_kernel_mutated_tensors(
+                constant_args, ("BLOCK_SIZE", "unknown_backend_option")
+            )
+        self.assertEqual(mutated, ["out_ptr"])
+
+        # Without launch_kwargs the analysis cannot tell an option from a kernel
+        # argument, so it keeps its conservative fallback.
+        with self.assertLogs("torch._dynamo", level="WARNING"):
+            mutated = self._add_kernel_mutated_tensors(constant_args, None)
+        self.assertEqual(mutated, ["in_ptr0", "in_ptr1", "out_ptr"])
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU), "requires gpu or triton cpu"
+    )
+    def test_mutation_analysis_without_extra_launch_kwargs(self):
+        for launch_kwargs in (None, (), ("BLOCK_SIZE",)):
+            with (
+                self.subTest(launch_kwargs=launch_kwargs),
+                self.assertNoLogs("torch._dynamo", level="WARNING"),
+            ):
+                mutated = self._add_kernel_mutated_tensors(
+                    {"BLOCK_SIZE": 128}, launch_kwargs
+                )
+                self.assertEqual(mutated, ["out_ptr"])
+
+    @unittest.skipUnless(
+        HAS_GPU or (HAS_CPU and TRITON_HAS_CPU), "requires gpu or triton cpu"
+    )
+    def test_mutation_analysis_reports_kernel_parameter_count_mismatch(self):
+        # A misspelled kernel parameter is not a parameter, so it is dropped as an
+        # option, and the parameter it was meant to bind is then missing.
+        with self.assertLogs("torch._dynamo", level="WARNING") as logs:
+            mutated = self._add_kernel_mutated_tensors(
+                {"BLOCK_SIZ": 128}, ("BLOCK_SIZ",)
+            )
+        self.assertEqual(mutated, ["in_ptr0", "in_ptr1", "out_ptr"])
+        (record,) = logs.records
+        self.assertIsNotNone(record.exc_info)
+        self.assertIn(
+            "Incorrect number of arguments passed to kernel", str(record.exc_info[1])
+        )
+
+    @requires_gpu
+    def test_misspelled_launch_kwarg_is_rejected_at_launch(self):
+        # The analysis ignores a misspelled extra launch kwarg, as it ignores any
+        # backend option, but launching or compiling the kernel still rejects it.
+        with self.assertNoLogs("torch._dynamo", level="WARNING"):
+            mutated = self._add_kernel_mutated_tensors(
+                {"BLOCK_SIZE": 128, "BLOCK_SZE": 128}, ("BLOCK_SIZE", "BLOCK_SZE")
+            )
+        self.assertEqual(mutated, ["out_ptr"])
+
+        x = torch.randn(4, device=GPU_TYPE)
+        with self.assertRaisesRegex(KeyError, "BLOCK_SZE"):
+            add_kernel[(1,)](x, x, torch.zeros_like(x), 4, BLOCK_SIZE=128, BLOCK_SZE=1)
+
+        f = _get_backend_options_fn(add_kernel, BLOCK_SIZE=128, BLOCK_SZE=1)
+        msg = "Triton launch kwargs must be kernel parameters or valid backend options"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(f, fullgraph=True)(x, x)
+
     # Test that a scalar args are not flagged as mutated when passed
     # to a tt.call op.
     @make_mutation_test

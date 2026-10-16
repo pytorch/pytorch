@@ -1898,12 +1898,17 @@ def get_mutated_tensors(
     constant_args_idx: int,
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    launch_kwargs: tuple[str, ...] | None = None,
 ) -> list[str]:
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    tensor_accesses = identify_accessed_tensors(
-        kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
-    )
+    # A launch kwarg that is not a kernel parameter is a backend option (see
+    # call_triton_kernel). generate_ttir only drops options of the backend active
+    # on this host, so an option for another target would fail its argument check
+    # and turn the analysis into "every input is mutated".
+    options = set(launch_kwargs).difference(kernel.arg_names) if launch_kwargs else set()
+    args = {k: v for k, v in {**kwargs, **constant_args}.items() if k not in options}
+    tensor_accesses = identify_accessed_tensors(kernel, args, tma_descriptor_metadata)
     # Filter to only tensor kwargs: with Triton 3.7+, ordered_arg_names
     # includes scalars, so writes may reference non-tensor args like SymInts.
     return [
@@ -1929,7 +1934,11 @@ def triton_kernel_wrapper_mutation_functionalize(
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
     tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+        kernel_idx,
+        constant_args_idx,
+        unwrapped_kwargs,
+        tma_descriptor_metadata,
+        launch_kwargs,
     )
     # A mutated arg that is a view has to be cloned through its base, and the base is
     # only a tracked value out here -- reading _base inside the functional impl yields
