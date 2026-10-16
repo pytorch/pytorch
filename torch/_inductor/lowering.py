@@ -6592,46 +6592,50 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
     def fn(idx):
         *prefix, h, w = idx
         # Invert the forward bounds to find pooled indices covering this pixel.
-        phstart = _adaptive_pooling_start_index(h, height, pooled_height)
-        pwstart = _adaptive_pooling_start_index(w, width, pooled_width)
-        phend = ops.index_expr(
+        pooled_h_start = _adaptive_pooling_start_index(h, height, pooled_height)
+        pooled_w_start = _adaptive_pooling_start_index(w, width, pooled_width)
+        pooled_h_end = ops.index_expr(
             _adaptive_pooling_end_index(h, height, pooled_height),
             torch.int64,
         )
-        pwend = ops.index_expr(
+        pooled_w_end = ops.index_expr(
             _adaptive_pooling_end_index(w, width, pooled_width),
             torch.int64,
         )
         gradient = None
 
-        for ph_ in range(h_window_size):
-            for pw_ in range(w_window_size):
-                ph_expr = phstart + ph_
-                pw_expr = pwstart + pw_
-                ph = ops.index_expr(ph_expr, torch.int64)
-                pw = ops.index_expr(pw_expr, torch.int64)
-                mask = ops.and_(ops.lt(ph, phend), ops.lt(pw, pwend))
-                grad_part = ops.masked(
+        for h_offset in range(h_window_size):
+            for w_offset in range(w_window_size):
+                pooled_h_expr = pooled_h_start + h_offset
+                pooled_w_expr = pooled_w_start + w_offset
+                pooled_h = ops.index_expr(pooled_h_expr, torch.int64)
+                pooled_w = ops.index_expr(pooled_w_expr, torch.int64)
+                mask = ops.and_(
+                    ops.lt(pooled_h, pooled_h_end), ops.lt(pooled_w, pooled_w_end)
+                )
+                grad_value = ops.masked(
                     mask,
-                    lambda: grad_loader([*prefix, ph_expr, pw_expr]),
+                    lambda: grad_loader([*prefix, pooled_h_expr, pooled_w_expr]),
                     0.0,
                 )
 
-                kh = ops.index_expr(
-                    _adaptive_pooling_end_index(ph_expr, pooled_height, height)
-                    - _adaptive_pooling_start_index(ph_expr, pooled_height, height),
+                region_h = ops.index_expr(
+                    _adaptive_pooling_end_index(pooled_h_expr, pooled_height, height)
+                    - _adaptive_pooling_start_index(
+                        pooled_h_expr, pooled_height, height
+                    ),
                     torch.int64,
                 )
-                kw = ops.index_expr(
-                    _adaptive_pooling_end_index(pw_expr, pooled_width, width)
-                    - _adaptive_pooling_start_index(pw_expr, pooled_width, width),
+                region_w = ops.index_expr(
+                    _adaptive_pooling_end_index(pooled_w_expr, pooled_width, width)
+                    - _adaptive_pooling_start_index(pooled_w_expr, pooled_width, width),
                     torch.int64,
                 )
-                part = ops.truediv(ops.truediv(grad_part, kh), kw)
+                contribution = ops.truediv(ops.truediv(grad_value, region_h), region_w)
                 if gradient is None:
-                    gradient = part
+                    gradient = contribution
                 else:
-                    gradient = ops.add(gradient, part)
+                    gradient = ops.add(gradient, contribution)
 
         if gradient is None:
             raise AssertionError("expected: gradient is not None")
