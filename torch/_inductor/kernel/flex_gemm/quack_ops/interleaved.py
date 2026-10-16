@@ -20,16 +20,20 @@ from torch._vendor.quack.epilogue.ops import _TileLoadState, TileLoad, TileStore
 INTERLEAVED_LANES = 2
 
 
+def _interleave_n_layout(layout):
+    """Map an N tile layout ``n -> col`` to the lane pair ``(lane, n) -> 2 col + lane``.
+
+    A dense ``2 * size`` layout is wrong when ``layout`` is a permutation (the
+    warp_n=2 epi tile of 2-CTA 64-row CTA tiles and its register-copy tiler).
+    """
+    return cute.coalesce(
+        cute.logical_product(cute.make_layout(INTERLEAVED_LANES), layout)
+    )
+
+
 def _interleaved_epi_tile(gemm, epi_tile):
     """Double an epilogue tile's N extent for the two interleaved lanes."""
-    if isinstance(epi_tile[1], cute.Layout):
-        # interleaved_supports_config excludes the warp_n=2 fixup layouts, so a
-        # dense layout of the doubled size is exact here.
-        return (
-            epi_tile[0],
-            cute.make_layout(cute.size(epi_tile[1]) * INTERLEAVED_LANES),
-        )
-    return (epi_tile[0], epi_tile[1] * INTERLEAVED_LANES)
+    return (epi_tile[0], _interleave_n_layout(epi_tile[1]))
 
 
 def _interleave_tv(layout_tv, tile_m):
@@ -64,7 +68,7 @@ def _interleaved_tiled_copy(tiled_copy_tv, tiler_mn, dtype):
         dtype,
         num_bits_per_copy=dtype.width * INTERLEAVED_LANES,
     )
-    tiler = (tiler_m, cute.make_layout(cute.size(tiler_n) * INTERLEAVED_LANES))
+    tiler = (tiler_m, _interleave_n_layout(tiler_n))
     return cute.make_tiled_copy(atom, layout_tv, tiler)
 
 
@@ -95,19 +99,8 @@ def _require_n_major(tensor, what):
 
 
 def interleaved_supports_config(config):
-    """Return whether a config has a validated interleaved tile geometry."""
-    # Validated: 128-row 1-CTA and 256-row 2-CTA tiles. tile_m=128 with even
-    # cluster_m selects 2-CTA MMA with 64-row CTA tiles, which these copies do not
-    # yet map correctly (wrong results, not only a strided epilogue N tile).
-    return (
-        config.device_capacity == 10
-        and not config.swap_ab
-        and config.cluster_n == 1
-        and (
-            (config.tile_m == 128 and config.cluster_m == 1)
-            or (config.tile_m == 256 and config.cluster_m == 2)
-        )
-    )
+    """SM100 only; under swap_ab the lane pairs would be M-adjacent, not N-adjacent."""
+    return config.device_capacity == 10 and not config.swap_ab
 
 
 class InterleavedMainStore(TileStore):
@@ -126,7 +119,7 @@ class InterleavedMainStore(TileStore):
         return interleaved_supports_config(config)
 
     def config_support_error(self, configs):
-        return "interleaved main outputs require an SM100 tile_m 128/256 config"
+        return "interleaved main outputs require an SM100 config without swap_ab"
 
     def to_params(self, gemm, args):
         _require_n_major(getattr(args, self.name), "interleaved main output")
@@ -168,7 +161,7 @@ class InterleavedTileLoad(TileLoad):
         return interleaved_supports_config(config)
 
     def config_support_error(self, configs):
-        return "interleaved captures require an SM100 tile_m 128/256 config"
+        return "interleaved captures require an SM100 config without swap_ab"
 
     def to_params(self, gemm, args):
         _require_n_major(getattr(args, self.name), "interleaved capture")
