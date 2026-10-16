@@ -1107,7 +1107,7 @@ class FlexGemmEpilogueEmitter:
             or dim not in (-1, len(gemm_shape))
         ):
             return None
-        return view_args[0], (cast(int, node.args[2]),) if select else (0, 1)
+        return view_args[0], (cast(int, node.args[2]) % 2,) if select else (0, 1)
 
     def broadcast_fragment_partial(
         self, reduced: Any, layout: GroupedTensorSSALayout, source: Any
