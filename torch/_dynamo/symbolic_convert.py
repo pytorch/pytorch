@@ -138,6 +138,7 @@ from .source import (
     DictGetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    is_from_global_source,
     LocalCellSource,
     LocalSource,
     SkipGuardSource,
@@ -6638,6 +6639,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_name = self.output.install_global_by_id(
                 UNNAMED_SCOPE_PREFIX, self.f_globals
             )
+            source = self.funcvar.source
+            if source is not None and is_from_global_source(source):
+                # How a loading process finds the live namespace again: the key
+                # embeds this process's id() of it.
+                self.output.unnamed_scope_sources.setdefault(
+                    globals_name, AttrSource(source, "__globals__")
+                )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Don't use lazy vt because we will do a setattr afterwards
