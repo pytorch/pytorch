@@ -2949,13 +2949,22 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
             cfn(x).backward()
 
-    def _shared_recompute_backend(self, shared, fw_mms=None, bw_mms=None):
+    def _shared_recompute_backend(
+        self, shared, fw_mms=None, bw_mms=None, operands=None
+    ):
         """aot_autograd backend asserting each graph makes ``shared`` shared
         recompute calls and, if given, runs fw_mms / bw_mms matmuls (counted
-        inside the shared subgraphs too)."""
+        inside the shared subgraphs too) and passes each call (in piece order)
+        the given number of ``operands``."""
+        from torch._higher_order_ops import invoke_subgraph
 
         def check(gm, args, mms):
             count_shared_recompute_calls(gm, args, shared)
+            if operands is not None:
+                calls = gm.graph.find_nodes(op="call_function", target=invoke_subgraph)
+                calls.sort(key=lambda n: n.args[1])
+                if [len(n.args) - 2 for n in calls] != operands:
+                    raise AssertionError(f"expected {operands} operands in {gm}")
             if mms is not None:
                 actual = sum(
                     n.target is torch.ops.aten.mm.default
@@ -3303,8 +3312,9 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
     @torch._functorch.config.patch(share_checkpoint_recompute=True)
     def test_share_checkpoint_recompute_sac_factory(self, device):
-        # A recomputed factory op has no inputs, so the shared subgraph can have
-        # zero operands.
+        # The backward reads the recomputed factory op itself (the gradient of
+        # h), so it is shared as a piece with no tensor operands (with dynamic
+        # shapes, only a SymInt), which Inductor must still lower.
         def gn(x, y):
             h = torch.matmul(x, y)
             return h * torch.arange(h.shape[-1], device=x.device, dtype=x.dtype)
@@ -3316,7 +3326,97 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         x = torch.randn(8, 8, device=device, requires_grad=True)
         y = torch.randn(8, 8, device=device, requires_grad=True)
-        self._validate(fn, self._shared_recompute_backend(1), x, y)
+        self._validate(fn, self._shared_recompute_backend(1, operands=[0]), x, y)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                torch._dynamo.reset()
+                xe, ye, xc, yc = (
+                    t.detach().clone().requires_grad_() for t in (x, y, x, y)
+                )
+                fn(xe, ye).sum().backward()
+                compiled = torch.compile(
+                    fn, backend="inductor", fullgraph=True, dynamic=dynamic
+                )
+                compiled(xc, yc).sum().backward()
+                self.assertEqual(xc.grad, xe.grad)
+                self.assertEqual(yc.grad, ye.grad)
+
+    @torch._functorch.config.patch(share_checkpoint_recompute=True)
+    def test_share_checkpoint_recompute_copies_constants(self, device):
+        # Each piece computes the constant table itself rather than taking it as
+        # an operand: the two pieces split by the saved mm each read only one
+        # value. When the backward also reads table directly (the gradient of h
+        # in h * table), table is shared as a piece of its own that the other
+        # piece reads instead, so the backward's table is the one the forward
+        # used.
+        def table(h):
+            n = h.shape[-1]
+            return (torch.arange(n, device=h.device, dtype=h.dtype) / n).exp()
+
+        def two_pieces(x, y, w):
+            h = torch.matmul(x, y)
+            t = table(h)
+            return (torch.matmul((h + t).sin(), w) + t).cos()
+
+        def read_by_backward(x, y):
+            h = torch.matmul(x, y)
+            return (h * table(h)).sin()
+
+        cases = ((two_pieces, 3, [1, 1]), (read_by_backward, 2, [0, 2]))
+        for gn, nargs, operands in cases:
+            with self.subTest(gn=gn.__name__):
+                torch._dynamo.reset()
+
+                def fn(*args, gn=gn):
+                    return torch.utils.checkpoint.checkpoint(
+                        gn, *args, use_reentrant=False, context_fn=save_mm_context_fn
+                    )
+
+                shared = self._shared_recompute_backend(
+                    len(operands), operands=operands
+                )
+                for backend in (shared, "inductor"):
+                    args = [
+                        torch.randn(8, 8, device=device, requires_grad=True)
+                        for _ in range(nargs)
+                    ]
+                    self._validate(fn, backend, *args)
+
+    @torch._functorch.config.patch(share_checkpoint_recompute=True)
+    def test_share_checkpoint_recompute_moves_readers(self, device):
+        # Forward: the piece recomputing p1 and p1 * i2 reads the saved i2,
+        # which the forward computes after the saved c that reads p1, so c moves
+        # below the shared call.
+        def forward_case(x, w, y, w2):
+            p1 = x.sin()
+            c = p1 @ w
+            i2 = y @ w2
+            return c + (p1 * i2).cos()
+
+        # Backward: the second piece (b1, b1 * a, b1.exp(), after the saved mm)
+        # reads the first piece's a. The backward uses b1.exp() for its gradient
+        # before it recomputes a, so that gradient moves below the second
+        # piece's call.
+        def backward_case(x, w):
+            a = x.sin()
+            b1 = (a @ w).cos()
+            return (b1 * a).sin() + b1.exp()
+
+        cases = ((forward_case, 4, 1), (backward_case, 2, 2))
+        for gn, nargs, shared in cases:
+            with self.subTest(gn=gn.__name__):
+                torch._dynamo.reset()
+
+                def fn(*args, gn=gn):
+                    return torch.utils.checkpoint.checkpoint(
+                        gn, *args, use_reentrant=False, context_fn=save_mm_context_fn
+                    )
+
+                args = [
+                    torch.randn(8, 8, device=device, requires_grad=True)
+                    for _ in range(nargs)
+                ]
+                self._validate(fn, self._shared_recompute_backend(shared), *args)
 
     @torch._functorch.config.patch(share_checkpoint_recompute=True)
     def test_share_checkpoint_recompute_sac_saved_between_pieces(self, device):

@@ -4,9 +4,19 @@ The partitioner recomputes a checkpointed region by copying the region's forward
 ops into the backward graph. The forward and backward are compiled separately, so
 the two copies can lower to different kernels and the recompute can drift
 numerically from the forward (gh-186572). With
-torch._functorch.config.share_checkpoint_recompute, each region's recomputed ops
-are outlined into one subgraph that both graphs invoke, compiled with Inductor
-deterministic=True so both lowerings match.
+torch._functorch.config.share_checkpoint_recompute, each convex piece of a
+region's recompute is outlined into a subgraph that both graphs invoke, compiled
+with Inductor deterministic=True so both lowerings match.
+
+The pass runs after partitioning because that is the first point where the
+recomputed ops are known: a selective-checkpointing policy is evaluated per aten
+op while AOT autograd traces the joint graph, and the partitioner then makes the
+final save/recompute choices (saving region boundaries, skipping ops the backward
+never reads, overriding PREFER_* preferences). Outlining regions before AOT
+tracing would give explicit boundaries, but would have to know those choices in
+advance, and would make each region a HOP in the traced program (its outputs may
+not alias its inputs, re-invoking it re-draws RNG, and backends without AOT
+autograd get no recompute).
 """
 
 import copy
@@ -67,20 +77,68 @@ def share_checkpoint_recompute(
             if (ac_graph_id := n.meta.get("ac_graph_id")) is not None:
                 regions[ac_graph_id].append(n)
 
+    # A constant depends on no tensor graph input (e.g. an arange, or math on
+    # one); SymInt sizes don't count. A piece copies the recomputed
+    # constants it reads instead of taking them as inputs, so they fuse into its
+    # kernels. A constant the backward reads directly must be the value the
+    # forward used, so it is shared as a piece of its own instead, which other
+    # pieces read.
+    recomputed = {n for nodes in regions.values() for n in nodes}
+    scalar_types = (int, float, bool, torch.SymInt, torch.SymFloat, torch.SymBool)
+    constants: set[torch.fx.Node] = set()
+    for n in fw_module.graph.nodes:
+        if (
+            n.op == "call_function"
+            and not _is_rng(n)
+            and all(
+                a in constants
+                for a in n.all_input_nodes
+                if not isinstance(a.meta.get("val"), scalar_types)
+            )
+        ):
+            constants.add(n)
+    recomputed_names = {n.name for n in recomputed}
+    direct = {
+        c
+        for c in recomputed & constants
+        if any(u.name not in recomputed_names for u in bw_body[c.name].users)
+    }
+    # Reading a view of a constant reads the constant: the slice returns the
+    # constant and the view stays inline.
+    stack = list(direct)
+    while stack:
+        c = stack.pop()
+        if c.target is operator.getitem or _is_view_op(c.target):
+            for a in c.all_input_nodes:
+                if a in recomputed and a in constants and a not in direct:
+                    direct.add(a)
+                    stack.append(a)
+    copied = (recomputed & constants) - direct
+
     # A piece must be convex: if a path left the recompute (e.g. through a saved
     # matmul) and came back into the same piece, no single call could replace
     # it. Count how often the path to each node passes from a recomputed node to
     # one that isn't, and only join nodes with the same count into a piece.
-    recomputed = {n for nodes in regions.values() for n in nodes}
+    # Constants never share a piece with other nodes, so paths out of them don't
+    # count.
     stage: dict[torch.fx.Node, int] = {}
     for n in fw_module.graph.nodes:
         stage[n] = max(
             (
-                stage[a] + (a in recomputed and n not in recomputed)
+                stage[a]
+                + (a in recomputed and a not in constants and n not in recomputed)
                 for a in n.all_input_nodes
             ),
             default=0,
         )
+
+    # Constant pieces go first, so the pieces that read them find their outputs
+    # in bw_of.
+    order = {n: i for i, n in enumerate(fw_module.graph.nodes)}
+    pieces = _split_region(sorted(direct, key=order.__getitem__), stage, copied, order)
+    for nodes in regions.values():
+        rest = [n for n in nodes if n not in direct]
+        pieces += _split_region(rest, stage, copied, order)
 
     changed = False
     # The backward node holding each value a shared piece returns, so later
@@ -89,13 +147,10 @@ def share_checkpoint_recompute(
     # Name pieces by their order in this graph, not by ac_graph_id: that is a
     # process-global counter, so recompiling the same graph would get new names
     # and miss the FX graph cache.
-    pieces = [
-        piece for nodes in regions.values() for piece in _split_region(nodes, stage)
-    ]
     for i, piece in enumerate(pieces):
         identifier = f"checkpoint_recompute_{i}"
         outputs = _share_region(
-            fw_module, bw_module, piece, saved, copies, bw_of, identifier
+            fw_module, bw_module, piece, saved, copies, copied, bw_of, identifier
         )
         if outputs is not None:
             bw_of.update(outputs)
@@ -108,14 +163,18 @@ def share_checkpoint_recompute(
 
 
 def _split_region(
-    nodes: list[torch.fx.Node], stage: dict[torch.fx.Node, int]
+    nodes: list[torch.fx.Node],
+    stage: dict[torch.fx.Node, int],
+    copied: set[torch.fx.Node],
+    order: dict[torch.fx.Node, int],
 ) -> list[list[torch.fx.Node]]:
     """Split a region's recomputed nodes (in topological order) into convex
     pieces, e.g. two recomputed stretches separated by a saved matmul: nodes join
     a piece only through recomputed edges within one ``stage``. Each piece gets
     its own shared subgraph; a later piece may read an earlier one's outputs.
-    Views of values outside the region are free to replay, so they join every
-    piece that reads them instead of joining pieces together."""
+    Views of values outside the region and ``copied`` constants are free to
+    replay, so they join every piece that reads them instead of joining pieces
+    together. Pieces and their nodes are sorted by ``order``."""
     in_region = set(nodes)
     outside_views: set[torch.fx.Node] = set()
     for n in nodes:
@@ -124,8 +183,9 @@ def _split_region(
             a not in in_region or a in outside_views for a in n.all_input_nodes
         ):
             outside_views.add(n)
+    replayed = outside_views | copied
 
-    parent = {n: n for n in nodes if n not in outside_views}
+    parent = {n: n for n in nodes if n not in replayed}
 
     def _find(n: torch.fx.Node) -> torch.fx.Node:
         while parent[n] is not n:
@@ -143,14 +203,14 @@ def _split_region(
         groups[_find(n)].add(n)
     pieces = []
     for group in groups.values():
-        stack = [a for n in group for a in n.all_input_nodes if a in outside_views]
+        stack = [a for n in group for a in n.all_input_nodes if a in replayed]
         while stack:
             v = stack.pop()
             if v not in group:
                 group.add(v)
-                stack.extend(a for a in v.all_input_nodes if a in outside_views)
-        pieces.append([n for n in nodes if n in group])
-    return sorted(pieces, key=lambda piece: nodes.index(piece[0]))
+                stack.extend(a for a in v.all_input_nodes if a in replayed)
+        pieces.append(sorted(group, key=order.__getitem__))
+    return sorted(pieces, key=lambda piece: order[piece[0]])
 
 
 def _is_rng(n: torch.fx.Node) -> bool:
@@ -176,6 +236,7 @@ def _share_region(
     s_nodes: list[torch.fx.Node],
     saved: set[torch.fx.Node],
     copies: set[torch.fx.Node],
+    copied: set[torch.fx.Node],
     bw_of: dict[torch.fx.Node, torch.fx.Node],
     identifier: str,
 ) -> dict[torch.fx.Node, torch.fx.Node] | None:
@@ -239,6 +300,8 @@ def _share_region(
             if not _is_view_op(n.target):
                 return _skip(f"{n.name} aliases a value but isn't a view op")
             inline.add(n)
+    # Copied constants are computed inside the slice and never returned.
+    inline |= s_set & copied
     if len(inline) == len(s_nodes):
         # Only views are recomputed: no kernels, nothing to drift.
         return _skip("it recomputes only views, so there is nothing to share")
@@ -259,27 +322,6 @@ def _share_region(
         if m is None:
             return _skip(f"its input {inp.name} isn't available in the backward")
         bw_operands.append(m)
-
-    # The slice becomes one call in the forward, which is only valid if every
-    # slice input is defined before every consumer of a slice output; otherwise
-    # the contracted graph would be cyclic (e.g. a saved value depends on a
-    # recomputed one). Inline views stay in place, so only consumers of
-    # contracted nodes count.
-    node_index = {n: i for i, n in enumerate(fw_graph.nodes)}
-    consumers = [
-        n
-        for n in fw_graph.nodes
-        if n.name not in contracted_names
-        and any(inp.name in contracted_names for inp in n.all_input_nodes)
-    ]
-    if consumers:
-        first_consumer_idx = min(node_index[c] for c in consumers)
-        last_s_input_idx = max((node_index[i] for i in s_inputs), default=-1)
-        if last_s_input_idx >= first_consumer_idx:
-            return _skip(
-                "a saved value depends on a recomputed one (its recompute is split "
-                "by saved values)"
-            )
 
     # A multi-output op stays whole in the slice (invoke_subgraph outputs must
     # be flat, so its getitems carry the values), and the slice returns whichever
@@ -315,22 +357,32 @@ def _share_region(
         if not _is_tuple_val(n) and n.name in contracted_names and _used_outside(n)
     ]
 
+    # The forward call goes right after the last slice input, or after the last
+    # placeholder when the slice reads nothing (e.g. a recomputed factory).
+    node_index = {n: i for i, n in enumerate(fw_graph.nodes)}
+    if s_inputs:
+        insert_after = max(s_inputs, key=lambda n: node_index[n])
+    else:
+        insert_after = fw_graph.find_nodes(op="placeholder")[-1]
+    fw_replaced = {n for n in s_nodes if n not in inline} | set(fw_extra.values())
+    fw_moved, reason = _readers_to_move(fw_replaced, s_inputs, insert_after)
+    if reason is not None:
+        return _skip(reason)
+
     # Run the backward call where the partitioner placed the piece's recompute,
     # so pieces still recompute one at a time instead of all up front, but not
-    # before its operands; whatever reads its outputs must still follow it.
+    # before its operands.
     bw_index = {n: i for i, n in enumerate(bw_graph.nodes)}
     first_recompute = next(n for n in bw_graph.nodes if n.name in contracted_names)
     bw_insert_after = max(
         [first_recompute.prev, *bw_operands], key=lambda n: bw_index[n]
     )
     bw_replaced = contracted_names | bw_extra.keys()
-    for name in bw_replaced:
-        for u in bw_by_name[name].users:
-            if u.name not in bw_replaced and bw_index[u] <= bw_index[bw_insert_after]:
-                return _skip(
-                    "the backward computes one of its inputs after its recompute is "
-                    "needed"
-                )
+    bw_moved, reason = _readers_to_move(
+        {bw_by_name[name] for name in bw_replaced}, bw_operands, bw_insert_after
+    )
+    if reason is not None:
+        return _skip(reason)
 
     # Inductor rewrites a graph's subgraph modules in place while compiling it,
     # so each graph gets its own (identical) copy rather than one shared object.
@@ -359,12 +411,6 @@ def _share_region(
     ]
     slice_index = {name: i for i, name in enumerate(out_names)}
 
-    # The forward call goes right after the last slice input, or after the last
-    # placeholder when the slice reads nothing (e.g. a recomputed factory).
-    if s_inputs:
-        insert_after = max(s_inputs, key=lambda n: node_index[n])
-    else:
-        insert_after = fw_graph.find_nodes(op="placeholder")[-1]
     fw_outs = _splice_slice_call(
         fw_module,
         fw_slice_gm,
@@ -375,6 +421,7 @@ def _share_region(
         slice_index=slice_index,
         erase_names=contracted_names | fw_extra.keys(),
         insert_after=insert_after,
+        move_below=fw_moved,
     )
     bw_outs = _splice_slice_call(
         bw_module,
@@ -386,6 +433,7 @@ def _share_region(
         slice_index=slice_index,
         erase_names=bw_replaced,
         insert_after=bw_insert_after,
+        move_below=bw_moved,
     )
     outputs = {fw_outs[n.name]: bw_outs[n.name] for n in s_out_nodes}
     # A saved result now comes from the forward call, while the backward still
@@ -395,6 +443,44 @@ def _share_region(
         if m is not None and m.op == "placeholder":
             outputs[fw_outs[name]] = m
     return outputs
+
+
+def _readers_to_move(
+    replaced: set[torch.fx.Node],
+    operands: list[torch.fx.Node],
+    insert_after: torch.fx.Node,
+) -> tuple[list[torch.fx.Node], str | None]:
+    """A call inserted after ``insert_after`` will replace the nodes in
+    ``replaced``, so whatever reads them (directly or through each other) up to
+    that point has to move below the call. Returns those readers in graph order,
+    or the reason they can't move."""
+    tainted = set(replaced)
+    readers: list[torch.fx.Node] = []
+    crossed: list[torch.fx.Node] = []
+    started = False
+    for n in insert_after.graph.nodes:
+        if n in replaced:
+            started = True
+        elif started:
+            if any(a in tainted for a in n.all_input_nodes):
+                tainted.add(n)
+                readers.append(n)
+            else:
+                crossed.append(n)
+        if n is insert_after:
+            break
+    for inp in operands:
+        if inp in tainted:
+            # A path leaves the piece and comes back, e.g. through another
+            # region's recompute.
+            return [], f"its input {inp.name} depends on its own recompute"
+    # Ordering against other nodes is carried by data edges (stream syncs are
+    # wrapped in control_deps), except that a sync_dealloc must stay the last
+    # use of its tensor.
+    for n in crossed:
+        if n.target is torch.ops.streams.sync_dealloc.default:
+            return [], f"it would move work past {n.name}"
+    return readers, None
 
 
 def _splice_slice_call(
@@ -407,9 +493,11 @@ def _splice_slice_call(
     slice_index: dict[str, int],
     erase_names: set[str],
     insert_after: torch.fx.Node,
+    move_below: list[torch.fx.Node],
 ) -> dict[str, torch.fx.Node]:
     """Insert ``invoke_subgraph(slice_gm, identifier, *operands)`` after
-    ``insert_after``, swap each node in ``replace`` for the matching output, and
+    ``insert_after``, swap each node in ``replace`` for the matching output, move
+    the nodes in ``move_below`` (in order) right after the call's outputs, and
     erase the nodes named in ``erase_names``. Returns the output getitems by the
     name of the node they replaced."""
     from torch._higher_order_ops.invoke_subgraph import (
@@ -441,6 +529,9 @@ def _splice_slice_call(
         gi.meta["val"] = slice_out_vals[idx]
         tgt.replace_all_uses_with(gi)
         getitems[name] = anchor = gi
+    for n in move_below:
+        anchor.append(n)
+        anchor = n
     # Erase in reverse topological order so no node is erased before its users.
     for n in reversed([n for n in g.nodes if n.name in erase_names]):
         g.erase_node(n)
