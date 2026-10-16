@@ -75,6 +75,10 @@ class TestColumnConfig(TestCase):
             self.select(order="linear")
         with self.assertRaisesRegex(ValueError, "requires unordered"):
             ct.reduce_col_tile(None, "sum", None, torch.float32, order="inner_tree")
+        with self.assertRaisesRegex(ValueError, "require inner_tree"):
+            ct.reduce_ordered_col(
+                None, "sum", None, [torch.float32], 1, order="unordered"
+            )
 
 
 class TestColumnCombine(TestCase):
