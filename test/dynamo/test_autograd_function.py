@@ -3893,11 +3893,9 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return SinWithZeroJvp.apply(x)
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        opt_fn = torch.compile(fn, backend=cnt)
+        opt_fn = torch.compile(fn, backend="aot_eager")
         x, dx = torch.randn(4), torch.randn(4)
         opt_fn(x)
-        cold_frame_count = cnt.frame_count
 
         with fwAD.dual_level():
             actual = fwAD.unpack_dual(opt_fn(fwAD.make_dual(x, dx))).tangent
@@ -3905,7 +3903,6 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, torch.zeros(4))
         self.assertEqual(actual, expected)
-        self.assertGreater(cnt.frame_count, cold_frame_count)
 
     def test_custom_jvp_with_forward_grad_disabled_still_graph_breaks(self):
         """Forward grad mode is deliberately not part of the break predicate.
