@@ -270,6 +270,13 @@ class TestKernelRowTile(TestCase):
         self.assertFalse(
             rt.tma_ok(32, 2, 1 << 20)
         )  # bf16 does not map one element per 4-byte bank
+        with mock.patch.object(rt._hw, "caps") as caps:
+            caps.return_value.cc = (9, 0)
+            self.assertTrue(rt.one_thread_row_ok(92, 4, 1 << 16, "cuda"))
+            self.assertFalse(rt.one_thread_row_ok(96, 4, 1 << 16, "cuda"))
+            self.assertTrue(rt.one_thread_row_ok(128, 4, 1 << 16, "cuda"))
+            caps.return_value.cc = (10, 0)
+            self.assertTrue(rt.one_thread_row_ok(96, 4, 1 << 16, "cuda"))
 
     def test_narrow_row_scalar_vec(self):
         # Exercise scalar and short-vector narrow loads.
@@ -476,6 +483,20 @@ class TestKernelRowTile(TestCase):
             trait, "nw2", x, [torch.float32], threads_per_row=64, threads_per_block=64
         )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
+
+    def test_ragged_vector_edges_and_interior(self):
+        """Combine scalar row edges with aligned vector loads across the interior."""
+        rows, columns = 33, 4097
+        x = torch.randn(rows, columns, device="cuda")
+        (got,) = rt.reduce_row_tile(
+            T.SumOps(acc=cutlass.Float32),
+            "ragged_vector",
+            x,
+            [torch.float32],
+            order="linear",
+            ragged_vector=True,
+        )
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-5)
 
 
 instantiate_parametrized_tests(TestKernelRowTile)

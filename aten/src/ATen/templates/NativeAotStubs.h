@@ -18,6 +18,7 @@
 // TensorBase.h, not Tensor.h: a declaration is all this header needs, and Tensor.h
 // drags in the generated TensorBody.h, rebuilding every includer on any
 // native_functions.yaml change.
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/DispatchStub.h>
 
