@@ -96,6 +96,10 @@ FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
     "FlexGEMM grouped main outputs compose only with the unchanged physical "
     "GEMM output as an auxiliary"
 )
+FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
+    "FlexGEMM interleaved main outputs compose only with GEMM-shaped auxiliaries "
+    "computed before the lanes are packed"
+)
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: contracted output shape must equal the "
     "physical GEMM output shape with N divided by the contraction group"
@@ -231,6 +235,22 @@ class FlexGemmOutputContraction:
     def concat_layout(self) -> tuple[str, ...]:
         """Return QuACK inputs whose contiguous chunks must be interleaved."""
         return ("B",) if self.chunked else ()
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmOutputExpansion:
+    """Main output stores two epilogue lanes interleaved along N.
+
+    ``out[..., 2 * n + j]`` is lane ``j`` at accumulator column ``n``; the body
+    returns ``torch.stack([a, b], -1).view(..., 2 * N)``.
+    """
+
+    @property
+    def concat_layout(self) -> tuple[str, ...]:
+        return ()
+
+
+FlexGemmOutputTransform = FlexGemmOutputContraction | FlexGemmOutputExpansion
 
 
 FlexGemmLocalReduceGeometry = GemmReductionGeometry
