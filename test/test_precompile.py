@@ -4971,7 +4971,6 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("stances ok", out.stdout)
 
     @skipIfCrossRef
-    @skipIfCrossRef
     @parametrize("installed", [False, True])
     def test_graphless_frames_that_lose_guards_are_served_eagerly(self, installed):
         # The disabled scale() leaves its callees compiled, so the registry
@@ -5187,6 +5186,7 @@ class TestPrecompileDynamoCapture(TestCase):
             self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
             self.assertEqual(counters["frames"]["total"] > 0, compiles)
 
+    @skipIfCrossRef
     @parametrize("caching_precompile", [False, True])
     def test_an_installed_artifact_can_opt_into_serve_time_compiles(
         self, caching_precompile
