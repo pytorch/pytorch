@@ -8732,6 +8732,40 @@ instantiate_device_type_tests(
 @skipIfNoCuteDSL
 @unittest.skipIf(not SM100OrLater, "SM100+ required")
 class TestFlexGemmFastMathDevice(FlexGemmTestCase):
+    @parametrize("dtype", (torch.float32, torch.float16))
+    @parametrize("fast_math", (False, True))
+    def test_mm_constant_division_keeps_reciprocal_in_range(
+        self, device, dtype, fast_math
+    ):
+        # 1 / divisor overflows dtype, so a reciprocal multiply would turn 0 into NaN.
+        divisor = 2.0**-20 if dtype == torch.float16 else 2.0**-128
+
+        def epilogue_fn(acc):
+            value = acc.float()
+            if dtype == torch.float16:
+                # Ordinary casts compute in fp32; inline asm keeps an fp16 value.
+                value = inline_asm_elementwise(
+                    value,
+                    asm_str="cvt.rn.f16.f32 $0, $1;",
+                    constraints="=h,f",
+                    dtype=torch.float16,
+                )
+            return value / divisor
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "fast_math": fast_math},
+            )
+
+        a = torch.zeros(128, 64, device=device, dtype=torch.bfloat16)
+        b = torch.ones(64, 128, device=device, dtype=torch.bfloat16)
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+        self.assertIn("flex_gemm_epilogue(", code)
+        self.assertEqual(actual, torch.zeros_like(actual), atol=0, rtol=0)
+
     def test_mm_fast_math_kernel_option_controls_cutedsl_math(self, device):
         def epilogue_fn(acc):
             magnitude = acc.abs() + 1.0
