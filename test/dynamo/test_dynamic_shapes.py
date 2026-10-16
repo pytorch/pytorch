@@ -96,8 +96,8 @@ DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes = slo
     DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes  # noqa: F821
 )
 
-DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_dynamic_shapes = periodic(  # noqa: F821
-    DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_dynamic_shapes  # noqa: F821
+DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_guard_simplification_dynamic_shapes = periodic(  # noqa: F821
+    DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_guard_simplification_dynamic_shapes  # noqa: F821
 )
 
 if __name__ == "__main__":
