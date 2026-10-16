@@ -28,7 +28,7 @@ class VerifyStateDictMixin:
             orig_tensor = orig_tensor.cpu()
             dist_tensor = dist_tensor.cpu()
         self.assertTrue(isinstance(dist_tensor, torch.Tensor))
-        self.assertTrue(torch.allclose(orig_tensor, dist_tensor))
+        self.assertEqual(orig_tensor, dist_tensor)
 
     def _verify_msd(
         self,
