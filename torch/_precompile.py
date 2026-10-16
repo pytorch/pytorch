@@ -2797,10 +2797,15 @@ def _make_inlined_forward(
             "programming model], invariant 7)."
         )
     if allow_serve_time_compiles:
+        default = "\n_ALLOW_SERVE_TIME_COMPILES = False\n"
+        if default not in python_code:
+            raise PrecompileError(
+                "allow_serve_time_compiles=True: the artifact's "
+                "_ALLOW_SERVE_TIME_COMPILES line is not in the form capture() writes, "
+                "so the flag cannot be applied. Recapture it under this torch."
+            )
         python_code = python_code.replace(
-            "\n_ALLOW_SERVE_TIME_COMPILES = False\n",
-            "\n_ALLOW_SERVE_TIME_COMPILES = True\n",
-            1,
+            default, "\n_ALLOW_SERVE_TIME_COMPILES = True\n", 1
         )
     module_ns: dict[str, object] = {"__name__": "_precompiled_artifact"}
     exec(compile(python_code, "<precompile>", "exec"), module_ns)
@@ -3218,6 +3223,12 @@ def _runnable_from_pair(
             "allow_serve_time_compiles=True: this installed artifact predates the "
             "flag and would still refuse every uncovered call. Recapture it under "
             "this torch."
+        )
+    if meta.get("_ALLOW_SERVE_TIME_COMPILES", False) is not False:
+        raise PrecompileError(
+            "this artifact sets _ALLOW_SERVE_TIME_COMPILES to something other than "
+            "False; capture() always writes False, and serve-time compiles are "
+            "enabled only by load(..., allow_serve_time_compiles=True)."
         )
 
     from torch.compiler._no_compile import is_compilation_forbidden
