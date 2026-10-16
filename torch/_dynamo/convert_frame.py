@@ -420,23 +420,6 @@ def nonrecursive_disable_skip(
     return None
 
 
-def skips_tensor_free_frame(
-    package: CompilePackage | None, frame: DynamoFrameType
-) -> bool:
-    """Whether a ConvertFrameAssert recording into package skips frame for
-    holding no tensor. An explicit package's resume functions are compiled
-    anyway: their guards must be recorded even when no tensor survives the graph
-    break, or the artifact cannot tell which calls it covers.
-    """
-    if (
-        package is not None
-        and package.explicit
-        and package.is_resume_code(frame.f_code)
-    ):
-        return False
-    return not has_tensor_in_frame(frame)
-
-
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
     """Check if the frame has torch.* related bits"""
@@ -752,7 +735,7 @@ class ConvertFrameAssert:
                 ],
             )
 
-        if skips_tensor_free_frame(self._package, frame):
+        if not has_tensor_in_frame(frame):
             return ConvertFrameReturn(
                 skip_reason="no tensor-related objects found in frame"
             )
@@ -2424,10 +2407,6 @@ class ConvertFrame:
         recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
-        # _FailOnRecompileCallback finds this through the _torchdynamo_orig_backend
-        # chain (CatchErrorsWrapper holds a functools.wraps copy); without it an
-        # installed artifact falls back to eager on a tensor-free resume frame.
-        self._package = package
         self._inner_convert = convert_frame_assert(
             compiler_fn,
             one_graph=False,

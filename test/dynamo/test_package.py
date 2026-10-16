@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import collections
 import contextlib
 import dataclasses
 import functools
@@ -31,16 +30,12 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
-    load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.precompile_package import default_guard_filter_fn
-from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
+from torch._dynamo.symbolic_convert import _import_module
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.aot_autograd_result import GenericAOTAutogradResult
-from torch._functorch._aot_autograd.runtime_wrappers import AOTDispatchAutograd
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -91,55 +86,6 @@ def compute_loss_helper(x):
 
 def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
-
-
-PKG_SCALE = 3
-
-_TENSOR_FREE_RESUME_STATE = {"value": 1}
-# Called through an alias so the continuation below names no torch module and
-# has_tensor_in_frame treats it as tensor-free.
-_tensor_free_resume_ones = torch.ones
-
-
-@torch.compiler.disable
-def _tensor_free_resume_value():
-    return _TENSOR_FREE_RESUME_STATE["value"]
-
-
-def _tensor_free_continuation(y):
-    value = _tensor_free_resume_value()
-    # Only the int crosses the graph break.
-    return _tensor_free_resume_ones(3) * value
-
-
-def _tensor_free_resume_fn(x):
-    y = x.sin()
-    return y.cos(), _tensor_free_continuation(y)
-
-
-def _empty_graph_continuation(y):
-    step = _tensor_free_resume_value()
-    return step + 1
-
-
-def _empty_graph_resume_fn(x):
-    y = x.sin()
-    return y.cos(), _empty_graph_continuation(y)
-
-
-@torch.compiler.disable
-def _tensor_or_int(y):
-    return y if _TENSOR_FREE_RESUME_STATE["value"] else 3
-
-
-def _resume_maybe_tensor_free_fn(x):
-    y = _tensor_or_int(x.sin())
-    return y + 1
-
-
-def _skip_closure_match(entries):
-    # The torch.compiler.disable wrapper's CLOSURE_MATCH cannot be serialized.
-    return [e.guard_type != "CLOSURE_MATCH" for e in entries]
 
 
 class UnpicklableConfig:
@@ -294,62 +240,10 @@ class _GraphBreakingDataclass:
         torch._dynamo.graph_break()
 
 
-def _make_generated_method():
-    def method(self):
-        return 1
-
-    method.__qualname__ = "_GeneratedMethodOwner.method"
-    return method
-
-
-def _make_generated_property():
-    def prop(self):
-        return 1
-
-    prop.__qualname__ = "_GeneratedMethodOwner.prop"
-    return property(prop)
-
-
-class _GeneratedMethodOwner:
-    method = _make_generated_method()
-    prop = _make_generated_property()
-
-
-def _make_stale_method():
-    def method(self):
-        return 1
-
-    return method
-
-
-class _StaleMethodOwner:
-    method = _make_stale_method()
-
-
-def _unwrapped_decorator(f):
-    def wrapper(*args):
-        return f(*args)
-
-    return wrapper
-
-
-@_unwrapped_decorator
-def _decorated_without_wraps(x):
-    return x
-
-
-# The co_qualnames, _make_*.<locals>.*, now name nothing in this module; only
-# the rewritten __qualname__s on _GeneratedMethodOwner do.
-del _make_generated_method, _make_generated_property, _make_stale_method
-
-
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
-
-# namedtuple builds __new__ with exec into a namespace no module owns.
-PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -422,7 +316,7 @@ import bbmod
 
 code = bbmod.f().g.__code__
 with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
-    name, path = package._get_code_source(code, bbmod)
+    name, path = package._get_code_source(code)
 print(eval(f"bbmod.{name}.{path}") is code)
 """
         with tempfile.TemporaryDirectory() as d:
@@ -479,7 +373,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertIsNone(inspect.getmodule(fn.__code__))
         package = CompilePackage(None)
         with self.assertRaisesRegex(
-            PackageError, r"'_closureless' does not resolve back to it.*fails with"
+            PackageError, r"_closureless.*fails with PackageError"
         ) as cm:
             with package.code_context(fn.__code__, fn.__globals__):
                 pass
@@ -562,43 +456,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
                 with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
                     compiled_fn(x)
-
-    def test_code_source_searches_the_module_when_the_qualname_is_stale(self):
-        # Python >= 3.11 walks co_qualname from the module and used to refuse
-        # the code at the first missing part, while < 3.11 searches the module.
-        for name, code in [
-            ("method", _GeneratedMethodOwner.method.__code__),
-            ("prop", _GeneratedMethodOwner.prop.fget.__code__),
-        ]:
-            package = CompilePackage(None)
-            with package.code_context(code):
-                pass
-            entry = package._codes[code]
-            self.assertEqual(entry.function_names, [f"_GeneratedMethodOwner.{name}"])
-            self.assertIs(_lookup_code(entry), code)
-
-    def test_code_source_refuses_a_stale_qualname_the_search_cannot_fix(self):
-        # The search finds _StaleMethodOwner.method, but its __qualname__ is as
-        # stale as co_qualname, so recording it would only fail at load.
-        code = _StaleMethodOwner.method.__code__
-        package = CompilePackage(None)
-        with self.assertRaisesRegex(
-            PackageError, r"__qualname__ '_make_stale_method\.<locals>\.method'"
-        ):
-            with package.code_context(code):
-                pass
-
-    def test_code_source_refuses_a_decorator_wrapper_without_wraps(self):
-        # On Python >= 3.11 the co_qualname walk reaches the wrapper and finds
-        # the code in its closure, recording the wrapper's stale __qualname__.
-        code = _decorated_without_wraps.__closure__[0].cell_contents.__code__
-        package = CompilePackage(None)
-        with self.assertRaisesRegex(
-            PackageError,
-            r"__qualname__ '_unwrapped_decorator\.<locals>\.wrapper'",
-        ):
-            with package.code_context(code):
-                pass
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
@@ -832,15 +689,12 @@ print(eval(f"bbmod.{name}.{path}") is code)
             fn(x, w).backward()
         return x.grad, w.grad
 
-    def _save_and_load_hooked_forward(
-        self, guard_filter_fn=None, compile_under_hooks=True
-    ):
+    def _save_and_load_hooked_forward(self, guard_filter_fn=None):
         ctx = DiskDynamoStore()
         package = CompilePackage(hooked_forward)
         compiled_fn = torch._dynamo.optimize(
             "inductor", package=package, guard_filter_fn=guard_filter_fn
         )(hooked_forward)
-        self._hooked_grads(compiled_fn, under_hooks=compile_under_hooks)
         expected = self._hooked_grads(compiled_fn, under_hooks=True)
         ctx.save_package(package, self.path())
 
@@ -854,23 +708,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
         return compiled_fn, expected
 
     def test_loaded_graphs_do_not_rerun_inlined_saved_tensors_hooks(self):
-        # The runtime wrappers read the ambient hooks and autocast state, so
-        # loading must leave them to the first call.
-        built = []
-        apply = GenericAOTAutogradResult._apply_runtime_wrappers
-
-        def recording_apply(result, *args):
-            built.append(result)
-            return apply(result, *args)
-
-        with patch.object(
-            GenericAOTAutogradResult, "_apply_runtime_wrappers", recording_apply
-        ):
-            compiled_fn, expected = self._save_and_load_hooked_forward()
-            self.assertEqual(built, [])
-            with torch.compiler.set_stance("fail_on_recompile"):
-                grads = self._hooked_grads(compiled_fn, under_hooks=True)
-        self.assertEqual(len(built), 2)
+        compiled_fn, expected = self._save_and_load_hooked_forward()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
 
     @staticmethod
@@ -887,50 +727,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
             self._hooked_grads(compiled_fn, under_hooks=False)
             grads = self._hooked_grads(compiled_fn, under_hooks=True)
         self.assertEqual(grads, expected)
-
-    def test_a_graph_compiled_without_hooks_keeps_them_on_a_first_call_under_them(
-        self,
-    ):
-        # Nothing was inlined, so the eager hooks must run, as they did in the
-        # capturing process, even though the wrappers are built under them.
-        compiled_fn, expected = self._save_and_load_hooked_forward(
-            self._drop_hooks_guard, compile_under_hooks=False
-        )
-        self.assertNotEqual(self._hooked_grads(hooked_forward, False), expected)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            grads = self._hooked_grads(compiled_fn, under_hooks=True)
-        self.assertEqual(grads, expected)
-
-    def test_a_loaded_graph_disables_the_autocast_it_was_compiled_under(self):
-        # disable_amp is read from the ambient autocast state when the runtime
-        # wrappers are built, and the graph is loaded outside autocast.
-        disable_amp = []
-        post_compile = AOTDispatchAutograd.post_compile
-
-        def recording_post_compile(spec):
-            disable_amp.append(spec.disable_amp)
-            return post_compile(spec)
-
-        def run(fn):
-            x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
-            w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
-            with torch.autocast("cpu", dtype=torch.bfloat16):
-                fn(x, w).backward()
-
-        ctx = DiskDynamoStore()
-        package = CompilePackage(hooked_forward)
-        run(torch._dynamo.optimize("inductor", package=package)(hooked_forward))
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        with patch.object(AOTDispatchAutograd, "post_compile", recording_post_compile):
-            package, backends = ctx.load_package(hooked_forward, self.path())
-            compiled_fn = torch._dynamo.optimize(package=package)(hooked_forward)
-            package.install(backends)
-            self.assertEqual(disable_amp, [])
-            with torch.compiler.set_stance("fail_on_recompile"):
-                run(compiled_fn)
-        self.assertEqual(disable_amp, [True, True])
 
     def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
         # install() roots the guards at sys.modules[...].__dict__, and a package
@@ -1048,93 +844,6 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(installed - set(scope), set())
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
-
-    def _save_record_package(self, ctx):
-        # Inlining PkgRecord.__new__ roots guards at the ___unnamed_scope_<id>_c<n>
-        # key Dynamo mints for its globals. The key embeds an id() from the
-        # compiling process, so a loading process has no binding for it and every
-        # call misses on a KeyError unless install() seeds it.
-        def fn(x):
-            record = PkgRecord(x.sin(), 2)
-            return record.value * record.weight
-
-        package = CompilePackage(fn)
-        torch._dynamo.optimize(
-            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
-        )(fn)(torch.randn(4))
-        names = {
-            name
-            for entry in package.cache_entry().codes
-            for guarded in entry.guarded_codes
-            for name in load_guards_state(
-                guarded.guards_state
-            ).output_graph.global_scope
-            if name.startswith(UNNAMED_SCOPE_PREFIX)
-        }
-        self.assertTrue(names)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
-        return fn, names
-
-    def test_install_seeds_unnamed_scope_globals(self):
-        ctx = DiskDynamoStore()
-        fn, names = self._save_record_package(ctx)
-        torch._dynamo.reset()
-        scope = fn.__globals__
-        # What a fresh process sees.
-        for name in names:
-            scope.pop(name, None)
-
-        x = torch.randn(4)
-        package, backends = ctx.load_package(fn, self.path())
-        compiled_fn = torch._dynamo.optimize(package=package)(fn)
-        package.install(backends)
-        self.assertLessEqual(names, scope.keys())
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled_fn(x), fn(x))
-        package.uninstall()
-        self.assertFalse(names & scope.keys())
-
-        # A binding someone else wrote is neither replaced nor removed.
-        foreign = {name: {} for name in names}
-        scope.update(foreign)
-        package.install(backends)
-        package.uninstall()
-        for name in names:
-            self.assertIs(scope.pop(name), foreign[name])
-
-    def test_install_keeps_unnamed_scope_globals_of_a_live_compile(self):
-        # The live compile bound the key behind a CleanupHook keyed on its
-        # generated code. install() keeps that binding, and the hook firing
-        # afterwards must not delete it from under the installed guards.
-        ctx = DiskDynamoStore()
-        before = set(CleanupManager.instance.refs)
-        fn, names = self._save_record_package(ctx)
-        # Pin the live compile's code objects so its hooks fire after install().
-        pinned = [
-            ref()
-            for idx, ref in list(CleanupManager.instance.refs.items())
-            if idx not in before
-        ]
-        pinned_ids = {id(p) for p in pinned if p is not None}
-        self.assertTrue(pinned_ids)
-
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(fn, self.path())
-        compiled_fn = torch._dynamo.optimize(package=package)(fn)
-        package.install(backends)
-        del pinned
-        gc.collect()
-
-        self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
-        self.assertLessEqual(names, fn.__globals__.keys())
-        x = torch.randn(4)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled_fn(x), fn(x))
-        package.uninstall()
-        for name in names:
-            fn.__globals__.pop(name, None)
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
@@ -1487,315 +1196,6 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
-
-    def _tensor_free_resume_entry(self, package, name="_tensor_free_continuation"):
-        (entry,) = (
-            entry
-            for code, entry in package._codes.items()
-            if code.co_name.startswith(f"torch_dynamo_resume_in_{name}_at_")
-        )
-        return entry
-
-    def _capture_tensor_free_resume(
-        self, values, fn=_tensor_free_resume_fn, name="_tensor_free_continuation"
-    ):
-        ctx = DiskDynamoStore()
-        x = torch.randn(4)
-        package = CompilePackage(fn)
-        compiled = torch._dynamo.optimize(
-            backend="eager",
-            package=package,
-            guard_filter_fn=_skip_closure_match,
-            dynamic=False,
-        )(fn)
-        for value in values:
-            _TENSOR_FREE_RESUME_STATE["value"] = value
-            self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(
-            len(self._tensor_free_resume_entry(package, name).guarded_codes),
-            len(values),
-        )
-        for backend_id, bknd in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, bknd)
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(fn, self.path())
-        compiled = torch._dynamo.optimize("eager", package=package, dynamic=False)(fn)
-        package.install(backends)
-        return package, compiled, x
-
-    # Nested graph breaks would resume inside a tensor-bearing parent frame.
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
-    @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_tensor_free_resume_guard_miss_fails_on_recompile(self):
-        # The continuation after the break in _tensor_free_continuation holds
-        # only an int, yet its graph depends on it: the package must record
-        # its guards, and a miss on it must raise under fail_on_recompile
-        # instead of silently running eagerly.
-        _, compiled, x = self._capture_tensor_free_resume((1, 2))
-        fn = _tensor_free_resume_fn
-        with torch.compiler.set_stance("fail_on_recompile"):
-            for value in (1, 2):
-                _TENSOR_FREE_RESUME_STATE["value"] = value
-                self.assertEqual(compiled(x), fn(x))
-            _TENSOR_FREE_RESUME_STATE["value"] = 3
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "function name: 'torch_dynamo_resume_in__tensor_free_continuation_at_",
-            ):
-                compiled(x)
-
-    # Nested graph breaks would resume inside a tensor-bearing parent frame.
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
-    @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_tensor_free_resume_recompile_after_load_keeps_guards(self):
-        # A loaded package still knows its resume functions, so a miss on a
-        # tensor-free continuation compiles a new guarded variant into it.
-        package, compiled, x = self._capture_tensor_free_resume((1,))
-        fn = _tensor_free_resume_fn
-        _TENSOR_FREE_RESUME_STATE["value"] = 2
-        self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(len(self._tensor_free_resume_entry(package).guarded_codes), 2)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            for value in (1, 2):
-                _TENSOR_FREE_RESUME_STATE["value"] = value
-                self.assertEqual(compiled(x), fn(x))
-
-    # Precompile capture keeps empty graphs as compiled frames.
-    @torch._dynamo.config.patch(nested_graph_breaks=False, allow_empty_graphs=True)
-    @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_tensor_free_resume_with_an_empty_graph_is_refused_on_a_new_value(self):
-        # The continuation only computes step + 1, yet it is still guarded:
-        # a call no captured variant covers is refused, even without tensor work.
-        fn = _empty_graph_resume_fn
-        name = "_empty_graph_continuation"
-        _, compiled, x = self._capture_tensor_free_resume((1,), fn, name)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled(x), fn(x))
-            _TENSOR_FREE_RESUME_STATE["value"] = 2
-            with self.assertRaisesRegex(
-                RuntimeError, f"function name: 'torch_dynamo_resume_in_{name}_at_"
-            ):
-                compiled(x)
-
-    # Nested graph breaks would resume inside a tensor-bearing parent frame.
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
-    @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_tensor_free_resume_is_skipped_without_an_explicit_package(self):
-        # Without a package, or with only the one caching_precompile creates,
-        # the tensor-free continuation stays skipped: it gets no cache entry
-        # and a new value under fail_on_recompile is no recompile.
-        from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list, reset_code
-        from torch._dynamo.resume_execution import ContinueExecutionCache
-
-        fn = _tensor_free_resume_fn
-        x = torch.randn(4)
-        for caching_precompile in (False, True):
-            with (
-                self.subTest(caching_precompile=caching_precompile),
-                torch._dynamo.config.patch(caching_precompile=caching_precompile),
-            ):
-                torch._dynamo.reset()
-                DynamoCache.clear()
-                _TENSOR_FREE_RESUME_STATE["value"] = 1
-                compiled = torch._dynamo.optimize("eager", dynamic=False)(fn)
-                self.assertEqual(compiled(x), fn(x))
-                (resume,) = ContinueExecutionCache.cache[
-                    _tensor_free_continuation.__code__
-                ].values()
-                self.assertEqual(len(_debug_get_cache_entry_list(resume)), 0)
-                # Drop the cached skip so the next run reaches the
-                # fail_on_recompile callback.
-                reset_code(resume)
-                _TENSOR_FREE_RESUME_STATE["value"] = 2
-                with torch.compiler.set_stance("fail_on_recompile"):
-                    self.assertEqual(compiled(x), fn(x))
-
-    @torch._dynamo.config.patch(caching_precompile=True)
-    @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_warm_loaded_resume_entries_do_not_fail_a_tensor_free_call(self):
-        # The warm load installs entries on fn's resume function, but the
-        # caching_precompile package is not explicit: once that frame holds no
-        # tensor it is skipped and runs eagerly, so under fail_on_recompile it
-        # is no recompile either.
-        fn = _resume_maybe_tensor_free_fn
-        x = torch.randn(3)
-        options = {"guard_filter_fn": _skip_closure_match}
-        torch.compile(fn, options=options)(x)  # noqa: UNSPECIFIED_BACKEND
-        self._save_and_reload(expected_backends=2, expected_dynamo=1)
-        compiled = torch.compile(fn, options=options)  # noqa: UNSPECIFIED_BACKEND
-        _TENSOR_FREE_RESUME_STATE["value"] = 0
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled(x), fn(x))
-
-    def _round_trip_under_fail_on_recompile(self, fn, x):
-        ctx = DiskDynamoStore()
-        package = CompilePackage(fn)
-        compiled_fn = torch._dynamo.optimize(
-            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
-        )(fn)
-        expected = compiled_fn(x)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(fn, self.path())
-        compiled_fn = torch._dynamo.optimize(
-            package=package, guard_filter_fn=default_guard_filter_fn
-        )(fn)
-        package.install(backends)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled_fn(x), expected)
-        return package
-
-    # Without nested graph breaks, the break makes helper a frame of its own.
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
-    def test_package_records_an_aliased_modules_own_frames(self):
-        # One file imported under two names is two modules, and
-        # inspect.getmodule maps a code object to whichever one it saw last.
-        # Recording helper's frame under the other alias looked for its code
-        # there and failed the compiled call.
-        source = """
-import torch
-
-
-def helper(y):
-    y = y.sin()
-    torch._dynamo.graph_break()
-    return y.cos()
-
-
-def entry(x):
-    return helper(x + 1) * 2
-"""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        path = os.path.join(tmp.name, "aliased.py")
-        with open(path, "w") as f:
-            f.write(source)
-        names = [f"test_package_alias_{i}" for i in range(2)]
-        for name in names:
-            self.addCleanup(sys.modules.pop, name, None)
-        first, second = (import_from_path(name, path) for name in names)
-        self.assertIs(inspect.getmodule(first.helper.__code__), second)
-
-        package = self._round_trip_under_fail_on_recompile(first.entry, torch.randn(4))
-        modules = {entry.python_module for entry in package.cache_entry().codes}
-        self.assertEqual(modules, {first.__name__})
-
-    def test_package_records_the_entry_under_its_globals_module(self):
-        # functools.wraps copies __module__ from the wrapped function, so the
-        # wrapper's __module__ names a module whose namespace is not the one
-        # its guards and installed globals belong in.
-        @functools.wraps(torch.sin)
-        def wrapper(x):
-            return torch.sin(x) + PKG_SCALE
-
-        self.assertEqual(wrapper.__module__, "torch")
-        package = self._round_trip_under_fail_on_recompile(wrapper, torch.randn(4))
-        self.assertEqual(package.cache_entry().codes[0].python_module, __name__)
-
-    def test_package_keeps_an_entry_module_alias_that_owns_its_globals(self):
-        # A __module__ naming another sys.modules key for the same module (here
-        # an importable alias of this test module) is kept, not replaced by the
-        # globals' own __name__.
-        def entry(x):
-            return x.sin() + PKG_SCALE
-
-        alias = "test_package_entry_alias"
-        sys.modules[alias] = sys.modules[__name__]
-        self.addCleanup(sys.modules.pop, alias, None)
-        entry.__module__ = alias
-        package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
-        self.assertEqual(package.cache_entry().codes[0].python_module, alias)
-
-    # Without nested graph breaks, hooked_forward becomes a frame of its own.
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
-    def test_package_keeps_the_entry_module_alias_for_frames_sharing_its_globals(
-        self,
-    ):
-        # The child frame (hooked_forward) and the resume functions run with the
-        # entry's globals, so they are recorded under the entry's alias too.
-        def entry(x):
-            y = hooked_forward(x, x) + x
-            torch._dynamo.graph_break()
-            return y + PKG_SCALE
-
-        alias = "test_package_entry_alias"
-        sys.modules[alias] = sys.modules[__name__]
-        self.addCleanup(sys.modules.pop, alias, None)
-        entry.__module__ = alias
-        package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
-        codes = package.cache_entry().codes
-        self.assertGreater(len(codes), 2)
-        self.assertEqual({code.python_module for code in codes}, {alias})
-
-    def test_package_records_a_renamed_module_under_its_spec_name(self):
-        # A module that rebinds __name__ is still registered under its spec
-        # name, and that is the only key a loading process can find it by.
-        source = """
-import torch
-
-__name__ = "test_package_renamed_public"
-
-
-def entry(x):
-    x = x.sin()
-    torch._dynamo.graph_break()
-    return x * 2
-"""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        path = os.path.join(tmp.name, "renamed.py")
-        with open(path, "w") as f:
-            f.write(source)
-        name = "test_package_renamed"
-        self.addCleanup(sys.modules.pop, name, None)
-        module = import_from_path(name, path)
-        self.assertNotIn(module.entry.__module__, sys.modules)
-
-        package = self._round_trip_under_fail_on_recompile(module.entry, torch.randn(4))
-        codes = package.cache_entry().codes
-        self.assertEqual(len(codes), 2)
-        self.assertEqual({entry.python_module for entry in codes}, {name})
-
-    def test_reset_keeps_nonrecursive_disable_wrapper_skipped(self):
-        # A bound method's innermost fn is the shared non-recursive disable
-        # wrapper, so this package's top-level code is the wrapper's code.
-        # Installing it must not let reset() strip its import-time skip.
-        class Mod(torch.nn.Module):
-            @torch._dynamo.disable(recursive=False)
-            def forward(self, x):
-                return self.inner(x) * 2
-
-            def inner(self, x):
-                return x.cos() + 1
-
-        ctx = DiskDynamoStore()
-        mod = Mod()
-        x = torch.randn(4)
-        package = CompilePackage(mod.forward)
-        torch._dynamo.optimize(backend="eager", package=package)(mod)(x)
-        for backend_id, bknd in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, bknd)
-        ctx.save_package(package, self.path())
-
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(mod.forward, self.path())
-        self.assertIs(
-            next(iter(package._codes)),
-            torch._dynamo.decorators._nonrecursive_disable_wrapper_code,
-        )
-        package.install(backends)
-        torch._dynamo.reset()
-
-        cnt = torch._dynamo.testing.CompileCounter()
-        self.assertEqual(torch.compile(mod, backend=cnt)(x), mod(x))
-        # Only inner() is compiled; forward() itself stays eager.
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 2)
 
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
