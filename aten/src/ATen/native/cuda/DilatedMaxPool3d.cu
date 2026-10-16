@@ -143,8 +143,17 @@ void max_pool3d_with_indices_out_frame(
   bool channels_last)
 {
   int offsetZ = 0;
+  // The 32-wide x dimension assumes a 32-lane warp, so an output narrower than
+  // 32 leaves most of each x row idle. 16x16 keeps the same 256 threads and
+  // doubles the output rows a warp covers, which measures faster at narrow
+  // outputs but loses once the output is 32 or wider. Hence the gate rather
+  // than a replaced constant.
   int threadX = 32;
   int threadY = 8;
+  if (owidth < 32) {
+    threadX = 16;
+    threadY = 16;
+  }
   int threadZ = 1;
   int stepZ = 65535;
   if (channels_last) {
