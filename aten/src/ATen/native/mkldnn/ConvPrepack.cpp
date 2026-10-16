@@ -5,6 +5,7 @@
 #include <ATen/native/mkldnn/ConvPrepack.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/OpContext.h>
+#include <ATen/native/mkldnn/detail/Conv.h>
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
@@ -61,7 +62,7 @@ ContextConv create(
   bool is_channels_last =
       weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   ideep::tensor::desc expected_weight_desc =
-      ideep::convolution_forward::expected_weights_desc(
+      mkldnn::convolution_forward_expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
           {stride_expanded.begin(), stride_expanded.end()},
@@ -102,7 +103,7 @@ static void _mkldnn_convolution_out(
     int64_t groups,
     const ideep::attr_t& attr = ideep::attr_t()) {
   if (b.has_value()) {
-    ideep::convolution_forward::compute_v2(
+    mkldnn::convolution_forward_compute_v2(
         x,
         w,
         b.value(),
@@ -120,7 +121,7 @@ static void _mkldnn_convolution_out(
         std::vector<int32_t>(),
         attr);
   } else {
-    ideep::convolution_forward::compute_v2(
+    mkldnn::convolution_forward_compute_v2(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
