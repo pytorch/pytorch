@@ -5457,6 +5457,253 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, obj.b)  # deep copy clones the list
         self.assertEqual(d.b, obj.b)
 
+    def test_copy_exact_container_methods(self):
+        # copy.copy dispatches an exact list/dict/set through copy._copy_dispatch,
+        # whose entries are the unbound C method descriptors list.copy,
+        # dict.copy and set.copy.
+        def fn(x, src):
+            lst = copy.copy(src)
+            lst.append(4)
+            return x + len(lst)
+
+        x = torch.randn(4)
+        src = [1, 2, 3]
+        correct = fn(x, src)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x, src)
+        self.assertEqual(result, correct)
+        # the copy is a new list, so mutating it leaves the source alone
+        self.assertEqual(src, [1, 2, 3])
+
+        def fn_literal(x):
+            lst = copy.copy([1, 2, 3])
+            lst.append(4)
+            dct = copy.copy({1: 2})
+            dct[3] = 4
+            st = copy.copy({1, 2})
+            st.add(3)
+            return x + len(lst) + len(dct) + len(st)
+
+        correct = fn_literal(x)
+        result = torch.compile(fn_literal, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_descriptor_owner_not_receiver_type(self):
+        # An unbound method descriptor runs the slot of its own __objclass__, so
+        # a subclass overriding the name must not see its override run.  The
+        # override here raises, which only a dispatch on the receiver reaches.
+        class OverridingAppend(list):
+            def append(self, value):
+                raise RuntimeError("overridden append ran")
+
+        def fn(x, lst):
+            list.append(lst, 3)
+            return x + len(lst)
+
+        x = torch.randn(4)
+        correct = fn(x, OverridingAppend([1, 2]))
+        result = torch.compile(fn, fullgraph=True, backend="eager")(
+            x, OverridingAppend([1, 2])
+        )
+        self.assertEqual(correct, x + 3)
+        self.assertEqual(result, correct)
+
+        # The same holds for a method whose override returns a value rather than
+        # raising.
+        class OverridingCopy(list):
+            def copy(self):
+                return "overridden"
+
+        def copied(x, lst):
+            return x + len(list.copy(lst))
+
+        args = (x, OverridingCopy([1, 2]))
+        correct = copied(*args)
+        result = torch.compile(copied, fullgraph=True, backend="eager")(*args)
+        self.assertEqual(result, correct)
+
+    def test_unbound_descriptor_owner_shadowed_by_subclass(self):
+        # A receiver whose own type replaces the name needs its slot, not the
+        # named descriptor's: methoddescr_call runs dict's slot, so
+        # dict.__eq__(od1, od2) ignores order, where the == operator on the same
+        # receivers runs OrderedDict's order sensitive compare.
+        def eq(x, a, b):
+            return x + float(dict.__eq__(a, b))
+
+        def ne(x, a, b):
+            return x + float(dict.__ne__(a, b))
+
+        x = torch.randn(4)
+        a = collections.OrderedDict([(1, 2), (3, 4)])
+        b = collections.OrderedDict([(3, 4), (1, 2)])
+
+        # eager really does disagree between the slot and the operator here
+        self.assertTrue(dict.__eq__(a, b))
+        self.assertFalse(a == b)
+
+        for fn in (eq, ne):
+            correct = fn(x, a, b)
+            result = torch.compile(fn, fullgraph=True, backend="eager")(x, a, b)
+            self.assertEqual(result, correct)
+
+        # an inherited descriptor is not shadowed and still dispatches
+        d = collections.OrderedDict([("a", 1), ("b", 2)])
+        d.move_to_end("a")
+
+        def get(x, d):
+            return x + dict.get(d, "a", 0)
+
+        self.assertEqual(dict.get(d, "a", 0), 1)
+        result = torch.compile(get, fullgraph=True, backend="eager")(x, d)
+        self.assertEqual(result, x + 1)
+
+    def test_unbound_object_slots(self):
+        # object's slots run object's code on every receiver type, so
+        # object.__eq__ is the identity compare and object.__hash__ is the
+        # address, not the receiver's tp_hash.
+        def fn(x, a, b):
+            return x + float(
+                object.__eq__(a, b) is NotImplemented
+                and object.__ne__(a, b) is False
+                and object.__lt__(a, b) is NotImplemented
+            )
+
+        x = torch.randn(4)
+        args = (x, {1: 2}, {1: 2})
+        correct = fn(*args)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(*args)
+        self.assertEqual(result, correct)
+
+        # an unhashable receiver is no different: the slot object.__hash__
+        # installs is PyObject_GenericHash wherever it is called from
+        def unhashable(x, a, b):
+            return x + float(object.__eq__(a, b) is NotImplemented)
+
+        t = torch.randn(3)
+        args = (x, [t], [t])
+        correct = unhashable(*args)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(unhashable, fullgraph=True, backend="eager")(*args)
+        self.assertEqual(result, correct)
+
+        # identity still compares equal, and __ne__ inverts that
+        def identical(x, a, _unused):
+            return x + float(object.__eq__(a, a) and not object.__ne__(a, a))
+
+        args = (x, [t], None)
+        correct = identical(*args)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(identical, fullgraph=True, backend="eager")(*args)
+        self.assertEqual(result, correct)
+
+        # hash(lst) raises, where object.__hash__(lst) answers with an address
+        def list_hash_raises(x, lst):
+            try:
+                hash(lst)
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        correct = list_hash_raises(x, [t])
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(list_hash_raises, fullgraph=True, backend="eager")(
+            x, [t]
+        )
+        self.assertEqual(result, correct)
+
+        # address hashes repeat for one receiver, and a NaN is the one float
+        # whose tp_hash is an address hash too, so there the two agree
+        def repeats(x, lst, v):
+            return x + float(
+                object.__hash__(lst) == object.__hash__(lst)
+                and object.__hash__(v) == hash(v)
+            )
+
+        args = (x, [t], float("nan"))
+        correct = repeats(*args)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(repeats, fullgraph=True, backend="eager")(*args)
+        self.assertEqual(result, correct)
+
+        # a hashable receiver is no different: object.__hash__ is not its
+        # tp_hash, so comparing its address against a real hash cannot be
+        # answered at compile time (it used to answer with hash(v))
+        def hash_of_int(x, v):
+            return x + float(object.__hash__(v) == hash(v))
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(hash_of_int, fullgraph=True, backend="eager")(x, 5)
+
+        # the value is an address, so it cannot be baked into the graph
+        def escapes(x, lst):
+            return x + object.__hash__(lst)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(escapes, fullgraph=True, backend="eager")(x, [t])
+
+        # a call that is not a comparison of two operands keeps the arity error
+        def too_few_args(x, a):
+            try:
+                object.__eq__(a)
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        correct = too_few_args(x, [t])
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(too_few_args, fullgraph=True, backend="eager")(x, [t])
+        self.assertEqual(result, correct)
+
+    def test_unbound_method_descriptor_value(self):
+        # A method descriptor of a builtin type works as a plain value, for any
+        # such type rather than the ones copy._copy_dispatch happens to hold.
+        getter = dict.get
+        joiner = str.join
+
+        def fn(x):
+            r = range(3)
+            d = {1: 2}
+            return x + getter(d, 1) + len(joiner("-", ["a", "b"])) + range.count(r, 1)
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        # methoddescr_call checks the receiver against __objclass__ and raises
+        # the TypeError eager raises, observed while tracing rather than graph
+        # breaking
+        copier = list.copy
+
+        def wrong_receiver(x):
+            try:
+                copier({1: 2})
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        correct = wrong_receiver(x)
+        self.assertEqual(correct, x + 1)
+        result = torch.compile(wrong_receiver, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_method_descriptor_guard(self):
+        # The descriptor identity is guarded, so rebinding the source recompiles
+        # instead of reusing the semantics traced from the old value.
+        dispatch = {dict: dict.get}
+
+        def call(d):
+            return dispatch[dict](d, 1)
+
+        cf = torch.compile(call, backend="eager", fullgraph=True)
+        self.assertEqual(cf({1: 2}), 2)
+
+        def forty_two(d, k):
+            return 42
+
+        dispatch[dict] = forty_two
+        self.assertEqual(cf({1: 2}), 42)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
@@ -18961,7 +19208,6 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
