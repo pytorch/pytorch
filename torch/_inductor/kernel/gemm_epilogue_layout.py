@@ -261,24 +261,33 @@ def match_output_contraction_use(
     source = split_normalized.source
     split_size = FlexGemmStructuralInt.from_value(split_normalized.split_size)
     shape = tensor_meta_shape(source)
+    physical_n = (
+        FlexGemmStructuralInt.from_value(shape[-1])
+        if shape is not None and len(shape) == 2
+        else None
+    )
     if (
         index is None
         or shape is None
         or len(shape) != 2
-        or not isinstance(shape[-1], int)
+        or physical_n is None
         or split_size is None
         or split_size.value <= 0
-        or shape[-1] % split_size.value
+        or physical_n.value % split_size.value
         or split_normalized.dim not in (-1, 1)
         or source in local_reduce.lane_domains
         or not local_reduce.graph.depends_on(source, gemm)
     ):
         return None
-    group = shape[-1] // split_size.value
+    group = physical_n.value // split_size.value
     if group <= 1:
         return None
     return OutputContractionUse(
-        FlexGemmLaneDomain(group, True), group, index.value, split, (index, split_size)
+        FlexGemmLaneDomain(group, True),
+        group,
+        index.value,
+        split,
+        (index, split_size, physical_n),
     )
 
 
@@ -299,7 +308,13 @@ def build_output_contraction_plan(
     ):
         return None
     expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // domain.physical_span)
-    if not statically_known_shape_equal(output_meta.shape, expected_shape):
+    if not statically_known_shape_equal(output_meta.shape, expected_shape) and not (
+        len(output_meta.shape) == 2
+        and statically_known_shape_equal(
+            (output_meta.shape[0], output_meta.shape[1] * domain.physical_span),
+            gemm_meta.shape,
+        )
+    ):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
     lanes = [
         (node, use)
