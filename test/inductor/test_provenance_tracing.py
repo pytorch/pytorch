@@ -643,6 +643,40 @@ class TestProvenanceTracingStackTraces(TestCase):
                         lambda msg: f"{msg}\nMismatch for key: {key}",
                     )
 
+    @torch._inductor.config.patch(
+        {"trace.provenance_tracking_level": 2, "provenance_profiler_markers": True}
+    )
+    def test_provenance_profiler_markers_cpu(self):
+        model = Model4()
+        example_inputs = (
+            torch.randn(8, 10),
+            torch.randn(10, 20),
+            torch.randn(20, 30),
+            torch.randn(10, 30),
+        )
+        torch._dynamo.reset()
+        reset_inductor_kernel_provenance_debug_handle()
+        with self._setup_provenance_capture() as payload_buffer:
+            compiled = torch.compile(model)
+            _, (code,) = run_and_get_code(compiled, *example_inputs)
+            handles = set(json.loads(payload_buffer.getvalue().strip()))
+
+        FileCheck().check("[Provenance debug handles] cpp_fused_mul_0:2").check_next(
+            "if torch.autograd.profiler._is_profiler_enabled:"
+        ).check_next(
+            "with torch._C._profiler._RecordFunctionFast('inductor_provenance:cpp_fused_mul_0:2'): pass"
+        ).run(code)
+
+        with torch.profiler.profile() as prof:
+            compiled(*example_inputs)
+        prefix = "inductor_provenance:"
+        markers = {
+            e.name.removeprefix(prefix)
+            for e in prof.events()
+            if e.name.startswith(prefix)
+        }
+        self.assertEqual(markers, handles)
+
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
     @requires_gpu_and_triton
     @config.patch("shape_padding", False)
