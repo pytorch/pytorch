@@ -26,6 +26,11 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx: DeviceIdx) -> str:
         return f"torch.xpu._DeviceGuard({device_idx})"
 
+    def device_exchange_functions(self) -> tuple[str, str] | None:
+        # The enter and exit of torch.xpu._DeviceGuard. XPU's set_device() emits
+        # nothing, so exchange needs no extra work.
+        return ("torch._C._xpu_exchangeDevice", "torch._C._xpu_maybeExchangeDevice")
+
     def current_device_idx_expr(self) -> str:
         return "torch.xpu.current_device()"
 

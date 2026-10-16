@@ -1222,6 +1222,7 @@ if RUN_GPU:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_buffer_use_after_remove"),
+        BaseTest("test_call_from_new_thread"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
