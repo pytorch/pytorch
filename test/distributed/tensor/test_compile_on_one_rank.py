@@ -2327,6 +2327,7 @@ class TestCompileOnOneRankMeshGroup(TestCase):
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
         self.mesh = init_device_mesh("cpu", (4,), mesh_dim_names=("replicate",))
         self.mesh_2d = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+        self.mesh_2d["dp", "tp"]._flatten("dp_tp")
 
     def tearDown(self):
         dist.destroy_process_group()
@@ -2345,6 +2346,7 @@ class TestCompileOnOneRankMeshGroup(TestCase):
             ("mesh", "replicate", 0),
             ("mesh_2d", 1, 1),
             ("mesh_2d", "tp", 1),
+            ("mesh_2d", "dp_tp", 0),
         ],
     )
     @compiler_config.patch(compile_on_one_rank=True)
@@ -2368,6 +2370,31 @@ class TestCompileOnOneRankMeshGroup(TestCase):
         self.assertEqual(lookups[0].args[0].op, "placeholder")
         self.assertEqual(lookups[0].args[1], dim_index)
         self.assertEqual(_baked_pg_constants(graph), [])
+
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_mesh_group_live_across_graph_break(self):
+        def fn(x, mesh):
+            pg = mesh.get_group()
+            torch._dynamo.graph_break()
+            return funcol.all_reduce(x + 1, "sum", pg)
+
+        x = torch.ones(4)
+        expected = fn(x, self.mesh)
+        backend = AotEagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+
+        self.assertEqual(compiled(x, self.mesh), expected)
+        # The looked-up group is returned from the first graph and fed back
+        # into the resume frame as an input.
+        self.assertEqual(len(backend.fw_graphs), 2)
+        first = backend.fw_graphs[0]
+        (lookup,) = [
+            node
+            for node in first.graph.nodes
+            if node.target is torch.ops._dtensor.mesh_get_process_group.default
+        ]
+        self.assertEqual(lookup.args[0].op, "placeholder")
+        self.assertIn(lookup, first.graph.output_node().args[0])
 
 
 if __name__ == "__main__":
