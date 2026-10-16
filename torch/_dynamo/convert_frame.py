@@ -761,10 +761,7 @@ class ConvertFrameAssert:
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
         # pyrefly: ignore [bad-assignment]
-        while (
-            prev_frame
-            and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
-        ):
+        while prev_frame and prev_frame.f_code.co_filename == __file__:
             prev_frame = prev_frame.f_back  # type: ignore[assignment]
         if (disabled := nonrecursive_disable_skip(prev_frame)) is not None:
             return disabled
