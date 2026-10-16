@@ -154,9 +154,9 @@ def _arch_list() -> str:
     """The arch list THIS build targets, as the CONFIGURE resolved it.
 
     Read from the file cmake/Codegen.cmake records, because that is the only place
-    the resolved value exists: EnvVarForwarding forwards the environment into the
-    cache only when the variable is undefined (so -D wins), and Dependencies.cmake
-    then shadows the cache with the environment for the rest of the configure. Either
+    the resolved value exists: EnvVarForwarding FORCEs the environment into the cache
+    (the environment wins over -D), and Dependencies.cmake then shadows the cache with
+    the environment for the rest of the configure, an unset one included. Either
     source read alone is therefore wrong for one of the two kinds of build. Reading
     the record also means a developer who changes the environment without
     reconfiguring gets the list the build COMPILED for, not the one they now intend.
