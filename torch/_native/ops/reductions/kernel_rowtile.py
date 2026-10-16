@@ -14,7 +14,7 @@ from ...cutedsl import hw_caps as _hw, launch as _L
 from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
-from .traits import WARP
+from .traits import WARP, welford_nouts
 
 
 _compile = _L.compile_kernel
@@ -156,6 +156,15 @@ _ITREE_ARCH: dict[str | tuple[int, int], _ItreeArch] = {
         combine_async=32,
         combine_max=2048,
     ),
+    # Pin Rubin's measured baseline independently of future default changes.
+    (10, 7): _ItreeArch(
+        split_stage_rows=0,
+        combine_rpb=128,
+        combine_group_bytes=0,
+        stage_rows=False,
+        combine_async=0,
+        combine_max=512,
+    ),
 }
 
 
@@ -178,7 +187,46 @@ def select_full_itree_arch(
     alignment: int,
     contiguous: bool,
 ) -> _ItreeArch | None:
-    return None
+    if (
+        cc != (10, 7)
+        or dtype not in (torch.float32, torch.bfloat16)
+        or M != 1
+        or not contiguous
+        or alignment < tile.TRANSFER_ALIGNMENT
+    ):
+        return None
+    itemsize = 4 if dtype == torch.float32 else 2
+    if N * itemsize not in (256 << 20, 2 << 30):
+        return None
+    if trait_key == "sum" and field_bits == (32,) and out_dtypes == (torch.float32,):
+        unroll = 0
+    elif (
+        trait_key == "argmaxi32"
+        and field_bits == (32, 32)
+        and out_dtypes == (torch.int64,)
+    ):
+        unroll = 128
+    elif (
+        field_bits == (32, 32, 32)
+        and welford_nouts(trait_key)
+        and out_dtypes == (dtype,) * welford_nouts(trait_key)
+    ):
+        unroll = 64
+    else:
+        return None
+    # Measured full-reduction anchors; keep columns and other sizes on their arch profile.
+    welford = field_bits == (32, 32, 32)
+    return _ItreeArch(
+        4,
+        WARP,
+        16,
+        False,
+        32,
+        2048,
+        unroll,
+        uniform_count=welford,
+        combine_weights=welford,
+    )
 
 
 def _full_itree_arch(
@@ -252,6 +300,43 @@ def select_row_order(
         return "inner_tree"
     if order != "unordered":
         raise ValueError(f"unknown reduction order: {order!r}")
+    if (
+        cc != (10, 7)
+        or dtype not in (torch.float32, torch.bfloat16)
+        or N not in (256, 1024, 4096)
+        or acc_bits != 32
+        or alignment < 16
+    ):
+        return "linear"
+    itemsize = 4 if dtype == torch.float32 else 2
+    # Seed measured anchors; intermediate sizes retain their existing policy.
+    size = M * N * itemsize
+    if size not in (16 << 20, 64 << 20, 256 << 20, 2 << 30):
+        return "linear"
+    welford = nfields == 3 and welford_nouts(trait_key) == nouts
+    argmax = (trait_key, nfields, nouts) == ("argmaxi32", 2, 1)
+    simple = (
+        nfields == 1 and nouts == 1 and trait_key in ("sum", "mean", "amax", "vnorm2")
+    )
+    if not (simple or argmax or welford):
+        return "linear"
+    if N == 1024:
+        inner = welford or (dtype == torch.bfloat16 and argmax)
+    elif N == 256:
+        if dtype == torch.bfloat16:
+            inner = size == 16 << 20 and not argmax
+        else:
+            inner = size >= 256 << 20 or (
+                not argmax and (trait_key != "mean" or size >= 64 << 20)
+            )
+    else:
+        inner = (
+            welford
+            or argmax
+            or (dtype == torch.float32 and (trait_key == "mean" or size >= 256 << 20))
+        )
+    if inner:
+        return "inner_tree"
     return "linear"
 
 
