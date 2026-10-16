@@ -66,6 +66,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/InnerProduct.h>
 
 namespace at::native {
 
@@ -117,9 +118,9 @@ Tensor mkldnn_linear(
   ideep::tensor y;
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
-    ideep::inner_product_forward::compute(x, w, b, y);
+    mkldnn::inner_product_forward(x, w, b, y);
   } else {
-    ideep::inner_product_forward::compute(x, w, y);
+    mkldnn::inner_product_forward(x, w, y);
   }
 
   auto input_size = self.sizes();
@@ -154,7 +155,7 @@ Tensor mkldnn_linear_backward_input(
   input_reshaped_size.push_back(weight.size(1));
 
   ideep::tensor gradx;
-  ideep::inner_product_backward_data::compute(
+  mkldnn::inner_product_backward_data(
     grady, w, {input_reshaped_size.begin(), input_reshaped_size.end()}, gradx);
 
   if (input_size.size() > 2) {
@@ -180,9 +181,9 @@ std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
   ideep::tensor& x = itensor_from_mkldnn(input_reshaped);
   ideep::tensor gradw, gradb;
   if (bias_defined) {
-    ideep::inner_product_backward_weights::compute(x, grady, gradw, gradb);
+    mkldnn::inner_product_backward_weights(x, grady, gradw, gradb);
   } else {
-    ideep::inner_product_backward_weights::compute(x, grady, gradw);
+    mkldnn::inner_product_backward_weights(x, grady, gradw);
   }
 
   return std::tuple<Tensor, Tensor>{
@@ -273,7 +274,7 @@ Tensor mkldnn_linear_pointwise(
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
+    mkldnn::inner_product_forward</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_bias.value(),
@@ -281,7 +282,7 @@ Tensor mkldnn_linear_pointwise(
         op_attr,
         aprop_kind);
   } else {
-    ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
+    mkldnn::inner_product_forward</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         w,
         mkldnn_output,
@@ -370,7 +371,7 @@ Tensor mkldnn_linear_pointwise_binary(
   }
 
   if (mkldnn_bias.has_value()) {
-    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
+    mkldnn::inner_product_forward_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
         mkldnn_other,
         w,
@@ -379,7 +380,7 @@ Tensor mkldnn_linear_pointwise_binary(
         op_attr,
         aprop_kind);
   } else {
-    ideep::inner_product_forward::compute_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
+    mkldnn::inner_product_forward_binary</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr, aprop_kind);
   }
 
