@@ -16,7 +16,9 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         return f"from torch._C import _xpu_getCurrentRawStream as {name}"
 
     def set_device(self, device_idx: DeviceIdx) -> str:
-        return f"torch.xpu.set_device({device_idx})"
+        # Only emitted inside device_guard(), which already sets the device, and
+        # XPU has no lazily created context to force into existence.
+        return "pass"
 
     def synchronize(self) -> str:
         return "torch.xpu.synchronize()"

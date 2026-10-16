@@ -23,7 +23,10 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
         return f"from torch._C import _cuda_getCurrentRawStream as {name}"
 
     def set_device(self, device_idx: DeviceIdx) -> str:
-        return f"torch.cuda.set_device({device_idx})"
+        # Emitted inside device_guard() to ensure the CUDA context exists, which
+        # _DeviceGuard skips when the device is already current. Calls the binding
+        # directly since this runs on every call of the compiled graph.
+        return f"torch._C._cuda_setDevice({device_idx})"
 
     def synchronize(self) -> str:
         return "torch.cuda.synchronize()"
