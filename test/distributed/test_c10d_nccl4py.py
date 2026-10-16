@@ -270,8 +270,7 @@ class TestNCCL4PyBackendCollectives(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_coalescing(self):
         device = torch.device(f"cuda:{self.rank}")
-        pg = dist.distributed_c10d._get_default_group()
-        backend = dist.get_backend_impl(pg, torch.device(device))
+        backend = dist.get_backend_impl(device=device)
         t1 = torch.ones(4, device=device) * (self.rank + 1)
         t2 = torch.ones(4, device=device) * (self.rank + 1) * 10
         backend.start_coalescing()

@@ -435,9 +435,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.all_reduce(t)
 
         def abortpg():
-            dist.get_backend_impl(
-                c10d.distributed_c10d._get_default_group(), torch.device(device)
-            ).abort()
+            dist.get_backend_impl(device=torch.device(device)).abort()
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
@@ -1010,8 +1008,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def _check_nccl_timeout(self, expected_timeout):
-        pg = dist.distributed_c10d._get_default_group()
-        options = dist.get_backend_impl(pg, torch.device(f"cuda:{self.rank}")).options
+        options = dist.get_backend_impl(
+            device=torch.device(f"cuda:{self.rank}")
+        ).options
         self.assertEqual(options._timeout, expected_timeout)
 
     @requires_nccl()
@@ -4494,8 +4493,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store=new_store,
         )
 
-        new_pg = c10d.distributed_c10d._get_default_group()
-        new_nccl_backend = dist.get_backend_impl(new_pg, torch.device(device))
+        new_nccl_backend = dist.get_backend_impl(device=torch.device(device))
         t = torch.rand(5, 5, device=device)
         dist.all_reduce(t)
         self.assertEqual(new_nccl_backend.get_error(), ErrorType.SUCCESS)

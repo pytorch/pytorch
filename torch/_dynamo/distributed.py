@@ -90,9 +90,7 @@ def get_compile_sync_pg() -> dist.ProcessGroup | None:
             # constant rather than the timeout init_process_group was configured with.
             default_pg = dist.distributed_c10d._get_default_group()
             coll_device = dist.distributed_c10d._get_object_coll_device(default_pg)
-            default_backend = dist.get_backend_impl(
-                default_pg, torch.device(coll_device)
-            )
+            default_backend = dist.get_backend_impl(device=torch.device(coll_device))
             compile_sync_pg = dist.distributed_c10d._new_group_with_tag(
                 backend="gloo",
                 timeout=default_backend.options._timeout,

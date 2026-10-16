@@ -346,13 +346,11 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
         return self.rank + 1
 
     def test_default_pg_has_cpu_backend(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cpu_be = dist.get_backend_impl(default_pg, torch.device("cpu"))
+        cpu_be = dist.get_backend_impl(device=torch.device("cpu"))
         self.assertIsNotNone(cpu_be)
 
     def test_default_pg_has_cuda_backend(self):
-        default_pg = dist.distributed_c10d._get_default_group()
-        cuda_be = dist.get_backend_impl(default_pg, torch.device("cuda"))
+        cuda_be = dist.get_backend_impl(device=torch.device("cuda"))
         self.assertIsNotNone(cuda_be)
 
     def test_allreduce_on_auto_qualified_pg(self):

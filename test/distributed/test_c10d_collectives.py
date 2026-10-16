@@ -693,7 +693,7 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
 
     def test_split_group(self):
         default_pg = dist.distributed_c10d._get_default_group()
-        parent_backend = dist.get_backend_impl(default_pg, self.device)
+        parent_backend = dist.get_backend_impl(device=self.device)
         if not parent_backend.supports_splitting:
             self.skipTest(f"{self.backend_name} does not support split_group")
         if self.device_type != "cpu":
@@ -723,7 +723,7 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         if self.world_size % 2 != 0:
             self.skipTest("full-partition split requires an even world size")
         default_pg = dist.distributed_c10d._get_default_group()
-        parent_backend = dist.get_backend_impl(default_pg, self.device)
+        parent_backend = dist.get_backend_impl(device=self.device)
         if not parent_backend.supports_splitting:
             self.skipTest(f"{self.backend_name} does not support split_group")
         if self.device_type != "cpu":

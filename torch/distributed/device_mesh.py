@@ -612,8 +612,7 @@ else:
                 and (
                     backend is None
                     or get_backend_impl(
-                        default_group,
-                        torch.accelerator.current_accelerator(),
+                        device=torch.accelerator.current_accelerator()
                     ).name()
                     == backend
                 )
