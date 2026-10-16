@@ -59,6 +59,8 @@ class RocprofActivityApi {
   std::atomic_bool stopCollection{false};
 
  private:
+  friend class RocprofActivityApiTest;
+
   bool registered_{false};
   timestamp_t toffset_{0};
 
