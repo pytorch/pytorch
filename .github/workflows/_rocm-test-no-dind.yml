@@ -65,15 +65,15 @@ permissions:
   contents: read
 
 jobs:
-  # This image resolution applies only to CI images built from main, not to
-  # images produced by pull requests. The GHCR mirror is the main CI image tag.
-  # The wheel still comes from this PR's build job; only the container image is
-  # the main-branch CI image. kubelet pulls the job image before any step runs,
-  # so the in-job ECR login _rocm-test.yml performs is too late here.
-  # docker-builds copies each main image it pushes to ECR onto the public GHCR
-  # mirror under the same tag, server-side, so the mirror carries the same
-  # digest. Resolve it on a CPU runner. A missing mirror fails this job so
-  # the test shards are not skipped.
+  # Resolve the ECR CI image selected by the caller to its public GHCR mirror.
+  # For PRs without .ci/docker changes, this is normally the image built from
+  # main; ciflow/docker runs also mirror PR-specific tree-hash images. The wheel
+  # still comes from this PR's build job.
+  # kubelet pulls the job image before any steps run, so the in-job ECR login
+  # used by _rocm-test.yml is too late. docker-builds copies main, release, and
+  # ciflow/docker images from ECR to GHCR under the same tree-hash tag using a
+  # server-side operation. Check for the mirror on a CPU runner before
+  # scheduling GPU shards; if it is missing, fail the workflow explicitly.
   resolve-image:
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     runs-on: ubuntu-24.04
