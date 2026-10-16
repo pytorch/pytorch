@@ -67,7 +67,7 @@ def _promote_type_fft(
         dtype = torch.get_default_dtype()
 
     allowed_types = [torch.float32, torch.float64]
-    maybe_support_half = device.type in ["cuda", "meta", "xpu"]
+    maybe_support_half = device.type in ["cuda", "meta", "xpu", "mtia"]
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
@@ -80,6 +80,10 @@ def _promote_type_fft(
         #     while aten returns a fresh tensor, breaking view-consistency
         #     (test_python_ref__refs_fft_*_cuda_bfloat16).
         if dtype == torch.bfloat16:
+            dtype = torch.float32
+        # MTIA uses CPU MKL for FFT fallback; MKL does not support float16.
+        # Promote float16 -> float32 so the fallback can compute correctly.
+        if device.type == "mtia" and dtype == torch.float16:
             dtype = torch.float32
     torch._check_not_implemented(
         dtype in allowed_types, lambda: f"Unsupported dtype {dtype}"
