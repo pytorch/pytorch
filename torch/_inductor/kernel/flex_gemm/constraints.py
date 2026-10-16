@@ -15,6 +15,8 @@ from torch.types import IntLikeType
 from torch.utils._ordered_set import OrderedSet
 
 
+INDEXED_OUTPUT_INDICES_ARG_NAME: Final = "indexed_output_indices"
+INDEXED_OUTPUT_STORE_ARG_NAME: Final = "indexed_output"
 LOCAL_REDUCE_FEED_MAIN_ARG_NAME: Final = "local_reduce0"
 LOCAL_REDUCE_PREPASS_FN_SUFFIX: Final = "_local_reduce_prepass"
 LOCAL_REDUCE_STORE_ARG_NAME: Final = "local_reduce_store"
@@ -93,7 +95,8 @@ LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
-    "FlexGEMM chunked group-2 lanes support only one unchanged accumulator auxiliary"
+    "FlexGEMM grouped main outputs do not compose with indexed outputs, and "
+    "chunked group-2 lanes support only one unchanged accumulator auxiliary"
 )
 FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
     "FlexGEMM expanded main outputs compose only with GEMM-shaped auxiliaries "
@@ -106,6 +109,11 @@ FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
 FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: main output shape must equal the physical "
     "GEMM output shape"
+)
+FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR = (
+    "FlexGEMM indexed outputs must gather from the returned main output (or the "
+    "value whose dtype conversion is the main output) and keep its dtype: write "
+    "main.gather(1, indices[:, None]).squeeze(1)"
 )
 FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
     "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
