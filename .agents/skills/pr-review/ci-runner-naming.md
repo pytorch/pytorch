@@ -101,11 +101,11 @@ A label is a runner value in any of these forms:
 
 Prefix sources:
 
-- The runner determinator: the outputs `label-type`, `amd-sandbox-label-type` and `scale-config-label-type` of a job whose `uses:` is exactly `pytorch/pytorch/.github/workflows/_runner-determinator.yml@main` (`@release/<X.Y>` on release branches) or `./.github/workflows/_runner-determinator.yml`, such as `${{ needs.get-label-type.outputs.label-type }}`. From any other job, these outputs are an unknown prefix scheme. `label-type` yields `mt-`, the default and error fallback, or `lf-` (`.github/scripts/runner_determinator.py`); in a workflow that passes `opt_out_experiments: lf` to the determinator, it yields only `mt-`.
+- The runner determinator: the outputs `label-type`, `amd-sandbox-label-type`, `amd-dpx-label-type` and `scale-config-label-type` of a job whose `uses:` is exactly `pytorch/pytorch/.github/workflows/_runner-determinator.yml@main` (`@release/<X.Y>` on release branches) or `./.github/workflows/_runner-determinator.yml`, such as `${{ needs.get-label-type.outputs.label-type }}`. From any other job, these outputs are an unknown prefix scheme. `label-type` yields `mt-`, the default and error fallback, or `lf-` (`.github/scripts/runner_determinator.py`); in a workflow that passes `opt_out_experiments: lf` to the determinator, it yields only `mt-`.
 - A literal `runner_prefix: "mt-"` or `runner_prefix: ""`.
 - `${{ inputs.runner_prefix }}` resolves to each caller's `runner_prefix:` value, or to the input default for a caller that omits it; each value gives a separate label. Both callers of `_docs.yml` pass the determinator.
 - `scale-config-label-type` yields an empty string, `wincanary.` or `wincanarylf.` in front of `windows.*` labels.
-- `amd-sandbox-label-type` yields an empty string, or `amd-sandbox-`, in front of `linux.rocm.*` labels.
+- `amd-sandbox-label-type` and `amd-dpx-label-type` yield an empty string, or `amd-sandbox-` and `amd-dpx-`, in front of `linux.rocm.*` labels.
 - `rel-` is never a prefix output. It is a literal chosen by branch or tag: `_select-release-runner.yml`, the templates' `release_runner_if`, and ternaries such as those in `build-vllm-wheel.yml`.
 - `c-` is not used in this repo.
 
@@ -119,14 +119,14 @@ Prefix sources:
    - anything else (legacy dot labels, partner labels, unknown prefix schemes) does not conform.
 
    A literal provider after a prefix expression, as in `${{ needs.get-label-type.outputs.label-type }}mt-l-x86iavx512-16-128`, does not conform. A label that conforms needs no finding: stop. Run steps 4-8 only for a label that does not conform, to decide whether other CI in this repo already uses it.
-4. **Take the core.** Drop either a leading prefix expression or a literal prefix (`c-mt-`, `mt-`, `c-lf-`, `lf-`, `amd-sandbox-`, `wincanary.` or `wincanarylf.`), never both, and keep `rel-` and everything after it: `${{ needs.get-label-type.outputs.amd-sandbox-label-type }}linux.rocm.gpu.mi350.1` has the core `linux.rocm.gpu.mi350.1`, and `mt-linux.s390x` has the core `linux.s390x`. A core with any character outside `[A-Za-z0-9._-]` is invalid: report it as a blocker, without searching.
+4. **Take the core.** Drop either a leading prefix expression or a literal prefix (`c-mt-`, `mt-`, `c-lf-`, `lf-`, `amd-sandbox-`, `amd-dpx-`, `wincanary.` or `wincanarylf.`), never both, and keep `rel-` and everything after it: `${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1` has the core `linux.rocm.gpu.gfx950.1`, and `mt-linux.s390x` has the core `linux.s390x`. A core with any character outside `[A-Za-z0-9._-]` is invalid: report it as a blocker, without searching.
 5. **Search.** Use the Grep tool with path set to the PR checkout's `.github` directory (never the repo root: too slow), output mode `content` with line numbers, glob `*.{yml,yaml,j2,py}`, and this pattern, with each `.` in CORE escaped as `\.`:
 
    ```
-   (^|[^A-Za-z0-9_.-])((c-)?(mt|lf)-|amd-sandbox-|wincanary(lf)?\.)?CORE([^A-Za-z0-9_.-]|$)
+   (^|[^A-Za-z0-9_.-])((c-)?(mt|lf)-|amd-(sandbox|dpx)-|wincanary(lf)?\.)?CORE([^A-Za-z0-9_.-]|$)
    ```
 
-   Search all of a PR's labels in one alternation, for example `(^|[^A-Za-z0-9_.-])((c-)?(mt|lf)-|amd-sandbox-|wincanary(lf)?\.)?(rel-l-x86iavx512-44-340|l-arm64g3-61-463|linux\.s390x)([^A-Za-z0-9_.-]|$)`. Keep the boundaries: a plain substring or `\b` search matches `l-x86iamx-22-225` inside `l-x86iamx-22-225-h100`, and `l-x86iavx512-44-340` inside `rel-l-x86iavx512-44-340`, so a new label looks existing. If a Grep result is truncated or cut short, re-run it narrower (fewer labels, or output mode `files_with_matches` first); never conclude that a label is new from a partial result.
+   Search all of a PR's labels in one alternation, for example `(^|[^A-Za-z0-9_.-])((c-)?(mt|lf)-|amd-(sandbox|dpx)-|wincanary(lf)?\.)?(rel-l-x86iavx512-44-340|l-arm64g3-61-463|linux\.s390x)([^A-Za-z0-9_.-]|$)`. Keep the boundaries: a plain substring or `\b` search matches `l-x86iamx-22-225` inside `l-x86iamx-22-225-h100`, and `l-x86iavx512-44-340` inside `rel-l-x86iavx512-44-340`, so a new label looks existing. If a Grep result is truncated or cut short, re-run it narrower (fewer labels, or output mode `files_with_matches` first); never conclude that a label is new from a partial result.
 6. **Keep only prior uses.** A prior use is a runner value in one of the forms above, not a comment or doc, in `.github/workflows/`, `.github/templates/`, `.github/actions/` or `.github/scripts/generate_ci_workflows.py`. It is either:
    - a deleted (`-`) diff line that used the label; look for it in the diff itself, since a search of the checkout cannot find deleted lines; or
    - a hit on a line the diff does not show as added (`+`). A line of a changed file outside every hunk's new-side range (`@@ ... +c,d @@`) is unchanged, so a pure rename leaves every line unchanged; but treat every line of a file whose diff entry reads `Binary files ... differ` as added.
