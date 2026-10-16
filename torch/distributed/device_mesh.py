@@ -100,13 +100,10 @@ else:
         Under compile_on_one_rank and Dynamo or an active make_fx trace, return
         the group as the output of _dtensor.mesh_get_process_group so the
         ProcessGroup is extracted from the (graph-input) mesh at runtime instead
-        of being baked into the graph as an unserializable torchbind constant.
+        of being baked into the graph as an unserializable ProcessGroup constant.
         Returns None to take the eager path otherwise. Mirrors
         _functional_collectives._resolve_group, but also covers eager collectives
         (dist.all_reduce -> c10d.allreduce_) that bind the ProcessGroup directly.
-
-        get_group's flattened-dim-name branch does not go through this helper,
-        so a group looked up by a flattened dim name is still baked.
 
         This is a module-level helper rather than a DeviceMesh method so that
         Dynamo does not reject it as an unregistered opaque-object member.
@@ -882,9 +879,15 @@ else:
 
             root_to_flatten_mapping = root_mesh._flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
-                dim_group_name = root_to_flatten_mapping[
-                    mesh_dim  # type: ignore[index]
-                ]._dim_group_names[0]
+                flat_mesh = root_to_flatten_mapping[mesh_dim]  # type: ignore[index]
+                # TODO: make_fx cannot reconstruct a flattened submesh from the
+                # root mesh input yet (_device_mesh_reconstruct_fn), so only
+                # Dynamo resolves this group in-graph; make_fx still bakes it.
+                if torch.compiler.is_dynamo_compiling():
+                    traced = _maybe_traced_group(flat_mesh, 0)
+                    if traced is not None:
+                        return traced
+                dim_group_name = flat_mesh._dim_group_names[0]
                 return not_none(_get_pg_from_name(root_mesh, dim_group_name))
             else:
                 mesh_dim = (

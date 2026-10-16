@@ -301,8 +301,15 @@ class _FailOnRecompileCallback:
     ) -> ConvertFrameReturn:
         if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
-        # A frame the backend would not compile is no recompile.
-        if convert_frame.skips_tensor_free_frame(self._torchdynamo_orig_backend, frame):
+        # A frame the backend would not compile is no recompile. The backend's
+        # package sits on the first wrapper in the chain that keeps one.
+        backend: Any = self._torchdynamo_orig_backend
+        while not hasattr(backend, "_package") and hasattr(
+            backend, "_torchdynamo_orig_backend"
+        ):
+            backend = backend._torchdynamo_orig_backend
+        package = getattr(backend, "_package", None)
+        if convert_frame.skips_tensor_free_frame(package, frame):
             return ConvertFrameReturn()
 
         # convert_frame would skip a disable(recursive=False) frame rather than
