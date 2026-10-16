@@ -3890,6 +3890,29 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertEqual(flex_output.dtype, torch.float16)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_mps
+    def test_autocast_mixed_dtype_backward(self, device):
+        q = torch.randn(
+            1, 1, 128, 64, device=device, dtype=torch.float16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 1, 128, 64, device=device, dtype=torch.float32, requires_grad=True
+        )
+        v = torch.randn(
+            1, 1, 128, 64, device=device, dtype=torch.float32, requires_grad=True
+        )
+
+        with torch.autocast(device_type=device, dtype=torch.float16):
+            output = flex_attention(q, k, v)
+            self.assertEqual(output.dtype, torch.float16)
+
+        output.sum().backward()
+        for tensor in (q, k, v):
+            self.assertIsNotNone(tensor.grad)
+            self.assertEqual(tensor.grad.dtype, tensor.dtype)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)

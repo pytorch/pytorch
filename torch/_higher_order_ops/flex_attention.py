@@ -311,9 +311,11 @@ def _flex_attention_autocast_impl(
     key = _autocast_cast(key, device_type, autocast_dtype)
     value = _autocast_cast(value, device_type, autocast_dtype)
 
-    autocast_keyset = torch._C.DispatchKeySet(
-        DispatchKey.AutocastCPU
-    ) | torch._C.DispatchKeySet(DispatchKey.AutocastCUDA)
+    autocast_keyset = (
+        torch._C.DispatchKeySet(DispatchKey.AutocastCPU)
+        | torch._C.DispatchKeySet(DispatchKey.AutocastCUDA)
+        | torch._C.DispatchKeySet(DispatchKey.AutocastXPU)
+    )
     with torch._C._ExcludeDispatchKeyGuard(autocast_keyset):
         return flex_attention(
             query,
@@ -355,6 +357,31 @@ def flex_attention_autocast_cuda(
 
 @flex_attention.py_impl(DispatchKey.AutocastCPU)
 def flex_attention_autocast_cpu(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: tuple,
+    scale: float,
+    kernel_options: dict[str, Any],
+    score_mod_other_buffers: tuple = (),
+    mask_mod_other_buffers: tuple = (),
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return _flex_attention_autocast_impl(
+        query,
+        key,
+        value,
+        score_mod,
+        block_mask,
+        scale,
+        kernel_options,
+        score_mod_other_buffers,
+        mask_mod_other_buffers,
+    )
+
+
+@flex_attention.py_impl(DispatchKey.AutocastXPU)
+def flex_attention_autocast_xpu(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
