@@ -29,6 +29,7 @@ from torch._native.ops.reductions import (
     kernel_general as kg,
     kernel_rowtile as rt,
     kernel_xcta as xc,
+    overrides as O,
     tile,
     traits as T,
 )
@@ -336,6 +337,12 @@ class TestKernelGeneral(TestCase):
             op, ("test_uniform_welford_tree",) + op.cache_sig, [x.flatten()], [out]
         )
         self.assertEqual(out, x.var(dim=1), atol=1e-5, rtol=1e-5)
+
+    def test_large_logical_extents_are_eligible(self):
+        """Keep representable logical extents above INT32_MAX eligible for CuTeDSL."""
+        x = torch.empty(1, device="cuda").expand((1 << 31) + 1)
+        self.assertTrue(O._base_cond(x, None, "sum"))
+        self.assertTrue(O._base_cond(x[:, None], 1, "sum"))
 
     def test_internal_invariants_raise(self):
         # Each invariant must raise explicitly because python -O strips asserts. Exercise every
