@@ -2291,7 +2291,7 @@ class DeviceCachingAllocator {
           handle_data.size());
     } else {
       ss.put(SHAREABLE_XPU_EXPANDABLE_SEGMENT);
-      auto full_range = block->expandable_segment_->share(
+      auto full_range = block->expandable_segment->share(
           SegmentRange(block->ptr, block->size), ss);
       offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
@@ -2426,7 +2426,7 @@ class NativeCachingAllocator : public XPUAllocator {
             c10::xpu::get_device_context(),
             c10::xpu::get_raw_device(device));
       } else if (type == SHAREABLE_XPU_EXPANDABLE_SEGMENT) {
-        expandable_segment_ =
+        expandable_segment =
             ExpandableSegment::fromShared(device, ss).release();
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -2443,9 +2443,9 @@ class NativeCachingAllocator : public XPUAllocator {
             xpu_ipc_ptr, c10::xpu::get_device_context());
         xpu_ipc_ptr = nullptr;
       }
-      if (expandable_segment_) {
-        delete expandable_segment_;
-        expandable_segment_ = nullptr;
+      if (expandable_segment) {
+        delete expandable_segment;
+        expandable_segment = nullptr;
       }
     }
 
@@ -2453,7 +2453,7 @@ class NativeCachingAllocator : public XPUAllocator {
       if (xpu_ipc_ptr) {
         return xpu_ipc_ptr;
       } else {
-        return expandable_segment_->ptr();
+        return expandable_segment->ptr();
       }
     }
 
@@ -2461,7 +2461,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
    private:
     void* xpu_ipc_ptr{nullptr};
-    ExpandableSegment* expandable_segment_{nullptr};
+    ExpandableSegment* expandable_segment{nullptr};
   };
   alignas(hardware_destructive_interference_size) std::mutex ipc_mutex;
   using IpcCacheKey = std::pair<c10::DeviceIndex, std::string>;
