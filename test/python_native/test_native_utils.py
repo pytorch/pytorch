@@ -133,34 +133,9 @@ class TestNativeUtils(TestCase):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
             self.assertTrue(cap.device_ok(x, (11,)), "the (9,10,12) answer was reused")
 
-    def test_on_current_device_never_raises(self):
-        # Conditions must return False rather than raise, or the dispatcher cannot fall back.
-        from torch._native.utils import capability as cap
-
-        self.assertFalse(cap.on_current_device(torch.empty(2)))
-        self.assertFalse(cap.on_current_device(torch.empty(2, device="meta")))
-        if torch.cuda.is_available():
-            self.assertTrue(cap.on_current_device(torch.empty(2, device="cuda")))
-
-    @unittest.skipUnless(TEST_CUDA, "needs a CUDA tensor to compare device indices")
-    @skipIfRocm
-    def test_on_current_device_declines_another_device(self):
-        # Reject non-current devices because kernel and stream caches bind to the current device.
-        # This case is needed because CPU and meta inputs short-circuit before that check.
-        from unittest.mock import patch
-
-        from torch._native.utils import capability as cap
-
-        x = torch.empty(2, device="cuda")
-        self.assertTrue(cap.on_current_device(x))
-        with patch.object(
-            torch.cuda, "current_device", return_value=x.device.index + 1
-        ):
-            self.assertFalse(cap.on_current_device(x))
-
-    def test_conds_never_raise_without_a_usable_device(self):
+    def test_device_ok_never_raises_without_a_usable_device(self):
         # On CPU-only systems, fake CUDA tensors normalize to cuda:0 but device queries raise.
-        # Both conditions must return False to preserve the dispatcher's fallback.
+        # The condition must return False to preserve the dispatcher's fallback.
         from unittest.mock import patch
 
         from torch._native.utils import capability as cap
@@ -170,12 +145,8 @@ class TestNativeUtils(TestCase):
         self.addCleanup(cap._arch_ok.cache_clear)
         cap._arch_ok.cache_clear()
         boom = RuntimeError("No CUDA GPUs are available")
-        with (
-            patch.object(torch.cuda, "get_device_capability", side_effect=boom),
-            patch.object(torch.cuda, "current_device", side_effect=boom),
-        ):
+        with patch.object(torch.cuda, "get_device_capability", side_effect=boom):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
-            self.assertFalse(cap.on_current_device(x))
 
 
 if __name__ == "__main__":
