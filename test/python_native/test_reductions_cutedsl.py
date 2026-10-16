@@ -4,6 +4,7 @@
 # numerical behavior.
 
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -21,7 +22,7 @@ class TestCuTeDSLReductionWiring(TestCase):
         from torch import _native
         from torch._native.ops.reductions import kernel_general as kg
 
-        names = ("reduce_dim", "reduce_all")
+        names = ("reduce_dim", "reduce_dim2", "reduce_all")
         orig = {nm: getattr(kg, nm) for nm in names}
         aot_enabled = _native.aot_enabled()
         n = [0]
@@ -45,11 +46,35 @@ class TestCuTeDSLReductionWiring(TestCase):
         return n[0]
 
     def test_supported_call_fires(self):
-        """Route every registered core operation instead of silently falling back."""
+        """Route every registered operation instead of silently falling back."""
         x = torch.randn(128, 512, device="cuda")
-        for op in (torch.sum, torch.mean, torch.amax, torch.amin, torch.prod):
+        for op in (
+            torch.sum,
+            torch.mean,
+            torch.amax,
+            torch.amin,
+            torch.prod,
+            torch.argmax,
+            torch.max,
+        ):
             with self.subTest(op=op):
                 self.assertEqual(self._fired_count(lambda: op(x, dim=-1)), 1)
+
+    def test_int64_index_split(self):
+        """Carry Int64 winners through split scratch when the reduced extent requires it."""
+        from torch._native.ops.reductions import overrides
+
+        x = torch.zeros(1, 65537, device="cuda")
+        x[:, 40000] = 1
+        x[:, 50000] = 1
+        out = []
+        with mock.patch.object(overrides, "_INT32_LIMIT", 4):
+            self.assertEqual(
+                self._fired_count(lambda: out.append(torch.argmax(x, dim=-1))), 2
+            )
+        self.assertEqual(
+            out[0], torch.tensor([40000], device="cuda", dtype=torch.int64)
+        )
 
     def test_unsupported_dtype_falls_back(self):
         """Leave unsupported dtypes to ATen instead of entering a mismatched kernel."""

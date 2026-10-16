@@ -762,6 +762,7 @@ class TileReduce:
         npairs_kept=0,
         wide_count=False,
         wide_output=False,
+        wide_gidx=False,
         wide_red=False,
         wide_kept=False,
         gidx_from="r",
@@ -783,6 +784,7 @@ class TileReduce:
             or order != "linear"
             or combine
             or npairs_red != 1
+            or wide_gidx
             or wide_red
             or gidx_from != "r"
             or not hasattr(trait, "combine_equal")
@@ -893,6 +895,7 @@ class TileReduce:
         self.npairs_kept = npairs_kept
         self.wide_count = wide_count
         self.wide_output = wide_output
+        self.wide_gidx = wide_gidx
         self.wide_red = wide_red
         self.wide_kept = wide_kept
         self.gidx_from = gidx_from
@@ -967,6 +970,7 @@ class TileReduce:
             self.npairs_kept,
             self.wide_count,
             self.wide_output,
+            self.wide_gidx,
             self.wide_red,
             self.wide_kept,
             self.gidx_from,
@@ -1651,7 +1655,9 @@ class TileReduce:
         bx, by, _ = cute.arch.block_idx()
         grid_x = cute.arch.grid_dim()[0] if const_expr(self.wide_output) else Int32(0)
         trait = self.trait
-        chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
+        chunk_base = (
+            Int64(0) if const_expr(self.wide_gidx) else Int32(0)
+        )  # nonzero only under ragged_chunk, for gidx_from "chunk"
         batch_idx = None  # split shape only: which batch of the row this block folds
         # Inner-tree thread map, set from its plan.
         lane_w = warp_id = row_in_block = None
@@ -1789,7 +1795,11 @@ class TileReduce:
             rb = nchunks
             if const_expr(self.flat_tail):
                 # Clamp reduce-all stage 1's overhanging final chunk.
-                chunk_base = unit * nchunks
+                chunk_base = (
+                    Int64(unit) * Int64(nchunks)
+                    if const_expr(self.wide_gidx)
+                    else unit * nchunks
+                )
                 left = limit - obase
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
@@ -1806,7 +1816,9 @@ class TileReduce:
                 _, cc = divmod(unit, kdivs[0])
                 c = cutlass.Int64(cc)
                 cnt = cutlass.Int64(nchunks)
-                chunk_base = Int32(c * cnt)  # this chunk's first step, for gidx
+                chunk_base = (
+                    c * cnt if const_expr(self.wide_gidx) else Int32(c * cnt)
+                )  # this chunk's first step, for gidx
                 left = limit - c * cnt
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no builtin min

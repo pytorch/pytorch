@@ -60,6 +60,37 @@ class _DecodeProbe:
         )
 
 
+class _WideIndexProbe:
+    def __init__(self):
+        self.gidx = "chunk"
+
+    @cute.jit
+    def __call__(self, x, out, chunk_base, stream):
+        divs = [cute.FastDivmodDivisorV2(Int32(1))]
+        self.kernel(x, out, divs, [Int64(1)], chunk_base).launch(
+            grid=[1, 1, 1], block=[1, 1, 1], stream=stream
+        )
+
+    @cute.kernel
+    def kernel(self, x, out, divs, strides, chunk_base):
+        trait = T.ArgMaxOps(acc=cutlass.Float32, idx=Int64)
+        acc = tile.fold_decoded(
+            trait,
+            x,
+            Int64(0),
+            divs,
+            strides,
+            cutlass.const_expr(1),
+            Int32(1),
+            cutlass.const_expr(1),
+            Int32(0),
+            Int64(0),
+            chunk_base,
+            cutlass.const_expr(self.gidx),
+        )
+        out[0] = acc[1]
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelGeneral(TestCase):
@@ -272,6 +303,22 @@ class TestKernelGeneral(TestCase):
             expected = torch.tensor([r * strides[0] + q * strides[1]], device="cuda")
             self.assertEqual(out, expected)
 
+    def test_int64_index_above_int32_max(self):
+        """Preserve a winning chunk index above INT32_MAX without allocating its extent."""
+        x = torch.ones(1, device="cuda")
+        out = torch.empty(1, dtype=torch.int64, device="cuda")
+        expected = (1 << 31) + 17
+        chunk_base = Int64(expected)
+        fn = _L.compile_kernel(
+            _WideIndexProbe(),
+            _L.fake_compact(cutlass.Float32, (_L.sym(),)),
+            _L.fake_compact(Int64, (_L.sym(),)),
+            chunk_base,
+            _L.stream(),
+        )
+        fn(x, out, chunk_base, _L.stream())
+        self.assertEqual(out, torch.tensor([expected], device="cuda"))
+
     def test_uniform_welford_tree(self):
         """Equal-count trees must retain Welford accuracy without serial counts."""
         rows, count = 17, 1024
@@ -316,14 +363,6 @@ class TestKernelGeneral(TestCase):
         self.assertIs(type(kg._geom_args(narrow)[0]), Int32)
         self.assertIs(type(kg._geom_args(wide)[0]), Int64)
         self.assertIs(type(kg._geom_args(wide_output)[0]), Int32)
-        with self.assertRaisesRegex(ValueError, "indices representable in Int32"):
-            kg.ReduceBlock(
-                T.ArgMaxOps(acc=cutlass.Float32),
-                count=2**31 + 1,
-                num_o=1,
-                red_pairs=((2**31 + 1, 1),),
-                kept_pairs=(),
-            )
         # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
         # here because the arm that allows it is one line in tile._decode_offset, and a crash.
         self.assertEqual(
