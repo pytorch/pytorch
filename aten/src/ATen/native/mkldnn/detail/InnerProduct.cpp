@@ -605,7 +605,7 @@ void inner_product_backward_data(
 
   // workaround: diff_src and weights from caffe2 may have different dims.
   // It would be better for caffe2 to do this reshape anyway.
-  if (diff_src_dims.size() != weights.ndims()) {
+  if (diff_src_dims.size() != static_cast<size_t>(weights.ndims())) {
     auto new_dims = diff_src_dims;
     new_dims[0] = weights.get_dim(0);
     weights_.reshape(new_dims);
