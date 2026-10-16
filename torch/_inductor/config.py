@@ -2476,8 +2476,9 @@ class triton:
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
 
-    # With use_tensor_descriptor and max_autotune(_pointwise), pointwise/reduction kernels race their TMA variants.
-    # "auto" adds host-side TMA, "all" also device-side TMA, and "off" leaves use_tensor_descriptor to decide alone.
+    # "auto" is the default: with use_tensor_descriptor and max_autotune(_pointwise), these kernels race TMA variants instead of forcing TMA.
+    # "all" also adds device-side TMA; "off" leaves use_tensor_descriptor to decide alone.
+    # pyrefly: ignore [bad-assignment]
     autotune_tensor_descriptor: Literal["off", "auto", "all"] = os.environ.get(
         "TORCHINDUCTOR_AUTOTUNE_TENSOR_DESCRIPTOR", "auto"
     )  # type: ignore[assignment]

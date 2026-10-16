@@ -64,7 +64,7 @@ class PointwiseHeuristic(CodegenConfigHeuristics):
         self, size_hints, bs, hinted_configs, triton_config_fn, inductor_meta
     ):
         if inductor_meta.get("tma_variant"):
-            from torch._inductor.runtime.triton_compat import Config
+            from triton import Config
 
             # Coordinate descent settles a TMA variant on 2048 elements and 2 warps on GB200 (#187175).
             # Built directly, since triton_config raises a block of 128+ elements to 4 warps (#97950).

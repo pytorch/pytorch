@@ -4304,7 +4304,7 @@ class PythonWrapperCodegen(CodeGen):
         what lets compilation fan out to the worker pool. When
         ``defines_triton_kernels_as_code()`` the kernel is defined as code instead.
         """
-        if not self.defines_triton_kernels_as_code():
+        if optional or not self.defines_triton_kernels_as_code():
             self.define_kernel(
                 kernel_name,
                 self.async_compile_triton_body(
@@ -4325,9 +4325,7 @@ class PythonWrapperCodegen(CodeGen):
         kernel_key = get_hash(src_code.strip())
         kernel_file = f"{kernel_key}.py"
         if async_compile.AsyncCompile.use_process_pool():
-            async_compile.AsyncCompile().triton(
-                subs_name, src_code, optional=optional
-            )
+            async_compile.AsyncCompile().triton(subs_name, src_code, optional=optional)
         autotune_body = (
             self.async_compile_triton_body(
                 subs_name,
@@ -4394,9 +4392,7 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(src_code, strip=True)
         optional_arg = ", optional=True" if optional else ""
-        compile_wrapper.writeline(
-            f"''', device_str='{device_type}'{optional_arg})"
-        )
+        compile_wrapper.writeline(f"''', device_str='{device_type}'{optional_arg})")
         return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
