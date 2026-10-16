@@ -549,6 +549,14 @@ _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
 
+def _names_from_code(code: types.CodeType) -> set[str]:
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= _names_from_code(const)
+    return names
+
+
 def _backend_ids_from_code(code: types.CodeType) -> Iterator[_BackendId]:
     for name in code.co_names:
         if is_compiled_fn_name(name):
@@ -1660,14 +1668,20 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    bytecode = SerializedCode.to_code_object(guarded_code.dynamo_code)
                     # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
                     # in the tracing process, so a fresh process has no binding
-                    # for it; the artifact carries the dict. A binding already
-                    # here (a live compile's, or anyone else's) is kept and not
+                    # for it; the artifact carries the guard pickler's copy of
+                    # the dict, with tensors faked and unguarded values pruned.
+                    # That copy is only fit for the guards, so a key the
+                    # bytecode reads (a graph input or a replayed store) stays
+                    # unbound and misses as before. A binding already here (a
+                    # live compile's, or anyone else's) is kept and not
                     # recorded, so uninstall() leaves it alone, and the guards
                     # check whatever it holds.
+                    reads = _names_from_code(bytecode)
                     for name, value in guards_state.output_graph.global_scope.items():
-                        if name.startswith(UNNAMED_SCOPE_PREFIX):
+                        if name.startswith(UNNAMED_SCOPE_PREFIX) and name not in reads:
                             self._install_global(
                                 module,
                                 name,
@@ -1704,11 +1718,7 @@ class CompilePackage:
                         guard_manager = load_guard_manager(
                             guards_state, target_code, runtime_global_scope
                         )
-                    _load_precompile_entry(
-                        target_code,
-                        guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
-                    )
+                    _load_precompile_entry(target_code, guard_manager, bytecode)
 
     def cache_entry(self) -> _DynamoCacheEntry:
         self.validate()
