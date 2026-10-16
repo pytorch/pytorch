@@ -353,10 +353,27 @@ def match_output_expansion(
 
     ``torch.stack`` reaches the body decomposed as ``cat([a.unsqueeze(-1),
     b.unsqueeze(-1)], -1)``; literal pointwise suffixes lower on both lanes.
+    Shape-preserving views are aliases, not evidence of interleaved packing.
     """
     aten = torch.ops.aten
     value = outputs.output
-    while (source := unary_pointwise_source(value)) is not None:
+    aliases: list[torch.fx.Node] = []
+    while True:
+        if (source := unary_pointwise_source(value)) is not None:
+            value = source
+            continue
+        view_args = view_or_reshape_args(value)
+        if view_args is None or not isinstance(view_args[0], torch.fx.Node):
+            break
+        source = view_args[0]
+        shape, source_shape = tensor_meta_shape(value), tensor_meta_shape(source)
+        if (
+            shape is None
+            or source_shape is None
+            or not statically_known_shape_equal(shape, source_shape)
+        ):
+            break
+        aliases.append(value)
         value = source
     view_args = view_or_reshape_args(value)
     chunked = view_args is None
@@ -375,9 +392,10 @@ def match_output_expansion(
     if chunked:
         if pack.target is not aten.cat.default:
             return None
-        lanes, aliases = list(packed), []
+        lanes = list(packed)
     elif pack.target is aten.stack.default:
-        lanes, aliases = list(packed), [value]
+        lanes = list(packed)
+        aliases.append(value)
     elif pack.target is aten.cat.default and all(
         isinstance(lane, torch.fx.Node)
         and lane.target is aten.unsqueeze.default
@@ -385,7 +403,8 @@ def match_output_expansion(
         for lane in packed
     ):
         unsqueezes = cast("list[torch.fx.Node]", list(packed))
-        lanes, aliases = [node.args[0] for node in unsqueezes], [value, *unsqueezes]
+        lanes = [node.args[0] for node in unsqueezes]
+        aliases.extend((value, *unsqueezes))
     else:
         return None
     if not all(isinstance(node, torch.fx.Node) for node in lanes):
