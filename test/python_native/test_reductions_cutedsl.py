@@ -56,6 +56,11 @@ class TestCuTeDSLReductionWiring(TestCase):
             torch.prod,
             torch.argmax,
             torch.max,
+            torch.var,
+            torch.linalg.vector_norm,
+            torch.count_nonzero,
+            torch.var_mean,
+            torch.aminmax,
         ):
             with self.subTest(op=op):
                 self.assertEqual(self._fired_count(lambda: op(x, dim=-1)), 1)
@@ -88,9 +93,48 @@ class TestCuTeDSLReductionWiring(TestCase):
             lambda t: torch.sum(t, dim=-1),
             lambda t: torch.sum(t, dim=0),
             lambda t: torch.sum(t),  # reduce-ALL of a non-contiguous input
+            lambda t: torch.amax(t, dim=-1),
+            lambda t: torch.var(t, dim=-1),
+            lambda t: torch.argmax(t, dim=-1),
         ):
             with self.subTest(fn=fn):
                 self.assertEqual(self._fired_count(lambda: fn(xt)), 1)
+
+    @staticmethod
+    def _compiled_kernel_count():
+        from torch._native.ops.reductions import (
+            kernel_coltile,
+            kernel_general,
+            kernel_rowtile,
+            kernel_xcta,
+        )
+
+        caches = (
+            kernel_general._COMPILE_CACHE,
+            kernel_rowtile._CACHE,
+            kernel_coltile._CACHE,
+            kernel_xcta._PLAN,
+        )
+        return sum(len(cache) for cache in caches), caches
+
+    def test_kernel_count_does_not_scale_with_shape(self):
+        """Keep dynamic shape variation from causing unbounded kernel compilation."""
+        few = [4096, 4104]
+        many = [4096, 4104, 4112, 4120, 4128, 4136, 4144, 4152, 4160, 4168]
+
+        def run(sizes):
+            _, caches = self._compiled_kernel_count()
+            for cache in caches:
+                cache.clear()
+            for n in sizes:
+                x = torch.randn(512, n, device="cuda")
+                torch.sum(x, dim=-1)
+                torch.amax(x, dim=-1)
+                torch.sum(x, dim=0)
+            return self._compiled_kernel_count()[0]
+
+        few_count = run(few)
+        self.assertEqual(run(many), few_count)
 
     def test_scalar_falls_back(self):
         """Decline scalar input without dividing dimension indices by zero."""

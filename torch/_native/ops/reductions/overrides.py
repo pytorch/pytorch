@@ -120,13 +120,22 @@ _ENVELOPE = {
     "argmin": _NO_OUT_DTYPE,
     "max_dim": _NO_OUT_DTYPE,
     "min_dim": _NO_OUT_DTYPE,
+    "vnorm": _FLOAT_ONLY,
+    "var": _NO_OUT_DTYPE,
+    "std": _NO_OUT_DTYPE,
+    "var_mean": _NO_OUT_DTYPE,
+    "std_mean": _NO_OUT_DTYPE,
+    "all": _NO_OUT_DTYPE,
+    "any": _NO_OUT_DTYPE,
+    "cnz": _NO_OUT_DTYPE,
+    "aminmax": _NO_OUT_DTYPE,
 }
 
 _INDEX_KEYS = {"argmax", "argmin", "max_dim", "min_dim"}
 
 
 def _env(key: str) -> _Envelope:
-    return _ENVELOPE[key]
+    return _ENVELOPE["vnorm" if key.startswith("vnorm") else key]
 
 
 def _out_ok(key: str, dtype: torch.dtype | None) -> bool:
@@ -179,6 +188,19 @@ def _make_dtype_cond(key: str) -> Callable[..., bool]:
         dtype: torch.dtype | None = None,
     ) -> bool:
         return _base_cond(self, dim, key) and _out_ok(key, dtype)
+
+    return cond
+
+
+def _make_dof_cond(key: str) -> Callable[..., bool]:
+    def cond(
+        self: torch.Tensor,
+        dim: _Dim = None,
+        *,
+        correction: Any = None,
+        keepdim: bool = False,
+    ) -> bool:
+        return _base_cond(self, dim, key)
 
     return cond
 
@@ -326,6 +348,134 @@ _max_dim_impl = _make_index_impl(lambda: T.MaxDimOps, "max.dim", with_value=True
 _min_dim_impl = _make_index_impl(lambda: T.MinDimOps, "min.dim", with_value=True)
 
 
+def _correction(correction: Any) -> Any:
+    return 1 if correction is None else correction
+
+
+def _run_dim2_vals(
+    make_trait: Callable[[Any], Any],
+    key: str,
+    self: torch.Tensor,
+    dim: _Dim,
+    keepdim: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    red = _normalize_dims(dim, self.dim())
+    x = _kernel_input(self)
+    acc, _ = _acc_for(x)
+    dims = None if red is None else sorted(red)
+    o0, o1 = kg.reduce_dim2(make_trait(acc), key, x, dims, [self.dtype, self.dtype])
+    o0 = _keepdim_reshape(o0, self.shape, red, keepdim)
+    o1 = _keepdim_reshape(o1, self.shape, red, keepdim)
+    return o0, o1
+
+
+def _make_welford_impl(
+    key: str,
+    *,
+    take_sqrt: bool = False,
+    with_mean: bool = False,
+) -> Callable[..., _Result]:
+    def impl(
+        self: torch.Tensor,
+        dim: _Dim = None,
+        *,
+        correction: Any = None,
+        keepdim: bool = False,
+    ) -> _Result:
+        c = _correction(correction)
+        make_trait = lambda acc: (  # noqa: E731
+            T.VarMeanOps if with_mean else T.WelfordOps
+        )(correction=c, take_sqrt=take_sqrt, acc=acc)
+        if with_mean:
+            return _run_dim2_vals(
+                make_trait,
+                f"{key}mean{c}",
+                self,
+                dim,
+                keepdim,
+            )
+        return _run1(
+            make_trait,
+            f"{key}{c}",
+            self,
+            _normalize_dims(dim, self.dim()),
+            keepdim,
+            self.dtype,
+        )
+
+    return impl
+
+
+def _norm_trait(ord_val: Any) -> Callable[[Any], Any]:
+    if ord_val == float("inf"):
+        return lambda acc: T.AbsMaxOps(acc=acc)
+    if ord_val == float("-inf"):
+        return lambda acc: T.AbsMinOps(acc=acc)
+    return lambda acc: T.NormOps(float(ord_val), acc=acc)
+
+
+def _vector_norm_impl(
+    self: torch.Tensor,
+    ord: Any = 2,
+    dim: _Dim = None,
+    keepdim: bool = False,
+    *,
+    dtype: torch.dtype | None = None,
+) -> torch.Tensor:
+    return _run1(
+        _norm_trait(ord),
+        f"vnorm{ord}",
+        self,
+        _normalize_dims(dim, self.dim()),
+        keepdim,
+        _out_dtype(self, dtype),
+    )
+
+
+def _vector_norm_cond(
+    self: torch.Tensor,
+    ord: Any = 2,
+    dim: _Dim = None,
+    keepdim: bool = False,
+    *,
+    dtype: torch.dtype | None = None,
+) -> bool:
+    key = f"vnorm{ord}"
+    return ord != 0 and _base_cond(self, dim, key) and _out_ok(key, dtype)
+
+
+def _flag_out_dtype(
+    self: torch.Tensor, dtype: torch.dtype | None = None
+) -> torch.dtype:
+    return torch.bool
+
+
+_var_impl = _make_welford_impl("var")
+_std_impl = _make_welford_impl("std", take_sqrt=True)
+_var_mean_impl = _make_welford_impl("var", with_mean=True)
+_std_mean_impl = _make_welford_impl("std", take_sqrt=True, with_mean=True)
+_all_impl = _make_impl(
+    lambda: T.AllOps, "all", _flag_out_dtype, widen=False, canonical_bool=False
+)
+_any_impl = _make_impl(
+    lambda: T.AnyOps, "any", _flag_out_dtype, widen=False, canonical_bool=False
+)
+_count_nonzero_impl = _make_impl(
+    lambda: T.CountNonzeroOps,
+    "cnz",
+    lambda self, dtype: torch.int64,
+    canonical_bool=False,
+)
+
+
+def _aminmax_impl(
+    self: torch.Tensor, *, dim: int | None = None, keepdim: bool = False
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _run_dim2_vals(
+        lambda acc: T.AMinMaxOps(acc=acc), "aminmax", self, dim, keepdim
+    )
+
+
 def register_reduction_overrides() -> None:
     # cu.register_op_override is a no-op when the CuteDSL runtime is unavailable.
     overrides = (
@@ -338,6 +488,15 @@ def register_reduction_overrides() -> None:
         ("argmin", _make_cond("argmin"), _argmin_impl),
         ("max.dim", _make_cond("max_dim"), _max_dim_impl),
         ("min.dim", _make_cond("min_dim"), _min_dim_impl),
+        ("var.correction", _make_dof_cond("var"), _var_impl),
+        ("std.correction", _make_dof_cond("std"), _std_impl),
+        ("linalg_vector_norm", _vector_norm_cond, _vector_norm_impl),
+        ("all.dim", _make_cond("all"), _all_impl),
+        ("any.dim", _make_cond("any"), _any_impl),
+        ("count_nonzero.dim_IntList", _make_cond("cnz"), _count_nonzero_impl),
+        ("var_mean.correction", _make_dof_cond("var_mean"), _var_mean_impl),
+        ("std_mean.correction", _make_dof_cond("std_mean"), _std_mean_impl),
+        ("aminmax", _make_cond("aminmax"), _aminmax_impl),
     )
     for op, cond, impl in overrides:
         cu.register_op_override("aten", op, "CUDA", cond=cond, impl=impl)
