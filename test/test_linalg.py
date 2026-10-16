@@ -9710,6 +9710,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         last_row = causal_mask[-1]
         self.assertTrue((last_row == 0.0).all())
 
+    def test_triu_tril_out_noncontiguous_batch(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/200542
+        x = make_tensor((2, 3, 4, 4), dtype=torch.float32, device=device)
+        for fn in (torch.triu, torch.tril):
+            for k in (-1, 0, 1):
+                out = torch.zeros(3, 2, 4, 4, device=device).transpose(0, 1)
+                fn(x, k, out=out)
+                self.assertEqual(out, fn(x, k))
+
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_triu_tril_extreme_k_values(self, device, dtype):
         """
