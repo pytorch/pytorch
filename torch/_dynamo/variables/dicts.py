@@ -107,6 +107,39 @@ def _is_set_or_dictview(obj: VariableTracker) -> bool:
     return issubclass(t, (set, frozenset, dict_keys, dict_items))
 
 
+def dict_richcompare_impl(
+    tx: "InstructionTranslatorBase",
+    self: VariableTracker,
+    other: VariableTracker,
+    op: str,
+    ordered: bool,
+) -> VariableTracker:
+    """dict_richcompare.
+
+    https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
+    Only supports eq/ne; returns NotImplemented for ordering.  `ordered` is the
+    receiver's tp_richcompare: OrderedDict compares the two orderings, while the
+    unbound dict.__eq__ / dict.__ne__ always ignore them.
+    """
+    from .builder import SourcelessBuilder
+
+    if op not in ("__eq__", "__ne__"):
+        return ConstantVariable.create(NotImplemented)
+    # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
+    # This is correct because CPython's dict_equal operates on the
+    # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
+    # -- it never calls __getitem__ or __len__ on dict subclasses.
+    # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+    if not isinstance(other, ConstDictVariable):
+        return ConstantVariable.create(NotImplemented)
+    eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
+        tx, [self, other], {"ordered": ConstantVariable.create(ordered)}
+    )
+    if op == "__ne__":
+        return VariableTracker.build(tx, not eq_result.as_python_constant())
+    return eq_result
+
+
 class ConstDictVariable(VariableTracker):
     # PyDict_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4825
     _cpython_type = dict
@@ -852,25 +885,7 @@ class ConstDictVariable(VariableTracker):
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
-        # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
-        # Only supports eq/ne; returns NotImplemented for ordering.
-        from .builder import SourcelessBuilder
-
-        if op not in ("__eq__", "__ne__"):
-            return ConstantVariable.create(NotImplemented)
-        # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
-        # This is correct because CPython's dict_equal operates on the
-        # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
-        # -- it never calls __getitem__ or __len__ on dict subclasses.
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-        if not isinstance(other, ConstDictVariable):
-            return ConstantVariable.create(NotImplemented)
-        eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-            tx, [self, other], {}
-        )
-        if op == "__ne__":
-            return VariableTracker.build(tx, not eq_result.as_python_constant())
-        return eq_result
+        return dict_richcompare_impl(tx, self, other, op, ordered=False)
 
     def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         # DictGuardManager does not support getattr_manager for plain dicts,
@@ -914,6 +929,13 @@ class OrderedDictVariable(ConstDictVariable):
 
         self.items.move_to_end(HashableTracker(args[0]), last=last)
         return ConstantVariable.create(None)
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        # OrderedDict's tp_richcompare compares the two orderings.  dict.__eq__
+        # is not this slot, so _call_unbound_method calls dict_richcompare_impl.
+        return dict_richcompare_impl(tx, self, other, op, ordered=True)
 
     def popitem(
         self: "OrderedDictVariable",

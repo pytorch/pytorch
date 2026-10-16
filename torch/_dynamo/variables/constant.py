@@ -9,6 +9,7 @@ maintaining type safety through the compilation process.
 from __future__ import annotations
 
 import enum
+import math
 import operator
 from collections.abc import Iterable
 from typing import Any, cast, Literal, overload, TYPE_CHECKING
@@ -242,6 +243,11 @@ class ConstantVariable(VariableTracker):
         value_type = cast(Any, type(self.value))
         mro = value_type.__mro__
         base = next((c for c in mro if c in _CONSTANT_BASE_TYPES), value_type)
+        if isinstance(self.value, float) and math.isnan(self.value):
+            # float_hash hashes a NaN by address, so the value is not stable
+            # across processes/runs and must not escape into the graph.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/floatobject.c#L428
+            return hash(self.value), True
         return base.__hash__(self.value), False
 
     def tp_richcompare_impl(
