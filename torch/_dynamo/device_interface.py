@@ -880,6 +880,9 @@ def register_interface_for_device(
     from .variables.user_defined import UserDefinedClassVariable
 
     UserDefinedClassVariable._in_graph_classes.cache_clear()
+    from .device_trace_rules import register_device_trace_rules
+
+    register_device_trace_rules(device_interface)
 
 
 def get_interface_for_device(device: str | torch.device) -> type[DeviceInterface]:

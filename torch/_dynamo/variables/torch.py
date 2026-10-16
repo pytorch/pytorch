@@ -2979,11 +2979,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
+        from ..device_trace_rules import overridden_device_trace_fns
+
         @register(
-            torch.accelerator.current_stream,
-            torch.cuda.current_stream,
-            torch.mtia.current_stream,
-            torch.xpu.current_stream,
+            *dict.fromkeys(
+                [
+                    torch.accelerator.current_stream,
+                    *overridden_device_trace_fns("current_stream"),
+                ]
+            )
         )
         def handle_current_stream(
             self,
