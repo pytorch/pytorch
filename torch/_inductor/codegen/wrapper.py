@@ -1100,10 +1100,20 @@ def _coor_device_idx_ref(device_idx: int) -> int | str:
     return _COOR_DEVICE_IDX_VAR if _coor_enabled() else device_idx
 
 
+# Module globals that the generated wrapper binds the functions from
+# DeviceOpOverrides.device_exchange_functions() to.
+EXCHANGE_DEVICE = "_exchange_device"
+MAYBE_EXCHANGE_DEVICE = "_maybe_exchange_device"
+
+
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
     last_seen_device_guard_index: int | None
+    # Set when the device has exchange functions, which replace device_guard():
+    # the variable holding the previous device, which the matching
+    # ExitDeviceContextManagerLine restores. None means device_guard() is used.
+    prev_device_var: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
@@ -1141,18 +1151,33 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 )
             else:
                 idx = self.device_idx
-            code.writeline(f"with {V.graph.device_ops.device_guard(idx)}:")
-            code.do_indent()
-            code.writeline(V.graph.device_ops.set_device(idx))
+            if self.prev_device_var is not None:
+                # The exchange function also does set_device()'s work, so no
+                # set_device() line follows.
+                code.writeline(f"{self.prev_device_var} = {EXCHANGE_DEVICE}({idx})")
+                code.writeline("try:")
+                code.do_indent()
+            else:
+                code.writeline(f"with {V.graph.device_ops.device_guard(idx)}:")
+                code.do_indent()
+                code.writeline(V.graph.device_ops.set_device(idx))
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_device_context_manager
 
 
+@dataclasses.dataclass
 class ExitDeviceContextManagerLine(WrapperLine):
+    # The matching EnterDeviceContextManagerLine.prev_device_var.
+    prev_device_var: str | None = None
+
     def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
             code.do_unindent()
+            if self.prev_device_var is not None:
+                code.writeline("finally:")
+                with code.indent():
+                    code.writeline(f"{MAYBE_EXCHANGE_DEVICE}({self.prev_device_var})")
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_exit_device_context_manager
@@ -1489,11 +1514,6 @@ class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
     """
 
     num_streams: int = 1
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        """Generate context exit code."""
-        if not V.graph.cpp_wrapper:
-            code.do_unindent()
 
 
 @dataclasses.dataclass
@@ -2214,6 +2234,9 @@ class PythonWrapperCodegen(CodeGen):
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: int | None = None
+        # Number of device guards currently open. Guards can nest, so each level
+        # gets its own EnterDeviceContextManagerLine.prev_device_var.
+        self._device_guard_depth = 0
         # [device-as-parameter] CooR harness render mode, resolved once and cached:
         # None = unresolved, False = compile-on-one-rank off, else the current accelerator.
         self._coor_current_accelerator: torch.device | Literal[False] | None = None
@@ -2901,6 +2924,15 @@ class PythonWrapperCodegen(CodeGen):
         num_streams: int = 1,
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
+        exchange_fns = V.graph.device_ops.device_exchange_functions()
+        if exchange_fns is not None and not V.graph.cpp_wrapper:
+            # Bind the functions to module globals once, so call() does not look
+            # up torch._C attributes on every run.
+            for name, fn in zip((EXCHANGE_DEVICE, MAYBE_EXCHANGE_DEVICE), exchange_fns):
+                if not self.imports.contains(line := f"{name} = {fn}"):
+                    self.imports.writeline(line)
+        prev_device_var = self._device_guard_prev_var()
+        self._device_guard_depth += 1
         if num_streams > 1:
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
@@ -2916,15 +2948,18 @@ class PythonWrapperCodegen(CodeGen):
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
-                    num_streams,
-                    stream_idx_to_user_obj_idx,
+                    prev_device_var=prev_device_var,
+                    num_streams=num_streams,
+                    stream_idx_to_user_obj_idx=stream_idx_to_user_obj_idx,
                     setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
             self.writeline(
                 EnterDeviceContextManagerLine(
-                    device_idx, self.last_seen_device_guard_index
+                    device_idx,
+                    self.last_seen_device_guard_index,
+                    prev_device_var=prev_device_var,
                 )
             )
         if config.triton.autotune_at_compile_time:
@@ -2950,13 +2985,29 @@ class PythonWrapperCodegen(CodeGen):
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
 
+    def _device_guard_prev_var(self) -> str | None:
+        """Return the name of the variable that holds the previous device for
+        the innermost open device guard, or None if guards use device_guard()."""
+        if (
+            V.graph.cpp_wrapper
+            or V.graph.device_ops.device_exchange_functions() is None
+        ):
+            return None
+        return f"_prev_device_{self._device_guard_depth}"
+
     def codegen_device_guard_exit(self) -> None:
+        self._device_guard_depth -= 1
+        prev_device_var = self._device_guard_prev_var()
         if hasattr(self, "_num_streams") and self._num_streams > 1:
             self.writeline(
-                ExitDeviceContextManagerWithStreamInfoLine(self._num_streams)
+                ExitDeviceContextManagerWithStreamInfoLine(
+                    prev_device_var=prev_device_var, num_streams=self._num_streams
+                )
             )
         else:
-            self.writeline(ExitDeviceContextManagerLine())
+            self.writeline(
+                ExitDeviceContextManagerLine(prev_device_var=prev_device_var)
+            )
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.do_unindent()
 
