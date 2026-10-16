@@ -691,9 +691,7 @@ class AsyncCompile:
                     kernel.precompile(
                         warm_cache_only=False,
                         reload_kernel=reload_kernel_in_parent,
-                        static_triton_bundle_key=CompiledTritonKernels.key(
-                            source_code
-                        ),
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
                 except Exception as e:
                     if optional:
