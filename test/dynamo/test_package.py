@@ -95,6 +95,7 @@ def compiled_region_with_backend_id_for_package_test():
 
 PKG_SCALE = 3
 
+
 class UnpicklableConfig:
     # Like ConfigThatCannotPickle, but the failure is not an AttributeError.
     scale = 2.0
@@ -1508,6 +1509,20 @@ def entry(x):
         self.assertEqual(wrapper.__module__, "torch")
         package = self._round_trip_under_fail_on_recompile(wrapper, torch.randn(4))
         self.assertEqual(package.cache_entry().codes[0].python_module, __name__)
+
+    def test_package_keeps_an_entry_module_alias_that_owns_its_globals(self):
+        # A __module__ naming another sys.modules key for the same module (here
+        # an importable alias of this test module) is kept, not replaced by the
+        # globals' own __name__.
+        def entry(x):
+            return x.sin() + PKG_SCALE
+
+        alias = "test_package_entry_alias"
+        sys.modules[alias] = sys.modules[__name__]
+        self.addCleanup(sys.modules.pop, alias, None)
+        entry.__module__ = alias
+        package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
+        self.assertEqual(package.cache_entry().codes[0].python_module, alias)
 
     def test_package_records_a_renamed_module_under_its_spec_name(self):
         # A module that rebinds __name__ is still registered under its spec

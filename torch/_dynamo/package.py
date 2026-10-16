@@ -643,14 +643,19 @@ class _DynamoCodeCacheEntry:
     bypassed: bool = False
 
 
-def _globals_module_name(namespace: dict[str, Any]) -> str | None:
+def _globals_module_name(
+    namespace: dict[str, Any], preferred: str | None = None
+) -> str | None:
     """The ``sys.modules`` key of the module whose namespace IS ``namespace``.
 
     A file imported under two names is two modules sharing one file, and
     ``inspect.getmodule`` maps a code object to a module by its file, so it can
     answer with the other alias, whose globals and functions are not the frame's.
+    ``preferred`` is tried first, so a key that already names the owner (e.g. an
+    importable alias of ``__main__``) is kept.
     """
     for name in (
+        preferred,
         namespace.get("__name__"),
         getattr(namespace.get("__spec__"), "name", None),
     ):
@@ -1244,11 +1249,9 @@ class CompilePackage:
             # set would: the re-saved string is never below the loaded one.
             self._device_types = frozenset((dynamo.device_type,))
         else:
-            self._add_function(
-                self._innermost_fn.__code__,
-                _globals_module_name(self._innermost_fn.__globals__)
-                or self._innermost_fn.__module__,
-            )
+            fn = self._innermost_fn
+            module_name = _globals_module_name(fn.__globals__, fn.__module__)
+            self._add_function(fn.__code__, module_name or fn.__module__)
         self._initialized = True
 
     def _add_function(
