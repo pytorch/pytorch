@@ -1458,10 +1458,10 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         would let any bot that can label a pull request start the review.
         """
         review = strip_comments(job_block(STAGE2.read_text(), "review"))
-        step = next(s for s in review.split("- name:") if "claude_args:" in s)
-        inputs = "\n".join(with_block(step))
-        bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
-        self.assertEqual(bots, ['"pytorch-bot[bot]"'])
+        for step_id in MODEL_STEP_IDS:
+            inputs = "\n".join(with_block(model_step(review, step_id)))
+            bots = re.findall(r"(?m)^\s*allowed_bots:\s*(.*)$", inputs)
+            self.assertEqual(bots, ['"pytorch-bot[bot]"'], f"step {step_id}")
 
     def test_stage2_declares_exactly_the_three_jobs_that_were_reviewed(self):
         """Stage 1 pins its job set; Stage 2 did not.
@@ -1616,6 +1616,15 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             self.assertTrue(
                 (REPO / path).is_file(), f"the hash names a missing file: {path}"
             )
+        # Stage A may read any file of its pr-review copy, named in SKILL.md or
+        # not, so each must move the hash; and that copy is the trusted one.
+        skill = REPO / ".agents" / "skills" / "pr-review"
+        readable = {str(p.relative_to(REPO)) for p in skill.rglob("*") if p.is_file()}
+        self.assertLessEqual(readable, hashed, "a pr-review file is not hashed")
+        self.assertIn(
+            "cp -rT trusted/.agents/skills/pr-review ~/.claude/skills/pr-review",
+            model_step(strip_comments(self.review), "aprompt"),
+        )
 
     def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
         """RUN the step: naming a file is not hashing it, and four text pins
@@ -2618,12 +2627,6 @@ class TestReviewJobConfigDiscoveryIsClosed(unittest.TestCase):
                     "the empty form parses to a boolean and re-enables project/local",
                 )
 
-    def test_no_stage_takes_add_dir(self):
-        # Neither stage writes a file, so neither is given a directory outside
-        # its Read rules.
-        for step_id in MODEL_STEP_IDS:
-            self.assertNotIn("--add-dir", self._claude_args(step_id))
-
 
 class TestTheFindingsPathIsPinned(unittest.TestCase):
     """Every step that names the findings file must name one path."""
@@ -3196,18 +3199,15 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
                 self._check_token_inputs(step)
 
     def _check_token_inputs(self, step: str) -> None:
-        steps = [step]
-        # Stage A has no `settings:` (no hooks), so its inputs differ; the
-        # token pair below is the same in both.
         # allowed_non_write_users turns on a scrub that refuses to install
         # Claude Code without bubblewrap, which this sudo-less job cannot add.
         # In the step's `env:`, not `with:`, where it would be an unknown input.
-        env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", steps[0])
+        env = re.search(r"(?ms)^ {8}env:\s*\n(.*?)(?=^ {8}\S)", step)
         self.assertIsNotNone(env, "the claude step declares no env:")
         self.assertRegex(
             env.group(1), r'(?m)^ {10}CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "0"$'
         )
-        inputs = with_block(steps[0])
+        inputs = with_block(step)
         self.assertEqual(
             [ln.strip() for ln in inputs if re.match(r"\s*github_token\s*:", ln)],
             [self.ACTION_TOKEN_LINE.strip()],
@@ -4744,13 +4744,14 @@ class TestTheReviewModelIsNamedOnceAtTheTop(unittest.TestCase):
         review = strip_comments(job_block(self.text, "review"))
         # The action's INPUTS, via the same reader the checkout tests use, so
         # a `claude_args:` moved into the step's `env:` cannot stand in for it.
-        step = next(s for s in review.split("- name:") if "claude_args:" in s)
-        args = scalar_block("\n".join(with_block(step)), "claude_args")
-        self.assertRegex(
-            args,
-            r"--model\s+\$\{\{\s*env\.REVIEW_MODEL\s*\}\}",
-            "the review step does not take its model from REVIEW_MODEL",
-        )
+        for step_id in MODEL_STEP_IDS:
+            step = model_step(review, step_id)
+            args = scalar_block("\n".join(with_block(step)), "claude_args")
+            self.assertRegex(
+                args,
+                r"--model\s+\$\{\{\s*env\.REVIEW_MODEL\s*\}\}",
+                f"step {step_id} does not take its model from REVIEW_MODEL",
+            )
         # No second, literal id anywhere in the job — that is how the env var
         # ends up decorative while a stale id is what actually runs.
         leftovers = re.findall(r"global\.anthropic\.[\w.-]+", review)
@@ -5245,12 +5246,8 @@ def job_if(job: str) -> str:
 
 
 class TestStageBMapsPrReviewsReview(unittest.TestCase):
-    """Stage A runs pr-review; stage B maps its review to the findings file.
-
-    Each link is checked here, because a break in any one lets the published
-    verdict drift from what pr-review said, or lets the sanitizer refuse every
-    result.
-    """
+    """Stage B maps stage A's pr-review to the findings file. A broken link lets
+    the verdict drift from pr-review's, or the sanitizer refuse every result."""
 
     def setUp(self):
         self.review = strip_comments(job_block(STAGE2.read_text(), "review"))
@@ -5314,15 +5311,29 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         step = step[: step.index("\n      - name:")]
         self.assertIn("if: always() && steps.a.outputs.execution_file != ''", step)
 
-    def test_a_failed_stage_a_is_a_model_failure(self):
+    def test_the_first_step_that_did_not_succeed_decides_the_outcome(self):
+        # downgrade() records skipped and cancelled as `blocked`, anything else
+        # as `model_error`. In GitHub, `&&` and `||` return an operand.
         step = self.review[self.review.index("- name: Sanitize the verdict") :]
-        self.assertIn(
-            "CLAUDE_OUTCOME: ${{ steps.aprompt.outcome != 'success' && 'failure' "
-            "|| steps.a.outcome != 'success' && steps.a.outcome "
-            "|| steps.arev.outcome != 'success' && 'failure' "
-            "|| steps.claude.outcome }}",
-            step,
-        )
+        tree = parse_bool_expr(re.search(r"CLAUDE_OUTCOME: \$\{\{ (.+) \}\}", step)[1])
+
+        def value(node, o):
+            if node[0] == "atom" and node[1].startswith("'"):
+                return node[1].strip("'")
+            if node[0] == "atom":
+                m = re.fullmatch(r"steps\.(\w+)\.outcome( != 'success')?", node[1])
+                return o[m[1]] != "success" if m[2] else o[m[1]]
+            if node[0] == "not":
+                return not value(node[1], o)
+            lhs = value(node[1], o)
+            return value(node[2], o) if bool(lhs) == (node[0] == "and") else lhs
+
+        self.assertIs(value(parse_bool_expr("!steps.a.outcome"), {"a": "x"}), False)
+        ids = ("aprompt", "a", "arev", "claude")
+        outcomes = ("success", "failure", "cancelled", "skipped")
+        for combo in itertools.product(outcomes, repeat=len(ids)):
+            want = next((o for o in combo if o != "success"), "success")
+            self.assertEqual(value(tree, dict(zip(ids, combo))), want, combo)
 
 
 class TestStage2CannotBeTriggeredByALookalikeWorkflow(unittest.TestCase):
@@ -6416,9 +6427,7 @@ class TestStageAMatchesInteractivePrReview(unittest.TestCase):
         starts = [
             i for i, ln in enumerate(lines) if ln.strip() == "append_system_prompt: |"
         ]
-        self.assertEqual(
-            len(starts), 1, "premise changed: claude-code.yml append_system_prompt"
-        )
+        self.assertEqual(len(starts), 1, "premise changed: claude-code.yml prompt")
         indent = len(lines[starts[0]]) - len(lines[starts[0]].lstrip())
         first_paragraph = []
         for ln in lines[starts[0] + 1 :]:
@@ -6432,9 +6441,7 @@ class TestStageAMatchesInteractivePrReview(unittest.TestCase):
             r'(?m)^\s*APPEND_SYSTEM_PROMPT:\s*(".*")\s*$',
             model_step(STAGE2.read_text(), "a"),
         )
-        self.assertEqual(
-            len(values), 1, "premise changed: stage A APPEND_SYSTEM_PROMPT"
-        )
+        self.assertEqual(len(values), 1, "premise changed: APPEND_SYSTEM_PROMPT")
         stage_a = json.loads(values[0]).splitlines()
         for line in first_paragraph:
             if line not in INTERACTIVE_ONLY:
