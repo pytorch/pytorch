@@ -1862,6 +1862,57 @@ def entry(x):
         self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
         self.assertEqual(counter.frame_count, 0)
 
+    def test_skip_hold_transitions_report_guard_collective_skip(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+        from torch._dynamo.package import _update_skip_hold
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        # No tensor ops: the frame is recorded with no guarded code.
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(3)
+        dynamo = package.cache_entry()
+
+        torch._dynamo.reset()
+        package = CompilePackage(fn, dynamo)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=counter, package=package)(fn)
+        package.install({})
+        x = torch.ones(2)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        def reports():
+            guard_results.clear()
+            self.assertEqual(compiled_fn(x), x + 1)
+            return list(guard_results)
+
+        code = fn.__code__
+        old_hook = set_guard_complete_hook(record)
+        try:
+            _update_skip_hold(code, True, hold=True)
+            self.assertEqual(reports(), [GuardCollectiveState.SKIP])
+            # The recursive hold goes; the package's non-recursive one remains.
+            _update_skip_hold(code, True, hold=False)
+            self.assertEqual(reports(), [GuardCollectiveState.SKIP])
+            # A second package's non-recursive hold goes; the first remains.
+            _update_skip_hold(code, False, hold=True)
+            _update_skip_hold(code, False, hold=False)
+            self.assertEqual(reports(), [GuardCollectiveState.SKIP])
+            self.assertEqual(counter.frame_count, 0)
+            # The last hold goes: the frame compiles, with no entries to guard
+            # on yet, so it issues no collective.
+            package.uninstall()
+            self.assertEqual(reports(), [])
+            self.assertEqual(counter.frame_count, 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
         # active TracingContext (e.g. precompile warm-load). Reconstructing the
