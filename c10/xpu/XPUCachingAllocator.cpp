@@ -599,7 +599,10 @@ class RingBuffer {
 };
 
 static char SHAREABLE_HANDLE_VERSION = 1;
-enum ShareableHandleType : char { SHAREABLE_XPU_MALLOC = 'c' };
+enum ShareableHandleType : char {
+  SHAREABLE_XPU_MALLOC = 'c',
+  SHAREABLE_XPU_EXPANDABLE_SEGMENT = 'e'
+};
 
 struct BlockState {
   c10::DeviceIndex device = 0;
@@ -2266,27 +2269,32 @@ class DeviceCachingAllocator {
     std::ostringstream ss;
     ss.put(SHAREABLE_HANDLE_VERSION);
     ptrdiff_t offset = 0;
-    TORCH_CHECK(
-        !block->expandable_segment,
-        "expandable segments are not supported for IPC sharing.");
-    ss.put(SHAREABLE_XPU_MALLOC);
-    Block* base_block = block;
-    while (base_block->prev) {
-      base_block = base_block->prev;
+    if (!block->expandable_segment) {
+      ss.put(SHAREABLE_XPU_MALLOC);
+      Block* base_block = block;
+      while (base_block->prev) {
+        base_block = base_block->prev;
+      }
+      offset = static_cast<const char*>(block->ptr) -
+          static_cast<const char*>(base_block->ptr);
+      sycl::ext::oneapi::experimental::ipc_memory::handle handle =
+          sycl::ext::oneapi::experimental::ipc_memory::get(
+              base_block->ptr, c10::xpu::get_device_context());
+      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
+          handle.data();
+      TORCH_INTERNAL_ASSERT(
+          handle_data.size() <= std::numeric_limits<char>::max(),
+          "IPC handle size exceeds maximum allowed size.");
+      ss.put(static_cast<char>(handle_data.size()));
+      ss.write(
+          reinterpret_cast<const char*>(handle_data.data()),
+          handle_data.size());
+    } else {
+      ss.put(SHAREABLE_XPU_EXPANDABLE_SEGMENT);
+      auto full_range = block->expandable_segment->share(
+          SegmentRange(block->ptr, block->size), ss);
+      offset = static_cast<const char*>(block->ptr) - full_range.ptr;
     }
-    offset = static_cast<const char*>(block->ptr) -
-        static_cast<const char*>(base_block->ptr);
-    sycl::ext::oneapi::experimental::ipc_memory::handle handle =
-        sycl::ext::oneapi::experimental::ipc_memory::get(
-            base_block->ptr, c10::xpu::get_device_context());
-    sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data =
-        handle.data();
-    TORCH_INTERNAL_ASSERT(
-        handle_data.size() <= std::numeric_limits<char>::max(),
-        "IPC handle size exceeds maximum allowed size.");
-    ss.put(static_cast<char>(handle_data.size()));
-    ss.write(
-        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
     return ShareableHandle{.offset = offset, .handle = ss.str()};
   }
 
@@ -2404,20 +2412,26 @@ class NativeCachingAllocator : public XPUAllocator {
           version <= SHAREABLE_HANDLE_VERSION,
           "received sharable handle from a future version of torch that this version does not know how to handle.");
       int type = ss.get();
-      TORCH_CHECK(
-          type == SHAREABLE_XPU_MALLOC,
-          "unexpected or illformed shareable handle type.");
-      auto handle_size = static_cast<size_t>(ss.get());
-      sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
-          handle_size);
-      ss.read(
-          reinterpret_cast<char*>(handle_data.data()),
-          static_cast<std::streamsize>(handle_size));
 
-      xpu_ipc_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
-          handle_data,
-          c10::xpu::get_device_context(),
-          c10::xpu::get_raw_device(device));
+      if (type == SHAREABLE_XPU_MALLOC) {
+        auto handle_size = static_cast<size_t>(ss.get());
+        sycl::ext::oneapi::experimental::ipc_memory::handle_data_t handle_data(
+            handle_size);
+        ss.read(
+            reinterpret_cast<char*>(handle_data.data()),
+            static_cast<std::streamsize>(handle_size));
+
+        xpu_ipc_ptr = sycl::ext::oneapi::experimental::ipc_memory::open(
+            handle_data,
+            c10::xpu::get_device_context(),
+            c10::xpu::get_raw_device(device));
+      } else if (type == SHAREABLE_XPU_EXPANDABLE_SEGMENT) {
+        expandable_segment =
+            ExpandableSegment::fromShared(device, ss).release();
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "unexpected or illformed shareable handle type.");
+      }
     }
 
     // clear() must be called explicitly to release IPC resources. Using a
@@ -2429,19 +2443,30 @@ class NativeCachingAllocator : public XPUAllocator {
             xpu_ipc_ptr, c10::xpu::get_device_context());
         xpu_ipc_ptr = nullptr;
       }
+      if (expandable_segment) {
+        delete expandable_segment;
+        expandable_segment = nullptr;
+      }
     }
 
     void* ptr() {
-      return xpu_ipc_ptr;
+      if (xpu_ipc_ptr) {
+        return xpu_ipc_ptr;
+      } else {
+        return expandable_segment->ptr();
+      }
     }
 
     std::weak_ptr<void> wp;
 
    private:
     void* xpu_ipc_ptr{nullptr};
+    ExpandableSegment* expandable_segment{nullptr};
   };
   alignas(hardware_destructive_interference_size) std::mutex ipc_mutex;
-  ska::flat_hash_map<std::string, MemHandleCacheEntry> ipc_handle_cache;
+  using IpcCacheKey = std::pair<c10::DeviceIndex, std::string>;
+  ska::flat_hash_map<IpcCacheKey, MemHandleCacheEntry, c10::hash<IpcCacheKey>>
+      ipc_handle_cache;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -2720,9 +2745,11 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 
   std::shared_ptr<void> getIpcDevPtr(std::string handle) {
+    c10::DeviceIndex curr_device = c10::xpu::current_device();
+    IpcCacheKey key{curr_device, handle};
     std::lock_guard<std::mutex> lock(ipc_mutex);
 
-    auto iter = ipc_handle_cache.find(handle);
+    auto iter = ipc_handle_cache.find(key);
     if (iter != ipc_handle_cache.end()) {
       auto devptr = iter->second.wp.lock();
       TORCH_INTERNAL_ASSERT(
@@ -2730,14 +2757,13 @@ class NativeCachingAllocator : public XPUAllocator {
           "ipc_handle_cache entry found but shared_ptr already expired.");
       return devptr;
     }
-    c10::DeviceIndex curr_device = c10::xpu::current_device();
     auto inserted = ipc_handle_cache.insert(
-        iter, {handle, MemHandleCacheEntry(curr_device, handle)});
-    auto sp = std::shared_ptr<void>(
-        inserted->second.ptr(), [handle, this](void* ptr) {
+        iter, {key, MemHandleCacheEntry(curr_device, handle)});
+    auto sp =
+        std::shared_ptr<void>(inserted->second.ptr(), [key, this](void* ptr) {
           std::unique_lock<std::mutex> deleter_lock(ipc_mutex);
 
-          auto it = ipc_handle_cache.find(handle);
+          auto it = ipc_handle_cache.find(key);
           TORCH_INTERNAL_ASSERT(
               it != ipc_handle_cache.end(),
               "ipc_handle_cache entry not found in deleter.");
