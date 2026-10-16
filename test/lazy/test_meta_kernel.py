@@ -16,10 +16,10 @@ class TestMetaKernel(TestCase):
         input = torch.ones(2, 2, dtype=torch.float16).to("lazy")
         self.assertTrue(input.dtype == torch.float16)
 
-        fc_nobias = torch.nn.Linear(2, 2, bias=False, dtype=float32).to("lazy")
+        fc_bias = torch.nn.Linear(2, 2, bias=True, dtype=float32).to("lazy")
 
         with self.assertRaises(Exception):
-            fc_nobias(input)
+            fc_bias(input)
 
     def test_addmm(self):
         """Tests that the addmm meta kernel returns the correct output type"""
