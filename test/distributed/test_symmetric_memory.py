@@ -2176,6 +2176,66 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
+class SymmMemExportCleanupTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @requires_cuda
+    @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported")
+    def test_rejected_rendezvous_closes_exported_descriptor(self) -> None:
+        import gc
+        from datetime import timedelta
+
+        if not dist.is_gloo_available() or not os.path.isdir("/proc/self/fd"):
+            self.skipTest("Gloo and Linux descriptor inventory required")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TORCH_SYMMMEM": "CUDA",
+                "TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES": "0",
+                "TORCH_SYMM_MEM_DISABLE_MULTICAST": "1",
+            },
+        ):
+            torch.cuda.set_device(0)
+            dist.init_process_group(
+                "gloo",
+                store=dist.FileStore(self.file_name, self.world_size),
+                rank=self.rank,
+                world_size=self.world_size,
+                timeout=timedelta(seconds=30),
+            )
+            try:
+                group = dist.group.WORLD.group_name
+
+                def rejected_cycle():
+                    tensor = _SymmetricMemory.empty_strided_p2p(
+                        (1024,), (1,), torch.float32, torch.device("cuda", 0)
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError, "detected allocations from overlapping devices"
+                    ):
+                        _SymmetricMemory.rendezvous(tensor, group)
+                    del tensor
+                    gc.collect()
+                    torch.cuda.synchronize(0)
+                    dist.barrier()
+
+                rejected_cycle()
+                baseline = len(os.listdir("/proc/self/fd"))
+                dist.barrier()
+                for _ in range(3):
+                    rejected_cycle()
+                    self.assertEqual(len(os.listdir("/proc/self/fd")), baseline)
+                    dist.barrier()
+            finally:
+                dist.destroy_process_group()
+
+
 # This Test class is used to test the error handling of SymmetricMemory APIs.
 # Since a process restart is often needed after each test, we use the
 # MultiProcessTestCase instead of MultiProcContinuousTest.
@@ -3397,7 +3457,61 @@ class LoweringTest(MultiProcContinuousTest):
 
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
 class SymmMemCleanupTest(TestCase):
-    def _run_cleanup(self, device, backend, body):
+    @parametrize("retain_handle", [False, True])
+    def test_cuda_peer_pointer_tables_cleanup(self, device, retain_handle):
+        if torch.cuda.memory.get_allocator_backend() != "native":
+            self.skipTest("allocation counts require the native caching allocator")
+        self._run_cleanup(
+            device,
+            "CUDA",
+            f"""
+            test.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+            dist.init_process_group(
+                "gloo", store=dist.HashStore(), rank=0, world_size=1
+            )
+            group_name = dist.group.WORLD.group_name
+            warm_handle = _SymmetricMemory.rendezvous(tensor, group_name)
+            del warm_handle, tensor
+            torch.cuda.synchronize(device)
+            baseline = torch.cuda.memory_stats(device)["allocation.all.current"]
+            for _ in range(3):
+                tensor = _SymmetricMemory.empty_strided_p2p(
+                    (1024,), (1,), torch.float32, device
+                )
+                handles = [
+                    _SymmetricMemory.rendezvous(tensor, group_name),
+                    _SymmetricMemory.rendezvous(tensor, group_name),
+                ]
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline + 2,
+                )
+                if {retain_handle!r}:
+                    del tensor
+                    del handles[0]
+                else:
+                    del handles
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline + 2,
+                )
+                if {retain_handle!r}:
+                    del handles
+                else:
+                    del tensor
+                torch.cuda.synchronize(device)
+                test.assertEqual(
+                    torch.cuda.memory_stats(device)["allocation.all.current"],
+                    baseline,
+                )
+            dist.destroy_process_group()
+            """,
+            env_overrides={"TORCH_SYMM_MEM_DISABLE_MULTICAST": "1"},
+        )
+
+    def _run_cleanup(self, device, backend, body, env_overrides=None):
         if backend == "NCCL" and (
             not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
         ):
@@ -3417,7 +3531,12 @@ if {backend!r} == "NVSHMEM":
     dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
 tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device)
 """
-        env = {**os.environ, "TORCH_SYMMMEM": backend, "CUDA_LAUNCH_BLOCKING": "0"}
+        env = {
+            **os.environ,
+            "TORCH_SYMMMEM": backend,
+            "CUDA_LAUNCH_BLOCKING": "0",
+            **(env_overrides or {}),
+        }
         result = subprocess.run(
             [sys.executable, "-c", script + textwrap.dedent(body)],
             env=env,
