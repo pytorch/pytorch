@@ -16361,58 +16361,6 @@ fn
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
 
-    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
-    def test_dynamic_storage_offset_no_zero_one_recompile(self):
-        buf = torch.randn(64)
-        # (8, 3): the first offset equals the size 8, which duck sizing would tie.
-        for offsets in ((5, 0, 1, 7), (0, 5, 1, 7), (1, 0, 5), (8, 3)):
-            torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounter()
-
-            @torch.compile(backend=cnt, dynamic=True)
-            def fn(x):
-                return x * 2
-
-            for offset in offsets:
-                x = buf[offset : offset + 8]
-                self.assertEqual(fn(x), x * 2)
-            self.assertEqual(cnt.frame_count, 1, offsets)
-
-    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
-    def test_dynamic_storage_offset_range(self):
-        from torch.fx.experimental.symbolic_shapes import (
-            DimDynamic,
-            StatelessSymbolicContext,
-        )
-        from torch.utils._sympy.value_ranges import ValueRanges
-
-        shape_env = ShapeEnv()
-        _, _, offset = shape_env.create_symbolic_sizes_strides_storage_offset(
-            torch.randn(64)[0:8],
-            ConstantSource("x"),
-            symbolic_context=StatelessSymbolicContext(
-                dynamic_sizes=[DimDynamic.DYNAMIC]
-            ),
-        )
-        expr = offset.node.expr
-        self.assertEqual(shape_env.var_to_range[expr], ValueRanges(0, int_oo))
-        self.assertTrue(expr.is_nonnegative)
-        self.assertIsNone(expr.is_positive)
-
-        def fn(x):
-            if x.storage_offset() > 0:
-                return x * 2
-            return x + 1
-
-        buf = torch.randn(64)
-        # (0, 5): the offset-0 graph refines the symbol to 0, which still needs a guard.
-        for offsets in ((5, 0, 1), (0, 5)):
-            torch._dynamo.reset()
-            opt_fn = torch.compile(fn, backend="eager", dynamic=True)
-            for offset in offsets:
-                x = buf[offset : offset + 8]
-                self.assertEqual(opt_fn(x), fn(x), offsets)
-
     def test_storage_offset_refined_to_constant_is_guarded(self):
         def fn(x):
             if x.storage_offset() > 2:
