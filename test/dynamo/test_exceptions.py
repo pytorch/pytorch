@@ -19,8 +19,8 @@ from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDiverge
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     disable_gc,
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
