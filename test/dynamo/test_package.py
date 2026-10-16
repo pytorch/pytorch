@@ -310,6 +310,16 @@ class PkgLogger:
 
 PKG_LOGGER = PkgLogger()
 
+PKG_FACTOR_SCOPE = {"factor": 3}
+exec("def scale(self, x):\n    return x * factor\n", PKG_FACTOR_SCOPE)
+
+
+class PkgScaler:
+    scale = PKG_FACTOR_SCOPE["scale"]
+
+
+PKG_SCALER = PkgScaler()
+
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -1022,6 +1032,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertTrue(pinned_ids)
 
         torch._dynamo.reset()
+        live = {name: fn.__globals__[name] for name in names}
         package, backends = ctx.load_package(fn, self.path())
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
@@ -1029,13 +1040,14 @@ print(eval(f"bbmod.{name}.{path}") is code)
         gc.collect()
 
         self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
-        self.assertLessEqual(names, fn.__globals__.keys())
+        for name in names:
+            self.assertIs(fn.__globals__[name], live[name])
         x = torch.randn(4)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), fn(x))
+        # Taken over from the hook, so nothing would drop it if uninstall() didn't.
         package.uninstall()
-        for name in names:
-            fn.__globals__.pop(name, None)
+        self.assertFalse(names & fn.__globals__.keys())
 
     def test_install_leaves_unbound_the_unnamed_scope_globals_the_bytecode_reads(self):
         # The artifact holds the guard pickler's copy of the namespace, so a
@@ -1063,6 +1075,33 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package.uninstall()
         for name in names:
             scope.pop(name, None)
+
+    def test_install_leaves_unbound_the_unnamed_scope_globals_with_value_guards(self):
+        # EQUALS_MATCH on factor would check the artifact's frozen copy, so a
+        # seeded key would keep serving x * 3 after the namespace moved on.
+        def fn(x):
+            return PKG_SCALER.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        torch._dynamo.reset()
+        scope = fn.__globals__
+        for name in names:
+            scope.pop(name, None)
+
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.assertFalse(names & scope.keys())
+        x = torch.randn(4)
+        PKG_FACTOR_SCOPE["factor"] = 5
+        try:
+            self.assertEqual(compiled_fn(x), x.sin() * 5)
+        finally:
+            PKG_FACTOR_SCOPE["factor"] = 3
+            package.uninstall()
+            for name in names:
+                scope.pop(name, None)
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
