@@ -332,11 +332,13 @@ def require_tma_loadable_tile_captures(
 
     A tile load needs a 16-byte aligned base, one unit-stride matrix dim, and aligned outer strides;
     an interleaved load pairs adjacent N columns, so it must be N-major. Views
-    such as ``h.view(m, n, 2)[..., 0]`` have neither, so they are copied to a
+    such as ``h.view(m, n, 2)[..., 0]`` lack a unit-stride matrix dim and are copied to a
     contiguous layout here instead of failing QuACK's launch-time stride check.
     The copy's row stride is padded to the alignment, so an unaligned N (a bf16
     ``[m, 12]`` tile) stays loadable.
-    Row-strided views such as ``h[:, :n]`` already qualify and load in place.
+    Row-strided views such as ``h[:, :n]`` load in place when their base and row stride
+    are aligned. Unknown producer layouts are constrained to padded strides; symbolic
+    layouts can specialize on stride divisibility.
     """
     from torch._inductor.virtualized import V
 
@@ -359,11 +361,8 @@ def require_tma_loadable_tile_captures(
     out = []
     for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True):
         alignment = max(16 // arg.get_dtype().itemsize, 1)
-        if kind in unit_dims and arg.maybe_get_stride() is not None:
-            if not sizevars.statically_known_multiple_of(
-                arg.get_layout().offset, alignment
-            ):
-                arg = ir.ExternKernel.copy_input(arg)
+        if kind in unit_dims and ir.is_unaligned(arg):
+            arg = ir.ExternKernel.copy_input(arg)
         if kind in unit_dims and not loadable(arg, unit_dims[kind], alignment):
             *outer, n = arg.get_size()
             padded = [*outer, ceildiv(n, alignment) * alignment]
