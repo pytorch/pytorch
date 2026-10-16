@@ -17,7 +17,7 @@ import torch._prims as prims
 import torch.utils._pytree as pytree
 from torch._prims.context import TorchRefsMode
 from torch._prims_common.wrappers import _maybe_remove_out_wrapper
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch._subclasses.fake_utils import outputs_alias_inputs
 from torch.fx.experimental.symbolic_shapes import (
     constrain_range,
@@ -68,7 +68,6 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_S390X,
     IS_SANDCASTLE,
-    MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -561,14 +560,14 @@ class TestCommon(TestCase):
                 continue
 
             if isinstance(result, torch.Tensor):
-                self.assertTrue(isinstance(meta_result, FakeTensor))
+                self.assertTrue(is_fake_tensor(meta_result))
                 prims.utils.compare_tensor_meta(
                     result, meta_result, check_conj=op.op not in CHECK_CONJ_SKIPS
                 )
             elif isinstance(result, Sequence):
                 for a, b in zip(result, meta_result):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
-                        self.assertTrue(isinstance(b, FakeTensor))
+                        self.assertTrue(is_fake_tensor(b))
                         prims.utils.compare_tensor_meta(
                             a, b, check_conj=op.op not in CHECK_CONJ_SKIPS
                         )
@@ -2836,6 +2835,13 @@ fake_autocast_device_skips = defaultdict(dict)
 fake_autocast_device_skips["cpu"] = {"linalg.pinv"}
 fake_autocast_device_skips["cuda"] = {"linalg.pinv", "pinverse"}
 fake_autocast_device_skips["xpu"] = {"linalg.pinv", "pinverse"}
+fake_autocast_device_skips["mps"] = {"linalg.pinv", "pinverse"}
+
+fake_mps_xfails = {
+    xfail("_native_batch_norm_legit", device_type="mps"),
+    # sample inputs call linalg.ldl_factor_ex, which is not implemented on MPS
+    xfail("linalg.ldl_solve", device_type="mps"),
+}
 
 
 dynamic_output_op_tests = (
@@ -2894,6 +2900,52 @@ fake_autocast_backward_xfails = {
     skip("linalg.pinv", "hermitian"),
     skip("linalg.pinv", "singular"),
     skip("pinverse"),
+}
+
+# TODO: triage. Most of these ops are either not implemented on MPS or need float64;
+# the rest are real meta vs. MPS mismatches (batch_norm, embedding_bag, linear,
+# max_unpool2d).
+fake_backward_mps_xfails = {
+    xfail(name, variant, device_type="mps")
+    for name, variant in (
+        ("_native_batch_norm_legit", ""),
+        ("_segment_reduce", "lengths"),
+        ("_segment_reduce", "offsets"),
+        ("cdouble", ""),
+        ("double", ""),
+        ("float_power", ""),
+        ("linalg.eig", ""),
+        ("linalg.eigvals", ""),
+        ("linalg.matrix_sqrth", ""),
+        ("mode", ""),
+        ("native_batch_norm", ""),
+        ("nn.functional.adaptive_avg_pool1d", ""),
+        ("nn.functional.adaptive_avg_pool2d", ""),
+        ("nn.functional.adaptive_avg_pool3d", ""),
+        ("nn.functional.adaptive_max_pool3d", ""),
+        ("nn.functional.batch_norm", ""),
+        ("nn.functional.channel_shuffle", ""),
+        ("nn.functional.embedding_bag", ""),
+        ("nn.functional.fractional_max_pool2d", ""),
+        ("nn.functional.fractional_max_pool3d", ""),
+        ("nn.functional.grid_sample", ""),
+        ("nn.functional.interpolate", "area"),
+        ("nn.functional.linear", ""),
+        ("nn.functional.linear_cross_entropy", ""),
+        ("nn.functional.linear_cross_entropy", "chunked"),
+        ("nn.functional.linear_cross_entropy", "chunked_none"),
+        ("nn.functional.max_unpool2d", ""),
+        ("nn.functional.max_unpool2d", "grad"),
+        ("nn.functional.multi_margin_loss", ""),
+        ("nn.functional.multilabel_margin_loss", ""),
+        ("nn.functional.pdist", ""),
+        ("nn.functional.rrelu", ""),
+        ("normal", "number_mean"),
+        ("ormqr", ""),
+        ("special.log_ndtr", ""),
+        ("special.ndtri", ""),
+        ("to", ""),
+    )
 }
 
 
@@ -2970,7 +3022,7 @@ class TestFakeTensor(TestCase):
                             self.assertEqual(fake_out, real_out)
                             continue
 
-                        self.assertTrue(isinstance(fake_out, FakeTensor))
+                        self.assertTrue(is_fake_tensor(fake_out))
                         # if you see a shape exception here, you may need to add
                         # a `dynamic_output_shape` tag to an operator
 
@@ -3022,7 +3074,12 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
-    @skipOps({skip("bmm", variant_name="triton_optimized")})
+    @skipOps(
+        {
+            skip("bmm", variant_name="triton_optimized"),
+            xfail("linalg.ldl_solve", device_type="mps"),
+        }
+    )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -3082,6 +3139,7 @@ class TestFakeTensor(TestCase):
             skip("native_batch_norm"),
             skip("bmm", variant_name="triton_optimized"),
         }
+        | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
@@ -3093,6 +3151,7 @@ class TestFakeTensor(TestCase):
             skip("native_batch_norm"),
             skip("bmm", variant_name="triton_optimized"),
         }
+        | fake_mps_xfails
     )
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_fake_autocast(self, device, dtype, op):
@@ -3106,9 +3165,6 @@ class TestFakeTensor(TestCase):
         self._test_fake_helper(device, dtype, op, context_fn)
 
     def _test_fake_crossref_helper(self, device, dtype, op, context):
-        if "xpu" in device and ("fft" in op.name):
-            self.skipTest("Skip on XPU for torch-xpu-ops/issues/3599")
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
@@ -3145,13 +3201,17 @@ class TestFakeTensor(TestCase):
 
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(fake_backward_xfails | {skip("sparse.sampled_addmm")})
+    @skipOps(
+        fake_backward_xfails | fake_backward_mps_xfails | {skip("sparse.sampled_addmm")}
+    )
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps(fake_backward_xfails | fake_autocast_backward_xfails)
+    @skipOps(
+        fake_backward_xfails | fake_autocast_backward_xfails | fake_backward_mps_xfails
+    )
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(
             device, dtype, op, partial(torch.amp.autocast, device_type=device)
@@ -3210,13 +3270,11 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
-instantiate_device_type_tests(
-    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
-)
+instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestTags, globals(), only_for="cpu")
 instantiate_device_type_tests(TestForwardADWithScalars, globals(), allow_xpu=True)
 

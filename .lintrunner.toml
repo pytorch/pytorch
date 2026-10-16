@@ -100,6 +100,7 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
     'aten/src/ATen/dlpack.h',
+    'torch/csrc/profiler/kineto/libkineto/third_party/**',
 ]
 init_command = [
     'python3',
@@ -224,6 +225,13 @@ exclude_patterns = [
     'c10/test/**/*.h',
     'c10/test/**/*.cpp',
     'third_party/**/*',
+    'torch/csrc/profiler/kineto/benchmarks/**',
+    'torch/csrc/profiler/kineto/libkineto/stress_test/**',
+    'torch/csrc/profiler/kineto/libkineto/test/**',
+    'torch/csrc/profiler/kineto/libkineto/third_party/**',
+    # Need ROCm/XPU SDK headers, which the lint image doesn't have
+    'torch/csrc/profiler/kineto/libkineto/src/Roc*',
+    'torch/csrc/profiler/kineto/libkineto/src/plugin/xpupti/**',
     'torch/csrc/distributed/**/*.cu',
     'torch/csrc/distributed/c10d/WinSockUtils.hpp',
     'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
@@ -458,6 +466,10 @@ exclude_patterns=[
     '**/*.ps1',
     '**/*.ptl',
     'fb/**',
+    # Directory paths, not files: the .claude/skills symlink, and .agents/skills
+    # when a diff replaces that path's earlier symlink. Files are linted below them.
+    '.claude/skills',
+    '.agents/skills',
     '**/fb/**',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -600,6 +612,7 @@ exclude_patterns = [
     'c10/util/flat_hash_map.h',  # skarupke/flat_hash_map
     'third_party/concurrentqueue/**',
     'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
+    'torch/csrc/profiler/kineto/libkineto/third_party/**',
     'third_party/perfetto/sdk/**',  # amalgamated perfetto SDK
     # Fork of flat_hash_map. Also: at()'s out_of_range becomes KeyError in
     # jit/python/python_dict.cpp, so converting it breaks TorchScript dicts.
@@ -638,6 +651,8 @@ exclude_patterns = [
     '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
+    # TODO: use full <torch/csrc/profiler/kineto/...> includes
+    'torch/csrc/profiler/kineto/**',
 ]
 command = [
     'python3',
@@ -821,6 +836,10 @@ exclude_patterns = [
     '**/gradlew',
     'fb/**',
     '**/fb/**',
+    # Directory paths, not files: the .claude/skills symlink, and .agents/skills
+    # when a diff replaces that path's earlier symlink. Files are linted below them.
+    '.claude/skills',
+    '.agents/skills',
 ]
 command = [
     'python3',
@@ -918,7 +937,6 @@ include_patterns = [
 # therefore are permitted to use logging
 exclude_patterns = [
     'tools/**',
-    'third_party/kineto/tools/**',  # copies of tools/linter, excluded above
     'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
@@ -1170,6 +1188,7 @@ include_patterns = [
 exclude_patterns = [
     'c10/util/CallOnce.h',
     '**/fb/**',
+    'torch/csrc/profiler/kineto/**',  # Kineto doesn't depend on c10
 ]
 command = [
     'python3',
@@ -1215,6 +1234,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/csrc/profiler/kineto/**',  # Kineto doesn't depend on c10
 ]
 command = [
     'python3',
@@ -1289,6 +1309,7 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'third_party/**',
+    'torch/csrc/profiler/kineto/libkineto/third_party/**',
     'test/cpython/**',
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
@@ -2129,4 +2150,17 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'TEST_LINTER'
+include_patterns = [
+    'test/**/*.py',
+    'tools/linter/adapters/test_linter_allowlist.json',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/test_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]

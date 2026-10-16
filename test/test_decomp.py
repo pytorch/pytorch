@@ -18,6 +18,7 @@ from torch._decomp import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
+from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
@@ -33,6 +34,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     is_iterable_of_tensors,
     run_tests,
     skipIfCrossRef,
@@ -576,6 +578,7 @@ comprehensive_failures = {
 
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     longMessage = True
 
     # NB: This actually overlaps with test_comprehensive, but it only
@@ -754,6 +757,38 @@ class TestDecomp(TestCase):
             input, weight, bias, mean, var, False, 1, 1e-05
         )
         self.assertEqual(shape, res[0].shape)
+
+    @onlyCPU
+    def test_log_sigmoid_forward_buffer_shape(self, device):
+        # The buffer output of aten.log_sigmoid_forward is only consumed by the
+        # CPU backward kernel (log_sigmoid_backward_cpu); the accelerator
+        # forward kernels (log_sigmoid_forward_{cuda,mps}, and the registered
+        # PrivateUse1 backend) allocate an empty (0,) buffer and ignore it. The
+        # decomposition used for FakeTensor shape inference must match the real
+        # kernels, otherwise torch.compile/export raise a MetadataMismatchError
+        # (see log_sigmoid_forward in torch/_decomp/decompositions.py). The
+        # assertions pivot on fake/meta devices and are independent of the
+        # injected `device`.
+        with FakeTensorMode():
+            # Resolved at runtime so renamed PrivateUse1 trees (e.g. npu) are
+            # covered too; the explicit :0 index skips _pin_device_index,
+            # which would getattr(torch, "privateuseone") and fail on trees
+            # where the backend module is absent.
+            privateuse1 = torch._C._get_privateuse1_backend_name()
+            for fake_device, expected_shape in (
+                ("cpu", (3,)),
+                ("cuda", (0,)),
+                ("mps", (0,)),
+                (f"{privateuse1}:0", (0,)),
+            ):
+                _, buffer = torch.ops.aten.log_sigmoid_forward(
+                    torch.randn(3, device=fake_device)
+                )
+                self.assertEqual(buffer.shape, torch.Size(expected_shape))
+        # Meta tensors follow the CPU branch: this op has no Meta kernel, so
+        # the decomposition defines its meta behavior.
+        _, buffer = torch.ops.aten.log_sigmoid_forward(torch.randn(3, device="meta"))
+        self.assertEqual(buffer.shape, torch.Size([3]))
 
     def test_batch_norm_eval_emits_rsqrt(self, device):
         # The eval/inference branch of native_batch_norm_helper computes the
@@ -1178,6 +1213,8 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
@@ -1318,6 +1355,28 @@ class DecompOneOffTests(TestCase):
             torch.ops.aten._weight_norm_interface(inp, inp2),
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
+
+        # 1-D v: norm is the per-element abs, kept in float for reduced dtypes.
+        # |v| is bounded away from zero so g / norm cannot overflow in half.
+        for dtype in (torch.float, torch.half, torch.bfloat16):
+            v1d = torch.linspace(-3, 3, 30, device=device, dtype=dtype)
+            g1d = torch.randn(30, device=device, dtype=dtype)
+            self.assertEqual(
+                torch.ops.aten._weight_norm_interface(v1d, g1d),
+                torch._decomp.decompositions._weight_norm_interface(v1d, g1d),
+            )
+
+        # rank-2 reduced dtypes: the norm is kept in float. The decomposition
+        # rounds g / norm and the product separately, so allow a few ulps.
+        for dtype in (torch.half, torch.bfloat16):
+            v2d = torch.randn(30, 10, device=device, dtype=dtype)
+            g2d = torch.randn(30, 1, device=device, dtype=dtype)
+            self.assertEqual(
+                torch.ops.aten._weight_norm_interface(v2d, g2d),
+                torch._decomp.decompositions._weight_norm_interface(v2d, g2d),
+                atol=1e-2,
+                rtol=1e-2,
+            )
 
     @onlyCUDA
     @skipIfCrossRef
@@ -1583,6 +1642,8 @@ instantiate_device_type_tests(DecompOneOffTests, globals())
 
 
 class HasDecompTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.maxDiff = None
