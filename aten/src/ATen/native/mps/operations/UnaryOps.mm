@@ -30,9 +30,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
-#include <ATen/ops/sgn_native.h>
-#include <ATen/ops/sign_mps_dispatch.h>
-#include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh_native.h>
@@ -93,12 +90,6 @@ static void unary_op(const Tensor& self,
   unary_op_noresize(self, output_, op_name, unaryBlock);
 }
 
-static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-  auto squares = [mpsGraph squareWithTensor:inputTensor name:nil];
-  auto sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
-  return [mpsGraph squareRootWithTensor:sumSquares name:nil];
-}
-
 } // namespace mps
 
 TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
@@ -113,19 +104,6 @@ TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
       output = [mpsGraph signbitWithTensor:inputTensor name:nil];
     }
     return mps::castMPSTensor(mpsGraph, output, ScalarType::Bool);
-  });
-}
-
-TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "sign_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    // Sign op is not implemented in MPS as of MacOS13.0 beta, so simulate it using clamp
-    if ([inputTensor dataType] == MPSDataTypeInt64) {
-      return [mpsGraph clampWithTensor:inputTensor
-                        minValueTensor:[mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt64]
-                        maxValueTensor:[mpsGraph constantWithScalar:1 dataType:MPSDataTypeInt64]
-                                  name:nil];
-    }
-    return [mpsGraph signWithTensor:inputTensor name:nil];
   });
 }
 
@@ -265,30 +243,6 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD);
-}
-
-TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
-  if (!self.is_complex()) {
-    at::mps::sign_outf(self, const_cast<Tensor&>(output));
-    return;
-  }
-
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
-  }
-
-  Tensor realInput = at::view_as_real(self);
-  Tensor realOutput = at::view_as_real(output);
-
-  auto complex_sgn_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> MPSGraphTensor* {
-    MPSGraphTensor* norm = mps::lengthOfComplexAsReal(mpsGraph, inputTensor);
-    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:norm.dataType];
-    MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:norm secondaryTensor:zero name:nil];
-    MPSGraphTensor* sgnTensor = [mpsGraph divisionWithPrimaryTensor:inputTensor secondaryTensor:norm name:nil];
-    return [mpsGraph selectWithPredicateTensor:isZero truePredicateTensor:zero falsePredicateTensor:sgnTensor name:nil];
-  };
-
-  mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
 }
 
 } // namespace at::native
