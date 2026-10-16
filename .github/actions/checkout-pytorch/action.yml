@@ -80,7 +80,8 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         single-branch: true
         fetch-tags: ${{ github.ref_type == 'tag' }}
-        submodules: ${{ inputs.submodules }}
+        # Recursive submodules are fetched by the "Fetch submodules" step below.
+        submodules: ${{ inputs.submodules != 'recursive' && inputs.submodules || 'false' }}
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
@@ -132,9 +133,17 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         single-branch: true
         fetch-tags: ${{ github.ref_type == 'tag' }}
-        submodules: ${{ inputs.submodules }}
+        # Recursive submodules are fetched by the "Fetch submodules" step below.
+        submodules: ${{ inputs.submodules != 'recursive' && inputs.submodules || 'false' }}
         show-progress: false
         filter: ${{ env.filter }}
         submodules-filter: ${{ env.filter }}
         sparse-checkout: ${{ inputs.sparse-checkout }}
         sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
+
+    - name: Fetch submodules
+      if: ${{ inputs.submodules == 'recursive' }}
+      shell: bash
+      env:
+        FILTER: ${{ inputs.checkout-mode == 'blobless' && 'blob:none' || inputs.checkout-mode == 'treeless' && 'tree:0' || '' }}
+      run: bash "${{ github.action_path }}/fetch-submodules.sh" "${FILTER}" "${{ inputs.fetch-depth }}"
