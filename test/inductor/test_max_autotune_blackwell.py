@@ -36,6 +36,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -181,6 +182,37 @@ class TestMaxAutotuneBlackwell(TestCase):
                 code[0]
             )
             FileCheck().check("tl.make_tensor_descriptor(out_ptr0").run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @largeTensorTest("20 GB", device=GPU_TYPE)
+    def test_blackwell_mm_tma_store_large_output_int64_indexing(self):
+        """An output past 2^31 elements makes the kernel index in int64; the
+        Blackwell template must still be offered with its TMA store."""
+        M, N, K = 5592406, 384, 128
+        self.assertGreater(M * N, 2**31 - 1)
+        # Entries in {-1, 0, 1} keep every partial sum exact, so any config must match bitwise.
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE, dtype=torch.int8).bfloat16()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_template_tma_store": True,
+                "triton.num_decompose_k_splits": 0,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
+
+        FileCheck().check("INDEX_DTYPE : tl.constexpr = tl.int64").check(
+            "tma_descriptor0.store("
+        ).run(code[0])
+        self.assertEqual(actual, torch.mm(a, b), atol=0, rtol=0)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
