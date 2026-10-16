@@ -335,6 +335,12 @@ device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    """Device-specific snippets of generated Python and C++ code.
+
+    Each backend registers a subclass with register_device_op_overrides().
+    Unsupported methods raise NotImplementedError.
+    """
+
     def uses_gpu_cpp_wrapper(self) -> bool:
         """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
 
