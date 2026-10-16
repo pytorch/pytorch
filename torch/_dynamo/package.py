@@ -1554,7 +1554,7 @@ class CompilePackage:
                             self._install_global(
                                 module,
                                 name,
-                                module.__dict__.get(name, value),
+                                runtime_global_scope.get(name, value),
                                 record_only_if_new=True,
                             )
                     # The installed builtins dict might be absent from the runtime
