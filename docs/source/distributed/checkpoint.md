@@ -13,14 +13,12 @@ DCP is different than `torch.save` and `torch.load` in a few significant ways:
 - It produces multiple files per checkpoint, with at least one per rank.
 - It operates in place, meaning that the model should allocate its data first and DCP uses that storage instead.
 
-The entrypoints to load and save a checkpoint are the following:
-
 ## Additional resources:
 
 - [Getting Started with Distributed Checkpoint (DCP)](https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html)
 - [Asynchronous Saving with Distributed Checkpoint (DCP)](https://pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)
-- [TorchTitan Checkpointing Docs](https://github.com/pytorch/torchtitan/blob/main/docs/checkpoint.md)
-- [TorchTitan DCP Implementation](https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpoint.py)
+- [TorchTitan Checkpointing Docs](https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpointer/README.md)
+- [TorchTitan DCP Implementation](https://github.com/pytorch/torchtitan/blob/main/torchtitan/components/checkpointer/dcp.py)
 
 ```{eval-rst}
 .. automodule:: torch.distributed.checkpoint
@@ -55,8 +53,14 @@ The entrypoints to load and save a checkpoint are the following:
 ```
 
 ```{eval-rst}
+.. autofunction:: create_default_local_load_plan
+```
+
+```{eval-rst}
 .. autofunction:: create_default_local_save_plan
 ```
+
+The entrypoints to load and save a checkpoint are the following:
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.checkpoint.state_dict_saver
@@ -82,6 +86,9 @@ The entrypoints to load and save a checkpoint are the following:
 
 ```{eval-rst}
 .. autofunction:: save_state_dict
+
+   .. deprecated:: 2.2
+      Use :func:`save` instead.
 ```
 
 ```{eval-rst}
@@ -94,6 +101,9 @@ The entrypoints to load and save a checkpoint are the following:
 
 ```{eval-rst}
 .. autofunction:: load_state_dict
+
+   .. deprecated:: 2.2
+      Use :func:`load` instead.
 ```
 
 The following module is also useful for additional customization of the staging mechanisms used for asynchronous checkpointing (`torch.distributed.checkpoint.async_save`):
@@ -148,7 +158,39 @@ The following types define the IO interface used during checkpoint:
   :members:
 ```
 
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.storage.WriteResult
+  :members:
+```
+
+Failures on any rank during save or load are raised as:
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.api.CheckpointException
+  :members:
+```
+
 The following types define the metadata used during checkpoint:
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.Metadata
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.MetadataIndex
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.ChunkStorageMetadata
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.metadata.BytesStorageMetadata
+  :members:
+```
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.metadata.StorageMeta
@@ -198,6 +240,16 @@ The following types define the planner interface used during checkpoint:
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.planner.WriteItemType
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.planner.LoadItemType
+  :members:
+```
+
+```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.planner.BytesIOWriteData
   :members:
 ```
@@ -234,16 +286,39 @@ We provide a filesystem based storage layer:
   :members:
 ```
 
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.fsspec_filesystem.FsspecReader
+  :members:
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.fsspec_filesystem.FsspecWriter
+  :members:
+```
+
+Tensors that are not DTensor or ShardedTensor can be saved as shards of a global tensor by implementing:
+
+```{eval-rst}
+.. autoclass:: torch.distributed.checkpoint.protocol.CheckpointableTensor
+  :members:
+```
+
 We also provide other storage layers, including ones to interact with HuggingFace safetensors:
 
+```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.HuggingFaceStorageReader
   :members:
+```
 
+```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.HuggingFaceStorageWriter
   :members:
+```
 
+```{eval-rst}
 .. autoclass:: torch.distributed.checkpoint.QuantizedHuggingFaceStorageReader
   :members:
+```
 
 We provide default implementations of `LoadPlanner` and `SavePlanner` that
 can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor and DistributedTensor.

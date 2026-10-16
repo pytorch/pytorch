@@ -2744,6 +2744,19 @@ class SkipFunctionVariable(VariableTracker):
                     "for this region."
                 )
 
+        if self.value is torch.autograd.backward:
+            inputs = args[5] if len(args) > 5 else kwargs.get("inputs")
+            inputs = inputs.realize() if inputs is not None else None
+            if isinstance(inputs, variables.MappingProxyVariable) and inputs.source:
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+
         # importlib functions are frozen builtins that Dynamo cannot trace
         # into.  They are deterministic for a given package name, so
         # constant-fold them when all args are constants.
@@ -3128,10 +3141,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
+        # Do not resume inside _torchdynamo_inline when the wrapper changes call
+        # semantics. Inner torch.compile preserves options such as fullgraph,
+        # while ScriptFunction must preserve TorchScript semantics.
         # Skip this for recursive calls to the same compiled function
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
@@ -3148,7 +3160,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
         polyfill = (
             polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
+            if (
+                is_inner_torch_compile
+                or isinstance(self.wrapper_obj, torch.jit.ScriptFunction)
+            )
             else polyfills.getattr_and_trace
         )
         return VariableTracker.build(

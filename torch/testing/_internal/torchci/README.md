@@ -1,10 +1,12 @@
 # Test run reports
 
 `plugin.py` writes one JSON Lines file per test process for the `tests.*`
-ClickHouse tables: a report line, then one line per completed test run. Lines are
-flushed as tests finish; readers skip a torn last line. Split lines on `\n`, not
-with `str.splitlines()`, which also breaks at U+2028, U+2029 and U+0085 inside
-strings.
+ClickHouse tables: a report line, then one line per completed test run. A process
+that ends without starting a test removes its file, which would hold only the
+report line, unless an error turned the writer off first; one that started a test
+keeps it (see Crashes and timeouts). Lines are flushed as tests finish; readers
+skip a torn last line. Split lines on `\n`, not with `str.splitlines()`, which
+also breaks at U+2028, U+2029 and U+0085 inside strings.
 
 ## Path
 
@@ -63,10 +65,10 @@ physical RAM; it is omitted where neither is available.
 |---|---|---|
 | `type` | string | `"run"` |
 | `schema_version` | string | `"0.1"` |
-| `file` | string | Launched Python file |
-| `suite` | string | Innermost Python class |
+| `file` | string | Launched Python file, or `cpp/<binary>` |
+| `suite` | string | Innermost Python class or gtest suite |
 | `case_name` | string | Collected test name, including generated parameters |
-| `language` | string | `python` |
+| `language` | string | `python` or `cpp` |
 | `declared_case_name` | string | Source test name before generated device, dtype, op, or parameter suffixes |
 | `rerun_number` | int | Execution number within one process, starting at `0` |
 | `outcome` | string | `passed`, `failed`, `error`, `skipped`, `xfailed`, or `xpassed`; `crashed` or `timed_out` for a run recorded by `run_test.py` (below) |
@@ -77,7 +79,9 @@ physical RAM; it is omitted where neither is available.
 
 Pytest reruns and flakefinder repeats within one process count up
 `rerun_number`. A test's subtests share its run line, and a failing subtest fails
-it.
+it. For a value-parameterized gtest, `declared_case_name` drops the `/<param>`
+suffix. A gtest whose process crashed is `failed`, with pytest-cpp's message, as in
+junit.
 
 A test aliased under a longer name (`test_x_dynamic = TestX.test_x`) reports the
 original's `declared_case_name`, `test_x`.
@@ -118,8 +122,8 @@ the cwd.
 
 In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
 described below, in the jobs `_torchci_reports_default` selects: for now, the
-trunk and pull workflows' jobs. `run_tests` has no default, so a test file run
-some other way writes no report.
+trunk, pull, slow, inductor and periodic-strict workflows' jobs. `run_tests` has
+no default, so a test file run some other way writes no report.
 
 ## Upload
 
