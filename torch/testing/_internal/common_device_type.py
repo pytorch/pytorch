@@ -57,6 +57,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
     validate_test_name,
 )
+from torch.testing._internal.rerun_code_skip import (
+    rerun_code_skip,
+    rocm_message_is_known_bug,
+    stamp_rerun_device_skip,
+)
 
 
 _T = TypeVar("_T")
@@ -1442,14 +1447,14 @@ def skipOps(to_skip):
                     decorator_callable = (
                         unittest.expectedFailure
                         if expected_failure
-                        else unittest.skip("Skipped!")
+                        else rerun_code_skip("Skipped!")
                     )
             else:
                 op_name, variant_name, device_type, dtypes, expected_failure = skip_spec
                 decorator_callable = (
                     unittest.expectedFailure
                     if expected_failure
-                    else unittest.skip("Skipped!")
+                    else rerun_code_skip("Skipped!")
                 )
             full_name = f"{op_name}.{variant_name}" if variant_name else op_name
             decorator = DecorateInfo(
@@ -2454,7 +2459,10 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
 def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
         reason = f"skipCUDAIfRocm: {msg}"
-        return skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+        wrapped = skipCUDAIf(TEST_WITH_ROCM, reason=reason)(fn)
+        if TEST_WITH_ROCM and rocm_message_is_known_bug(msg):
+            return stamp_rerun_device_skip(wrapped, "cuda")
+        return wrapped
 
     if func:
         return dec_fn(func)
@@ -2462,10 +2470,16 @@ def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm st
 
 
 # Skips a test on CUDA when not using ROCm.
-def skipCUDAIfNotRocm(fn):
-    return skipCUDAIf(
-        not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack"
-    )(fn)
+def skipCUDAIfNotRocm(fn=None, *, msg="test doesn't currently work on the CUDA stack"):
+    def dec_fn(func):
+        wrapped = skipCUDAIf(not TEST_WITH_ROCM, msg)(func)
+        if not TEST_WITH_ROCM and rocm_message_is_known_bug(msg):
+            return stamp_rerun_device_skip(wrapped, "cuda")
+        return wrapped
+
+    if fn is not None:
+        return dec_fn(fn)
+    return dec_fn
 
 
 # Skips a test on CUDA if ROCm is unavailable or its version is lower than requested.
@@ -2531,17 +2545,12 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
 def skipCUDAVersionIn(versions: list[tuple[int, int]] | None = None):
     def dec_fn(fn):
-        @wraps(fn)
-        def wrap_fn(self, *args, **kwargs):
-            version = _get_torch_cuda_version()
-            if version == (0, 0):  # cpu or rocm
-                return fn(self, *args, **kwargs)
-            if version in (versions or []):
-                reason = f"test skipped for CUDA version {version}"
-                raise unittest.SkipTest(reason)
-            return fn(self, *args, **kwargs)
-
-        return wrap_fn
+        version = _get_torch_cuda_version()
+        if version == (0, 0):  # cpu or rocm
+            return fn
+        if version in (versions or []):
+            return rerun_code_skip(f"test skipped for CUDA version {version}")(fn)
+        return fn
 
     return dec_fn
 
@@ -2609,7 +2618,11 @@ def skipCUDAIfNoCudnn(fn):
 
 
 def skipCUDAIfMiopen(fn):
-    return skipCUDAIf(torch.version.hip is not None, "Marked as skipped for MIOpen")(fn)
+    msg = "Marked as skipped for MIOpen"
+    wrapped = skipCUDAIf(torch.version.hip is not None, msg)(fn)
+    if torch.version.hip is not None and rocm_message_is_known_bug(msg):
+        return stamp_rerun_device_skip(wrapped, "cuda")
+    return wrapped
 
 
 def skipCUDAIfNoMiopen(fn):
@@ -2619,31 +2632,47 @@ def skipCUDAIfNoMiopen(fn):
 
 
 def skipLazy(fn):
-    return skipLazyIf(True, "test doesn't work with lazy tensors")(fn)
+    return stamp_rerun_device_skip(
+        skipLazyIf(True, "test doesn't work with lazy tensors")(fn), "lazy"
+    )
 
 
 def skipMeta(fn):
-    return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+    return stamp_rerun_device_skip(
+        skipMetaIf(True, "test doesn't work with meta tensors")(fn), "meta"
+    )
 
 
 def skipXLA(fn):
-    return skipXLAIf(True, "Marked as skipped for XLA")(fn)
+    return stamp_rerun_device_skip(
+        skipXLAIf(True, "Marked as skipped for XLA")(fn), "xla"
+    )
 
 
 def skipMPS(fn):
-    return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
+    return stamp_rerun_device_skip(
+        skipMPSIf(True, "test doesn't work on MPS backend")(fn), "mps"
+    )
 
 
 def skipHPU(fn):
-    return skipHPUIf(True, "test doesn't work on HPU backend")(fn)
+    return stamp_rerun_device_skip(
+        skipHPUIf(True, "test doesn't work on HPU backend")(fn), "hpu"
+    )
 
 
 def skipXPU(fn):
-    return skipXPUIf(True, "test doesn't work on XPU backend")(fn)
+    return stamp_rerun_device_skip(
+        skipXPUIf(True, "test doesn't work on XPU backend")(fn), "xpu"
+    )
 
 
 def skipPRIVATEUSE1(fn):
-    return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)
+    device_type = torch._C._get_privateuse1_backend_name()
+    return stamp_rerun_device_skip(
+        skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn),
+        device_type,
+    )
 
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
