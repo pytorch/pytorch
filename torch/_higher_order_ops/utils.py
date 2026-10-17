@@ -196,7 +196,83 @@ class _VmapCombineFnWrapper:
         return outputs
 
 
-def _hop_compile_and_call(fn, args, kwargs=None):
+def _same_export_region(a, b, fake_mode):
+    """Conservatively identify reusable flat export-region GraphModules."""
+    from torch._dynamo.variables.higher_order_ops import are_same_graph_modules
+
+    if not isinstance(a, torch.fx.GraphModule) or not isinstance(
+        b, torch.fx.GraphModule
+    ):
+        return False
+    if a.meta.get("nested_region_config") != b.meta.get("nested_region_config"):
+        return False
+    if len(a.graph.nodes) != len(b.graph.nodes):
+        return False
+
+    for left, right in zip(a.graph.nodes, b.graph.nodes):
+        # This first export-only path deliberately leaves captured attributes and
+        # nested HOP graphs alone: both can carry identity-sensitive state that
+        # the flat graph comparator is not meant to normalize speculatively.
+        if left.op != right.op or left.op not in {
+            "placeholder",
+            "call_function",
+            "call_method",
+            "output",
+        }:
+            return False
+        if left.op == "placeholder" and not all(
+            isinstance(node.meta.get("example_value"), (torch.Tensor, torch.SymInt))
+            for node in (left, right)
+        ):
+            return False
+        if (
+            pytree.tree_flatten((left.args, left.kwargs))[1]
+            != pytree.tree_flatten((right.args, right.kwargs))[1]
+        ):
+            return False
+
+    try:
+        return are_same_graph_modules("non_strict_export", a, b, fake_mode)
+    except (KeyError, NotImplementedError):
+        return False
+
+
+def _invoke_subgraph_for_export(subgraph, *operands):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    mode = get_proxy_mode()
+    fake_mode = detect_fake_mode(operands)
+    if mode is not None and fake_mode is not None:
+        # Each nested Dynamo compile can independently call its body
+        # ``subgraph_0``. Reuse only an equivalent body already seen by this
+        # outer proxy trace; never let an inner compile choose that name.
+        for previous in mode._invoke_subgraph_cache:
+            if _same_export_region(previous, subgraph, fake_mode):
+                subgraph = previous
+                break
+
+    # The inference helper allocates the identifier in the enclosing proxy
+    # trace, which is the namespace that contains the resulting HOP node.
+    return invoke_subgraph_infer(subgraph, *operands)
+
+
+def _export_region_backend(backend):
+    def wrapped(gm, example_inputs):
+        for node in gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.invoke_subgraph
+            ):
+                node.target = _invoke_subgraph_for_export
+                node.args = (node.args[0], *node.args[2:])
+        gm.recompile()
+        return backend(gm, example_inputs)
+
+    return wrapped
+
+
+def _hop_compile_and_call(fn, args, kwargs=None, *, preserve_export_regions=False):
     """Compile and call fn with fullgraph=True for HOP eager execution.
 
     Pre-activates the fullgraph counter so that compile_wrapper treats this as
@@ -206,7 +282,14 @@ def _hop_compile_and_call(fn, args, kwargs=None):
     """
     from torch._dynamo.eval_frame import set_fullgraph_compiled_frame_count
 
-    with setup_compilation_env() as backend:
+    region_context = (
+        torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+        if preserve_export_regions
+        else nullcontext()
+    )
+    with region_context, setup_compilation_env() as backend:
+        if preserve_export_regions:
+            backend = _export_region_backend(backend)
         old_count = set_fullgraph_compiled_frame_count(0)
         try:
             return torch.compile(fn, backend=backend, fullgraph=True)(
