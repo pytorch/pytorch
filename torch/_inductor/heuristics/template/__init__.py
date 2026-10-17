@@ -17,6 +17,7 @@ from . import (
     bmm,
     contiguous_mm,
     decompose_k,
+    gluon,
     nv_universal_gemm,
     registry,
     tlx,
