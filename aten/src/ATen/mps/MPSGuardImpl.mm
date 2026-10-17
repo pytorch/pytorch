@@ -2,6 +2,7 @@
 
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSGuardImpl.h>
 
 namespace at::mps {
