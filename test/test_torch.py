@@ -119,21 +119,29 @@ def _test_gather_backward_one_dim(test_case, device, deterministic: bool = False
             test_case.assertEqual(grad, expected, atol=0, rtol=0)
 
 
-# Runs dst.copy_(src) and reports whether the tiled CUDA transpose kernel was
-# dispatched. Dispatch is the performance contract the tiled-transpose tests pin.
+# Runs dst.copy_(src) and reports whether a kernel whose name contains
+# kernel_name ran. The ROCm profiler occasionally drops kernel records but never
+# reports a kernel that did not run, so on ROCm a miss is retried.
+def _copy_uses_kernel(dst, src, kernel_name):
+    attempts = 3 if torch.version.hip else 1
+    for _ in range(attempts):
+        with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+            dst.copy_(src)
+            torch.cuda.synchronize()
+        if any(kernel_name in e.name for e in prof.events()):
+            return True
+    return False
+
+
+# Reports whether the tiled CUDA transpose kernel was dispatched. Dispatch is
+# the performance contract the tiled-transpose tests pin.
 def _copy_uses_tiled_transpose(dst, src):
-    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
-        dst.copy_(src)
-        torch.cuda.synchronize()
-    return any("transpose_copy_tiled_kernel" in e.name for e in prof.events())
+    return _copy_uses_kernel(dst, src, "transpose_copy_tiled_kernel")
 
 
-# Runs dst.copy_(src) and reports whether the strided 16-byte chunk kernel ran.
+# Reports whether the strided 16-byte chunk kernel ran.
 def _copy_uses_strided_chunks(dst, src):
-    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
-        dst.copy_(src)
-        torch.cuda.synchronize()
-    return any("maybe_strided_chunk_copy" in e.name for e in prof.events())
+    return _copy_uses_kernel(dst, src, "maybe_strided_chunk_copy")
 
 
 # Writes signed zeros and NaNs with distinct payloads into the first fp32 words.
