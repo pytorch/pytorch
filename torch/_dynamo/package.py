@@ -633,10 +633,6 @@ class _DynamoCodeCacheEntry:
          uninstall(). Set on a frame a precompile capture serves as plain
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
-      12. The module each function name is bound in, where that is not
-         python_module. Under config.nested_graph_breaks, a continuation of an
-         inlined frame runs with the inlined function's globals but is bound
-         in, and loaded by LOAD_GLOBAL from, the root frame's globals.
     """
 
     python_code: SerializedCode
@@ -650,7 +646,6 @@ class _DynamoCodeCacheEntry:
     has_compile_id: bool = False
     bypassed: bool = False
     skip_recursive: bool = False
-    bound_in: dict[_FunctionId, str] = dataclasses.field(default_factory=dict)
 
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
@@ -668,12 +663,21 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         raise AssertionError(
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
-    fn: Any = sys.modules[entry.python_module]
-    parts = entry.function_names[0].split(".")
+    return _lookup_code_path(
+        entry.python_module, entry.function_names[0], entry.code_source
+    )
+
+
+def _lookup_code_path(
+    python_module: str, function_name: str, code_source: str | None
+) -> types.CodeType:
+    entry = (python_module, function_name, code_source)
+    fn: Any = sys.modules[python_module]
+    parts = function_name.split(".")
     for part in parts:
         fn = getattr(fn, part)
-    if entry.code_source:
-        parts = entry.code_source.split(".")
+    if code_source:
+        parts = code_source.split(".")
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
@@ -750,13 +754,20 @@ def _get_code_source(
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    search_module_tree = code_module is None
-    if sys.version_info >= (3, 11) and not search_module_tree:
+    search_module_tree = sys.version_info < (3, 11) or code_module is None
+    if not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                _raise_resolution_error(code, toplevel)
+                # co_qualname is fixed at compile time and names where the def
+                # statement ran: a factory deleted afterwards, or one that
+                # exec'd it under a module's filename. The function can still
+                # be reachable from the module under a rewritten __qualname__,
+                # so search the module the way Python < 3.11 always does.
+                toplevel = module
+                search_module_tree = True
+                break
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -821,7 +832,7 @@ def _get_code_source(
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11) or search_module_tree:
+        if search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -864,7 +875,26 @@ def _get_code_source(
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    return toplevel.__qualname__, code_source.strip(".")
+    function_name, code_source = toplevel.__qualname__, code_source.strip(".")
+    # The recorded __qualname__ can be stale (a factory-made function, or a
+    # wrapper from a decorator without functools.wraps), so replay the lookup
+    # the loader will do.
+    cause: Exception | None = None
+    try:
+        found = _lookup_code_path(module.__name__, function_name, code_source)
+    except Exception as e:
+        # A replay can fail in many ways (a missing attribute, a None
+        # __closure__, an index out of range); each means unreplayable.
+        found, cause = None, e
+    if found is not code:
+        outcome = f"fails with {cause!r}" if cause else "finds other code"
+        raise PackageError(
+            f"Cannot resolve a fully qualified name for {code}. Lookup scope: "
+            f"{toplevel}. Its __qualname__ {function_name!r} does not resolve back "
+            f"to it: replaying {module.__name__}:{function_name} ({code_source}) "
+            f"{outcome}"
+        ) from cause
+    return function_name, code_source
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1230,7 +1260,6 @@ class CompilePackage:
                         backend_ids=[],
                         function_names=list(code.function_names),
                         import_sources=dict(code.import_sources),
-                        bound_in=dict(code.bound_in),
                     )
             # The codes come back, so the device they recorded must too, or one
             # recompile after a reload re-saves the entry as what that frame
@@ -1251,7 +1280,6 @@ class CompilePackage:
         function_name: _FunctionId | None = None,
         code_source: str | None = None,
         install_to_global: bool = False,
-        bound_in: str | None = None,
     ) -> None:
         if python_code not in self._codes:
             code = _DynamoCodeCacheEntry(
@@ -1282,8 +1310,6 @@ class CompilePackage:
 
         if function_name is not None:
             code.function_names.append(function_name)
-            if bound_in is not None and bound_in != python_module:
-                code.bound_in[function_name] = bound_in
 
     @property
     def cached_backends(self) -> dict[_BackendId, Any]:
@@ -1313,26 +1339,6 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
-        if code_module is None:
-            # The module search records the found function's __qualname__,
-            # which the loader replays with plain getattr. dataclasses rename
-            # what they exec() to its attribute path; a helper that does not
-            # would otherwise only fail at load.
-            cause: Exception | None = None
-            try:
-                resolves = _lookup_code(self._codes[code]) is code
-            except Exception as e:
-                # A replay can fail in many ways (a missing attribute, a None
-                # __closure__, an index out of range); each means unreplayable.
-                resolves, cause = False, e
-            if not resolves:
-                del self._codes[code]
-                outcome = f"fails with {cause!r}" if cause else "finds other code"
-                raise PackageError(
-                    f"Cannot resolve a fully qualified name for {code}: replaying "
-                    f"the recorded path {module.__name__}:{function_name} "
-                    f"({code_source}) {outcome}"
-                ) from cause
 
     @property
     def current_entry(self) -> _DynamoCodeCacheEntry | None:
@@ -1421,14 +1427,12 @@ class CompilePackage:
         python_code: types.CodeType,
         python_module: str,
         function_name: str,
-        bound_in: str,
     ) -> None:
         self._add_function(
             python_code,
             python_module,
             function_name=_FunctionId(function_name),
             install_to_global=True,
-            bound_in=bound_in,
         )
         self._resume_codes.add(python_code)
 
@@ -1539,10 +1543,6 @@ class CompilePackage:
                 target_code = code
                 if entry.install_to_global:
                     for function_name in entry.function_names:
-                        bound_module = entry.bound_in.get(
-                            function_name, entry.python_module
-                        )
-                        scope = sys.modules[bound_module]
                         if code.co_freevars:
                             # Resume functions with freevars need a factory
                             # that takes a closure tuple, matching
@@ -1560,12 +1560,12 @@ class CompilePackage:
                                     _code, _globals, _name, None, closure
                                 )
 
-                            self._install_global(scope, function_name, _make_fn)
+                            self._install_global(module, function_name, _make_fn)
                         else:
                             fn = types.FunctionType(
                                 code, module.__dict__, function_name
                             )
-                            self._install_global(scope, function_name, fn)
+                            self._install_global(module, function_name, fn)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 
