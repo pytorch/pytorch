@@ -97,6 +97,12 @@ def _capture_config() -> Iterator[None]:
     inference call therefore compiles a backward too, and a backward the
     backend cannot compile fails the capture; capturing under
     ``torch.no_grad()`` avoids both.
+    The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
+    bundle per compile context, left open on a remote-cache miss until the
+    first compiled call, but eager lowering compiles the forward and the
+    backward in one context before either runs, so on a miss the backward
+    fails opening its own. Every eager backward lowering can hit this, not only
+    capture's; CompilePackage.install() turns it off for the same reason.
     ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
     guards reach the artifact; it also extends the lifetime of objects the frame
     holds -- with it on, a weakref callback on a value the frame captured does
@@ -132,8 +138,14 @@ def _capture_config() -> Iterator[None]:
     # the capture is short one backend, so raise where the pickle fails instead.
     if torch._dynamo.config.strict_precompile:
         functorch_patch["strict_autograd_cache"] = True
+    import torch._inductor.config as inductor_config
+
+    # TODO: drop the bundled_autotune_remote_cache patch once
+    # AutotuneCacheBundler keeps one bundle per compiled module rather than one
+    # per CompileContext, which fixes every eager-backward caller.
     with (
         functorch_config.patch(functorch_patch),
+        inductor_config.patch(bundled_autotune_remote_cache=False),
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
