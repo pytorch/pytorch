@@ -388,38 +388,60 @@ def arange(
     dtype: DTypeLike | None = None,
     like: NotImplementedType = None,
 ) -> torch.Tensor:
-    # NumPy's arange accepts positional (start, stop, step) but requires stop
-    # to be specified when start is passed by keyword: arange(start=4) raises
-    # TypeError while arange(4) is shorthand for arange(stop=4). Interface the
-    # impl as star-args so the args/kwargs distinction survives the normalizer.
+    # NumPy's arange requires stop to be specified when start is passed by
+    # keyword: arange(start=4) raises TypeError while arange(4) is shorthand
+    # for arange(stop=4). Interface the impl as star-args so the args/kwargs
+    # distinction survives the normalizer.
+    #
+    # NumPy binds positional args to the (start, stop, step) slots in order,
+    # then applies the `[start, ]stop` shorthand: a *lone* positional arg
+    # that is not disambiguated by a `stop` keyword means stop (so
+    # arange(4) == arange(stop=4) and arange(4, step=2) == arange(0, 4, 2));
+    # when `stop` *is* passed by keyword, the positional binds to start
+    # (arange(0, stop=5)). A keyword colliding with a positional slot raises
+    # TypeError with NumPy's wording (there the parser reports keyword
+    # presence even when it equals the default, e.g. arange(1, 2, 3, step=1);
+    # our default-filtered check cannot see that edge case).
+    # NB: NumPy also accepts `dtype` as a 4th positional arg (its signature
+    # is arange([start, ]stop, [step, ]dtype=None)); we cannot support that
+    # here because positional args of a *args-led impl are normalized via
+    # the ArrayLikeOrScalar annotation, so `dtype` stays keyword-only.
     n = len(args)
     if n > 3:
-        raise TypeError("arange() takes at most 3 positional arguments")
+        raise TypeError(
+            f"arange() takes from 0 to 3 positional arguments but {n} were given"
+        )
     if n >= 1 and start is not None:
-        raise TypeError("arange() got multiple values for argument 'start'")
+        raise TypeError(
+            "argument for arange() given by name ('start') and position (position 0)"
+        )
     if n >= 2 and stop is not None:
-        raise TypeError("arange() got multiple values for argument 'stop'")
+        raise TypeError(
+            "argument for arange() given by name ('stop') and position (position 1)"
+        )
     if n == 3 and step != 1:
-        raise TypeError("arange() got multiple values for argument 'step'")
+        raise TypeError(
+            "argument for arange() given by name ('step') and position (position 2)"
+        )
     if n == 0:
-        if start is not None and stop is None:
-            raise TypeError(
-                "arange() requires stop to be specified when start is "
-                "passed as a keyword argument"
-            )
-        if start is None and stop is None:
-            raise TypeError("arange() requires stop to be specified")
+        if stop is None:
+            # both arange() and arange(start=4)
+            raise TypeError("arange() requires stop to be specified.")
         if start is None:
-            start, stop = 0, stop
-    else:
-        if n == 1:
-            start, stop = 0, args[0]
-        elif n == 2:
-            start, stop = args
+            start = 0
+    elif n == 1:
+        if stop is not None:
+            # the positional binds to start; stop comes from the keyword
+            start = args[0]
         else:
-            start, stop, step = args
+            # the lone positional is the `[start, ]stop` shorthand
+            start, stop = 0, args[0]
+    elif n == 2:
+        start, stop = args
+    else:
+        start, stop, step = args
     if step == 0:
-        raise ZeroDivisionError
+        raise ZeroDivisionError("division by zero")
 
     # the dtype of the result
     # NB: a None step is not handled here (numpy would treat it as 1); passing
