@@ -41,6 +41,7 @@ from torch.distributed._symmetric_memory._nccl import (
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
+    dtypes,
     e4m3_type,
     instantiate_device_type_tests,
 )
@@ -2757,6 +2758,73 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         ref = torch.ops._c10d_functional.wait_tensor(ref)
 
         self.assertTrue(out.eq(ref).all())
+
+
+@requires_accelerator_p2p_access()
+class SymmMemAllReduceOrderingTest(MultiProcContinuousTest):
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @dtypes(torch.float32, torch.bfloat16)
+    @parametrize("numel", [2048, 65536])
+    @parametrize("op", ["two_shot", "one_shot_copy"])
+    def test_all_reduce_ordering(self, device, dtype, numel, op):
+        device = torch.device(torch.device(device).type, self.rank)
+        device_module.set_device(device)
+        if TEST_WITH_ROCM:
+            if not symm_mem.is_nvshmem_available():
+                self.skipTest("rocSHMEM is not available")
+            if symm_mem.get_backend(device) != "NVSHMEM":
+                self.skipTest("select rocSHMEM with TORCH_SYMMMEM=NVSHMEM")
+        group = dist.group.WORLD.group_name
+        buf = symm_mem.empty(numel, dtype=dtype, device=device)
+        symm_mem.rendezvous(buf, group=group)
+        index = torch.arange(numel, device=device)
+        inputs = [
+            ((index + step * 3 + self.rank * 2) % 9 - 4).to(dtype) for step in range(16)
+        ]
+        expected = [
+            sum(
+                ((index + step * 3 + rank * 2) % 9 - 4).to(dtype)
+                for rank in range(self.world_size)
+            )
+            for step in range(16)
+        ]
+        outputs = [torch.empty_like(buf) for _ in inputs]
+
+        def run():
+            for inp, out in zip(inputs, outputs):
+                if op == "one_shot_copy":
+                    torch.ops.symm_mem.one_shot_all_reduce_copy_out(
+                        buf, inp, "sum", group, out
+                    )
+                else:
+                    buf.copy_(inp)
+                    torch.ops.symm_mem.two_shot_all_reduce_(buf, "sum", group)
+                    out.copy_(buf)
+
+        def check():
+            correct = (
+                torch.stack([(out == ref).all() for out, ref in zip(outputs, expected)])
+                .all()
+                .to(torch.int32)
+            )
+            dist.all_reduce(correct, op=dist.ReduceOp.MIN)
+            self.assertEqual(correct, torch.ones_like(correct))
+
+        run()
+        check()
+        graph = graph_cls()
+        with device_module.graph(graph):
+            run()
+        for _ in range(5):
+            for inp, ref in zip(inputs, expected):
+                inp.neg_()
+                ref.neg_()
+            graph.replay()
+            check()
+
+
+instantiate_device_type_tests(SymmMemAllReduceOrderingTest, globals(), only_for="cuda")
 
 
 @instantiate_parametrized_tests
