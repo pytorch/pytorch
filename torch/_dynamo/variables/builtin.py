@@ -2996,7 +2996,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
-        return variables.ClassMethodVariable(func)
+        return variables.ClassMethodVariable.create(tx, func)
 
     def call_staticmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker
