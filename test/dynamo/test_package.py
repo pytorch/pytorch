@@ -271,9 +271,25 @@ class PkgScaler:
 
 PKG_SCALER = PkgScaler()
 
+# scale reaches helper through the namespace itself, so helper's source is rooted
+# at the unnamed scope key that stands for it.
+PKG_CHAIN_SCOPE = {"factor": 3}
+exec(
+    "def helper(x):\n    return x * factor\n"
+    "helpers = [helper]\n"
+    "def scale(self, x):\n    return helpers[0](x)\n",
+    PKG_CHAIN_SCOPE,
+)
+
+
+class PkgChainScaler:
+    scale = PKG_CHAIN_SCOPE["scale"]
+
+
 PKG_HANDLER_SCOPE = {"factor": 3}
 exec("def scale(x):\n    return x * factor\n", PKG_HANDLER_SCOPE)
 PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
+PKG_HANDLER_SET = {PKG_HANDLER_SCOPE["scale"]}
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -906,6 +922,16 @@ print(eval(f"bbmod.{name}.{path}") is code)
         ctx.save_package(package, self.path())
         return fn, names
 
+    def _recorded_unnamed_scope_sources(self, package):
+        return {
+            name: source
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name, source in load_guards_state(
+                guarded.guards_state
+            ).output_graph.unnamed_scope_sources.items()
+        }
+
     def _install_unnamed_scope_package(self, ctx, fn, names):
         # Drop the keys the save bound, as a fresh process would not have them.
         torch._dynamo.reset()
@@ -971,7 +997,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         del pinned
         gc.collect()
 
-        self.assertTrue(pinned_ids - set(CleanupManager.instance.refs))
+        self.assertFalse(pinned_ids & set(CleanupManager.instance.refs))
         for name in names:
             self.assertIs(fn.__globals__[name], live[name])
         x = torch.randn(4)
@@ -1035,11 +1061,32 @@ print(eval(f"bbmod.{name}.{path}") is code)
         fn, names = self._save_unnamed_scope_package(ctx, fn)
         stale = [] if handlers == "emptied" else None
         with patch.object(sys.modules[fn.__module__], "PKG_HANDLERS", stale):
-            _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+            package, _, compiled_fn = self._install_unnamed_scope_package(
+                ctx, fn, names
+            )
+        self.assertEqual(self._recorded_unnamed_scope_sources(package).keys(), names)
         self.assertFalse(names & fn.__globals__.keys())
         with torch.compiler.set_stance("fail_on_recompile"):
             with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
                 compiled_fn(torch.randn(4))
+
+    def test_install_binds_an_unnamed_scope_reached_through_a_set(self):
+        # The namespace's source goes through Dynamo's ___set_getitem helper,
+        # which a bare eval of the source's name does not have.
+        def fn(x):
+            for handler in PKG_HANDLER_SET:
+                return handler(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        sources = self._recorded_unnamed_scope_sources(package)
+        self.assertIn("___set_getitem", "".join(s.name for s in sources.values()))
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
 
     def test_install_leaves_unbound_an_unnamed_scope_reached_through_a_local(self):
         # The namespace is found through the frame's argument, which install()
@@ -1051,10 +1098,32 @@ print(eval(f"bbmod.{name}.{path}") is code)
         fn, names = self._save_unnamed_scope_package(
             ctx, fn, PKG_SCALER, torch.randn(4)
         )
-        _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(self._recorded_unnamed_scope_sources(package))
         self.assertFalse(names & fn.__globals__.keys())
         x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(PKG_SCALER, x)
         self.assertEqual(compiled_fn(PKG_SCALER, x), x.sin() * 3)
+
+    def test_install_records_no_source_rooted_at_an_unnamed_scope_key(self):
+        # scale is reached through the frame's argument and helper through
+        # G[<key>]['helpers'][0]. Recording the latter would bind the key through
+        # itself, so neither is recorded and the key stays unbound.
+        def fn(scaler, x):
+            return scaler.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(
+            ctx, fn, PkgChainScaler(), torch.randn(4)
+        )
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(self._recorded_unnamed_scope_sources(package))
+        self.assertFalse(names & fn.__globals__.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(PkgChainScaler(), torch.randn(4))
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
