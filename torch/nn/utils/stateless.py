@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, cast
 from typing_extensions import deprecated
 
 import torch
@@ -164,7 +165,7 @@ def _reparametrize_module(
 )
 def functional_call(
     module: "torch.nn.Module",
-    parameters_and_buffers: dict[str, Tensor],
+    parameters_and_buffers: dict[str, Tensor] | Iterable[tuple[str, Tensor]],
     args: Any | tuple | None = None,
     kwargs: dict[str, Any] | None = None,
     *,
@@ -215,8 +216,8 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffers (dict of str and Tensor): the parameters that will be used in
-            the module call.
+        parameters_and_buffers (dict of str and Tensor or iterable of (str, Tensor)): the parameters that will be used
+            in the module call. An iterable can be used directly with APIs such as ``module.named_parameters()``.
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
@@ -242,7 +243,7 @@ def functional_call(
 
 def _functional_call(
     module: "torch.nn.Module",
-    parameters_and_buffers: dict[str, Tensor],
+    parameters_and_buffers: dict[str, Tensor] | Iterable[tuple[str, Tensor]],
     args: Any | tuple | None = None,
     kwargs: dict[str, Any] | None = None,
     *,
@@ -250,6 +251,34 @@ def _functional_call(
     strict: bool = False,
 ):
     # TODO allow kwargs such as unsafe and others for parametrization
+    normalized_parameters_and_buffers: dict[str, Tensor]
+    if isinstance(parameters_and_buffers, dict):
+        normalized_parameters_and_buffers = cast(
+            dict[str, Tensor], parameters_and_buffers
+        )
+    else:
+        if not isinstance(parameters_and_buffers, Iterable):
+            raise ValueError(
+                "Expected parameters_and_buffers to be a dict or an iterable of "
+                f"(name, Tensor) pairs, but got {type(parameters_and_buffers)}"
+            )
+        normalized_parameters_and_buffers = {}
+        repeated_keys: list[str] = []
+        for item in parameters_and_buffers:
+            if not (
+                isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
+            ):
+                raise ValueError(
+                    "Expected parameters_and_buffers to contain (name, Tensor) pairs"
+                )
+            name, value = item
+            if name in normalized_parameters_and_buffers:
+                repeated_keys.append(name)
+            normalized_parameters_and_buffers[name] = value
+        if repeated_keys:
+            raise ValueError(
+                f"{sorted(set(repeated_keys))} appeared multiple times; behavior of functional call is ambiguous"
+            )
     if (
         torch.jit.is_tracing()
         or torch.jit.is_scripting()
@@ -274,6 +303,9 @@ def _functional_call(
     elif not isinstance(args, tuple):
         args = (args,)
     with _reparametrize_module(
-        module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+        module,
+        normalized_parameters_and_buffers,
+        tie_weights=tie_weights,
+        strict=strict,
     ):
         return module(*args, **kwargs)
