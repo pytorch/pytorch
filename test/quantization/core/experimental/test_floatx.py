@@ -443,7 +443,7 @@ class TestFloat4Dtype(TestCase):
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
 
-    def test_cast_raises_on_host(self, device):
+    def test_shell_dtype_cast_raises_on_host(self, device):
         # Casting to or from shell dtypes used to device-assert on CUDA,
         # poisoning the context; it must raise on the host instead.
         x = torch.zeros(4, 8, dtype=torch.uint8, device=device)
@@ -457,8 +457,17 @@ class TestFloat4Dtype(TestCase):
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.zeros(4, 8, device=device).to(torch.float4_e2m1fn_x2)
         for shell_dtype in (torch.bits8, torch.uint4, torch.int4):
-            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+            name = str(shell_dtype).removeprefix("torch.")
+            msg = rf"(?i){name} is a shell dtype"
+            with self.assertRaisesRegex(NotImplementedError, msg):
                 x.view(shell_dtype).float()
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.zeros(4, 8, device=device).to(shell_dtype)
+        with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+            x.view(torch.bits8).to(torch.uint4)
+        # meta tensors keep their shape-only copy semantics
+        x_meta = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device="meta")
+        self.assertEqual(x_meta.to(torch.float32).dtype, torch.float32)
         # the device is still usable afterwards
         self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
 

@@ -142,8 +142,9 @@ bool is_supported_device(Device device) {
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
-// Shell dtypes with no defined value conversion. Without this host check, a
-// CUDA copy from these types reaches the dynamic-cast kernel and device-asserts.
+// Shell dtypes with no defined value conversion. Rejecting casts on the host
+// keeps backends consistent; on CUDA they would otherwise device-assert in the
+// dynamic-cast kernel.
 bool is_uncastable_shell_type(ScalarType t) {
   return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
       t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
@@ -187,7 +188,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
-  check_shell_type_cast(self.scalar_type(), src.scalar_type());
 
   // FBGeMM kernel support exists only for the following case,
   // 1. Memory Format for source and destination tensors is contiguous.
@@ -271,6 +271,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     at::_copy_from(src, self, non_blocking);
     return self;
   }
+
+  // Checked after the meta and _copy_from paths so meta tensors and
+  // out-of-tree backends keep their own handling of these dtypes.
+  check_shell_type_cast(self.scalar_type(), src.scalar_type());
 
   if (self.is_quantized() && !src.is_quantized()) {
     return quantized_copy_from_float_(self, src);
