@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     IS_WINDOWS,
     slowTest,
@@ -54,10 +55,12 @@ class CppWrapperTemplate:
 
 
 class TestCppWrapper(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
 
 
