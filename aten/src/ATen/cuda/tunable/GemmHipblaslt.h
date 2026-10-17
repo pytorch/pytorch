@@ -91,6 +91,12 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
   return static_cast<hipDataType>(500);
 }
 
+// Same as above: a scale factor type, dummy value to satisfy linker.
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e5m3fnu>() {
+  return static_cast<hipDataType>(501);
+}
+
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float4_e2m1fn_x2>() {
 #if ROCM_VERSION >= 70000
