@@ -1433,12 +1433,12 @@ void shifted_chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator) {
 void ldexp_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(0), "ldexp_cpu", [&] {
     using float_t = scalar_t;
-    AT_DISPATCH_INTEGRAL_TYPES(iter.input_dtype(1), "ldexp_cpu_exp", [&] {
+    AT_DISPATCH_V2(iter.input_dtype(1), "ldexp_cpu_exp", AT_WRAP([&] {
       using int_t = scalar_t;
       cpu_kernel(iter, [](float_t x, int_t exp) -> float_t {
         return static_cast<float_t>(std::ldexp(static_cast<double>(x), exp));
       });
-    });
+    }), kBool, AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   });
 }
 
