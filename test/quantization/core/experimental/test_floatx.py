@@ -443,6 +443,25 @@ class TestFloat4Dtype(TestCase):
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
 
+    def test_cast_raises_on_host(self, device):
+        # Casting to or from shell dtypes used to device-assert on CUDA,
+        # poisoning the context; it must raise on the host instead.
+        x = torch.zeros(4, 8, dtype=torch.uint8, device=device)
+        x_f4 = x.view(torch.float4_e2m1fn_x2)
+        msg = r"view\(torch.uint8\) and unpack"
+        for dtype in (torch.float32, torch.bfloat16, torch.uint8, torch.float8_e4m3fn):
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x_f4.to(dtype)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.empty(4, 8, device=device).copy_(x_f4)
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.zeros(4, 8, device=device).to(torch.float4_e2m1fn_x2)
+        for shell_dtype in (torch.bits8, torch.uint4, torch.int4):
+            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+                x.view(shell_dtype).float()
+        # the device is still usable afterwards
+        self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
+
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(
             torch.float4_e2m1fn_x2

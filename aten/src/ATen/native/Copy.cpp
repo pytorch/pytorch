@@ -142,6 +142,43 @@ bool is_supported_device(Device device) {
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
+// Shell dtypes with no defined value conversion. Without this host check, a
+// CUDA copy from these types reaches the dynamic-cast kernel and device-asserts.
+bool is_uncastable_shell_type(ScalarType t) {
+  return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
+      t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
+      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
+      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
+      t == ScalarType::UInt7 || t == ScalarType::Int1 ||
+      t == ScalarType::Int2 || t == ScalarType::Int3 ||
+      t == ScalarType::Int4 || t == ScalarType::Int5 ||
+      t == ScalarType::Int6 || t == ScalarType::Int7;
+}
+
+void check_shell_type_cast(ScalarType dst, ScalarType src) {
+  if (dst == src ||
+      !(is_uncastable_shell_type(dst) || is_uncastable_shell_type(src))) {
+    return;
+  }
+  if (dst == ScalarType::Float4_e2m1fn_x2 ||
+      src == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Casting from ", src, " to ", dst, " is not supported. "
+        "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+        "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+        "the nibbles (low 4 bits are the first element, high 4 bits the "
+        "second); to encode, pack fp4 codes into torch.uint8 and "
+        ".view(torch.float4_e2m1fn_x2).");
+  }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Casting from ", src, " to ", dst, " is not supported: ",
+      is_uncastable_shell_type(src) ? src : dst,
+      " is a shell dtype with no defined conversions. Use .view() to "
+      "reinterpret the bytes as a same-size integer dtype instead.");
+}
+
 } // namespace
 
 namespace at::native {
@@ -150,6 +187,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // TODO: this should be handled during dispatch, but that's missing...
   TORCH_CHECK(self.defined(), "self is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
+  check_shell_type_cast(self.scalar_type(), src.scalar_type());
 
   // FBGeMM kernel support exists only for the following case,
   // 1. Memory Format for source and destination tensors is contiguous.
