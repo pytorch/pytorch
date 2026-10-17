@@ -5,6 +5,8 @@ import struct
 import unittest
 
 import torch
+from torch._prims_common import _uncastable_shell_dtypes
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -458,18 +460,68 @@ class TestFloat4Dtype(TestCase):
             torch.zeros(4, 8, device=device).to(torch.float4_e2m1fn_x2)
         for shell_dtype in (torch.bits8, torch.uint4, torch.int4):
             name = str(shell_dtype).removeprefix("torch.")
-            msg = rf"(?i){name} is a shell dtype"
-            with self.assertRaisesRegex(NotImplementedError, msg):
+            shell_msg = rf"(?i){name} is a shell dtype"
+            with self.assertRaisesRegex(NotImplementedError, shell_msg):
                 x.view(shell_dtype).float()
-            with self.assertRaisesRegex(NotImplementedError, msg):
+            with self.assertRaisesRegex(NotImplementedError, shell_msg):
                 torch.zeros(4, 8, device=device).to(shell_dtype)
         with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
             x.view(torch.bits8).to(torch.uint4)
-        # meta tensors keep their shape-only copy semantics
-        x_meta = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device="meta")
-        self.assertEqual(x_meta.to(torch.float32).dtype, torch.float32)
+        # zero-element casts are rejected too, rather than silently succeeding
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.empty(0, dtype=torch.float4_e2m1fn_x2, device=device).float()
+        with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+            torch.empty(0, device=device).to(torch.uint4)
         # the device is still usable afterwards
         self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
+
+    def test_shell_dtype_cast_raises_when_tracing(self, device):
+        # Meta, FakeTensor, and the prims decomposition used by torch.compile
+        # must reject the same casts as eager instead of tracing them.
+        msg = r"view\(torch.uint8\) and unpack"
+        x_meta = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device="meta")
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            x_meta.to(torch.float32)
+        with FakeTensorMode():
+            x_fake = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device=device)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x_fake.to(torch.float32)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.empty(4, 8, device=device).copy_(x_fake)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.ops.prims.convert_element_type(x_fake, torch.float32)
+            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+                torch.empty(4, 8, device=device).to(torch.uint4)
+            x_bits = torch.empty(4, 8, dtype=torch.bits8, device=device)
+            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+                torch.ops.prims.convert_element_type(x_bits, torch.uint4)
+        x = torch.zeros(4, 8, dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            torch.compile(lambda t: t.to(torch.float32), backend="eager")(x)
+
+    def test_shell_dtype_lists_match(self, device):
+        # The prims check mirrors the C++ copy_ check; keep their dtype sets equal.
+        quantized = {
+            torch.qint8,
+            torch.qint32,
+            torch.quint8,
+            torch.quint4x2,
+            torch.quint2x4,
+        }
+        dtypes = {d for d in vars(torch).values() if isinstance(d, torch.dtype)}
+        for dtype in dtypes - quantized - {torch.float32}:
+            src = torch.empty(2, dtype=dtype, device="meta")
+            try:
+                src.to(torch.float32)
+                rejected = False
+            except NotImplementedError:
+                rejected = True
+            self.assertEqual(
+                rejected, dtype in _uncastable_shell_dtypes, msg=str(dtype)
+            )
 
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(

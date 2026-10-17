@@ -1692,32 +1692,10 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 #undef DEFINE_SCALAR_TYPE
 
-  auto is_subbyte_dummy = [](at::ScalarType t) {
-    switch (t) {
-      case at::ScalarType::UInt1:
-      case at::ScalarType::UInt2:
-      case at::ScalarType::UInt3:
-      case at::ScalarType::UInt4:
-      case at::ScalarType::UInt5:
-      case at::ScalarType::UInt6:
-      case at::ScalarType::UInt7:
-      case at::ScalarType::Int1:
-      case at::ScalarType::Int2:
-      case at::ScalarType::Int3:
-      case at::ScalarType::Int4:
-      case at::ScalarType::Int5:
-      case at::ScalarType::Int6:
-      case at::ScalarType::Int7:
-        return true;
-      default:
-        return false;
-    }
-  };
-
   THPObjectPtr result(PyList_New(0));
   TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
-    if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
+    if (c10::isQIntType(scalar_type) || c10::isSubByteIntType(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));

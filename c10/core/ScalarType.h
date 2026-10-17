@@ -118,6 +118,18 @@ inline bool isBitsType(ScalarType t) {
       t == ScalarType::Bits16;
 }
 
+// Sub-byte integer shell dtypes (UInt1-7, Int1-7). They have no kernels or
+// casts and exist for tensor subclasses to use as a dtype tag.
+constexpr bool isSubByteIntType(ScalarType t) {
+  return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
+      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
+      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
+      t == ScalarType::UInt7 || t == ScalarType::Int1 ||
+      t == ScalarType::Int2 || t == ScalarType::Int3 ||
+      t == ScalarType::Int4 || t == ScalarType::Int5 ||
+      t == ScalarType::Int6 || t == ScalarType::Int7;
+}
+
 constexpr bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||

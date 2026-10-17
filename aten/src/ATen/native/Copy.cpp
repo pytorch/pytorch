@@ -147,13 +147,7 @@ bool is_supported_device(Device device) {
 // dynamic-cast kernel.
 bool is_uncastable_shell_type(ScalarType t) {
   return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
-      t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
-      t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
-      t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
-      t == ScalarType::UInt7 || t == ScalarType::Int1 ||
-      t == ScalarType::Int2 || t == ScalarType::Int3 ||
-      t == ScalarType::Int4 || t == ScalarType::Int5 ||
-      t == ScalarType::Int6 || t == ScalarType::Int7;
+      isSubByteIntType(t);
 }
 
 void check_shell_type_cast(ScalarType dst, ScalarType src) {
@@ -244,6 +238,17 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+  // Meta is checked so FakeTensor tracing rejects these casts like eager does;
+  // this applies to traced tensors of every device, since meta loses the
+  // original device. Eager out-of-tree devices keep their own handling through
+  // _copy_from.
+  const auto checks_shell_cast = [](Device d) {
+    return d.is_meta() || is_supported_device(d);
+  };
+  if (checks_shell_cast(self.device()) && checks_shell_cast(src.device())) {
+    check_shell_type_cast(self.scalar_type(), src.scalar_type());
+  }
+
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {
     auto shape = infer_size_symdimvector(self.sym_sizes(), src.sym_sizes());
@@ -271,10 +276,6 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     at::_copy_from(src, self, non_blocking);
     return self;
   }
-
-  // Checked after the meta and _copy_from paths so meta tensors and
-  // out-of-tree backends keep their own handling of these dtypes.
-  check_shell_type_cast(self.scalar_type(), src.scalar_type());
 
   if (self.is_quantized() && !src.is_quantized()) {
     return quantized_copy_from_float_(self, src);
