@@ -60,6 +60,13 @@ class TestCudaPrimaryCtx(TestCase):
             # CUDA 12, and in ROCm 7.14+ which matches the eager behavior.
             self.assertTrue(torch._C._cuda_hasPrimaryContext(0))
 
+    def test_is_scaled_mm_supported_no_context(self):
+        # A capability query must not create a primary context on any device.
+        for device in range(torch.cuda.device_count()):
+            torch.is_scaled_mm_supported(device)
+        for device in range(torch.cuda.device_count()):
+            self.assertFalse(torch._C._cuda_hasPrimaryContext(device))
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_str_repr(self):
         x = torch.randn(1, device="cuda:1")
