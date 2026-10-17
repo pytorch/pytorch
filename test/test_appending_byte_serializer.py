@@ -2,7 +2,7 @@
 
 import dataclasses
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.utils._appending_byte_serializer import (
     AppendingByteSerializer,
     BytesReader,
@@ -11,6 +11,8 @@ from torch.utils._appending_byte_serializer import (
 
 
 class TestAppendingByteSerializer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_write_and_read_int(self) -> None:
         def int_serializer(writer: BytesWriter, i: int) -> None:
             writer.write_uint64(i)
