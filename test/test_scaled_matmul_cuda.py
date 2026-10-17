@@ -3183,7 +3183,7 @@ class TestFP8Matmul(TestCase):
             )
 
         if recipe == "mxfp4" and output_dtype != torch.bfloat16:
-            with self.assertRaisesRegex(ValueError, "MXFP4 scaled_mm on CUDA only supports bfloat16 output"):
+            with self.assertRaisesRegex(NotImplementedError, "MXFP4 scaled_mm on CUDA only supports bfloat16 output"):
                 run()
             return
         out = run()
@@ -3192,7 +3192,7 @@ class TestFP8Matmul(TestCase):
 
         if recipe != "mxfp4":
             return
-        with self.assertRaisesRegex(ValueError, "MXFP4 scaled_mm on CUDA does not support bias"):
+        with self.assertRaisesRegex(NotImplementedError, "MXFP4 scaled_mm on CUDA does not support bias"):
             run(bias)
         out_t = torch.empty(N, M, device=device, dtype=output_dtype).t()
         with self.assertRaisesRegex(ValueError, "MXFP4 scaled_mm on CUDA requires a contiguous output tensor"):
