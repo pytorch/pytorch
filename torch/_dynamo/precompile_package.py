@@ -45,7 +45,12 @@ from torch.utils._config_module import ConfigModule
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .convert_frame import ConvertFrame
 from .exc import PackageError
-from .guards import CheckFunctionManager, strip_local_scope
+from .guards import (
+    CheckFunctionManager,
+    is_portable_function_guard,
+    is_portable_identity_guard,
+    strip_local_scope,
+)
 from .package import CompilePackage
 from .source import (
     AttrSource,
@@ -213,18 +218,38 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
     identity guards ID_MATCH, FUNCTION_MATCH, MODULE_MATCH, NN_MODULE,
     CLASS_MATCH and CLOSURE_MATCH (a function by its ``__code__`` id), plus
-    DICT_VERSION and WEAKREF_ALIVE. Dropping one gives up on noticing that the
-    guarded object was rebound, mutated or collected: rebind a global function
-    between capture and load and the artifact serves the graph traced against
-    the old one, with no error
-    (``test_default_guard_filter_through_serialize_guards``). Every dropped
-    slot is reported in ``PrecompileSummary.dropped_guards``, once however many
-    variants dropped it.
+    DICT_VERSION and WEAKREF_ALIVE. An ID_MATCH, FUNCTION_MATCH, MODULE_MATCH or
+    CLASS_MATCH is still kept when ``is_portable_identity_guard`` finds that
+    its object unpickles by reference to the loading process's own: a module
+    that is its ``sys.modules`` entry, a class or function that its
+    ``__module__`` and ``__qualname__`` lead back to, or a member of such an
+    enum. A ``<locals>`` class, a module missing from ``sys.modules``, a
+    ``functools.wraps`` wrapper and a NamedTuple class nested in a class (the
+    guard-state pickler rebuilds it as a fresh class) are still dropped, and so
+    is a class whose metaclass is nested or local. An object defined in
+    ``__main__`` is kept like any other and resolves against the loading
+    process's ``__main__``: a serving script that does not define it fails the
+    load with an ``AttributeError`` rather than serving without the guard.
+    A CLOSURE_MATCH on a plain function is kept when
+    ``is_portable_function_guard`` finds that an importable module owns the
+    function's globals: the save rewrites it into a FUNCTION_CODE_MATCH, which
+    the loaded artifact checks against the function's code and that module by
+    value. An ID_MATCH or CLOSURE_MATCH on a builtin bound to a class that
+    unpickles by reference, like an autograd Function's ``apply``, is kept too:
+    the save rewrites it into a NATIVE_METHOD_MATCH, which compares the value
+    with that class's attribute by equality. Dropping a guard gives up on
+    noticing that the guarded object was rebound, mutated or collected: rebind
+    a global function whose globals no importable module owns between capture
+    and load, and the artifact serves the graph traced against the old one,
+    with no error (``test_default_guard_filter_through_serialize_guards``).
+    Every dropped slot is reported in ``PrecompileSummary.dropped_guards``,
+    once however many variants dropped it.
 
-    The criterion is the pre-check's own: a guard is dropped if its type is
-    refused or a derived type is (a CONSTANT_MATCH on a code object runs
-    through ID_MATCH), and TYPE_MATCH and BUILTIN_MATCH are kept whatever they
-    derive, as the pre-check accepts them before it looks at derived types.
+    The criterion is the pre-check's own: apart from those portable identity
+    and function guards, a guard is dropped if its type is refused or a
+    derived type is (a CONSTANT_MATCH on a code object runs through ID_MATCH),
+    and TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the
+    pre-check accepts them before it looks at derived types.
     That keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH that
     the loaded artifact still checks against the loading process's builtins.
 
@@ -264,8 +289,14 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
             # The pre-check's accepted-by-type pair, a literal in serialize_guards,
             # in test_aot_compile.py's keep_builtin_guards and in
             # test_precompile_package.py's _pre_check_accepts too; a type added
-            # to one is not seen by the others.
+            # to one is not seen by the others. _pre_check_accepts leaves out the
+            # portable identity branch on purpose.
             g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
+            or (
+                g.has_value
+                and is_portable_identity_guard(g.guard_type, derived, g.value)
+            )
+            or (g.has_value and is_portable_function_guard(g.guard_type, g.value))
             or (
                 g.guard_type not in unsupported
                 and not any(d in unsupported for d in derived)
@@ -1254,12 +1285,15 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "EMPTY_NN_MODULE_HOOKS_DICT",
         "EQUALS_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
+        "FUNCTION_CODE_MATCH",
         "HASATTR",
         "LIST_REVERSEITERATOR_LEN",
         "MAPPING_KEYS_CHECK",
+        "NATIVE_METHOD_MATCH",
         "NONE_MATCH",
         "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
+        "ORDERED_DICT_KEYS_MATCH",
         "RANGE_ITERATOR_MATCH",
         "SEQUENCE_LENGTH",
         "SET_CONTAINS",
@@ -1329,27 +1363,28 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_M
 
 def _saved_hooks_fingerprint() -> str:
     """
-    Name the installed saved-tensors hooks the way the guard compares them.
+    Name the installed saved-tensors hooks the way the saved guard compares them.
 
-    The guard stores ``tuple(map(id, hooks))`` when both hooks are fx
-    GraphModules and ``None`` otherwise, so plain-Python hooks, and no hooks at
-    all, are one value to it and must be one value here, or the report shows a
-    'varies' line for a guard that passes either way. Inlineable hooks are
-    named by their rendered graph rather than by address, since an id cannot
-    go in a committed, diffable file. KNOWN TRADEOFF: two distinct GraphModules
-    with identical code read as one hook set here while the guard tells them
-    apart, so the report may call that guard invariant when it is not.
+    A serialized AUTOGRAD_SAVED_TENSORS_HOOKS guard compares
+    ``guards._saved_tensors_hooks_fingerprint``: None for hooks it cannot inline,
+    so plain-Python hooks and no hooks at all are one value, and otherwise a
+    content hash of each hook's graph and fx.wrap ``user_cache_hash``es, with
+    None for a graph the guard never accepts. Reusing it keeps two hook sets one
+    line here exactly when the loaded guard treats them alike; an id could not
+    go in a committed, diffable file anyway.
     """
     try:
-        from torch._functorch._aot_autograd.utils import (
-            saved_tensors_hooks_are_inlineable,
-            top_saved_tensors_hooks,
-        )
+        from torch._dynamo.guards import _saved_tensors_hooks_fingerprint
+        from torch._functorch._aot_autograd.utils import top_saved_tensors_hooks
 
-        hooks = top_saved_tensors_hooks()
-        if not saved_tensors_hooks_are_inlineable(hooks):
+        fingerprint = _saved_tensors_hooks_fingerprint(top_saved_tensors_hooks())
+        if fingerprint is None:
             return "hooks=None"
-        return "hooks=(" + ", ".join(_hash_text(hook.code) for hook in hooks) + ")"
+        return (
+            "hooks=("
+            + ", ".join("unverifiable" if p is None else p[:12] for p in fingerprint)
+            + ")"
+        )
     except Exception:
         # Distinct from the "" that means "the rendered code already names the
         # check": a failed read must not merge two variants.

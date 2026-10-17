@@ -31,6 +31,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, 
 import torch._prims as prims
 from torch._prims_common import CUDARngStateHelper
 from torch._prims.executor import make_traced
+from torch._subclasses.fake_tensor import FakeTensorMode
 import torch._refs as refs
 
 
@@ -42,6 +43,39 @@ GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decompositi
 
 class TestPrimsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("op,kwargs", [
+        ("fft_r2c", {"onesided": True}),
+        ("fft_r2c", {"onesided": False}),
+        ("fft_c2c", {"forward": True}),
+        ("fft_c2c", {"forward": False}),
+        ("fft_c2r", {}),
+    ])
+    @parametrize("shape,dim,transpose", [
+        ((5, 6, 7), (1,), False),
+        ((5, 6, 7), (1,), True),
+        ((2, 3, 4, 5, 6), (0, 1, 2, 3), False),
+        ((5, 1, 7), (1,), False),
+        ((0, 6, 7), (1,), False),
+    ])
+    def test_fft_meta_layout(self, device, op, kwargs, shape, dim, transpose):
+        dtype = torch.float32 if op == "fft_r2c" else torch.complex64
+        x = make_tensor(shape, dtype=dtype, device=device)
+        if transpose:
+            x = x.transpose(0, 2)
+        if op == "fft_c2r":
+            kwargs = {"last_dim_size": max(1, 2 * (x.shape[dim[-1]] - 1))}
+        prim = getattr(prims, op)
+        result = prim(x, dim=dim, **kwargs)
+        with FakeTensorMode() as mode:
+            fake = prim(mode.from_tensor(x), dim=dim, **kwargs)
+        self.assertEqual(result.shape, fake.shape)
+        self.assertEqual(result.stride(), fake.stride())
+        self.assertEqual(result.dtype, fake.dtype)
+        self.assertEqual(result.device, fake.device)
+        reference_dtype = torch.float64 if op == "fft_r2c" else torch.complex128
+        reference = getattr(torch, "_" + op)(x.to(reference_dtype), dim, 0, *kwargs.values())
+        self.assertEqual(result, reference.to(result.dtype), atol=1e-4, rtol=1e-5)
 
     @onlyAccelerator
     @dtypes(torch.float32)
