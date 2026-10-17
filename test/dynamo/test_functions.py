@@ -8889,6 +8889,32 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             func_compiled(x)
 
+    @parametrize("non_leaf", (False, True))
+    def test_full_with_requires_grad_fill_value_raises(self, non_leaf):
+        def func(x):
+            return torch.full((2,), x * 2 if non_leaf else x)
+
+        x = torch.tensor(2.5, requires_grad=True)
+
+        with self.assertRaises(TypeError):
+            func(x)
+
+        func_compiled = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            func_compiled(x)
+
+    def test_full_with_detached_fill_value(self):
+        def func(x):
+            return torch.full((2,), (x * 2).detach())
+
+        x = torch.tensor(2.5, requires_grad=True)
+        expected = func(x)
+
+        result = torch.compile(func, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(result, expected)
+        self.assertFalse(result.requires_grad)
+
     def test_full_with_tensor_subclass_fill_value(self):
         class MyTensor(torch.Tensor):
             pass

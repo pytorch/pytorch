@@ -2129,8 +2129,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             fill_value: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if fill_value.is_tensor() and not issubclass(
-                fill_value.python_type(), torch.nn.Parameter
+            # Eager only accepts a tensor fill_value that does not require grad,
+            # and fill_ would make the result differentiable w.r.t. it.
+            if (
+                isinstance(fill_value, TensorVariable)
+                and not fill_value.requires_grad
+                and not issubclass(fill_value.python_type(), torch.nn.Parameter)
             ):
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
