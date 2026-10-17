@@ -293,7 +293,9 @@ def signature_to_meta(
 
 
 def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
-    """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
+    """Get a buffer's layout, including constants not tracked by the scheduler."""
+    if buf_name in V.graph.constants:
+        return V.graph.get_buffer(buf_name).get_layout()
     if V.graph.scheduler:
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
