@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_CUDA,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -308,6 +310,37 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_zero_sized(self) -> None:
+        # All zero-sized outputs
+        input_empty = torch.empty(0, device=self.device)
+        outputs_empty = [
+            torch.empty(0, device=self.device) for _ in range(self.world_size)
+        ]
+        dist.all_gather(outputs_empty, input_empty)
+        for out in outputs_empty:
+            self.assertEqual(out.numel(), 0)
+
+        # Uneven gather where the first rank(s) have zero-sized tensors.
+        # Catches #199579 where zero-sized outputs both had null data_ptr and were
+        # misclassified as aliased.
+        sizes = [0, 4] if self.world_size == 2 else [0, 0] + [4] * (self.world_size - 2)
+        input_tensor = (
+            torch.empty(0, device=self.device)
+            if sizes[self.rank] == 0
+            else torch.full((sizes[self.rank],), float(self.rank), device=self.device)
+        )
+        outputs = [torch.empty(s, device=self.device) for s in sizes]
+        dist.all_gather(outputs, input_tensor)
+        for r, s in enumerate(sizes):
+            if s == 0:
+                self.assertEqual(outputs[r].numel(), 0)
+            else:
+                self.assertEqual(
+                    outputs[r], torch.full((s,), float(r), device=self.device)
+                )
+
 
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
     @property
@@ -474,6 +507,13 @@ class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
         dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
         self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
 
+    # Remove once ncclCollConfig is enabled on ROCm. NCCL2_HAS_COLL_CONFIG
+    # still excludes USE_ROCM; that enablement is a separate change.
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "per-collective ncclCollConfig is compiled out on ROCm; "
+        "enablement is tracked separately",
+    )
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
@@ -1156,6 +1196,7 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_timeout_without_process_abort(self) -> None:
         # NoHandling is how a stock NCCL user opts out of the process being
         # taken down by the watchdog; nccl2 reads the same variable, when the
@@ -1241,6 +1282,7 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dumped_on_timeout(self) -> None:
         # The dump is written by the abort hook c10d::FlightRecorderHook
         # registers, which nccl2 runs when it detects the timeout. NoHandling
@@ -1338,6 +1380,7 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dump_is_bounded(self) -> None:
         # Symbolizing a traceback may need the GIL, so the attempt that
         # includes stack traces is made under a bounded wait and abandoned for

@@ -125,6 +125,7 @@ def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 
+
 op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.i0e",
@@ -385,7 +386,7 @@ op_db: list[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool, *_unsigned_int_types),
-        dtypesIfMPS=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=(lambda x: scipy.special.airy(x)[0]) if TEST_SCIPY else None,
         skips=(
             DecorateInfo(
@@ -393,8 +394,6 @@ op_db: list[OpInfo] = [
                 "TestUnaryUfuncs",
                 "test_reference_numerics_large",
             ),
-            # NotImplementedError: The operator 'aten::special_airy_ai.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         supports_autograd=False,
     ),
@@ -405,6 +404,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -446,6 +446,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -482,6 +483,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -513,6 +515,7 @@ op_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
             # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
@@ -891,6 +894,7 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
         ),
@@ -904,6 +908,7 @@ python_ref_db: list[OpInfo] = [
                 {
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
+                    torch.bfloat16: 1e-04,
                 },
             ),
         ),
