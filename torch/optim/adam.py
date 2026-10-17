@@ -935,8 +935,9 @@ def adam(
         _, foreach = _default_to_fused_or_foreach(
             params, differentiable, use_fused=False
         )
-        # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
-        if foreach and isinstance(lr, Tensor) and not capturable:
+        # Do not flip on foreach for the unsupported case where lr or a beta is a Tensor and capturable=False.
+        tensor_hparam = any(isinstance(h, Tensor) for h in (lr, beta1, beta2))
+        if foreach and tensor_hparam and not capturable:
             foreach = False
     if fused is None:
         fused = False
