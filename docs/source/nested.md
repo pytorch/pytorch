@@ -317,6 +317,9 @@ torch.Size([2, j1, 2, 6])
 torch.Size([2, 6, j1])
 ```
 
+``torch.chunk()`` can split a non-batch, non-ragged dimension regardless of where the
+ragged dimension appears in the shape. Chunking along the ragged dimension is not supported.
+
 ### Attention mechanisms
 
 As variable-length sequences are common inputs to attention mechanisms, nested tensors support
