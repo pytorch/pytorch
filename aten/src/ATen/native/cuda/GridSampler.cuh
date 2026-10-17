@@ -218,8 +218,9 @@ scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
+template<typename index_t>
 __forceinline__ __device__
-bool within_bounds_2d(int h, int w, int H, int W) {
+bool within_bounds_2d(index_t h, index_t w, index_t H, index_t W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
@@ -228,18 +229,21 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
-template<typename scalar_t>
+// Keep spatial offset products in the kernel's index type. Channels-last
+// strides can exceed the 32-bit range even when each spatial extent fits int.
+template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 scalar_t get_value_bounded(
-    const scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    const scalar_t *data, scalar_t x, scalar_t y,
+    index_t W, index_t H, index_t sW, index_t sH,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 
-  x = compute_coordinates(x, W, padding_mode, align_corners);
-  y = compute_coordinates(y, H, padding_mode, align_corners);
+  x = compute_coordinates(x, static_cast<int>(W), padding_mode, align_corners);
+  y = compute_coordinates(y, static_cast<int>(H), padding_mode, align_corners);
 
-  int ix = static_cast<int>(x);
-  int iy = static_cast<int>(y);
+  index_t ix = static_cast<index_t>(x);
+  index_t iy = static_cast<index_t>(y);
 
   if (within_bounds_2d(iy, ix, H, W)) {
     return data[iy * sH + ix * sW];
@@ -249,8 +253,8 @@ scalar_t get_value_bounded(
 
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
-void safe_add_2d(scalar_t *data, int h, int w,
-                 int sH, int sW, int H, int W,
+void safe_add_2d(scalar_t *data, index_t h, index_t w,
+                 index_t sH, index_t sW, index_t H, index_t W,
                  scalar_t delta,
                  const index_t NC_offset,
                  const index_t memory_span) {
@@ -282,18 +286,19 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
 template<typename scalar_t, typename index_t>
 __forceinline__ __device__
 void add_value_bounded(
-    scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+    scalar_t* data, scalar_t x, scalar_t y,
+    index_t W, index_t H, index_t sW, index_t sH,
     scalar_t delta,
     GridSamplerPadding padding_mode,
     bool align_corners,
     const index_t NC_offset,
     const index_t memory_span) {
 
-  x = compute_coordinates(x, W, padding_mode, align_corners);
-  y = compute_coordinates(y, H, padding_mode, align_corners);
+  x = compute_coordinates(x, static_cast<int>(W), padding_mode, align_corners);
+  y = compute_coordinates(y, static_cast<int>(H), padding_mode, align_corners);
 
-  int ix = static_cast<int>(x);
-  int iy = static_cast<int>(y);
+  index_t ix = static_cast<index_t>(x);
+  index_t iy = static_cast<index_t>(y);
 
   safe_add_2d(data, iy, ix, sH, sW, H, W, delta, NC_offset, memory_span);
 }
