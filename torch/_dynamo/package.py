@@ -1168,7 +1168,10 @@ _SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
 def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None:
-    from torch._C._dynamo.eval_frame import set_code_exec_strategy
+    from torch._C._dynamo.eval_frame import (
+        _load_precompile_skip,
+        set_code_exec_strategy,
+    )
 
     from .types import FrameAction, FrameExecStrategy
 
@@ -1179,11 +1182,12 @@ def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None
         holds.remove(recursive)
     if not holds:
         del _SKIP_HOLDS[code]
-        strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        set_code_exec_strategy(
+            code, FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+        )
     else:
-        callees = FrameAction.SKIP if any(holds) else FrameAction.DEFAULT
-        strategy = FrameExecStrategy(FrameAction.SKIP, callees)
-    set_code_exec_strategy(code, strategy)
+        # A SKIP strategy that also reports SKIP to the guard collective.
+        _load_precompile_skip(code, recursive=any(holds))
 
 
 class CompilePackage:
@@ -1673,7 +1677,10 @@ class CompilePackage:
                         )
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
-                # in these cases.
+                # in these cases. Both kinds of skip are reported to the guard
+                # collective: each is this rank's capture decision (a frame
+                # with no graph, or a bypassed or lossy one), so another rank's
+                # artifact may hold compiled entries for the same frame.
                 if entry.skip_recursive or len(entry.guarded_codes) == 0:
                     _update_skip_hold(target_code, entry.skip_recursive, hold=True)
                     self._skipped_codes.append((target_code, entry.skip_recursive))

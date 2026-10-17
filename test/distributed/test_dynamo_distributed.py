@@ -1616,6 +1616,69 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(compiled(x), x.sin())
             self.assertEqual(counter.frame_count, 1)
 
+    @skip_if_lt_x_gpu(2)
+    def test_guard_collective_unanimous_precompile_skip_runs_eagerly(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.eval_frame import guard_collectives_hook
+        from torch._dynamo.types import GuardCollectiveState
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            x = torch.randn(4, device=self.rank)
+            fn = _precompiled_guard_collective_entry
+            _load_precompile_skip(fn.__code__)
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter)
+            states = []
+
+            def record_and_sync(state):
+                states.append(state)
+                return guard_collectives_hook(state)
+
+            old_hook = set_guard_complete_hook(record_and_sync)
+            try:
+                self.assertEqual(compiled(x), x.sin())
+            finally:
+                set_guard_complete_hook(old_hook)
+            self.assertEqual(states, [GuardCollectiveState.SKIP])
+            self.assertEqual(counter.frame_count, 0)
+
+    @skip_if_lt_x_gpu(2)
+    @enable_guard_collectives()
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
+    def test_guard_collective_precompile_skip_propagates_miss(self):
+        from torch._C._dynamo.eval_frame import _load_precompile_skip
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            x = torch.randn(4, device=self.rank)
+            fn = _precompiled_guard_collective_entry
+            # Rank 0's artifact skips the frame; rank 1's compiled it.
+            if self.rank == 0:
+                _load_precompile_skip(fn.__code__)
+                counter = CompileCounter()
+                compiled = torch.compile(fn, backend=counter, dynamic=False)
+            else:
+                compiled, counter = _load_as_precompile_entries(fn, x)
+            # A SKIP/HIT mix runs each rank's own path and never recompiles,
+            # however often it repeats.
+            for _ in range(5):
+                self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 0)
+            # Only rank 1 misses; every rank recompiles.
+            if self.rank == 1:
+                x = torch.randn(5, device=self.rank)
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 1)
+            # Both ranks now hit the entry compiled for the miss.
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 1)
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)

@@ -526,6 +526,11 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
   m.def("_load_precompile_entry", &_load_precompile_entry);
+  m.def(
+      "_load_precompile_skip",
+      &_load_precompile_skip,
+      py::arg("code"),
+      py::arg("recursive") = false);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_get_lru_cache", &_get_lru_cache);
   m.def("_set_lru_cache", &_set_lru_cache);
