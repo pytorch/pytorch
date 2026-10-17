@@ -4846,17 +4846,17 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(calls, mode="installed")
 
     @skipIfCrossRef
-    @parametrize("two_levels", [False, True])
+    @parametrize("shape", ["flat", "closure", "two_levels"])
     @parametrize("backend", ["inductor", "eager"])
     @torch._dynamo.config.patch(nested_graph_breaks=True)
-    def test_an_inlined_frames_resume_is_bound_in_the_root_module(
-        self, backend, two_levels
-    ):
+    def test_an_inlined_frames_resume_is_bound_in_the_root_module(self, backend, shape):
         # Under nested graph breaks the helper is inlined, so the entry reaches
         # every frame and the artifact is standalone. The continuation of the
         # helper's break runs with the helper's globals but the entry's bytecode
         # loads it from the entry's module, which is where it must be bound.
-        # two_levels breaks in a third module the helper calls instead.
+        # closure breaks in a closure the helper defines, so the inner
+        # continuation is a co_freevars factory; two_levels breaks in a third
+        # module the helper calls.
         helper = f"{self.module_name}_helper"
         inner = f"{self.module_name}_inner"
         entry = f"{self.module_name}_ngb"
@@ -4865,10 +4865,24 @@ class TestPrecompileDynamoCapture(TestCase):
             "    torch._dynamo.graph_break()\n"
             "    return y.cos() * OFF\n"
         )
-        sources = {
-            helper: f"import torch\n\nOFF = 3.0\n\ndef helper(y):\n{breaking}",
-        }
-        if two_levels:
+        if shape == "flat":
+            sources = {
+                helper: f"import torch\n\nOFF = 3.0\n\ndef helper(y):\n{breaking}",
+            }
+        elif shape == "closure":
+            sources = {
+                helper: (
+                    "import torch\n\n"
+                    "def helper(y):\n"
+                    "    OFF = y.shape[0] + 1.0\n\n"
+                    "    def inner(y):\n"
+                    "        y = y.sin() + OFF\n"
+                    "        torch._dynamo.graph_break()\n"
+                    "        return y.cos() * OFF\n\n"
+                    "    return inner(y) - OFF\n"
+                ),
+            }
+        else:
             sources = {
                 inner: f"import torch\n\nOFF = 3.0\n\ndef inner(y):\n{breaking}",
                 helper: (
@@ -4898,7 +4912,7 @@ class TestPrecompileDynamoCapture(TestCase):
             if name.startswith("__resume_at_")
             and getattr(value, "__globals__", None) is not vars(mod)
         ]
-        self.assertEqual(len(inlined), 2 if two_levels else 1)
+        self.assertEqual(len(inlined), 1 if shape == "flat" else 2)
         # A binding the serving process already holds under one of those names
         # is refused in the entry's module, before anything is seeded.
         script = (
