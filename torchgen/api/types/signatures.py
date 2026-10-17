@@ -191,6 +191,44 @@ class CppSignatureGroup:
         )
 
 
+def _arguments_with_defaults(
+    func: FunctionSchema, *, symint: bool = True
+) -> list[Binding]:
+    # Add C++ default values only, keeping dispatcher argument types and
+    # ordering.  TensorOptions sub-items (dtype/layout/device/pin_memory)
+    # default to {}, and the other non-out arguments get C++ expressions via
+    # cpp.default_expr when the schema defines a default.
+    from torchgen.model import TensorOptionsArguments
+
+    if func.is_out_fn():
+        return dispatcher.arguments(func, symint=symint)
+    tensor_options_names: set[str] = set()
+    for a in func.arguments.non_out:
+        if isinstance(a, TensorOptionsArguments):
+            tensor_options_names.update(it.name for it in a.all())
+    bindings = dispatcher.arguments(func, symint=symint)
+    jit_args = dispatcher.jit_arguments(func)
+    result: list[Binding] = []
+    for binding, jit_arg in zip(bindings, jit_args):
+        default: str | None = None
+        if jit_arg.name in tensor_options_names:
+            default = "{}"
+        elif jit_arg.default is not None:
+            default = cpp.default_expr(jit_arg.default, jit_arg.type, symint=symint)
+        if default is None:
+            result.append(binding)
+        else:
+            result.append(
+                Binding(
+                    nctype=binding.nctype,
+                    name=binding.name,
+                    default=default,
+                    argument=binding.argument,
+                )
+            )
+    return result
+
+
 @dataclass(frozen=True)
 class DispatcherSignature:
     # The schema this signature is derived from
@@ -203,7 +241,14 @@ class DispatcherSignature:
 
     symint: bool = True
 
+    # Emit C++ default arguments in decl(), keeping dispatcher argument
+    # types and ordering.  Used by external backends whose header
+    # declarations are consumed by hand-written C++ callers.
+    defaults: bool = False
+
     def arguments(self) -> list[Binding]:
+        if self.defaults:
+            return _arguments_with_defaults(self.func, symint=self.symint)
         return dispatcher.arguments(self.func, symint=self.symint)
 
     def name(self) -> str:
@@ -243,9 +288,13 @@ class DispatcherSignature:
 
     @staticmethod
     def from_schema(
-        func: FunctionSchema, *, prefix: str = "", symint: bool = True
+        func: FunctionSchema,
+        *,
+        prefix: str = "",
+        symint: bool = True,
+        defaults: bool = False,
     ) -> DispatcherSignature:
-        return DispatcherSignature(func, prefix, symint)
+        return DispatcherSignature(func, prefix, symint, defaults)
 
 
 @dataclass(frozen=True)
@@ -342,7 +391,12 @@ def kernel_signature(
                 "without SymInt in schema"
             )
     if backend_index.external:
-        return DispatcherSignature.from_schema(f.func, prefix=prefix, symint=symint)
+        return DispatcherSignature.from_schema(
+            f.func,
+            prefix=prefix,
+            symint=symint,
+            defaults=backend_index.generate_default_args,
+        )
     else:
         return NativeSignature(f.func, prefix=prefix, symint=symint)
 
