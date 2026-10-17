@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._inductor.cudagraph_trees as cudagraph_trees
 from torch._dynamo.testing import same
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TEST_CUDA_GRAPH
 
 
@@ -55,7 +56,7 @@ def patch_all(ok=True):
 N_ITERS = 5
 
 
-@unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
+@unittest.skipIf(not TEST_CUDA_GRAPH, "these tests require cuda graph")
 class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
     @patch_all()
     def test_basic(self):
@@ -228,7 +229,9 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
             "Replaying inference workload should not warn about repeated graph captures",
         )
 
-    def test_compile_during_capture_errors(self):
+
+class TestCompileDuringCapture(torch._dynamo.test_case.TestCase):
+    def test_compile_during_capture_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/185074
         from torch._dynamo.exc import TorchRuntimeError
 
@@ -237,28 +240,29 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
         comp_fn = torch.compile(backend="eager")(fn)
 
-        x = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=device)
+        device_type = torch.device(device).type
+        device_module = torch.get_device_module(device_type)
+        # torch.accelerator.Graph() is not implemented for every accelerator
+        # (only XPU); use each device module's native graph-capture API instead.
+        graph = getattr(device_module, f"{device_type.upper()}Graph")()
 
         # Should raise TorchRuntimeError when trying to compile during capture
         with self.assertRaisesRegex(
             TorchRuntimeError,
-            r"cannot JIT compile during CUDA graph capture",
+            f"cannot JIT compile during {device_type.upper()} graph capture",
         ):
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+            with device_module.graph(graph):
                 comp_fn(x)
 
         self.assertEqual(comp_fn(x), fn(x))
 
 
+instantiate_device_type_tests(
+    TestCompileDuringCapture, globals(), except_for=("cpu",), allow_xpu=True
+)
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
-    if not TEST_CUDA_GRAPH:
-        if __name__ == "__main__":
-            import sys
-
-            sys.exit(0)
-        raise unittest.SkipTest("cuda graph test is skipped")
 
     run_tests()
