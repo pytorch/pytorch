@@ -1904,6 +1904,8 @@ class LocalElasticAgentUninterruptibleStateTest(TestCase):
         agent = self._make_agent()
         agent._pcontext = Mock()
         agent._pcontext.pids.return_value = {0: 4321}
+        agent._pcontext.error_files = {0: os.devnull}
+        agent._worker_group.workers[0].global_rank = 7
         # Pre-seed the first-seen timestamp far in the past.
         agent._uninterruptible_state_first_seen[4321] = time.monotonic() - 600
         agent._remaining_restarts = 3
@@ -1916,6 +1918,9 @@ class LocalElasticAgentUninterruptibleStateTest(TestCase):
             )
         self.assertIsNotNone(result)
         self.assertEqual(result.state, WorkerState.UNHEALTHY)
+        self.assertEqual(list(result.failures), [7])
+        self.assertEqual(result.failures[7].local_rank, 0)
+        self.assertEqual(result.failures[7].pid, 4321)
         # D-state workers wedge the host; restarting on the same host would
         # conflict. _check_uninterruptible_state_timeout should disable
         # restarts so the supervising loop exits via _stop_workers instead

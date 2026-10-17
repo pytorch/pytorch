@@ -756,7 +756,7 @@ class SimpleElasticAgentTest(TestCase):
                 agent = TestAgent(spec)
                 worker_group = agent._worker_group
 
-                agent.run()
+                self.assertTrue(agent.run().is_failed())
                 self.assertEqual(WorkerState.FAILED, worker_group.state)
                 self.assertEqual(0, agent._remaining_restarts)
                 # one monitor call for each retry + one to monitor the last retry
