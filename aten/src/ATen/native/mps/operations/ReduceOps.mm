@@ -449,7 +449,7 @@ struct ReductionOp {
   MetalType input_type;
   MetalType output_type;
   float param = 0;
-  std::optional<Tensor> mean = std::nullopt;
+  std::optional<Tensor> mean;
 };
 
 struct ReductionPartials {
@@ -897,8 +897,8 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims) {
 static void std_var_kernel_mps(TensorIterator& iter, double correction, bool take_sqrt) {
   const auto prefix = take_sqrt ? "std_" : "var_";
   const auto dtype = iter.dtype();
-  const auto mean = iter.noutputs() == 2 ? std::make_optional(iter.output(1)) : std::nullopt;
-  const ReductionOp op{/*is_arg=*/false, prefix, dtype, dtype, static_cast<float>(correction), mean};
+  auto mean = iter.noutputs() == 2 ? std::make_optional(iter.output(1)) : std::nullopt;
+  const ReductionOp op{/*is_arg=*/false, prefix, dtype, dtype, static_cast<float>(correction), std::move(mean)};
   reduction_dispatch_mps(iter.input(0), iter.output(0), op, MetalType("float3", 16), prefix);
 }
 
