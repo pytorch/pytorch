@@ -1570,6 +1570,7 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
+        import torch._inductor.config as inductor_config
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
@@ -1650,8 +1651,16 @@ class CompilePackage:
                         raise RuntimeError(
                             f"Backend {backend_id} is not found in the given backends"
                         )
-                    with dynamo_timed(
-                        "after_deserialization", phase_name="backend_compile"
+                    # AutotuneCacheBundler keeps one bundle per compile
+                    # context, left open on a remote-cache miss until the
+                    # first compiled call, so a frame's second backend fails
+                    # to open its own. The artifact carries its kernels, so
+                    # the bundle has nothing to share here.
+                    with (
+                        dynamo_timed(
+                            "after_deserialization", phase_name="backend_compile"
+                        ),
+                        inductor_config.patch(bundled_autotune_remote_cache=False),
                     ):
                         backend = backends[backend_id].after_deserialization()
                         self._install_global(
