@@ -459,6 +459,41 @@ class TestFlyDSLTopK(TestCase):
         finally:
             torch.cuda.set_device(old_device)
 
+    @parametrize("k,kernel", ((8, "register"), (128, "radix")))
+    def test_nondefault_stream_reuses_specialization(self, k, kernel):
+        from torch._native.ops.topk.flydsl_kernels import (
+            topk_cache_info,
+            topk_radix,
+            topk_register,
+        )
+
+        n = _test_n(k)
+        self.assertEqual(_expected_kernel(k, n), kernel)
+        x = self._make_input(shape=(_test_m(), n))
+        with pn.flydsl.disabled():
+            ref_v, ref_i = torch.topk(x, k, dim=-1)
+
+        if kernel == "register":
+            topk_register(x, k)
+        else:
+            topk_radix(x, k, deterministic=False)
+
+        stream = torch.cuda.Stream(device=x.device)
+        with torch.cuda.stream(stream):
+            if kernel == "register":
+                got_v, got_i = topk_register(x, k)
+            else:
+                got_v, got_i = topk_radix(x, k, deterministic=False)
+            done = torch.cuda.Event()
+            done.record(stream)
+        done.synchronize()
+
+        self.assertEqual(got_v, ref_v)
+        self.assertEqual(torch.gather(x, -1, got_i), got_v)
+        info = topk_cache_info(kernel)
+        self.assertEqual(info.misses, 1)
+        self.assertGreaterEqual(info.hits, 1)
+
 
 instantiate_parametrized_tests(TestFlyDSLTopK)
 
