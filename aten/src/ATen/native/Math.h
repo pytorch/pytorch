@@ -178,19 +178,35 @@ Date:  February 1996
     x = y * num / dem;
   }
   else{
-    z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
-    num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
-    dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
-#ifdef _WIN32
-    // error C2039: '_copysign': is not a member of 'std'
-    x = copysign(num, y) / dem;
-#else
-    x = std::copysign(num, y) / dem;
-#endif
-  }
-  /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+      /* Use more numerically stable computation for values close to 1 */
+      if (y_abs > static_cast<T>(0.99999)) {
+        /* For values very close to 1, use asymptotic expansion:
+           erfinv(y) ≈ sqrt(-2*log(1-y)) * (1 + log(1-y)/4 + log(1-y)^2/32 + ...)
+        */
+        T log_term = std::log(static_cast<T>(1.0) - y_abs);
+        T z = std::sqrt(-2.0 * log_term);
+        /* Use rational approximation for correction term */
+        T log2 = std::log(static_cast<T>(2.0));
+        T log1my = log_term;
+        T correction = static_cast<T>(1.0) + log1my / static_cast<T>(8.0) +
+                       log1my * log1my / static_cast<T>(192.0) +
+                       log1my * log1my * log1my / static_cast<T>(3072.0);
+        x = z * correction;
+      } else {
+        z = std::sqrt(-std::log((static_cast<T>(1.0)-y_abs)/static_cast<T>(2.0)));
+        num = ((c[3]*z + c[2])*z + c[1]) * z + c[0];
+        dem = (d[1]*z + d[0])*z + static_cast<T>(1.0);
+      }
+    }
+  #ifdef _WIN32
+      // error C2039: '_copysign': is not a member of 'std'
+      x = copysign(x, y);
+  #else
+      x = std::copysign(x, y);
+  #endif
+    /* Two steps of Newton-Raphson correction */
+    x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+    x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
 
   return x;
 }
