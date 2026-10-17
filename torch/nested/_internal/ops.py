@@ -1076,7 +1076,9 @@ def narrow(func, *args, **kwargs):
     return NestedTensor(values, **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.chunk.default, "self: jt, chunks: any, dim: any?")
+@register_jagged_func(
+    torch.ops.aten.chunk.default, "self: jt_all, chunks: any, dim: any?"
+)
 def chunk_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1089,6 +1091,7 @@ def chunk_default(func, *args, **kwargs):
     )
 
     if operating_on_batch:
+        check_schema("self: jt", chunk_default, inp)
         chunks = new_kwargs["chunks"]
 
         # get _offsets of the chunks

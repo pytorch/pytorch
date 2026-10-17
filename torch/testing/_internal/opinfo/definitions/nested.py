@@ -999,6 +999,19 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
             for chunks in [1, D // 2, D - 1, D]:
                 yield _update_sample(sample_input, {"chunks": chunks})
 
+    # Contiguous NJT with a non-leading ragged dimension (gh-153238).
+    nt = torch.nested.nested_tensor(
+        [torch.randn(9, length, 9, device=device, dtype=dtype) for length in (3, 4)],
+        layout=torch.jagged,
+        requires_grad=requires_grad,
+    )
+    for dim in (1, -1):
+        yield SampleInput(
+            _clone(nt),
+            kwargs={"chunks": 3, "dim": dim},
+            name=f"{_describe_njt(nt)}: normal_dim, dim={dim}, chunks=3",
+        )
+
 
 def sample_inputs_matmul(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
