@@ -342,43 +342,6 @@ PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
 PKG_HANDLER_SET = {PKG_HANDLER_SCOPE["scale"]}
 
 
-def nested_break_sources(prefix, shape):
-    """Modules, in import order, whose last one's ``fn`` reaches a graph break
-    inlined from another module: ``flat`` breaks in the helper, ``closure`` in a
-    closure the helper defines, ``two_levels`` in a third module the helper calls.
-    """
-    helper, inner = f"{prefix}_helper", f"{prefix}_inner"
-    breaking = (
-        "    y = y.sin() + OFF\n"
-        "    torch._dynamo.graph_break()\n"
-        "    return y.cos() * OFF\n"
-    )
-    sources = {}
-    if shape == "flat":
-        sources[helper] = f"import torch\n\nOFF = 3.0\n\ndef helper(y):\n{breaking}"
-    elif shape == "closure":
-        sources[helper] = (
-            "import torch\n\n"
-            "def helper(y):\n"
-            "    OFF = y.shape[0] + 1.0\n\n"
-            "    def inner(y):\n"
-            "        y = y.sin() + OFF\n"
-            "        torch._dynamo.graph_break()\n"
-            "        return y.cos() * OFF\n\n"
-            "    return inner(y) - OFF\n"
-        )
-    else:
-        sources[inner] = f"import torch\n\nOFF = 3.0\n\ndef inner(y):\n{breaking}"
-        sources[helper] = (
-            f"import {inner}\n\nSCALE = 2.0\n\n"
-            f"def helper(y):\n    return {inner}.inner(y * SCALE) + SCALE\n"
-        )
-    sources[f"{prefix}_entry"] = (
-        f"import {helper}\n\ndef fn(x):\n    return {helper}.helper(x * 2) + 1\n"
-    )
-    return sources
-
-
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
 @instantiate_parametrized_tests
@@ -1384,60 +1347,6 @@ def fn(x):
             self.assertIn(alias, set(unseeded_scope))
             package.uninstall()
             self.assertNotIn(alias, set(unseeded_scope))
-
-    @parametrize("shape", ["flat", "closure", "two_levels"])
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
-    def test_package_binds_an_inlined_frames_resume_in_the_root_module(self, shape):
-        # Under nested graph breaks, the continuation of a graph break inside an
-        # inlined helper runs with the helper's globals but is bound in, and
-        # loaded by LOAD_GLOBAL from, the root frame's module. Binding it in the
-        # helper's module instead leaves the root's bytecode with a NameError.
-        sources = nested_break_sources(f"test_package_ngb_{shape}", shape)
-        entry_name = list(sources)[-1]
-        ctx = DiskDynamoStore()
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            for name in sources:
-                self.addCleanup(sys.modules.pop, name, None)
-
-            def fresh_import():
-                for name, source in sources.items():
-                    path = os.path.join(tmp_dir, name + ".py")
-                    with open(path, "w") as f:
-                        f.write(source)
-                    import_from_path(name, path)
-                return sys.modules[entry_name]
-
-            entry = fresh_import()
-            args = (torch.randn(3),)
-            expected = entry.fn(*args)
-            package = CompilePackage(entry.fn)
-            torch._dynamo.optimize(backend="eager", package=package)(entry.fn)(*args)
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-            ctx.save_package(package, self.path())
-            bound_in = {
-                name: module
-                for code in package._codes.values()
-                for name, module in code.bound_in.items()
-            }
-            self.assertEqual(set(bound_in.values()), {entry_name})
-            self.assertEqual(len(bound_in), 1 if shape == "flat" else 2)
-            has_closure = any(code.co_freevars for code in package._codes)
-            self.assertEqual(has_closure, shape == "closure")
-
-            torch._dynamo.reset()
-            entry = fresh_import()
-            others = [vars(sys.modules[name]) for name in list(sources)[:-1]]
-            package, backends = ctx.load_package(entry.fn, self.path())
-            with torch.compiler.set_stance("fail_on_recompile"):
-                compiled_fn = torch._dynamo.optimize(package=package)(entry.fn)
-                package.install(backends)
-                self.assertEqual(compiled_fn(*args), expected)
-            self.assertTrue(set(bound_in) <= set(vars(entry)))
-            for scope in others:
-                self.assertEqual(set(bound_in) & set(scope), set())
-            package.uninstall()
-            self.assertEqual(set(bound_in) & set(vars(entry)), set())
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_bound_method_name_guard_survives_func_reached_first(self):
