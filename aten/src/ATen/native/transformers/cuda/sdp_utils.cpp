@@ -622,7 +622,7 @@ bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     bool debug) {
 #if USE_ROCM
   return true;
-#endif
+#else
   // Flash Attention will raise an error in the backward pass if the head_dim
   // is unsupported on SM86-SM89 or SM120-SM121.
   using sm86 = SMVersion<8, 6>;
@@ -654,6 +654,7 @@ bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120_121(
     return false;
   }
   return true;
+#endif
 }
 
 bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug) {

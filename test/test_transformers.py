@@ -1738,7 +1738,7 @@ class TestSDPAFailureModes(NNTestCase):
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not (isSM8XDevice or isSM120Device),
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or TEST_WITH_ROCM or not (isSM8XDevice or isSM120Device),
         "Does not support fused SDPA or not SM86+ hardware",
     )
     @parametrize("head_dim", [193, 256])
