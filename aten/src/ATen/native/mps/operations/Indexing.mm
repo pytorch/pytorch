@@ -312,10 +312,7 @@ static inline const char* index_kernel_suffix(bool use_32bit_index) {
 static void nonzero_impl_mps(const Tensor& self, Tensor& out_, std::optional<int64_t> max_elements) {
   using namespace mps;
 
-  TORCH_CHECK(out_.scalar_type() == kLong,
-              max_elements ? "nonzero_static" : "nonzero",
-              ": Expected out tensor to have scalar type Long but got scalar type ",
-              out_.scalar_type());
+  TORCH_CHECK(out_.dtype() == at::kLong, "Expected output type to be Long, but got ", out_.dtype());
   TORCH_CHECK(self.device() == out_.device(),
               "expected self and out to be on the same device, but got out on ",
               out_.device(),
