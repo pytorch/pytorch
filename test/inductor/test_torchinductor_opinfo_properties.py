@@ -831,7 +831,7 @@ def compile_fn(fn, backend):
 @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
 @unittest.skipIf(not HAS_GPU, "Requires GPU")
 class TestOpInfoProperties(TestCase):
-    """Test op properties under various inductor modes using OpInfo on CUDA."""
+    """Test op properties under various inductor modes using OpInfo on each accelerator."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
@@ -961,6 +961,9 @@ class TestOpInfoProperties(TestCase):
         # Disable split-k accumulation in GEMM to ensure batch-invariant results.
         # Split-k can produce different rounding based on how work is partitioned.
         # Disabling split-k requires the cuBLASLt backend, so we set it first.
+        # CUDA-only on purpose: ROCM_BATCH_INVARIANCE_XFAILS already expects
+        # nn.functional.linear to stay non-batch-invariant on ROCm, so applying
+        # hipBLASLt knobs there could XPASS those (strict) xfails.
         prev_blas_library = None
         prev_fp16 = None
         prev_bf16 = None
