@@ -22,6 +22,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -503,7 +504,7 @@ static void flip_kernel_mps(TensorIterator& iter, const bool quantized) {
   }
 
   const auto input = iter.input(0);
-  const auto ndim = safe_downcast<uint32_t, int64_t>(iter.ndim());
+  const auto ndim = c10::safe_conv<uint32_t, int64_t>(iter.ndim());
   const bool use_direct_grid = ndim > 0 && ndim <= 3;
   const auto bit_size = getBitSizeString(input);
   const auto kernel_name = use_direct_grid ? fmt::format("flip_direct_{}", bit_size) : fmt::format("flip_{}", bit_size);
