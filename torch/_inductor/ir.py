@@ -109,7 +109,13 @@ from .dependencies import (
 )
 from .fx_utils import get_node_storage
 from .loop_body import LoopBody
-from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
+from .ops_handler import (
+    OpCounterCSE,
+    OpCountLimitExceeded,
+    OpCountResult,
+    ReductionType,
+    StoreMode,
+)
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
 from .sizevars import is_range_bound
@@ -1153,13 +1159,35 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_opcount(self) -> OpCountResult:
-        opcounter = OpCounterCSE(V.MockHandler())
+        result = self._inner_fn_opcount(self.get_expanded_opcount_limit())
+        if result is None:
+            # Dependency metadata must be complete, even for a realized body
+            # that exceeded the expansion budget.
+            result = self._inner_fn_opcount(None)
+        if result is None:
+            raise AssertionError("Unbounded operation counting must complete")
+        return result
+
+    @cache_on_self_and_args("Loops")
+    def _inner_fn_opcount(self, max_ops: int | None) -> OpCountResult | None:
+        """Return complete metadata, or None if the traversal exceeds max_ops."""
+        opcounter = OpCounterCSE(V.MockHandler(), max_ops=max_ops)
         with (
             V.set_ops_handler(opcounter),
             patch.object(FlexibleLayout, "allow_indexing", True),
         ):
-            self.inner_fn(*self.inner_fn_args())
+            try:
+                self.inner_fn(*self.inner_fn_args())
+            except OpCountLimitExceeded:
+                return None
             return opcounter.getvalue()
+
+    def get_expanded_opcount_limit(self) -> int | None:
+        return config.realize_cpu_max_expanded_ops if is_cpu(self) else None
+
+    def has_exceeded_max_expanded_ops(self) -> bool:
+        limit = self.get_expanded_opcount_limit()
+        return limit is not None and self._inner_fn_opcount(limit) is None
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         return (self._index(self.ranges),)
@@ -1187,7 +1215,8 @@ class Loops(IRNode):
         return max(threshold, realize_opcount_threshold)
 
     def has_large_inner_fn(self, threshold: int | None = None) -> bool:
-        return self.inner_fn_opcount().num_ops > self.get_realize_opcount_threshold(
+        opcount = self._inner_fn_opcount(self.get_expanded_opcount_limit())
+        return opcount is None or opcount.num_ops > self.get_realize_opcount_threshold(
             threshold
         )
 
