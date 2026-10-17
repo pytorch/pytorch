@@ -1614,12 +1614,36 @@ class CompilePackage:
                     with dynamo_timed("precompile_load_guards"):
                         guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
+                    # The installed builtins dict might be absent from the runtime
+                    # while loading guards. Populate it if it's missing.
+                    if (
+                        builtin_dict_name
+                        := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+                    ):
+                        # A pre-reset compile's CleanupHook may still own this
+                        # name even when we're about to leave its value alone
+                        # below (same dict object every compile in this
+                        # module), so it must not delete it once collected.
+                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
+                        builtins_dict = get_builtins_dict(runtime_global_scope)
+                        if builtin_dict_name in runtime_global_scope:
+                            if (
+                                runtime_global_scope[builtin_dict_name]
+                                is not builtins_dict
+                            ):
+                                raise AssertionError(
+                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
+                                )
+                        else:
+                            runtime_global_scope[builtin_dict_name] = builtins_dict
                     # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
                     # in the tracing process, so a fresh process has no binding
-                    # for it. Bind it to the live namespace, found again through
-                    # the inlined function's source, so the guards and the
-                    # bytecode see what they saw while tracing; the artifact's
-                    # copy of the dict is frozen and has its tensors faked. A
+                    # for it. Bind it (after the builtins dict above, which a
+                    # recorded source can be rooted at) to the live namespace,
+                    # found again through the inlined function's source, so
+                    # the guards and the bytecode see what they saw while
+                    # tracing; the artifact's copy of the dict is frozen and
+                    # has its tensors faked. A
                     # key whose source does not resolve here (one rooted at a
                     # frame local, or a chain through user objects that raises
                     # against this process's state) stays unbound and misses as
@@ -1648,28 +1672,6 @@ class CompilePackage:
                                 runtime_global_scope.get(name, namespace),
                                 record_only_if_new=True,
                             )
-                    # The installed builtins dict might be absent from the runtime
-                    # while loading guards. Populate it if it's missing.
-                    if (
-                        builtin_dict_name
-                        := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-                    ):
-                        # A pre-reset compile's CleanupHook may still own this
-                        # name even when we're about to leave its value alone
-                        # below (same dict object every compile in this
-                        # module), so it must not delete it once collected.
-                        CleanupHook.disown(runtime_global_scope, builtin_dict_name)
-                        builtins_dict = get_builtins_dict(runtime_global_scope)
-                        if builtin_dict_name in runtime_global_scope:
-                            if (
-                                runtime_global_scope[builtin_dict_name]
-                                is not builtins_dict
-                            ):
-                                raise AssertionError(
-                                    f"Builtins dict mismatch for key '{builtin_dict_name}'"
-                                )
-                        else:
-                            runtime_global_scope[builtin_dict_name] = builtins_dict
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
