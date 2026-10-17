@@ -1481,7 +1481,12 @@ def explicit_super(code: types.CodeType, instructions: list[Instruction]) -> Non
     output = []
     for idx, inst in enumerate(instructions):
         output.append(inst)
-        if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
+        if (
+            inst.opname == "LOAD_GLOBAL"
+            and inst.argval == "super"
+            # Without the cell, super() raises RuntimeError at runtime; leave it be.
+            and "__class__" in cell_and_free
+        ):
             nexti = instructions[idx + 1]
             if nexti.arg == 0 and (
                 (sys.version_info >= (3, 12) and nexti.opname == "CALL")
@@ -1492,10 +1497,6 @@ def explicit_super(code: types.CodeType, instructions: list[Instruction]) -> Non
                 )
                 or (sys.version_info < (3, 11) and nexti.opname == "CALL_FUNCTION")
             ):
-                if "__class__" not in cell_and_free:
-                    raise AssertionError(
-                        "__class__ not found in cell_and_free for super() call"
-                    )
                 output.append(create_instruction("LOAD_DEREF", argval="__class__"))
                 first_var = code.co_varnames[0]
                 if first_var in cell_and_free:
@@ -1963,8 +1964,7 @@ def _cached_cleaned_instructions(
     if not safe:
         if sys.version_info < (3, 11):
             remove_load_call_method(instructions)
-        if sys.version_info < (3, 12):
-            explicit_super(code, instructions)
+        explicit_super(code, instructions)
         if sys.version_info >= (3, 11):
             remove_jump_if_none(instructions)
             if sys.version_info >= (3, 12):
