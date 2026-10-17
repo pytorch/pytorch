@@ -52,11 +52,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
-    captured_graph_kernels_and_edges,
-    captured_signal_pad_order,
     core_dumps_disabled,
-    gated_signal_pad_order,
-    graph_path_exists,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -67,6 +63,12 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_arch_multiprocess,
     skip_if_rocm_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
+)
+from torch.testing._internal.common_symmem import (
+    captured_graph_kernels_and_edges,
+    captured_signal_pad_order,
+    gated_signal_pad_order,
+    graph_path_exists,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
