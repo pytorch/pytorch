@@ -726,7 +726,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
     @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
     )
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -791,7 +791,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
     @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
     )
     @skip_if_lt_x_gpu(2)
     @parametrize("op", _NCCL_EAGER_PAD_OPS)
@@ -827,6 +827,38 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         self.assertTrue(
             after_open, f"{op} b waits for work queued on the stream after a"
         )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_but_pass_in_sandcastle_if(not _HAS_CUDA_BINDINGS, "requires cuda.bindings")
+    @requires_symmetric_memory_device_API
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_stream_serialization_eager_order_across_capture(self):
+        """The NCCL-backend counterpart of
+        SymmetricMemoryTest.test_stream_serialization_eager_order_across_capture:
+        eager barrier b still waits for eager barrier a when a barrier of the
+        same group is captured between them."""
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+
+        barrier = _nccl_pad_op_launches(c10d.group.WORLD, self.device)["barrier"]
+        barrier[0]()
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+
+        def capture_barrier():
+            with torch.cuda.stream(capture_stream):
+                graph.capture_begin(capture_error_mode="thread_local")
+                barrier[0]()
+                graph.capture_end()
+
+        while_gated, after_open = gated_signal_pad_order(
+            barrier, barrier, expect_ordered=True, between=capture_barrier
+        )
+        self.assertFalse(while_gated, "b finished while a was gated")
+        self.assertTrue(after_open, "b waits for work queued on the stream after a")
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_symmetric_memory_device_API
@@ -1066,7 +1098,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
     )
     @skip_if_lt_x_gpu(2)
     @parametrize("experts_per_rank", [1, 2])
@@ -1144,7 +1176,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
     )
     @skip_if_lt_x_gpu(2)
     @parametrize("dim", [0, 1])

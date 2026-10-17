@@ -1668,6 +1668,47 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertFalse(while_gated, "b finished while a was gated")
         self.assertTrue(after_open, "b waits for work queued on the stream after a")
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @requires_cuda_python_bindings
+    def test_stream_serialization_graph_order_second_capture(self) -> None:
+        """A capture that follows an earlier capture starts its own ordering:
+        its first barrier must not wait on the earlier graph's event, recorded
+        on another stream in a capture it cannot see, and two barriers forked
+        inside it are ordered. The eager ordering is kept across both."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        hdl = symm_mem.rendezvous(symm_mem.empty(64, device="cuda"), dist.group.WORLD)
+        barrier = [lambda: hdl.barrier(channel=0)]
+        main, other = torch.cuda.Stream(), torch.cuda.Stream()
+        for s in (main, other):
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                barrier[0]()
+        torch.cuda.synchronize()
+
+        first = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(first, stream=other):
+            barrier[0]()
+        with torch.cuda.stream(main):
+            barrier[0]()
+        torch.cuda.synchronize()
+
+        after_a, after_marker = captured_signal_pad_order(main, barrier, barrier)
+        self.assertTrue(after_a, "second capture: b is not ordered after a")
+        self.assertFalse(after_marker, "b waits for work queued after a")
+
+        while_gated, after_open = gated_signal_pad_order(
+            barrier, barrier, expect_ordered=True
+        )
+        self.assertFalse(while_gated, "eager b finished while a was gated")
+        self.assertTrue(after_open, "eager b waits for work queued after a")
+
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
