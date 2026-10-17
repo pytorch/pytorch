@@ -3826,7 +3826,7 @@ class InstructionTranslatorBase(
         )
         if self.package is not None:
             self.package.add_resume_function(
-                new_code, self.f_globals, resume_name, self.output.root_tx.f_globals
+                new_code, self.f_globals["__name__"], resume_name
             )
 
         counters["resumes"][new_code.co_name] += 1
