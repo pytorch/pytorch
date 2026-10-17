@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 import warnings
 import weakref
@@ -23,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from copy import deepcopy
 from itertools import product
 from random import randint
-from unittest.mock import call, patch
+from unittest.mock import call, Mock, patch
 
 import psutil
 
@@ -96,6 +97,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     recover_orig_fp32_precision,
     requires_cuda_python_bindings,
+    requires_uvm_python_bindings,
     run_tests,
     serialTest,
     setBlasBackendsToDefaultFinally,
@@ -12404,7 +12406,73 @@ print(json.dumps([
                 f"expandable_segments:{EXPANDABLE_SEGMENTS}"
             )
 
-    @requires_cuda_python_bindings
+    def test_use_uvm_native_hip_python_bindings(self):
+        from torch.cuda import memory
+
+        success = 0
+        hip = types.ModuleType("rocm.bindings.hip")
+        hip.hipError_t = types.SimpleNamespace(
+            hipSuccess=success,
+            hipErrorMemoryAllocation=2,
+        )
+        hip.hipMemoryAdvise = types.SimpleNamespace(
+            hipMemAdviseSetPreferredLocation=3,
+            hipMemAdviseSetAccessedBy=5,
+        )
+        hip.hipDeviceAttribute_t = types.SimpleNamespace(
+            hipDeviceAttributeConcurrentManagedAccess=86,
+        )
+        hip.hipMemAttachGlobal = 1
+        hip.hipMallocManaged = Mock(return_value=(success, 0x1234))
+        hip.hipMemAdvise = Mock(return_value=(success,))
+        hip.hipDeviceGetAttribute = Mock(return_value=(success, 1))
+        hip.hipFree = Mock(return_value=(success,))
+        hip.hipGetErrorString = Mock(return_value=(success, b"success"))
+
+        rocm = types.ModuleType("rocm")
+        bindings = types.ModuleType("rocm.bindings")
+        bindings.hip = hip
+        rocm.bindings = bindings
+        pool = object()
+
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "rocm": rocm,
+                    "rocm.bindings": bindings,
+                    "rocm.bindings.hip": hip,
+                },
+            ),
+            patch.object(torch.version, "hip", "10.0.0"),
+            patch.object(
+                memory.MemPool, "from_py_allocator", return_value=pool
+            ) as create,
+            patch.object(
+                memory.torch.cuda, "device", return_value=contextlib.nullcontext()
+            ),
+        ):
+            self.assertIs(memory._make_uvm_pool(), pool)
+            alloc, free = create.call_args.args
+            self.assertEqual(alloc(4096, 0, 0), 0x1234)
+            free(0x1234, 4096, 0, 0)
+
+        hip.hipMallocManaged.assert_called_once_with(4096, hip.hipMemAttachGlobal)
+        hip.hipMemAdvise.assert_has_calls(
+            [
+                call(
+                    0x1234,
+                    4096,
+                    hip.hipMemoryAdvise.hipMemAdviseSetPreferredLocation,
+                    0,
+                ),
+                call(0x1234, 4096, hip.hipMemoryAdvise.hipMemAdviseSetAccessedBy, 0),
+            ]
+        )
+        self.assertEqual(hip.hipMemAdvise.call_count, 2)
+        hip.hipFree.assert_called_once_with(0x1234)
+
+    @requires_uvm_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
             x = torch.randn(256, 256, device="cuda")
@@ -12413,7 +12481,7 @@ print(json.dumps([
         self.assertEqual(z.shape, (256, 256))
         self.assertTrue(z.is_cuda)
 
-    @requires_cuda_python_bindings
+    @requires_uvm_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
         with torch.cuda._use_uvm():
@@ -12422,43 +12490,65 @@ print(json.dumps([
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
 
-    @requires_cuda_python_bindings
+    @requires_uvm_python_bindings
     def test_use_uvm_oom_uses_caching_allocator_recovery(self):
-        from cuda.bindings import runtime
+        if TEST_WITH_ROCM:
+            from rocm.bindings import hip as runtime  # pyrefly: ignore[missing-import]
 
-        oom = (runtime.cudaError_t.cudaErrorMemoryAllocation, 0)
-        with patch.object(runtime, "cudaMallocManaged", return_value=oom):
+            malloc_managed = "hipMallocManaged"
+            oom = (runtime.hipError_t.hipErrorMemoryAllocation, None)
+        else:
+            from cuda.bindings import runtime
+
+            malloc_managed = "cudaMallocManaged"
+            oom = (runtime.cudaError_t.cudaErrorMemoryAllocation, 0)
+        with patch.object(runtime, malloc_managed, return_value=oom):
             with torch.cuda._use_uvm():
                 with self.assertRaises(torch.OutOfMemoryError):
                     torch.empty(1, dtype=torch.uint8, device="cuda")
 
-    @requires_cuda_python_bindings
+    @requires_uvm_python_bindings
     def test_use_uvm_advice_error_frees_allocation(self):
-        from cuda.bindings import runtime
+        if TEST_WITH_ROCM:
+            from rocm.bindings import hip as runtime  # pyrefly: ignore[missing-import]
 
-        success = runtime.cudaError_t.cudaSuccess
+            success = runtime.hipError_t.hipSuccess
+            invalid_value = runtime.hipError_t.hipErrorInvalidValue
+            malloc_managed = "hipMallocManaged"
+            device_get_attribute = "hipDeviceGetAttribute"
+            mem_advise = "hipMemAdvise"
+            free = "hipFree"
+        else:
+            from cuda.bindings import runtime
+
+            success = runtime.cudaError_t.cudaSuccess
+            invalid_value = runtime.cudaError_t.cudaErrorInvalidValue
+            malloc_managed = "cudaMallocManaged"
+            device_get_attribute = "cudaDeviceGetAttribute"
+            mem_advise = "cudaMemAdvise"
+            free = "cudaFree"
         ptr = 0x1234
         with (
-            patch.object(runtime, "cudaMallocManaged", return_value=(success, ptr)),
-            patch.object(runtime, "cudaDeviceGetAttribute", return_value=(success, 1)),
+            patch.object(runtime, malloc_managed, return_value=(success, ptr)),
+            patch.object(runtime, device_get_attribute, return_value=(success, 1)),
             patch.object(
                 runtime,
-                "cudaMemAdvise",
-                return_value=(runtime.cudaError_t.cudaErrorInvalidValue,),
+                mem_advise,
+                return_value=(invalid_value,),
             ),
-            patch.object(runtime, "cudaFree", return_value=(success,)) as cuda_free,
+            patch.object(runtime, free, return_value=(success,)) as runtime_free,
         ):
             with torch.cuda._use_uvm():
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    r"cudaMemAdvise\(SetPreferredLocation\).*"
-                    r"(cudaErrorInvalidValue|invalid argument)",
+                    r"(cuda|hip)MemAdvise\(SetPreferredLocation\).*"
+                    r"(cudaErrorInvalidValue|hipErrorInvalidValue|invalid argument)",
                 ):
                     torch.empty(1, dtype=torch.uint8, device="cuda")
 
-        cuda_free.assert_called_once_with(ptr)
+        runtime_free.assert_called_once_with(ptr)
 
-    @requires_cuda_python_bindings
+    @requires_uvm_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
             with torch.autograd.set_multithreading_enabled(False):
@@ -12468,7 +12558,7 @@ print(json.dumps([
         self.assertIsNotNone(model.weight.grad)
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
-    @requires_cuda_python_bindings
+    @requires_uvm_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the
         # context, leaving its block cached in the PrivatePool until a later global

@@ -1978,6 +1978,17 @@ def _cuda_python_bindings_usable() -> bool:
 
 
 TEST_CUDA_PYTHON_BINDINGS = _cuda_python_bindings_usable()
+
+
+def _uvm_python_bindings_usable() -> bool:
+    if torch.version.cuda is not None:
+        return TEST_CUDA_PYTHON_BINDINGS
+    if torch.version.hip is not None:
+        return _check_module_exists("rocm.bindings.hip")
+    return False
+
+
+TEST_UVM_PYTHON_BINDINGS = _uvm_python_bindings_usable()
 TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
 skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
@@ -2715,6 +2726,10 @@ def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windo
     return decorator(func) if func is not None else decorator
 
 requires_cuda_python_bindings = unittest.skipUnless(TEST_CUDA_PYTHON_BINDINGS, "requires cuda-python (cuda.bindings)")
+requires_uvm_python_bindings = unittest.skipUnless(
+    TEST_UVM_PYTHON_BINDINGS,
+    "requires cuda-python on CUDA or hip-python on ROCm",
+)
 
 def requires_cuda_p2p_access():
     cuda_p2p_access_available = (

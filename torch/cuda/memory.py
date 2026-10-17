@@ -1881,15 +1881,74 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
 
 
 def _make_uvm_pool():
-    r"""Build a Python-callback MemPool backed by CUDA managed memory."""
-    try:
-        from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
-    except ImportError:
-        raise ImportError(
-            "torch.cuda._use_uvm() requires the 'cuda-python' package "
-            "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
-            "and cudaFree."
-        ) from None
+    r"""Build a Python-callback MemPool backed by CUDA or HIP managed memory."""
+    if torch.version.hip is not None:
+        try:
+            from rocm.bindings import hip as _rt  # pyrefly: ignore[missing-import]
+        except ImportError:
+            raise ImportError(
+                "torch.cuda._use_uvm() on ROCm requires the 'hip-python' package "
+                "(rocm.bindings.hip)."
+            ) from None
+
+        def _check_bindings(result, *, msg):
+            err, *out = result
+            if err != _rt.hipError_t.hipSuccess:
+                err_str = _rt.hipGetErrorString(err)[-1]
+                if isinstance(err_str, bytes):
+                    err_str = err_str.decode()
+                raise RuntimeError(f"{msg}: {err} ({err_str})")
+            if not out:
+                return None
+            if len(out) == 1:
+                return out[0]
+            return out
+
+        _malloc_managed = _rt.hipMallocManaged
+        _free = _rt.hipFree
+        _mem_advise_call = _rt.hipMemAdvise
+        _device_get_attribute = _rt.hipDeviceGetAttribute
+        _success = _rt.hipError_t.hipSuccess
+        _out_of_memory = _rt.hipError_t.hipErrorMemoryAllocation
+        _attach_global = _rt.hipMemAttachGlobal
+        _preferred_location = _rt.hipMemoryAdvise.hipMemAdviseSetPreferredLocation
+        _accessed_by = _rt.hipMemoryAdvise.hipMemAdviseSetAccessedBy
+        _concurrent_managed_access = getattr(
+            _rt.hipDeviceAttribute_t,
+            "hipDeviceAttributeConcurrentManagedAccess",
+            None,
+        )
+        _api_prefix = "HIP"
+        _malloc_name = "hipMallocManaged"
+        _mem_advise_name = "hipMemAdvise"
+        _free_name = "hipFree"
+    else:
+        try:
+            from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
+        except ImportError:
+            raise ImportError(
+                "torch.cuda._use_uvm() requires the 'cuda-python' package "
+                "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
+                "and cudaFree."
+            ) from None
+
+        _check_bindings = _check_cuda_bindings
+        _malloc_managed = _rt.cudaMallocManaged
+        _free = _rt.cudaFree
+        _mem_advise_call = _rt.cudaMemAdvise
+        _device_get_attribute = _rt.cudaDeviceGetAttribute
+        _success = _rt.cudaError_t.cudaSuccess
+        _out_of_memory = _rt.cudaError_t.cudaErrorMemoryAllocation
+        _attach_global = _rt.cudaMemAttachGlobal
+        _preferred_location = _rt.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation
+        _accessed_by = _rt.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy
+        _concurrent_managed_access = getattr(
+            _rt.cudaDeviceAttr, "cudaDevAttrConcurrentManagedAccess", None
+        )
+        _api_prefix = "CUDA"
+        _malloc_name = "cudaMallocManaged"
+        _mem_advise_name = "cudaMemAdvise"
+        _free_name = "cudaFree"
 
     _advise_uses_struct = hasattr(_rt, "cudaMemLocation")
 
@@ -1909,7 +1968,7 @@ def _make_uvm_pool():
                 return _runtime.cudaMemAdvise(ptr, size, advice, loc)
             except TypeError:
                 _advise_uses_struct = False
-        return _runtime.cudaMemAdvise(ptr, size, advice, device_id)
+        return _mem_advise_call(ptr, size, advice, device_id)
 
     _uvm_advise_supported_cache: dict[tuple[int, int], bool] = {}
 
@@ -1917,15 +1976,12 @@ def _make_uvm_pool():
         cache_key = (device_id, id(_runtime))
         if cache_key in _uvm_advise_supported_cache:
             return _uvm_advise_supported_cache[cache_key]
-        attr = getattr(
-            _runtime.cudaDeviceAttr, "cudaDevAttrConcurrentManagedAccess", None
-        )
-        if attr is None:
+        if _concurrent_managed_access is None:
             supported = False
         else:
-            result = _runtime.cudaDeviceGetAttribute(attr, device_id)
+            result = _device_get_attribute(_concurrent_managed_access, device_id)
             err = result if not isinstance(result, tuple) else result[0]
-            if err != _runtime.cudaError_t.cudaSuccess:
+            if err != _success:
                 supported = False
             else:
                 supported = bool(result[1])
@@ -1934,38 +1990,40 @@ def _make_uvm_pool():
 
     def _uvm_alloc(size, device, _stream, _runtime=_rt):
         with torch.cuda.device(device):
-            result = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
-            if result[0] == _runtime.cudaError_t.cudaErrorMemoryAllocation:
+            result = _malloc_managed(size, _attach_global)
+            if result[0] == _out_of_memory:
                 return 0
             ptr = int(
-                _check_cuda_bindings(
-                    result, msg=f"CUDA error in cudaMallocManaged({size})"
+                _check_bindings(
+                    result, msg=f"{_api_prefix} error in {_malloc_name}({size})"
                 )
             )
             try:
                 if _device_supports_uvm_advise(device, _runtime):
-                    _check_cuda_bindings(
+                    _check_bindings(
                         _mem_advise(
                             ptr,
                             size,
-                            _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                            _preferred_location,
                             device,
                         ),
-                        msg="CUDA error in cudaMemAdvise(SetPreferredLocation)",
+                        msg=f"{_api_prefix} error in "
+                        f"{_mem_advise_name}(SetPreferredLocation)",
                     )
-                    _check_cuda_bindings(
+                    _check_bindings(
                         _mem_advise(
                             ptr,
                             size,
-                            _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                            _accessed_by,
                             device,
                         ),
-                        msg="CUDA error in cudaMemAdvise(SetAccessedBy)",
+                        msg=f"{_api_prefix} error in {_mem_advise_name}(SetAccessedBy)",
                     )
             except Exception:
-                _check_cuda_bindings(
-                    _runtime.cudaFree(ptr),
-                    msg="CUDA error in cudaFree while cleaning up after cudaMemAdvise failure",
+                _check_bindings(
+                    _free(ptr),
+                    msg=f"{_api_prefix} error in {_free_name} while cleaning up "
+                    f"after {_mem_advise_name} failure",
                 )
                 raise
             return ptr
@@ -1973,9 +2031,10 @@ def _make_uvm_pool():
     def _uvm_free(ptr, size, device, _stream, _runtime=_rt):
         if ptr:
             with torch.cuda.device(device):
-                _check_cuda_bindings(
-                    _runtime.cudaFree(ptr),
-                    msg="CUDA error in cudaFree while releasing a UVM allocation",
+                _check_bindings(
+                    _free(ptr),
+                    msg=f"{_api_prefix} error in {_free_name} while releasing "
+                    "a UVM allocation",
                 )
 
     return MemPool.from_py_allocator(_uvm_alloc, _uvm_free)
@@ -1997,7 +2056,7 @@ def _use_uvm(device: "Device" = None):
 
     Example::
 
-        >>> # xdoctest: +SKIP(reason="requires CUDA and cuda-python")
+        >>> # xdoctest: +SKIP(reason="requires a GPU and runtime Python bindings")
         >>> with torch.cuda._use_uvm():
         ...     x = torch.randn(1024, 1024, device="cuda")
         ...     y = x @ x.T  # computed on GPU, pages in/out as needed
@@ -2010,7 +2069,7 @@ def _use_uvm(device: "Device" = None):
         onto the calling thread so that backward allocations also use UVM.
 
     .. note::
-        Requires the ``cuda-python`` package (``cuda.bindings``).
+        Requires ``cuda-python`` on CUDA or ``hip-python`` on ROCm.
     """
     pool = _make_uvm_pool()
     with use_mem_pool(pool, device=device):
