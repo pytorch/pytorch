@@ -326,11 +326,7 @@ void cuda_take_put_kernel(
 
   const auto offset_calc = make_offset_calculator<2>(iter);
   using uindex_t = std::make_unsigned_t<offset_t>;
-  using bounds_t = std::conditional_t<
-      std::numeric_limits<index_value_t>::digits <=
-          std::numeric_limits<offset_t>::digits,
-      offset_t,
-      std::conditional_t<std::is_unsigned_v<index_value_t>, uint64_t, int64_t>>;
+  using bounds_t = std::common_type_t<index_value_t, offset_t>;
 
   // OffsetCalculator needs the sizes and strides reversed
   const auto indexed_sizes = std::vector<int64_t>(indexed.sizes().rbegin(), indexed.sizes().rend());

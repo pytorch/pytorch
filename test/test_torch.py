@@ -3765,16 +3765,7 @@ class TestTorchDeviceType(TestCase):
     @onlyOn(["cpu", "cuda"])
     @parametrize(
         "index_dtype",
-        (
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        ),
+        integral_types_and(torch.uint16, torch.uint32, torch.uint64),
     )
     def test_take_integer_index(self, device, index_dtype):
         source = torch.arange(256, device=device).reshape(16, 16).t()
@@ -3795,16 +3786,7 @@ class TestTorchDeviceType(TestCase):
     @onlyOn(["cpu", "cuda"])
     @parametrize(
         "index_dtype",
-        (
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        ),
+        integral_types_and(torch.uint16, torch.uint32, torch.uint64),
     )
     def test_take_integer_index_backward(self, device, index_dtype):
         source = torch.arange(4.0, device=device, requires_grad=True)
@@ -3817,16 +3799,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCPU
     @parametrize(
         "index_dtype",
-        (
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint16,
-            torch.uint32,
-            torch.uint64,
-        ),
+        integral_types_and(torch.uint16, torch.uint32, torch.uint64),
     )
     def test_take_integer_index_out_of_bounds(self, device, index_dtype):
         source = torch.arange(16, device=device)
