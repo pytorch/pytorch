@@ -1981,6 +1981,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     args[0],
                     args[1:],
                     tx=tx,
+                    init_kwargs=kwargs,
                 )
 
             if self.fn is tuple and len(args) == 2 and not kwargs:
@@ -1995,6 +1996,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     args[0],
                     args[1:],
                     tx=tx,
+                    init_kwargs=kwargs,
                 )
 
         if name in _BUILTIN_CONSTANT_FOLDABLE_METHODS.get(self.fn, ()):
@@ -3588,6 +3590,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     args[0],
                     [],
                     tx=tx,
+                    init_kwargs=kwargs,
                 )
 
         resolved_fn = getattr(dict, name, None)
@@ -4129,6 +4132,7 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     args[0],
                     [],
                     tx=tx,
+                    init_kwargs=kwargs,
                 )
 
         return super().call_method(tx, name, args, kwargs)
