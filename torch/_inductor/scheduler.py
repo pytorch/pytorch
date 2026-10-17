@@ -3748,7 +3748,54 @@ def _prune_redundant_deps(
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
 
 
+def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
+    """
+    Return a human-readable FQN annotation for a fused Triton kernel.
+
+    Uses V.graph.fx_fqn_map — built once during lowering in graph.py:run_node —
+    to map FX node names to FQN strings.
+
+    For each snode, collects the FX nodes whose compute is actually inlined
+    into its loop body (Loops.collect_compute_fx_nodes) rather than walking
+    the transitively accumulated origins. This prevents over-attribution to ops
+    that are only read, not computed, by the kernel, and correctly records all
+    original layers fused into a single kernel.
+
+    FQNs already claimed by an extern kernel are dropped, so a fused kernel is
+    not labeled with the extern op beside it. If that leaves nothing (e.g. the
+    channels-last copies of a convolution's input and weight), the kernel only
+    does work for that extern op and is labeled with its FQN.
+    """
+    fqn_map: dict[str, str] = V.graph.fx_fqn_map
+    extern_fqns: OrderedSet[str] = V.graph.fx_extern_fqns
+    log.debug("get_fused_kernel_module_fqn: snodes=%d", len(scheduler_nodes))
+
+    module_names: OrderedSet[str] = OrderedSet()
+    extern_claimed: OrderedSet[str] = OrderedSet()
+    for snode in scheduler_nodes:
+        if snode.node is None:
+            continue
+        data = getattr(snode.node, "data", None)
+        if isinstance(data, ir.Loops):
+            compute_nodes = data.collect_compute_fx_nodes()
+        else:
+            lowering_node = snode.node.get_lowering_fx_node()
+            compute_nodes = [lowering_node] if lowering_node is not None else []
+        for fx_node in compute_nodes:
+            fqn = fqn_map.get(fx_node.name)
+            if fqn:
+                (extern_claimed if fqn in extern_fqns else module_names).add(fqn)
+
+    module_names = module_names or extern_claimed
+    result = " + ".join(f"L.{fqn}" for fqn in module_names) if module_names else None
+    log.debug("get_fused_kernel_module_fqn: result=%s", result)
+    return result
+
+
 class ExternKernelSchedulerNode(BaseSchedulerNode):
+    """Scheduler node for an ir.ExternKernel, a call to an op that Inductor
+    does not generate a kernel for (e.g. a cuBLAS mm or a fallback op)."""
+
     def __init__(self, scheduler: Scheduler, node: ir.Operation) -> None:
         super().__init__(scheduler)
         self._init_from_node(node)
@@ -3781,9 +3828,97 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return ([numel], [])
         return ([], [])
 
+    def _get_extern_module_fqn(self) -> str | None:
+        """Derive the FQN annotation string for this extern kernel.
+
+        Separated from codegen() so the Scheduler can pre-populate
+        fx_extern_fqns before any Triton kernel codegen runs, making
+        get_fused_kernel_module_fqn's extern filter order-independent.
+        """
+        if not isinstance(self.node, ir.ExternKernel):
+            raise AssertionError("expected self.node to be an ir.ExternKernel")
+        from torch._inductor.fx_passes.graph_view import (
+            _clean_stack_name,
+            _strip_instance_suffix,
+        )
+
+        lowering_node = self.node.get_lowering_fx_node()
+        if lowering_node is not None:
+            stack = lowering_node.meta.get("nn_module_stack")
+            if stack:
+                module_path = _clean_stack_name(next(reversed(stack.values()))[0])
+                if module_path:
+                    return (
+                        f"L.{module_path}.{_strip_instance_suffix(lowering_node.name)}"
+                    )
+        return None
+
+    @staticmethod
+    def _write_annotated_lines(
+        wrapper: PythonWrapperCodegen, lines: list[Any], module_fqn: str
+    ) -> None:
+        """Re-emit an extern kernel's codegen lines wrapped in mark_kernels.
+
+        Memory-planning lines stay at the top level, since the memory planners
+        only walk top-level lines. Runs with no statement (empty or comments
+        only) are left unwrapped, as an empty ``with`` body is invalid Python.
+        Externs that emit subgraph scopes (cond, while_loop) are not wrapped.
+        """
+        from torch._inductor.codegen.wrapper import (
+            AnnotatedExternKernelBlock,
+            CommentLine,
+            EnterSubgraphLine,
+            ExitSubgraphLine,
+            MemoryPlanningLine,
+            WrapperLine,
+        )
+
+        if any(isinstance(x, (EnterSubgraphLine, ExitSubgraphLine)) for x in lines):
+            wrapper.lines.extend(lines)
+            return
+
+        def is_statement(line: Any) -> bool:
+            if isinstance(line, str):
+                return bool(line.strip()) and not line.lstrip().startswith("#")
+            return isinstance(line, WrapperLine) and not isinstance(line, CommentLine)
+
+        run: list[Any] = []
+
+        def flush() -> None:
+            if any(is_statement(x) for x in run):
+                wrapper.writeline(AnnotatedExternKernelBlock(list(run), module_fqn))
+            else:
+                wrapper.lines.extend(run)
+            run.clear()
+
+        for line in lines:
+            if isinstance(line, MemoryPlanningLine):
+                flush()
+                wrapper.lines.append(line)
+            else:
+                run.append(line)
+        flush()
+
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
+        if (
+            torch._inductor.config.triton.cudagraph_kernel_annotations
+            and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
+        ):
+            module_fqn = self._get_extern_module_fqn()
+            # MultiOutput and DynamicScalar launch no kernels; don't wrap them.
+            if module_fqn and not isinstance(
+                self.node, (ir.MultiOutput, ir.DynamicScalar)
+            ):
+                V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
+                n_before = len(wrapper.lines)
+                self.node.codegen(wrapper)
+                inner_lines = wrapper.lines[n_before:]
+                del wrapper.lines[n_before:]
+                self._write_annotated_lines(wrapper, inner_lines, module_fqn)
+                return
         return self.node.codegen(wrapper)
 
 
@@ -12630,6 +12765,23 @@ class Scheduler:
                 multi = [name for name, ss in input_streams.items() if len(ss) > 1]
                 if multi:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
+
+        # Pre-populate fx_extern_fqns for all extern kernels before any Triton
+        # kernel is codegen'd.  get_fused_kernel_module_fqn reads this set to
+        # keep extern-kernel FQNs out of fused Triton labels; if an extern
+        # kernel were codegen'd after a Triton kernel in the same block, the
+        # set would be incomplete and the label would depend on codegen order.
+        if (
+            config.triton.cudagraph_kernel_annotations
+            and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
+        ):
+            for node in nodes:
+                for snode in node.get_nodes():
+                    if isinstance(snode, ExternKernelSchedulerNode):
+                        fqn = snode._get_extern_module_fqn()
+                        if fqn:
+                            V.graph.fx_extern_fqns.add(fqn.removeprefix("L."))
 
         for node in nodes:
             stream_key = (node.get_device(), self.get_node_stream(node))
