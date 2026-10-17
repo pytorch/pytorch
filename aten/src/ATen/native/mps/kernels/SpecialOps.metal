@@ -25,7 +25,7 @@ DEFINE_UNARY_FLOATING_FUNCTOR(airy_ai_forward);
 struct bessel_y0_forward_functor {
   template <typename T>
   inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
-    return static_cast<T>(bessel_y0_forward(static_cast<float>(x)));
+    return static_cast<T>(bessel_y0_forward(x));
   }
   template <typename T>
   inline enable_if_t<is_integral_v<T>, float> operator()(const T x) {
@@ -39,7 +39,7 @@ struct bessel_y0_forward_functor {
 struct bessel_y1_forward_functor {
   template <typename T>
   inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
-    return static_cast<T>(bessel_y1_forward(static_cast<float>(x)));
+    return static_cast<T>(bessel_y1_forward(x));
   }
   template <typename T>
   inline enable_if_t<is_integral_v<T>, float> operator()(const T x) {
