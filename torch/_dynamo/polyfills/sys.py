@@ -11,6 +11,7 @@ from ..decorators import substitute_in_graph
 
 __all__ = [
     "intern",
+    "getdefaultencoding",
     "getrecursionlimit",
 ]
 
@@ -19,6 +20,11 @@ __all__ = [
 @substitute_in_graph(sys.intern, can_constant_fold_through=True)
 def intern(string: str, /) -> str:
     return string
+
+
+@substitute_in_graph(sys.getdefaultencoding, can_constant_fold_through=True)
+def getdefaultencoding() -> str:
+    return sys.getdefaultencoding()
 
 
 @substitute_in_graph(sys.getrecursionlimit, can_constant_fold_through=True)
