@@ -17,6 +17,7 @@ from native_stack import (
     _landed_in,
     _trunk_landings,
     build_native_stack_rebase,
+    find_stack_dependents,
     get_native_stack,
     get_native_stack_landing_prs,
     GH_GET_PR_STACK_QUERY,
@@ -633,6 +634,130 @@ class TestGetNativeStackLandingPrs(GitTestCase):
         stack = self.merge_into_stack(stack, TRUNK)
         landing = [entry.number for entry, _ in self.landing_prs(stack, c.number)]
         self.assertEqual(landing, [101, 102, 103])
+
+
+class TestFindStackDependents(GitTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.landings: dict[int, str] = {}
+
+    def land_pr(self, number: int, *deps: int) -> str:
+        message = landing_message(pr_url(number))
+        if deps:
+            message += f"{stack_dependencies_line(list(deps))}\n"
+        self.landings[number] = self.commit(message)
+        return self.landings[number]
+
+    def revert_pr(self, number: int) -> str:
+        return self.commit(revert_message(pr_url(number), self.landings[number]))
+
+    def land_stack(self) -> tuple[str, str, str]:
+        return self.land_pr(101), self.land_pr(102, 101), self.land_pr(103, 101, 102)
+
+    def found(self, number: int, ref: str = TRUNK) -> tuple[str | None, list[Any]]:
+        return find_stack_dependents(GitRepo(self.dev), ORG, PROJECT, number, ref)
+
+    def dependents(self, number: int, ref: str = TRUNK) -> list[tuple[str, int]]:
+        return self.found(number, ref)[1]
+
+    def test_bottom_pr_has_every_pr_above_it_top_first(self) -> None:
+        a, b, c = self.land_stack()
+        self.assertEqual(self.found(101), (a, [(c, 103), (b, 102)]))
+
+    def test_reverts_of_reverts_reapply_their_commit(self) -> None:
+        a, b, c = self.land_stack()
+
+        def revert(sha: str) -> str:
+            return self.commit(f"Revert\n\nThis reverts commit {sha}.\n")
+
+        revert(revert(b))
+        self.assertEqual(self.found(101), (a, [(c, 103), (b, 102)]))
+        reverted = revert(a)
+        self.assertEqual(self.found(101), (None, []))
+        reapplied = revert(reverted)
+        self.assertEqual(self.found(101), (a, [(c, 103), (b, 102)]))
+        # Rebases read the reapplied PR as landed too
+        self.assertEqual(_landed_in(GitRepo(self.dev), pr_url(101), TRUNK, TRUNK), a)
+        revert(reapplied)
+        self.assertEqual(self.found(101), (None, []))
+
+    def test_dependents_are_ordered_by_their_position_in_the_stack(self) -> None:
+        _, _, c = self.land_stack()
+        self.revert_pr(102)
+        b = self.land_pr(102, 101)
+        self.assertEqual(self.dependents(101), [(c, 103), (b, 102)])
+
+    def test_middle_pr_has_only_the_prs_above_it(self) -> None:
+        _, _, c = self.land_stack()
+        self.assertEqual(self.dependents(102), [(c, 103)])
+        self.assertEqual(self.dependents(103), [])
+
+    def test_skips_commits_of_other_prs_and_stacks(self) -> None:
+        self.land_pr(101)
+        self.land_pr(200)
+        b = self.land_pr(102, 101)
+        self.land_pr(300)
+        other = self.land_pr(301, 300)
+        c = self.land_pr(103, 101, 102)
+        self.commit("Unrelated change")
+        self.assertEqual(self.dependents(101), [(c, 103), (b, 102)])
+        self.assertEqual(self.dependents(300), [(other, 301)])
+
+    def test_skips_dependents_reverted_since(self) -> None:
+        _, _, c = self.land_stack()
+        self.land_pr(104, 101, 102, 103)
+        self.revert_pr(104)
+        self.revert_pr(102)
+        self.assertEqual(self.dependents(101), [(c, 103)])
+        self.assertEqual(self.dependents(103), [])
+
+    def test_stack_dependencies_line_quoted_in_a_body_does_not_count(self) -> None:
+        self.land_pr(101)
+        self.land_pr(300)
+        quoted = stack_dependencies_line([101])
+        self.commit(landing_message(pr_url(600), f"Landed commits end with\n{quoted}"))
+        message = landing_message(pr_url(301), quoted)
+        on_300 = self.commit(f"{message}{stack_dependencies_line([300])}\n")
+        self.assertEqual(self.dependents(101), [])
+        self.assertEqual(self.dependents(300), [(on_300, 301)])
+
+    def test_dependent_relanded_outside_the_stack_is_not_a_dependent(self) -> None:
+        _, b, _ = self.land_stack()
+        self.revert_pr(103)
+        self.land_pr(103)
+        self.assertEqual(self.dependents(101), [(b, 102)])
+        self.assertEqual(self.dependents(102), [])
+
+    def test_pr_numbers_in_stack_dependencies_must_match_exactly(self) -> None:
+        for number in (10, 101, 1011):
+            self.land_pr(number)
+        on_10 = self.land_pr(201, 10)
+        on_101 = self.land_pr(202, 101)
+        on_1011 = self.land_pr(203, 1011)
+        on_all = self.land_pr(204, 10, 101, 1011)
+        self.assertEqual(self.dependents(10), [(on_all, 204), (on_10, 201)])
+        self.assertEqual(self.dependents(101), [(on_all, 204), (on_101, 202)])
+        self.assertEqual(self.dependents(1011), [(on_all, 204), (on_1011, 203)])
+
+    def test_dependents_landed_before_a_reland_still_count(self) -> None:
+        _, b, c = self.land_stack()
+        self.revert_pr(101)
+        self.land_pr(101)
+        self.assertEqual(self.dependents(101), [(c, 103), (b, 102)])
+
+    def test_pr_without_a_landing_has_no_dependents(self) -> None:
+        self.land_pr(102, 101)
+        self.assertEqual(self.dependents(101), [])
+        self.land_pr(101)
+        c = self.land_pr(103, 101)
+        self.assertEqual(self.dependents(101), [(c, 103)])
+        self.revert_pr(101)
+        self.assertEqual(self.dependents(101), [])
+
+    def test_regular_pr_has_no_dependents(self) -> None:
+        for number in (101, 102, 103):
+            self.land_pr(number)
+        self.assertEqual(self.dependents(101), [])
 
 
 VIABLE_STRICT = "viable/strict"
