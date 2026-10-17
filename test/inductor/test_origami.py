@@ -8,10 +8,6 @@ from unittest import mock
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.heuristics.template.triton import (
-    _rocm_version as _th_rocm_version,
-    ORIGAMI_UNSUPPORTED_ROCM_VERSION,
-)
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
@@ -37,7 +33,7 @@ PERF_SLOWDOWN_TOLERANCE = 1.05  # 5% tolerance on performance
 
 IS_ROCM = torch.version.hip is not None
 
-ORIGAMI_ROCM_SUPPORTED = IS_ROCM and _th_rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+ORIGAMI_ROCM_SUPPORTED = IS_ROCM
 
 try:
     import origami
@@ -69,7 +65,7 @@ def tearDownModule():
 @unittest.skipIf(not IS_ROCM, "Origami integration is ROCm-only")
 @unittest.skipIf(
     not ORIGAMI_ROCM_SUPPORTED,
-    "Origami is not supported on ROCm 10.0+",
+    "This platform does not support ROCM Origami",
 )
 @unittest.skipIf(not HAS_ORIGAMI, "Origami package is not installed")
 @unittest.skipIf(
@@ -647,54 +643,6 @@ class TestOrigamiSkippedOnNonROCm(TestCase):
                 compiled = torch.compile(test_fn, dynamic=False)
                 result = compiled(a, b)
                 torch.testing.assert_close(result, expected, atol=1e-5, rtol=1e-5)
-
-
-class TestOrigamiVersionGate(TestCase):
-    """Unit tests for the _rocm_version / _origami_enabled() cutoff.
-
-    No GPU or origami package required: all paths are exercised by patching
-    the module-level _rocm_version directly.
-    """
-
-    def test_origami_enabled_below_cutoff(self):
-        """_origami_enabled() returns True on ROCm just below the cutoff."""
-        import torch._inductor.heuristics.template.triton as th
-
-        with (
-            mock.patch.object(th, "_rocm_version", (9, 9)),
-            config.patch({"rocm.origami": True}),
-        ):
-            self.assertTrue(th._origami_enabled())
-
-    def test_origami_disabled_at_cutoff(self):
-        """_origami_enabled() returns False at exactly the cutoff version."""
-        import torch._inductor.heuristics.template.triton as th
-
-        with (
-            mock.patch.object(th, "_rocm_version", (10, 0)),
-            config.patch({"rocm.origami": True}),
-        ):
-            self.assertFalse(th._origami_enabled())
-
-    def test_origami_disabled_above_cutoff(self):
-        """_origami_enabled() returns False above the cutoff version."""
-        import torch._inductor.heuristics.template.triton as th
-
-        with (
-            mock.patch.object(th, "_rocm_version", (10, 1)),
-            config.patch({"rocm.origami": True}),
-        ):
-            self.assertFalse(th._origami_enabled())
-
-    def test_origami_config_off_below_cutoff(self):
-        """_origami_enabled() respects config.rocm.origami=False even below cutoff."""
-        import torch._inductor.heuristics.template.triton as th
-
-        with (
-            mock.patch.object(th, "_rocm_version", (9, 9)),
-            config.patch({"rocm.origami": False}),
-        ):
-            self.assertFalse(th._origami_enabled())
 
 
 if __name__ == "__main__":

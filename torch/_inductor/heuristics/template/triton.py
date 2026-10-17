@@ -34,7 +34,6 @@ from ...kernel.mm_plus_mm import mm_plus_mm_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...runtime.hints import DeviceProperties
 from ...utils import (
-    _rocm_version_tuple,
     _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
     _TDM_MIN_INNERMOST_REQUEST_BYTES,
     commit_tdm_operand_layout,
@@ -82,14 +81,10 @@ def _use_template_autows() -> bool:
 # Check if running on ROCm
 IS_ROCM = torch.version.hip is not None
 
-_rocm_version = _rocm_version_tuple()
-# First ROCm version where origami is not supported.
-ORIGAMI_UNSUPPORTED_ROCM_VERSION = (10, 0)
-
 
 def _origami_enabled() -> bool:
     """Check if origami GEMM optimization is enabled."""
-    return config.rocm.origami and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
+    return config.rocm.origami
 
 
 def _tdm_descriptor_orientation(kwargs: dict[str, Any]) -> tuple[bool, bool]:
@@ -175,13 +170,7 @@ def _filter_tdm_descriptor_block_configs(
 # both max_autotune and config.rocm.origami are enabled (env-var driven, set once
 # at config import). Cache the import here so the hot path never pays an exception
 # and CUDA/CPU/origami-disabled processes never attempt the import.
-# origami is not supported on ROCm 10.0+.
-if (
-    IS_ROCM
-    and _rocm_version < ORIGAMI_UNSUPPORTED_ROCM_VERSION
-    and config.max_autotune
-    and config.rocm.origami
-):
+if IS_ROCM and config.max_autotune and config.rocm.origami:
     try:
         import origami  # type: ignore[import-not-found]
     except ImportError:
@@ -192,17 +181,6 @@ if (
         )
 else:
     origami = None
-    if (
-        IS_ROCM
-        and config.rocm.origami
-        and _rocm_version >= ORIGAMI_UNSUPPORTED_ROCM_VERSION
-    ):
-        log.warning(
-            "ROCm origami GEMM selection is not supported on ROCm %d.%d+ "
-            "(detected %d.%d); origami disabled.",
-            *ORIGAMI_UNSUPPORTED_ROCM_VERSION,
-            *_rocm_version,
-        )
 
 
 # TODO(rocm-origami): replace these wrappers with public accessors when the
@@ -2543,14 +2521,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         mnk_static = all(not getattr(x, "free_symbols", None) for x in (m, n, k))
         if (
             origami is not None
+            and _origami_enabled()
             and not mnk_static
             and config.max_autotune_gemm_search_space == "DEFAULT"
         ):
             log.debug("Origami skipped: symbolic m/n/k, using regular config generator")
-        # `origami is not None` encodes the module-load gate (see top of file);
-        # only DEFAULT search space is supported here.
+        # `origami is not None` is the module-load gate (set at import time);
+        # `_origami_enabled()` checks config.rocm.origami at call time so that
+        # config.patch({"rocm.origami": False}) disables the origami path even
+        # after the module has been imported.
         if (
             origami is not None
+            and _origami_enabled()
             and config.max_autotune_gemm_search_space == "DEFAULT"
             and mnk_static
         ):
@@ -2772,9 +2754,9 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         else:
             # Warn if origami was enabled but not used due to EXHAUSTIVE search space.
-            # `origami is not None` already covers IS_ROCM + max_autotune + rocm.origami.
             if (
                 origami is not None
+                and _origami_enabled()
                 and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
             ):
                 log.warning(
