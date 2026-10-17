@@ -1699,13 +1699,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 y = 2 * x
                 return y.sum()
 
-            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
-
             x = torch.ones(4, device=device)
 
-            # NCCL startup is lazy
+            # NCCL startup is lazy; keep it out of the short timeout below
             w = pg.allreduce(x)
             w.wait()
+            torch.accelerator.synchronize(device)
+
+            dist.set_timeout(timedelta(seconds=sleep_time - 2), pg)
 
             f(x)
             if self.rank != 0:
@@ -1717,6 +1718,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             w = pg.allreduce(x)
             w.wait()
             torch.accelerator.synchronize(device)
+            dist.set_timeout(dist.default_pg_timeout, pg)
 
             metrics = torch._dynamo.utils.get_compilation_metrics()
             # Number of compiles same on all nodes
