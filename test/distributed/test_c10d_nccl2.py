@@ -285,6 +285,7 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ephemeral_timeout(self) -> None:
+        self.addCleanup(dist.set_timeout, self.timeout)
         dist.set_timeout(timedelta(seconds=3))
 
         existing_work = dist.all_reduce(
