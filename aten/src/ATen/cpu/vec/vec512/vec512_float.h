@@ -315,7 +315,31 @@ class Vectorized<float> {
     // erf(x) = sign(x) * (1 - r * t * exp(- x * x))
     auto tmp6 = _mm512_mul_ps(tmp5, t);
     auto tmp7 = _mm512_fmadd_ps(tmp6, r, one_vec);
-    return _mm512_xor_ps(sign_mask, tmp7);
+    auto rational = _mm512_xor_ps(sign_mask, tmp7);
+    // The rational approximation has an absolute error of 1.5e-7, so below
+    // |x| = 0.5 it loses relative accuracy and rounds to 0 for |x| <= 1e-7.
+    // There the Taylor series is accurate to about 2 ulp; its next term,
+    // x^15 / 75600, is below 1e-9 of erf(0.5):
+    // erf(x) = 2 / sqrt(pi) * x *
+    //     (1 - x^2 / 3 + x^4 / 10 - x^6 / 42 + x^8 / 216 - x^10 / 1320 +
+    //      x^12 / 9360)
+    const auto half_vec = _mm512_set1_ps(0.5f);
+    const auto two_over_sqrt_pi = _mm512_set1_ps(1.1283791670955126f);
+    const auto c1 = _mm512_set1_ps(-0.3333333333333333f);
+    const auto c2 = _mm512_set1_ps(0.1f);
+    const auto c3 = _mm512_set1_ps(-0.023809523809523808f);
+    const auto c4 = _mm512_set1_ps(0.004629629629629629f);
+    const auto c5 = _mm512_set1_ps(-0.0007575757575757576f);
+    const auto c6 = _mm512_set1_ps(0.00010683760683760684f);
+    auto s = _mm512_fmadd_ps(c6, pow_2, c5);
+    s = _mm512_fmadd_ps(s, pow_2, c4);
+    s = _mm512_fmadd_ps(s, pow_2, c3);
+    s = _mm512_fmadd_ps(s, pow_2, c2);
+    s = _mm512_fmadd_ps(s, pow_2, c1);
+    s = _mm512_fmadd_ps(s, pow_2, one_vec);
+    auto series = _mm512_mul_ps(two_over_sqrt_pi, _mm512_mul_ps(values, s));
+    auto small_mask = _mm512_cmp_ps_mask(abs_vec, half_vec, _CMP_LT_OQ);
+    return _mm512_mask_blend_ps(small_mask, rational, series);
   }
 #endif
 #ifdef AT_VEC_CUSTOM_MATH

@@ -604,6 +604,38 @@ namespace {
             [](const vec& v) { return v.erf(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    TYPED_TEST(ErrorFunctions, ErfSmallArguments) {
+        // The tolerance of test_unary is absolute first (5e-5 for float), so
+        // it cannot see a result that has lost its relative accuracy near 0.
+        // erf(x) ~ 2 / sqrt(pi) * x there; the vector implementation has to
+        // keep the relative error within a few ulp down to the smallest
+        // inputs, like std::erf does.
+        using vec = TypeParam;
+        using VT = ValueType<vec>;
+        constexpr int el_count = vec::size();
+        CACHE_ALIGN VT vals[el_count];
+        CACHE_ALIGN VT actual[el_count];
+        const VT magnitudes[] = {
+            VT(1e-7), VT(1e-6), VT(1e-5), VT(1e-4), VT(1e-3), VT(0.01),
+            VT(0.1), VT(0.3), VT(0.49), VT(0.5), VT(0.51), VT(1), VT(2)};
+        for (VT magnitude : magnitudes) {
+            for (VT sign : {VT(1), VT(-1)}) {
+                const VT x = sign * magnitude;
+                for (const auto i : c10::irange(el_count)) {
+                    vals[i] = x;
+                }
+                vec::loadu(vals).erf().store(actual);
+                const VT expected = std::erf(x);
+                const VT bound =
+                    VT(32) * std::numeric_limits<VT>::epsilon() * std::abs(expected);
+                for (const auto i : c10::irange(el_count)) {
+                    EXPECT_LE(std::abs(actual[i] - expected), bound)
+                        << "erf(" << x << ") = " << actual[i] << ", expected "
+                        << expected;
+                }
+            }
+        }
+    }
     TYPED_TEST(ErrorFunctions, Erfc) {
         using vec = TypeParam;
         test_unary<vec>(
