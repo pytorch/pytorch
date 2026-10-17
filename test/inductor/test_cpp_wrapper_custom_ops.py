@@ -7,7 +7,12 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -190,13 +195,11 @@ class TestCppWrapperCustomOps(InductorTestCase):
 
     @unittest.skipIf(not HAS_CPU, "requires CPU")
     @config.patch(cpp_wrapper=True, implicit_fallbacks=True)
-    def test_cpp_wrapper_single_element_tensor_list_return(self):
-        # A Tensor[]-returning op goes through the Python custom_op_wrapper
-        # fallback, which always returns a Python list. A single-element result
-        # must be unwrapped with PyList_GET_ITEM, not as a bare capsule (which
-        # yields a null handle and segfaults downstream).
+    @parametrize("dispatch", ("boxed", "python"))
+    def test_cpp_wrapper_single_element_tensor_list_return(self, dispatch):
         with torch.library._scoped_library("mylib_single_list", "FRAGMENT") as m:
-            m.define("single_list(Tensor x) -> Tensor[]")
+            return_type = "Tensor[]" if dispatch == "boxed" else "Tensor?[]"
+            m.define(f"single_list(Tensor x) -> {return_type}")
             m.impl("single_list", lambda x: [x + 1], "CPU")
             m.impl("single_list", lambda x: [torch.empty_like(x)], "Meta")
 
@@ -208,8 +211,72 @@ class TestCppWrapperCustomOps(InductorTestCase):
             out, code = run_and_get_code(torch.compile(fn, fullgraph=True), x)
             self.assertEqual(out, (x + 1) * 2)
             code_str = "\n".join(code)
-            self.assertIn("custom_op_wrapper", code_str)
-            self.assertIn("PyList_GET_ITEM", code_str)
+            if dispatch == "boxed":
+                self.assertIn("callBoxed", code_str)
+                self.assertNotIn("custom_op_wrapper", code_str)
+            else:
+                self.assertIn("custom_op_wrapper", code_str)
+                self.assertIn("PyList_GET_ITEM", code_str)
+                self.assertNotIn("callBoxed", code_str)
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @config.patch(cpp_wrapper=True, implicit_fallbacks=True)
+    @parametrize("optional_present", (False, True))
+    @parametrize("empty_last_list", (False, True))
+    def test_cpp_wrapper_mixed_tensor_list_returns(
+        self, optional_present, empty_last_list
+    ):
+        with torch.library._scoped_library("mylib_mixed_lists", "FRAGMENT") as m:
+            m.define("mixed(Tensor x) -> (Tensor[], Tensor?, Tensor, Tensor[])")
+            m.impl(
+                "mixed",
+                lambda x: (
+                    [x + 1, x + 2],
+                    x + 3 if optional_present else None,
+                    x + 4,
+                    [] if empty_last_list else [x + 5],
+                ),
+                "CPU",
+            )
+            m.impl(
+                "mixed",
+                lambda x: (
+                    [torch.empty_like(x), torch.empty_like(x)],
+                    torch.empty_like(x) if optional_present else None,
+                    torch.empty_like(x),
+                    [] if empty_last_list else [torch.empty_like(x)],
+                ),
+                "Meta",
+            )
+
+            def fn(x):
+                first, optional, middle, last = torch.ops.mylib_mixed_lists.mixed(
+                    x.sin()
+                )
+                return first, optional, middle, last, first[0] + middle
+
+            x = torch.randn(4)
+            compiled = torch.compile(fn, fullgraph=True)
+            actual, code = run_and_get_code(compiled, x)
+            self.assertEqual(actual, fn(x))
+            self.assertEqual(len(actual[0]), 2)
+            self.assertEqual(len(actual[3]), 0 if empty_last_list else 1)
+            if not optional_present:
+                self.assertIsNone(actual[1])
+            next_x = torch.randn(4)
+            self.assertEqual(compiled(next_x), fn(next_x))
+            self.assertEqual(actual, fn(x))
+            code_str = "\n".join(code)
+            self.assertIn("callBoxed", code_str)
+            self.assertIn("toListRef()", code_str)
+            self.assertNotIn("custom_op_wrapper", code_str)
+            self.assertRegex(
+                code_str,
+                r"std::move\(dispatch_stack_\d+\[2\]\)\.toTensor\(\)",
+            )
+
+
+instantiate_parametrized_tests(TestCppWrapperCustomOps)
 
 
 if __name__ == "__main__":
