@@ -1567,9 +1567,12 @@ class CompilePackage:
                         )
                     # AutotuneCacheBundler keeps one bundle per compile
                     # context, left open on a remote-cache miss until the
-                    # first compiled call, so a frame's second backend fails
-                    # to open its own. The artifact carries its kernels, so
-                    # the bundle has nothing to share here.
+                    # first compiled call. A backend with a backward
+                    # post-compiles both in one after_deserialization(), and a
+                    # frame can have several backends, so a second bundle
+                    # would fail to open. With the flag off these kernels'
+                    # first-call autotune results are not uploaded as a
+                    # bundle; the per-kernel autotune caches still apply.
                     with (
                         dynamo_timed(
                             "after_deserialization", phase_name="backend_compile"
