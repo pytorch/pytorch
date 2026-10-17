@@ -152,7 +152,7 @@ void adagrad_fused_step_impl(
   scalar_t* param_data = param.data_ptr<scalar_t>();
   scalar_t* grad_data = grad.data_ptr<scalar_t>();
   scalar_t* state_sum_data = state_sum.data_ptr<scalar_t>();
-  double step = state_step.item<float>();
+  double step = state_step.item<double>();
   double clr = lr / (1.0 + (step - 1.0) * lr_decay);
 
   constexpr size_t cache_line_size = 64;

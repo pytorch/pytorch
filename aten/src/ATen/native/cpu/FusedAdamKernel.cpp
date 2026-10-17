@@ -279,7 +279,7 @@ void adam_fused_step_impl(
     const bool maximize,
     const float* grad_scale_ptr) {
   using opmath_t = at::opmath_type<scalar_t>;
-  double step = state_step.item<float>();
+  double step = state_step.item<double>();
   scalar_t* param_data = param.data_ptr<scalar_t>();
   scalar_t* exp_avg_data = exp_avg.data_ptr<scalar_t>();
   scalar_t* exp_avg_sq_data = exp_avg_sq.data_ptr<scalar_t>();

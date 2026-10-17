@@ -17,6 +17,7 @@ from torch.nn import Parameter
 from torch.optim import Optimizer, SGD
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.optim.optimizer import (
+    _get_scalar_dtype,
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
@@ -26,6 +27,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCPU,
+    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -40,10 +43,12 @@ from torch.testing._internal.common_optimizers import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     markDynamoStrictTest,
     parametrize,
     run_tests,
     serialTest,
+    set_default_dtype,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -1000,6 +1005,145 @@ class TestOptimRenewed(TestCase):
                 for k in og_p_state:
                     actual = new_p_state[k]
                     self.assertEqual(og_p_state[k], actual, rtol=rtol, atol=atol)
+
+    @parametrize("default_dtype", [torch.float32, torch.float64])
+    @parametrize("amsgrad", [False, True])
+    @parametrize("tensor_lr", [False, True])
+    @optims(
+        [
+            optim
+            for optim in optim_db
+            if optim.optim_cls
+            in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_fused_step_dtype(
+        self, device, dtype, optim_info, default_dtype, amsgrad, tensor_lr
+    ):
+        device_type = torch.device(device).type
+        if device_type not in optim_info.supports_fused_on:
+            self.skipTest(
+                f"Fused {optim_info.optim_cls.__name__} is unsupported on {device_type}"
+            )
+        kwargs = {"lr": 0.01}
+        if tensor_lr:
+            kwargs["lr"] = torch.tensor(0.01, device=device, dtype=torch.float32)
+        if optim_info.optim_cls is torch.optim.Adagrad:
+            if amsgrad:
+                self.skipTest("Adagrad does not support AMSGrad")
+            kwargs["lr_decay"] = 0.1
+        else:
+            kwargs["amsgrad"] = amsgrad
+        expected_dtype = (
+            torch.float64
+            if device_type in ("cpu", "cuda") and default_dtype == torch.float64
+            else torch.float32
+        )
+        with set_default_dtype(default_dtype):
+            param = torch.ones(8, device=device, dtype=dtype, requires_grad=True)
+            reference = param.detach().clone().requires_grad_()
+            optimizer = optim_info.optim_cls([param], fused=True, **kwargs)
+            reference_optimizer = optim_info.optim_cls(
+                [reference], fused=False, **kwargs
+            )
+            for _ in range(3):
+                param.grad = torch.full_like(param, 0.25)
+                reference.grad = param.grad.clone()
+                optimizer.step()
+                reference_optimizer.step()
+                self.assertEqual(param, reference)
+            step = optimizer.state[param]["step"]
+            self.assertEqual(step.dtype, expected_dtype)
+            self.assertEqual(step, torch.tensor(3, device=device, dtype=expected_dtype))
+
+            state = deepcopy(optimizer.state_dict())
+            for param_state in state["state"].values():
+                param_state["step"] = param_state["step"].to(
+                    device="cpu", dtype=torch.float64
+                )
+            optimizer.load_state_dict(state)
+            step = optimizer.state[param]["step"]
+            self.assertEqual(step.dtype, expected_dtype)
+            self.assertEqual(step.device, param.device)
+            optimizer.step()
+            reference_optimizer.step()
+            self.assertEqual(param, reference)
+            self.assertEqual(step, torch.tensor(4, device=device, dtype=expected_dtype))
+
+            if expected_dtype == torch.float64:
+                step.fill_(2**24)
+                reference_optimizer.state[reference]["step"].fill_(2**24)
+                for expected_step in (2**24 + 1, 2**24 + 2):
+                    optimizer.step()
+                    reference_optimizer.step()
+                    self.assertEqual(step.item(), expected_step)
+                    self.assertEqual(param, reference)
+
+    @onlyCUDA
+    @parametrize("amsgrad", [False, True])
+    @optims(
+        [o for o in optim_db if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW)],
+        dtypes=[torch.float32],
+    )
+    def test_fused_mixed_precision_step_dtype(self, device, dtype, optim_info, amsgrad):
+        params = [torch.ones(8, device=device, dtype=dtype) for _ in range(2)]
+        optimizers = [
+            optim_info.optim_cls([p], lr=0.01, fused=True, amsgrad=amsgrad)
+            for p in params
+        ]
+        for param, optimizer, step_dtype in zip(
+            params, optimizers, (torch.float32, torch.float64), strict=True
+        ):
+            param.grad = torch.full_like(param, 0.25)
+            _bf16_state_init_hook(optimizer, (), {})
+            optimizer.state[param]["step"] = torch.zeros(
+                (), device=device, dtype=step_dtype
+            )
+        for step in range(1, 4):
+            for optimizer in optimizers:
+                optimizer.step()
+            self.assertEqual(params[0], params[1])
+            for key in optimizers[0].state[params[0]]:
+                if key == "step":
+                    for param, optimizer in zip(params, optimizers, strict=True):
+                        self.assertEqual(optimizer.state[param][key].item(), step)
+                else:
+                    self.assertEqual(
+                        optimizers[0].state[params[0]][key],
+                        optimizers[1].state[params[1]][key],
+                    )
+
+    @onlyCPU
+    @optims(
+        [
+            o
+            for o in optim_db
+            if o.optim_cls in (torch.optim.Adam, torch.optim.AdamW, torch.optim.Adagrad)
+        ],
+        dtypes=[torch.float64],
+    )
+    def test_fused_float64_step_cpu_precision(self, device, dtype, optim_info):
+        if optim_info.optim_cls is torch.optim.Adagrad:
+            kwargs = {"lr": float(2**24), "lr_decay": 1.0}
+        else:
+            kwargs = {"lr": 1.0, "betas": (1 - 2**-24, 1 - 2**-23)}
+        param = torch.zeros(8, device=device, dtype=dtype)
+        reference = param.clone()
+        with set_default_dtype(torch.float64):
+            optimizer = optim_info.optim_cls([param], fused=True, **kwargs)
+            reference_optimizer = optim_info.optim_cls(
+                [reference], fused=False, **kwargs
+            )
+            for p, optim in ((param, optimizer), (reference, reference_optimizer)):
+                p.grad = torch.full_like(p, 0.25)
+                optim.step()
+                p.zero_()
+                optim.state[p]["step"].fill_(2**24)
+            optimizer.step()
+            reference_optimizer.step()
+            self.assertEqual(optimizer.state[param]["step"].item(), 2**24 + 1)
+            self.assertEqual(param, reference, rtol=1e-12, atol=1e-14)
 
     @skipMPS  # MPS does not support float64
     @onlyAccelerator
@@ -2725,6 +2869,23 @@ class TestOptimRenewed(TestCase):
         )
 
 
+class TestScalarDtype(TestCase):
+    @parametrize("default_dtype", [torch.float16, torch.float32, torch.float64])
+    @parametrize("is_fused", [None, False, True])
+    @parametrize("target_device", [None, "cpu", "cuda", "mps", "xpu"])
+    def test_get_scalar_dtype(self, default_dtype, is_fused, target_device):
+        target_device = torch.device(target_device) if target_device else None
+        expected = torch.float32
+        if default_dtype == torch.float64 and (
+            not is_fused
+            or (target_device is not None and target_device.type in ("cpu", "cuda"))
+        ):
+            expected = torch.float64
+        with set_default_dtype(default_dtype):
+            self.assertEqual(_get_scalar_dtype(is_fused, target_device), expected)
+
+
+instantiate_parametrized_tests(TestScalarDtype)
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 

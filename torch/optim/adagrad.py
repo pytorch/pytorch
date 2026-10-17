@@ -83,7 +83,9 @@ class Adagrad(Optimizer):
                 state["step"] = (
                     torch.zeros(
                         (),
-                        dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                        dtype=_get_scalar_dtype(
+                            is_fused=group["fused"], device=p.device
+                        ),
                         device=p.device,
                     )
                     if group["fused"]
@@ -116,7 +118,7 @@ class Adagrad(Optimizer):
                     p_state["step"] = (
                         torch.tensor(
                             step_val,
-                            dtype=_get_scalar_dtype(is_fused=fused),
+                            dtype=_get_scalar_dtype(is_fused=fused, device=p.device),
                             device=p.device,
                         )
                         if group["fused"]
@@ -163,7 +165,9 @@ class Adagrad(Optimizer):
                     state["step"] = (
                         torch.zeros(
                             (),
-                            dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                            dtype=_get_scalar_dtype(
+                                is_fused=group["fused"], device=p.device
+                            ),
                             device=p.device,
                         )
                         if group["fused"]
