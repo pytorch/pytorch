@@ -112,13 +112,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.huber_loss": [
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-                torch.int16,
-                torch.int32,
-            ],
             "nn.functional.adaptive_avg_pool3d": None,
             "nn.functional.adaptive_max_pool1d": [
                 torch.int16,
@@ -227,12 +220,6 @@ if torch.backends.mps.is_available():
             ],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
-            "nn.functional.silu": [
-                torch.int16,
-                torch.int32,
-                torch.uint8,
-                torch.int8,
-            ],
             "nn.functional.softplus": [
                 torch.int32,
                 torch.uint8,
