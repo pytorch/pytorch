@@ -403,14 +403,26 @@ def arange(
     # presence even when it equals the default, e.g. arange(1, 2, 3, step=1);
     # our default-filtered check cannot see that edge case).
     # NB: NumPy also accepts `dtype` as a 4th positional arg (its signature
-    # is arange([start, ]stop, [step, ]dtype=None)); we cannot support that
-    # here because positional args of a *args-led impl are normalized via
-    # the ArrayLikeOrScalar annotation, so `dtype` stays keyword-only.
+    # is arange([start, ]stop, [step, ]dtype=None)); the wrapper registered in
+    # _funcs.py peels that slot into the dtype keyword before the normalizer
+    # runs, since a positional dtype would not survive the first parameter's
+    # ArrayLikeOrScalar annotation.
     n = len(args)
-    if n > 3:
+    if n > 4:
         raise TypeError(
-            f"arange() takes from 0 to 3 positional arguments but {n} were given"
+            f"arange() takes from 0 to 4 positional arguments but {n} were given"
         )
+    if n == 4:
+        # only reachable from direct callers of this impl (the public `arange`
+        # wrapper peels the 4th positional before the normalizer runs)
+        if dtype is not None:
+            raise TypeError(
+                "argument for arange() given by name ('dtype') "
+                "and position (position 3)"
+            )
+        dtype = args[3]
+        args = args[:3]
+        n = 3
     if n >= 1 and start is not None:
         raise TypeError(
             "argument for arange() given by name ('start') and position (position 0)"

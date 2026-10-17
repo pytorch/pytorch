@@ -561,6 +561,18 @@ class TestArangeKeywordBinding(TestCase):
         with assert_raises(ZeroDivisionError):
             w.arange(1, 5, step=0)
 
+    def test_positional_dtype(self):
+        # NumPy's 4th positional slot is dtype: arange(0, 10, 2, np.int16)
+        for dt in (_np.float32, _np.int16, "float64", float, int):
+            got = w.arange(0, 10, 2, dt)
+            expected = _np.arange(0, 10, 2, dt)
+            assert_equal(got, expected)
+            assert_equal(got.dtype.torch_dtype, torch.from_numpy(expected).dtype)
+
+    def test_dtype_positional_and_kw_collision(self):
+        with assert_raises(TypeError):
+            w.arange(0, 10, 2, _np.float32, dtype=_np.float64)
+
 
 class TestCopyTo(TestCase):
     hw_classification = HardwareClassification.GENERIC
