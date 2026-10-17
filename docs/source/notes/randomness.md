@@ -44,6 +44,13 @@ It is also possible to obtain identical results from an operation that uses
 random numbers by setting {meth}`torch.manual_seed()` to the same value between
 subsequent calls.
 
+Seeding a CUDA generator makes device-side sampling reproducible run to run on the
+same GPU. The same seed is not guaranteed to produce the same values on a GPU of a
+different model, or on a partitioned GPU (e.g. NVIDIA MIG or AMD Instinct compute
+partitioning), and PyTorch does not test for it. If a sampled tensor must be
+identical across devices, generate it on the CPU with a seeded
+{class}`torch.Generator` and copy it to the device.
+
 ### Python
 
 For custom operators, you might need to set python seed as well:
