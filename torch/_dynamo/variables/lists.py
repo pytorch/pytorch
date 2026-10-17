@@ -17,6 +17,7 @@ variable tracking system.
 import collections
 import operator
 import sys
+from collections.abc import Iterator
 from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import TypeIs
 
@@ -76,6 +77,7 @@ from .object_protocol import (
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    repr_from_parts,
     type_implements_nb_index,
     vt_is_iterable,
 )
@@ -1182,9 +1184,16 @@ class ListVariable(BaseListVariable):
     def debug_repr(self) -> str:
         return self.debug_repr_helper("[", "]")
 
+    def repr_parts(self) -> Iterator[str | VariableTracker]:
+        yield "["
+        for i, item in enumerate(self.items):
+            if i:
+                yield ", "
+            yield item
+        yield "]"
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        return VariableTracker.build(tx, f"[{items}]")
+        return repr_from_parts(tx, self)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Only a sourceless object needs the empty-then-fill placeholder. Once
@@ -2025,11 +2034,16 @@ class TupleVariable(BaseListVariable):
             return self.debug_repr_helper("(", ",)")
         return self.debug_repr_helper("(", ")")
 
+    def repr_parts(self) -> Iterator[str | VariableTracker]:
+        yield "("
+        for i, item in enumerate(self.items):
+            if i:
+                yield ", "
+            yield item
+        yield ",)" if len(self.items) == 1 else ")"
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        if len(self.items) == 1:
-            items += ","
-        return VariableTracker.build(tx, f"({items})")
+        return repr_from_parts(tx, self)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/tupleobject.c#L1101-L1117
@@ -2470,9 +2484,13 @@ class SizeVariable(TupleVariable):
     def debug_repr(self) -> str:
         return self.debug_repr_helper("torch.Size([", "])")
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = ", ".join(tracked_repr(tx, item) for item in self.items)
-        return VariableTracker.build(tx, f"torch.Size([{items}])")
+    def repr_parts(self) -> Iterator[str | VariableTracker]:
+        yield "torch.Size(["
+        for i, item in enumerate(self.items):
+            if i:
+                yield ", "
+            yield item
+        yield "])"
 
     def python_type(self) -> type:
         return torch.Size
