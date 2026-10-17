@@ -247,10 +247,12 @@ def validate_output_transform_composition(
             ):
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
         case OutputContractionPlan(transform=contraction):
-            if outputs.aux_outputs and (
-                outputs.aux_outputs != (gemm,)
-                or outputs.local_reduce is not None
-                or contraction.group != 2
+            # Chunked B interleaves accumulator columns. Save the unchanged
+            # accumulator by selecting each lane into its logical output half.
+            if (
+                outputs.aux_outputs
+                and contraction.chunked
+                and (contraction.group != 2 or outputs.aux_outputs != (gemm,))
             ):
                 raise NotImplementedError(
                     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR
@@ -264,9 +266,16 @@ def validate_output_transform_composition(
                     "chunked grouped main outputs do not compose with grouped reductions"
                 )
         case OutputExpansionPlan(pack=pack):
-            # Auxiliaries store through ordinary GEMM-shaped tiles, so they must
-            # be computed before the lanes are packed.
-            if outputs.local_reduce is not None or any(
+            # Auxiliaries (and grouped reductions) store through ordinary
+            # GEMM-shaped tiles, so they must be computed before the lanes are packed.
+            local_reduce = outputs.local_reduce
+            if (
+                local_reduce is not None
+                and (
+                    local_reduce.feeds_main
+                    or graph.depends_on(local_reduce.match.value_node, pack)
+                )
+            ) or any(
                 graph.depends_on(aux, pack)
                 or not statically_known_shape_equal(
                     tensor_meta_shape(aux) or (), gemm_shape or ()
@@ -1153,41 +1162,57 @@ class FlexGemmEpilogueEmitter:
             )
         return self.broadcast_fragment_partial(reduced, layout, source)
 
-    def scalar_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
-        """Re-broadcast uniform scalar captures to the current logical fragment."""
+    def capture_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
+        """Re-broadcast uniform captures to the current logical fragment.
+
+        Scalar captures are re-filled to the reference fragment. Row and column
+        captures are lane-uniform (lowering widens rows to the physical N), so
+        inside a lane domain their lane 0 holds the logical value. Against
+        physical GEMM values they stay physical.
+        """
         if not isinstance(self.outputs.output_transform, FlexGemmOutputContraction):
             return self.env
         graph = self.analysis.local_reduce.graph
         inputs = tuple(iter_fx_node_inputs((node.args, node.kwargs)))
-        reference = next(
+        reference_arg = next(
             (
-                self.env[arg]
+                arg
                 for arg in inputs
                 if graph.depends_on(arg, self.gemm)
                 and isinstance(self.env.get(arg), CuteDSLCSEVariable)
             ),
             None,
         )
-        if reference is None:
+        if reference_arg is None:
             return self.env
+        reference = self.env[reference_arg]
+        domain = self.analysis.local_reduce.lane_domains.get(reference_arg)
         env = self.env
         for arg in inputs:
             shape = tensor_meta_shape(arg)
             value = self.env.get(arg)
             if (
-                shape is not None
-                and statically_known_shape_equal(shape, (1,) * len(shape))
-                and not graph.depends_on(arg, self.gemm)
-                and isinstance(value, CuteDSLCSEVariable)
+                shape is None
+                or graph.depends_on(arg, self.gemm)
+                or not isinstance(value, CuteDSLCSEVariable)
             ):
-                if env is self.env:
-                    env = dict(env)
+                continue
+            if statically_known_shape_equal(shape, (1,) * len(shape)):
                 # The donor can be Boolean; preserve the captured value's dtype.
-                env[arg] = self.generate_like(
-                    f"cute.full_like({reference}, {value}[0], {value}.element_type)",
-                    value,
-                    shape_reference=reference,
+                expression = (
+                    f"cute.full_like({reference}, {value}[0], {value}.element_type)"
                 )
+            elif domain is None:
+                continue
+            else:
+                layout = GroupedTensorSSALayout(domain.physical_span, 1)
+                expression = (
+                    f"{value}.reshape({layout.tensorssa_shape(value)})"
+                    "[((0, 0, None), None, None)]"
+                )
+            if env is self.env:
+                env = dict(env)
+            env[arg] = self.generate_like(expression, value, shape_reference=reference)
         return env
 
     def lower_graph(self) -> None:
@@ -1333,7 +1358,7 @@ class FlexGemmEpilogueEmitter:
                     continue
                 self.env[node] = lower_gemm_epilogue_fx_node(
                     self.kernel,
-                    self.scalar_broadcast_env(node),
+                    self.capture_broadcast_env(node),
                     node,
                     context="FlexGEMM",
                 )
