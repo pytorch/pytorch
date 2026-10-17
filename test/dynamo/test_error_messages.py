@@ -1093,7 +1093,7 @@ from user code:
 
         expected = """\
 RuntimeError when making fake tensor call
-  Explanation: Dynamo failed to run FX node with fake tensors: call_function <built-in function add>(*(FakeTensor(..., size=(3,)), FakeTensor(..., size=(4,))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 4 at -1! Mismatching argument at index 1 had torch.Size([4]); but expected shape should be broadcastable to [3]')
+  Explanation: Attempting to broadcast a dimension of length 4 at -1! Mismatching argument at index 1 had torch.Size([4]); but expected shape should be broadcastable to [3]
   Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
 
   Developer debug context:
@@ -1113,6 +1113,27 @@ from user code:
                 torch.randn(3), torch.randn(4)
             ),
             expected,
+        )
+
+    def test_cat_mismatched_shapes_reports_user_error(self):
+        def fn(a, b, c):
+            return torch.cat([a, b, c], dim=1)
+
+        with self.assertRaises(TorchRuntimeError) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(1, 1),
+                torch.randn(4, 16),
+                torch.randn(4, 32),
+            )
+
+        msg = str(cm.exception)
+        self.assertIn(
+            "Sizes of tensors must match except in dimension",
+            msg,
+        )
+        self.assertNotIn(
+            "Dynamo failed to run FX node with fake tensors",
+            msg,
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
