@@ -84,6 +84,68 @@ def boo(x: torch.Tensor) -> None:
     x.sin_()
 
 
+# x is overwritten by an unrelated value after a result that could be
+# reinplaced into x, and that result is still returned afterwards.
+def _overwrite_after_slice_scatter(x, src, idx):
+    y = torch.slice_scatter(x, src, 0, 1, 3)
+    x.zero_()
+    return y
+
+
+def _overwrite_after_diagonal_scatter(x, src, idx):
+    y = torch.diagonal_scatter(x, x.diagonal())
+    x.fill_(2.0)
+    return y
+
+
+def _overwrite_after_index_fill_clone(x, src, idx):
+    x.index_fill_(1, idx, 4.0)
+    y = x.clone()
+    x.clamp_(-4.0, 4.0)
+    return y
+
+
+def _overwrite_after_custom_op(x, src, idx):
+    # The result is a getitem of auto_functionalized.
+    boo(x)
+    y = x.clone()
+    x.fill_(2.0)
+    return y
+
+
+def _overwrite_after_index_put_chain(x, src, idx):
+    # w is reinplaced into y, which would itself be reinplaced into x.
+    y = x.index_put((idx,), src[0])
+    w = y.index_put((idx + 1,), src[1])
+    x.zero_()
+    return w
+
+
+# The value written back into x is the result itself: reinplacing into x is
+# what makes the write-back free.
+def _write_back_slice_assign(x, src, idx):
+    x[1:3] = src
+    return x
+
+
+def _write_back_slice_scatter(x, src, idx):
+    y = torch.slice_scatter(x, src, 0, 1, 3)
+    x.copy_(y)
+    return x
+
+
+def _write_back_custom_op(x, src, idx):
+    boo(x)
+    return x
+
+
+def _write_back_index_put_chain(x, src, idx):
+    y = x.index_put((idx,), src[0])
+    w = y.index_put((idx + 1,), src[1])
+    x.copy_(w)
+    return x
+
+
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
         ReinplaceCounters.clear()
@@ -137,6 +199,48 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             return x
 
         self._test(f)
+
+    def _check_input_overwrite_case(self, fn):
+        args = (
+            torch.arange(-12.0, 12.0, device=device).reshape(4, 6),
+            torch.ones(2, 6, device=device),
+            torch.tensor([0, 2], device=device),
+        )
+        eager_args = tuple(a.clone() for a in args)
+        compiled_args = tuple(a.clone() for a in args)
+        self.assertEqual(fn(*eager_args), torch.compile(fn)(*compiled_args))
+        self.assertEqual(eager_args, compiled_args)
+
+    @parametrize(
+        "fn",
+        [
+            subtest(_overwrite_after_slice_scatter, name="slice_scatter"),
+            subtest(_overwrite_after_diagonal_scatter, name="diagonal_scatter"),
+            subtest(_overwrite_after_index_fill_clone, name="index_fill_clone"),
+            subtest(_overwrite_after_custom_op, name="custom_op"),
+            subtest(_overwrite_after_index_put_chain, name="index_put_chain"),
+        ],
+    )
+    def test_dont_reinplace_into_input_overwritten_later(self, fn):
+        # The result must stay a fresh tensor when the input it would be
+        # reinplaced into is overwritten by an unrelated value later and the
+        # result is still observed afterwards (here: returned).
+        self._check_input_overwrite_case(fn)
+
+    @parametrize(
+        "fn",
+        [
+            subtest(_write_back_slice_assign, name="slice_assign"),
+            subtest(_write_back_slice_scatter, name="slice_scatter"),
+            subtest(_write_back_custom_op, name="custom_op"),
+            subtest(_write_back_index_put_chain, name="index_put_chain"),
+        ],
+    )
+    def test_reinplace_into_input_written_back(self, fn):
+        # When the value written back into the input is the result itself, the
+        # check above must not stop reinplacing.
+        self._check_input_overwrite_case(fn)
+        self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_dont_reinplace_scatter_from_overlapping_view(self):
         # https://github.com/pytorch/pytorch/issues/197829
