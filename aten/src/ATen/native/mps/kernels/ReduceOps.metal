@@ -682,6 +682,34 @@ inline T chunk_shuffle_down(T val, ushort delta) {
       ::metal::simd_shuffle_down(static_cast<float>(val), delta));
 }
 
+template <LoadMode MODE, typename TA>
+struct SumChunkOps {
+  static inline TA identity() {
+    return SumOp<TA>::identity();
+  }
+  template <typename TI>
+  static inline TA load(TI v) {
+    return static_cast<TA>(load_val<MODE>(v));
+  }
+  static inline TA combine(TA a, TA b) {
+    return SumOp<TA>::combine(a, b);
+  }
+};
+
+template <template <typename> class OpFn, typename Load, typename TA>
+struct ValueChunkOps {
+  static inline TA identity() {
+    return OpFn<TA>::identity();
+  }
+  template <typename TI>
+  static inline TA load(TI v) {
+    return Load::template load<TA>(v);
+  }
+  static inline TA combine(TA a, TA b) {
+    return OpFn<TA>::combine(a, b);
+  }
+};
+
 // Consume the vec4-loadable prefix of a lane's segment: lane row_lane reads
 // quads row_lane, row_lane + lanes_per_row, ... of [seg_begin, seg_end) and
 // returns where its scalar loop should resume. The caller's `ok` must be

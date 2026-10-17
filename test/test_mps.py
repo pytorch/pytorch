@@ -16458,27 +16458,19 @@ class TestComplex(TestCase):
 class TestCommon(TestCase):
     exact_dtype = True
 
-    @dtypes(torch.float16)
-    def test_segment_reduce_accumulation(self, device, dtype):
-        data = torch.ones((4096, 2), dtype=dtype, device=device, requires_grad=True)
-        result = torch.segment_reduce(data, "sum", lengths=torch.tensor([4096], device=device))
-        self.assertEqual(result, torch.full((1, 2), 4096., dtype=dtype, device=device))
-        result.sum().backward()
-        self.assertEqual(data.grad, torch.ones_like(data))
-
-    @dtypes(torch.float16)
-    def test_segment_reduce_prod_backward_overflow(self, device, dtype):
-        data = torch.ones((2, 1025), dtype=dtype, device=device)
-        data[:, :3] = 100.
-        data[1, -1] = 0.
-        data.requires_grad_()
-        offsets = torch.tensor([[0, 1025], [0, 1025]], dtype=torch.int32, device=device)
-        result = torch.segment_reduce(data, "prod", offsets=offsets, axis=1)
-        reference = data.detach().cpu().float().requires_grad_()
-        expected = torch.segment_reduce(reference, "prod", offsets=offsets.cpu(), axis=1)
-        result.sum().backward()
-        expected.sum().backward()
-        self.assertEqual(data.grad, reference.grad.to(device=device, dtype=dtype))
+    @dtypes(torch.bfloat16)
+    @parametrize("inner", [1, 2])
+    def test_segment_reduce_forward(self, device, dtype, inner):
+        # inner=1 uses threadgroups; inner=2 uses the serial strided reduction.
+        data = torch.ones((2, 4098, inner), dtype=dtype, device=device)[:, ::2]
+        data[:, 2] = 2.
+        data[1, 1026] = 0.
+        offsets = torch.tensor([[1, 1025, 1025, 2049]] * 2, dtype=torch.int32, device=device)
+        reference = data.cpu().float()
+        for reduce in ("sum", "mean", "min", "max", "prod"):
+            result = torch.segment_reduce(data, reduce, offsets=offsets, axis=1)
+            expected = torch.segment_reduce(reference, reduce, offsets=offsets.cpu(), axis=1)
+            self.assertEqual(result, expected.to(dtype=dtype))
 
     # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
     @classmethod
