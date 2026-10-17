@@ -6649,7 +6649,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # How a loading process finds the live namespace again: the key
             # embeds this process's id() of it. A source rooted at an unnamed
             # scope key needs that key bound first, so it cannot.
-            if root is not None and not root.startswith(UNNAMED_SCOPE_PREFIX):
+            if (
+                source is not None
+                and root is not None
+                and not root.startswith(UNNAMED_SCOPE_PREFIX)
+            ):
                 self.output.unnamed_scope_sources.setdefault(
                     globals_name, AttrSource(source, "__globals__")
                 )
