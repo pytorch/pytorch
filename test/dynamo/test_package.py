@@ -127,6 +127,16 @@ def _empty_graph_resume_fn(x):
     return y.cos(), _empty_graph_continuation(y)
 
 
+@torch.compiler.disable
+def _tensor_or_int(y):
+    return y if _TENSOR_FREE_RESUME_STATE["value"] else 3
+
+
+def _resume_maybe_tensor_free_fn(x):
+    y = _tensor_or_int(x.sin())
+    return y + 1
+
+
 def _skip_closure_match(entries):
     # The torch.compiler.disable wrapper's CLOSURE_MATCH cannot be serialized.
     return [e.guard_type != "CLOSURE_MATCH" for e in entries]
@@ -1693,16 +1703,23 @@ def add(x, y):
     # Nested graph breaks would resume inside a tensor-bearing parent frame.
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_tensor_free_resume_records_a_guarded_variant_per_value(self):
+    def test_tensor_free_resume_guard_miss_fails_on_recompile(self):
         # The continuation after the break in _tensor_free_continuation holds
-        # only an int, yet its graph depends on it: the package must record a
-        # guarded variant for each value, and the loaded package serves them.
+        # only an int, yet its graph depends on it: the package must record
+        # its guards, and a miss on it must raise under fail_on_recompile
+        # instead of silently running eagerly.
         _, compiled, x = self._capture_tensor_free_resume((1, 2))
         fn = _tensor_free_resume_fn
         with torch.compiler.set_stance("fail_on_recompile"):
             for value in (1, 2):
                 _TENSOR_FREE_RESUME_STATE["value"] = value
                 self.assertEqual(compiled(x), fn(x))
+            _TENSOR_FREE_RESUME_STATE["value"] = 3
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "function name: 'torch_dynamo_resume_in__tensor_free_continuation_at_",
+            ):
+                compiled(x)
 
     # Nested graph breaks would resume inside a tensor-bearing parent frame.
     @torch._dynamo.config.patch(nested_graph_breaks=False)
@@ -1723,13 +1740,19 @@ def add(x, y):
     # Precompile capture keeps empty graphs as compiled frames.
     @torch._dynamo.config.patch(nested_graph_breaks=False, allow_empty_graphs=True)
     @patch.dict(_TENSOR_FREE_RESUME_STATE)
-    def test_tensor_free_resume_with_an_empty_graph_gets_a_guarded_variant(self):
-        # The continuation only computes step + 1, yet it is still guarded.
+    def test_tensor_free_resume_with_an_empty_graph_is_refused_on_a_new_value(self):
+        # The continuation only computes step + 1, yet it is still guarded:
+        # a call no captured variant covers is refused, even without tensor work.
         fn = _empty_graph_resume_fn
         name = "_empty_graph_continuation"
         _, compiled, x = self._capture_tensor_free_resume((1,), fn, name)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), fn(x))
+            _TENSOR_FREE_RESUME_STATE["value"] = 2
+            with self.assertRaisesRegex(
+                RuntimeError, f"function name: 'torch_dynamo_resume_in_{name}_at_"
+            ):
+                compiled(x)
 
     # Nested graph breaks would resume inside a tensor-bearing parent frame.
     @torch._dynamo.config.patch(nested_graph_breaks=False)
@@ -1763,6 +1786,23 @@ def add(x, y):
                 _TENSOR_FREE_RESUME_STATE["value"] = 2
                 with torch.compiler.set_stance("fail_on_recompile"):
                     self.assertEqual(compiled(x), fn(x))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    @patch.dict(_TENSOR_FREE_RESUME_STATE)
+    def test_warm_loaded_resume_entries_do_not_fail_a_tensor_free_call(self):
+        # The warm load installs entries on fn's resume function, but the
+        # caching_precompile package is not explicit: once that frame holds no
+        # tensor it is skipped and runs eagerly, so under fail_on_recompile it
+        # is no recompile either.
+        fn = _resume_maybe_tensor_free_fn
+        x = torch.randn(3)
+        options = {"guard_filter_fn": _skip_closure_match}
+        torch.compile(fn, options=options)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        compiled = torch.compile(fn, options=options)  # noqa: UNSPECIFIED_BACKEND
+        _TENSOR_FREE_RESUME_STATE["value"] = 0
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), fn(x))
 
     def _round_trip_under_fail_on_recompile(self, fn, x):
         ctx = DiskDynamoStore()

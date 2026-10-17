@@ -4694,6 +4694,27 @@ def records_stance(model, x):
 def tags_compiled(model, x):
     # Adds 1 only in a compiled frame, so a result shows how the call was served.
     return breaking_helper(model(x)) + int(torch.compiler.is_compiling())
+
+
+RESUME_VALUE = [0]
+# Called through an alias so the continuation below names no torch module.
+_ones = torch.ones
+
+
+@torch._dynamo.disable
+def resume_value():
+    return RESUME_VALUE[0]
+
+
+def scalar_continuation(y):
+    value = resume_value()
+    # Only the int crosses the break: the continuation frame holds no tensor.
+    return _ones(3) * value
+
+
+def tensor_free_resume(model, x):
+    y = model(x)
+    return y.sum(dim=0), scalar_continuation(y)
 """
 
 _GOLDEN_LOADER = """
@@ -5511,6 +5532,48 @@ class TestPrecompileDynamoCapture(TestCase):
             "    print('refused')\n"
         )
         argv = [self.dir, self.artifact, self.cache, helper]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_artifact_refuses_a_miss_on_a_tensor_free_continuation(
+        self,
+    ):
+        # The continuation after the break in scalar_continuation holds only an
+        # int, but its graph depends on it: capture must record its variant,
+        # and a call it does not cover must refuse rather than run eagerly.
+        fn = self.mod.tensor_free_resume
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        with open(self.artifact) as f:
+            self.assertIn('SERVING_MODE = "installed"', f.read())
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "model, x = mod.Model(), torch.randn(2, 4)\n"
+            "torch.testing.assert_close(f(model, x), mod.tensor_free_resume(model, x))\n"
+            "mod.RESUME_VALUE[0] = 1\n"
+            "try:\n"
+            "    f(model, x)\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'no captured variant' in str(e), e\n"
+            "    assert 'torch_dynamo_resume_in_scalar_continuation' in str(e), e\n"
+            "else:\n"
+            "    raise AssertionError('an uncovered call was served')\n"
+            "mod.RESUME_VALUE[0] = 0\n"
+            "torch.testing.assert_close(f(model, x), mod.tensor_free_resume(model, x))\n"
+            "print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name]
         out = subprocess.run(
             [sys.executable, "-c", script, *argv],
             capture_output=True,

@@ -2421,6 +2421,10 @@ class ConvertFrame:
         recompile_limit: int | None = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
+        # _FailOnRecompileCallback finds this through the _torchdynamo_orig_backend
+        # chain (CatchErrorsWrapper holds a functools.wraps copy); without it an
+        # installed artifact falls back to eager on a tensor-free resume frame.
+        self._package = package
         self._inner_convert = convert_frame_assert(
             compiler_fn,
             one_graph=False,
