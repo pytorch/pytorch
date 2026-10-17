@@ -52,6 +52,17 @@ def _reset_debug_server_state() -> None:
     debug_module._DEBUG_SERVER_PROC = None
 
 
+def requires_ipv6_wildcard_bind():
+    try:
+        with socket.socket(socket.AF_INET6) as s:
+            s.bind(("::", 0))
+        available = True
+    except OSError:
+        available = False
+    return unittest.skipUnless(available, "cannot bind to :::0 (no IPv6)")
+
+
+@requires_ipv6_wildcard_bind()
 class TestDebug(TestCase):
     def setUp(self) -> None:
         super().setUp()
