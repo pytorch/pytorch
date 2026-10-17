@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     OpDTypes,
     ops,
     precisionOverride,
@@ -1614,6 +1615,43 @@ class TestSparseCSR(TestCase):
                 c = make_tensor((batch_size, m, n), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
+
+    @onlyCUDA
+    @skipCUDAIfNoSparseGeneric
+    @dtypes(torch.float32)
+    def test_baddbmm_batched_csr_cuda(self, device, dtype):
+        dense = torch.tensor(
+            [[[1, 0, 2, 0], [0, 3, 0, 0], [0, 0, 4, 5]],
+             [[0, 6, 0, 7], [8, 0, 0, 0], [0, 9, 10, 0]]],
+            device=device, dtype=dtype)
+        csr = dense.to_sparse_csr()
+        mat2 = torch.randn(2, 4, 2, device=device, dtype=dtype)
+        input = torch.randn(2, 3, 2, device=device, dtype=dtype)
+        product = torch.stack([torch.mm(csr[i], mat2[i]) for i in range(2)])
+
+        self.assertEqual(torch.bmm(csr, mat2), product)
+        self.assertEqual(torch.baddbmm(input, csr, mat2, beta=0.5, alpha=1.25),
+                         0.5 * input + 1.25 * product)
+
+        single = csr[0]
+        broadcast = torch.sparse_csr_tensor(single.crow_indices(), single.col_indices(),
+                                            single.values(), (2, 3, 4), check_invariants=False)
+        broadcast_product = torch.stack([torch.mm(single, mat2[i]) for i in range(2)])
+        self.assertEqual(torch.bmm(broadcast, mat2), broadcast_product)
+        self.assertEqual(torch.baddbmm(input, broadcast, mat2, beta=0.5, alpha=1.25),
+                         0.5 * input + 1.25 * broadcast_product)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoSparseGeneric
+    @dtypes(torch.float32)
+    def test_bmm_csr_batch_limit_cuda(self, device, dtype):
+        single = torch.tensor([[1.0]], device=device, dtype=dtype).to_sparse_csr()
+        broadcast = torch.sparse_csr_tensor(single.crow_indices(), single.col_indices(),
+                                            single.values(), (65536, 1, 1), check_invariants=False)
+        mat2 = torch.ones(65536, 1, 1, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "cuSPARSE SpMM supports at most 65535 batches"):
+            torch.bmm(broadcast, mat2)
 
     @onlyAccelerator
     @skipCUDAIfNoSparseGeneric
