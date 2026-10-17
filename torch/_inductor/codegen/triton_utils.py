@@ -373,6 +373,8 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
                 layout = inp.get_layout()
             else:
                 return False
+        elif arg.buffer in V.graph.constants:
+            layout = V.graph.get_buffer(arg.buffer).get_layout()
         else:
             layout = _get_buffer_layout(arg.buffer)
         storage_bytes = layout.storage_size() * arg.dtype.itemsize

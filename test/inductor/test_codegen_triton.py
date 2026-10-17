@@ -1415,6 +1415,28 @@ def helper(x):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "shape, stride, expected",
+        [
+            ((32, 32), (32, 1), True),
+            ((2**30,), (1,), False),
+            ((2,), (2**30,), False),
+        ],
+    )
+    def test_constant_pointer_range_survives_scheduling(
+        self, scheduled, shape, stride, expected
+    ):
+        self._graph.constants["weight"] = torch.empty_strided(
+            shape, stride, dtype=torch.float16, device="meta"
+        )
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
     @inductor_config.patch("triton.emit_pointer_range_32", True)
     def test_config_of_emit_pointer_range_32_enabled(self):
         from torch._inductor.utils import (
