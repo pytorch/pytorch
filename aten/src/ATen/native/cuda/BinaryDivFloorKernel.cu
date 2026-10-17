@@ -46,6 +46,12 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 
           auto inv_b = accscalar_t(1.0) / b;
           iter.remove_operand(2);
+          if (C10_UNLIKELY(!is_usable_reciprocal(inv_b))) {
+            gpu_kernel(iter, [b] GPU_LAMBDA(scalar_t a) -> scalar_t {
+              return c10::div_floor_floating(static_cast<accscalar_t>(a), b);
+            });
+            return;
+          }
           gpu_kernel(iter, [b, inv_b] GPU_LAMBDA(scalar_t a) -> scalar_t {
             auto mod = std::fmod(a, b);
             auto div = (a - mod) * inv_b;
