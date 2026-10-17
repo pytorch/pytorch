@@ -606,6 +606,10 @@ class TestFloat8E5M3FNU(TestCase):
         self.assertEqual(bits(full), torch.full((3,), 0x78, dtype=torch.uint8))
         full.fill_(114688.0)
         self.assertEqual(bits(full), torch.full((3,), 0xFE, dtype=torch.uint8))
+        # like the other float8 dtypes, Scalar fills are range-checked: values
+        # below finfo.min (0) raise instead of following the cast rule (|x|)
+        with self.assertRaisesRegex(RuntimeError, "without overflow"):
+            full.fill_(-1.0)
         t = torch.tensor([0.5, 2.0], dtype=self.dtype, device=device)
         self.assertEqual(bits(t), torch.tensor([0x70, 0x80], dtype=torch.uint8))
         self.assertEqual(t.tolist(), [0.5, 2.0])
