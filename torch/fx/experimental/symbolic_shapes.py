@@ -6706,8 +6706,13 @@ class ShapeEnv:
                 # This logic excludes static values found on tensors from guarding, because
                 # dynamo's check_tensor_fn does that (see guards.cpp).
                 # However, for non tensor sources, we still need to guard here.
+                # check_tensor_fn does not check the storage offset, so an offset
+                # symbol that a guard refined to a constant is still guarded here.
                 if ignore_static and isinstance(source, TensorPropertySource):
-                    if expr.is_number:
+                    if expr.is_number and not (
+                        source.prop is TensorProperty.STORAGE_OFFSET
+                        and srcname in self.source_to_var
+                    ):
                         self.log.debug(
                             "Skipping guard %s", f"{source_ref(source)} == {expr}"
                         )
