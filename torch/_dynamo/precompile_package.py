@@ -1611,9 +1611,10 @@ class _CapturePackage(CompilePackage):
         python_code: types.CodeType,
         python_module: str,
         function_name: str,
+        bound_in: str,
     ) -> None:
         self.note_compute()
-        super().add_resume_function(python_code, python_module, function_name)
+        super().add_resume_function(python_code, python_module, function_name, bound_in)
 
 
 def _summarize(
