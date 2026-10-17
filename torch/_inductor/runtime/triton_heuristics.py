@@ -2250,6 +2250,7 @@ class CachingAutotuner(KernelInterface):
                 "tensordesc_meta": schema.get(
                     "tensordesc_meta", legacy_tensordesc_meta
                 ),
+                "kernel_hash": getattr(self, "kernel_hash", None),
             }
         else:
             # Fallback: hasattr probing for older Triton versions
@@ -2279,6 +2280,7 @@ class CachingAutotuner(KernelInterface):
                 "profile_scratch": launcher.profile_scratch,
                 "cuda_arch": cuda_arch,
                 "tensordesc_meta": legacy_tensordesc_meta,
+                "kernel_hash": getattr(self, "kernel_hash", None),
             }
 
         from torch._inductor.codecache import CudaKernelParamCache
@@ -2315,6 +2317,7 @@ class CachingAutotuner(KernelInterface):
 
         CudaKernelParamCache.set(key, params, kernel_binary, bin_type, asm, asm_type)
         self.cuda_kernel_saved = True
+        self.cuda_kernel_params = params
 
     def save_cpu_kernel(self, launcher):
         """AOTI counterpart of save_gpu_kernel for CPU Triton kernels.
@@ -2546,6 +2549,14 @@ class CachingAutotuner(KernelInterface):
             and not kwargs
             and not autograd_profiler._is_profiler_enabled
             and not get_active_debug_mode()
+            and not (
+                self.inductor_meta.get("store_cubin")
+                and (
+                    not self.cpu_kernel_saved
+                    if self.device_props.type == "cpu"
+                    else not self.cuda_kernel_saved
+                )
+            )
         ):
             return fast(*args, stream=stream)
 
@@ -2628,7 +2639,10 @@ class CachingAutotuner(KernelInterface):
         # (this is an idempotent set-add). For single-config kernels that skip
         # autotuning entirely, this is the only call site that records the winner.
         TritonBundler.put_winner(launcher.cache_hash)
-        if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
+        if (
+            getattr(launcher, "store_cubin", False)
+            or self.inductor_meta.get("store_cubin")
+        ) and (not benchmark_run or not self.cuda_kernel_saved):
             if self.device_props.type == "cpu":
                 if not self.cpu_kernel_saved:
                     self.save_cpu_kernel(launcher)
