@@ -660,8 +660,23 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
-  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
-       " but got ", bias->numel());
+#ifdef USE_ROCM
+  // Accept output-shaped residuals through the v1 bias argument on ROCm.
+  // Add the residual in the GEMM epilogue before rounding the BF16 output.
+  const bool bias_is_matrix = bias && bias->dim() == 2 &&
+      bias->size(0) == mat1.size(0) && bias->size(1) == mat2.size(1);
+#else
+  constexpr bool bias_is_matrix = false;
+#endif
+  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1] || bias_is_matrix,
+       "Bias must be size ", mat2.sizes()[1], " or match the output matrix, but got ", bias->sizes());
+  TORCH_CHECK(!bias_is_matrix ||
+      (bias->is_contiguous() && bias->device() == mat1.device() &&
+       bias->scalar_type() == out.scalar_type() &&
+       out.scalar_type() == ScalarType::BFloat16 &&
+       scaling_choice_a == ScalingType::RowWise &&
+       scaling_choice_b == ScalingType::RowWise),
+      "ROCm matrix residual requires contiguous BF16 output-shaped bias and rowwise scaling");
   TORCH_CHECK(
       mat1.sizes()[1] % 16 == 0,
       "Expected trailing dimension of mat1 to be divisible by 16 ",
@@ -807,7 +822,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
   // v1 has no swizzle argument, so it can only express the default layout.
   // Callers wanting the gfx950 32x8-tiled scales must use `_scaled_mm_v2`.
-  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, SwizzleType::NO_SWIZZLE, SwizzleType::NO_SWIZZLE, bias, use_fast_accum, out, {}, scale_result);
+  ScaledGemmEpilogue epilogue;
+  if (bias_is_matrix) {
+    epilogue.accumulator = bias;
+    epilogue.beta = 1.0f;
+  }
+  return _scaled_gemm(mat1, mat2, scale_a, scale_b, scaling_choice_a, scaling_choice_b, SwizzleType::NO_SWIZZLE, SwizzleType::NO_SWIZZLE, bias_is_matrix ? std::nullopt : bias, use_fast_accum, out, epilogue, scale_result);
 }
 
 Tensor

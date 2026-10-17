@@ -1798,6 +1798,74 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    def _scaled_mm_v1_residual_inputs(self, device, m=17):
+        k, n = 128, 64
+        x = torch.ones((m, k), device=device).to(e4m3_type)
+        y = torch.ones((n, k), device=device).to(e4m3_type).t()
+        scale_a = torch.full((m, 1), 1.0 / k, device=device)
+        scale_b = torch.full((1, n), 1.00390625, device=device)
+        residual = torch.arange(m * n, device=device).reshape(m, n)
+        residual = (residual.remainder(4) + 1).to(torch.bfloat16) / 128
+        return x, y, scale_a, scale_b, residual
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("bias_kind", ["matrix", "vector"])
+    @parametrize("m", [1, 17])
+    def test_scaled_mm_v1_rocm_output_shaped_residual(self, device, bias_kind, m):
+        x, y, scale_a, scale_b, residual = self._scaled_mm_v1_residual_inputs(device, m)
+        bias = residual if bias_kind == "matrix" else residual[0].clone()
+        actual = torch._scaled_mm(
+            x, y, scale_a, scale_b, bias=bias,
+            out_dtype=torch.bfloat16, use_fast_accum=False,
+        )
+        product = (x.float() @ y.float()) * scale_a * scale_b
+        expected = (product + bias.float()).to(torch.bfloat16)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        if bias_kind == "matrix":
+            rounded_add = product.to(torch.bfloat16) + bias
+            self.assertFalse(torch.equal(expected, rounded_add))
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("invalid", ["shape", "dtype", "stride", "scaling", "device", "output_dtype"])
+    def test_scaled_mm_v1_rocm_residual_contracts(self, device, invalid):
+        x, y, scale_a, scale_b, bias = self._scaled_mm_v1_residual_inputs(device)
+        output_dtype = torch.bfloat16
+        message = "ROCm matrix residual requires contiguous BF16"
+        if invalid == "shape":
+            bias = torch.ones((x.size(0), y.size(1) + 1), device=device, dtype=torch.bfloat16)
+            message = "Bias must be size"
+        elif invalid == "dtype":
+            bias = bias.float()
+        elif invalid == "stride":
+            bias = bias.t().contiguous().t()
+        elif invalid == "scaling":
+            scale_a = torch.tensor(1.0 / x.size(1), device=device)
+            scale_b = torch.tensor(1.00390625, device=device)
+        elif invalid == "device":
+            bias = bias.cpu()
+        elif invalid == "output_dtype":
+            output_dtype = torch.float32
+        with self.assertRaisesRegex(RuntimeError, message):
+            torch._scaled_mm(
+                x, y, scale_a, scale_b, bias=bias,
+                out_dtype=output_dtype, use_fast_accum=False,
+            )
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_mm_v1_cuda_rejects_matrix_bias(self, device):
+        x, y, scale_a, scale_b, bias = self._scaled_mm_v1_residual_inputs(device)
+        with self.assertRaisesRegex(RuntimeError, "Bias must be size"):
+            torch._scaled_mm(
+                x, y, scale_a, scale_b, bias=bias,
+                out_dtype=torch.bfloat16, use_fast_accum=False,
+            )
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
