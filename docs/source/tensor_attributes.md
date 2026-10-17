@@ -42,6 +42,7 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | `torch.float8_e4m3fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-4-3, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e5m2fnuz` [^shell] [^1] | 8-bit floating point, S-E-M 1-5-2, from <https://arxiv.org/pdf/2206.02915> |
 | `torch.float8_e8m0fnu` [^shell] [^1] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
+| `torch.float8_e5m3fnu` [^shell] [^1] | 8-bit unsigned floating point, S-E-M 0-5-3, NVIDIA UE5M3 block-scale format |
 | `torch.float4_e2m1fn_x2` [^shell] [^1] [^3] | packed 4-bit floating point, S-E-M 1-2-1, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 
 **Integer dtypes**
