@@ -27,14 +27,16 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
-    captured_signal_pad_order,
-    gated_signal_pad_order,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_symmem import (
+    captured_signal_pad_order,
+    gated_signal_pad_order,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1064,7 +1066,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
-        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
     )
     @skip_if_lt_x_gpu(2)
     @parametrize("experts_per_rank", [1, 2])
@@ -1142,7 +1144,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
-        (2, 29, 7), "nccl_reduce_scatter_offset requires nccl 2.29.7"
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
     )
     @skip_if_lt_x_gpu(2)
     @parametrize("dim", [0, 1])
