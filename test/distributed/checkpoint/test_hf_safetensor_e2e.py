@@ -275,6 +275,49 @@ class TestSingleRankSaveLoad(TestCase):
                 msg=f"Value mismatch for tensor {tensor_name}",
             )
 
+    @with_temp_dir
+    def test_mxfp4_checkpoint_loading(self) -> None:
+        """Test loading a full MXFP4 tensor (gpt-oss format) dequantizes every value."""
+        try:
+            from safetensors.torch import save_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        fp4_values = torch.tensor(
+            [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+            + [-0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0]
+        )
+        # [experts, rows, groups, bytes per group]; each byte packs two FP4 values.
+        num_experts, rows, groups, group_bytes = 2, 3, 4, 16
+        codes = torch.randint(0, 16, (num_experts, rows, groups, 2 * group_bytes))
+        exponents = torch.randint(-2, 3, (num_experts, rows, groups))
+        blocks = (codes[..., 0::2] | (codes[..., 1::2] << 4)).to(torch.uint8)
+        scales = (exponents + 127).to(torch.uint8)
+        expected = fp4_values[codes] * torch.pow(2.0, exponents).unsqueeze(-1)
+        expected = expected.reshape(num_experts, rows, groups * 2 * group_bytes)
+
+        blocks_fqn = "model.layers.0.mlp.experts.down_proj_blocks"
+        scales_fqn = "model.layers.0.mlp.experts.down_proj_scales"
+        save_file(
+            {blocks_fqn: blocks, scales_fqn: scales},
+            os.path.join(CHECKPOINT_DIR, "model.safetensors"),
+        )
+        weight_map = {blocks_fqn: "model.safetensors", scales_fqn: "model.safetensors"}
+        index_file = os.path.join(CHECKPOINT_DIR, "model.safetensors.index.json")
+        with open(index_file, "w") as f:
+            json.dump({"weight_map": weight_map}, f)
+
+        state_dict_to_load = {blocks_fqn: torch.zeros_like(expected)}
+        dist_cp.load(
+            state_dict=state_dict_to_load,
+            storage_reader=QuantizedHuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
+
+        self.assertEqual(state_dict_to_load[blocks_fqn], expected)
+
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
     @with_comms
