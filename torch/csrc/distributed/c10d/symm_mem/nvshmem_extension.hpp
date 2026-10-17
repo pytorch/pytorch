@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -17,6 +19,9 @@ namespace c10d::nvshmem_extension {
 
 // Check if NVSHMEM is available
 TORCH_API bool is_nvshmem_available();
+
+TORCH_API std::array<int64_t, 2> shmem_signal_op_values();
+TORCH_API std::array<int64_t, 6> shmem_compare_op_values();
 
 // Release the NVSHMEM team pool associated with a process group.
 TORCH_API void release_nvshmem_team_pool(const std::string& group_name);
