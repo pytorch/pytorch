@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mkl/Sparse.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -12,8 +13,13 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Operators.h>
 #else
+#include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/searchsorted.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -296,6 +302,136 @@ Tensor& _compressed_row_strided_addmm_out(
   }
 
   return result;
+}
+
+/*
+  Adds unbatched BSR/BSC tensors using their sorted block coordinates.
+  Flattened int64 coordinates order blocks in compressed-major order for
+  either layout, so searchsorted can place blocks without sorting the inputs.
+*/
+void add_out_sparse_compressed_blocked(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Tensor& result) {
+  const auto layout = mat1.layout();
+  const auto layout_str = at::sparse_csr::layoutToString(layout);
+  TORCH_CHECK(mat2.layout() == layout,
+      "torch.add(", layout_str, ", ", at::sparse_csr::layoutToString(mat2.layout()),
+      "): expected both operands to have the same layout.");
+  TORCH_CHECK(result.layout() == layout,
+      "torch.add: expected 'out' to have ", layout_str, " layout, but got ", result.layout());
+  TORCH_CHECK(mat1.device() == mat2.device() && mat1.device() == result.device(),
+      "torch.add: expected all tensors to be on the same device, but got ",
+      mat1.device(), ", ", mat2.device(), " and ", result.device());
+
+  const auto common_dtype = at::result_type(mat1, mat2);
+  at::native::alpha_check(common_dtype, alpha);
+  const auto out_dtype = result.scalar_type();
+  TORCH_CHECK(canCast(common_dtype, out_dtype),
+      "Can't convert result type ", common_dtype, " to output ", out_dtype, " in add operation");
+  auto* result_impl = static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl());
+
+  if (mat1.is_same(mat2)) {
+    if (result.is_same(mat1)) {
+      result.values().add_(mat2.values(), alpha);
+    } else {
+      auto [compressed, plain] = at::sparse_csr::getCompressedPlainIndices(mat1);
+      auto out_values = mat1.values().add(mat2.values(), alpha).to(out_dtype);
+      result_impl->set_member_tensors(compressed, plain, out_values, mat1.sizes());
+    }
+    return;
+  }
+
+  const auto batch1 = at::sparse_csr::numBatchDimensions(mat1);
+  const auto batch2 = at::sparse_csr::numBatchDimensions(mat2);
+  TORCH_CHECK(batch1 == 0 && batch2 == 0,
+      "torch.add(", layout_str, ", ", layout_str, "): general batched inputs are not supported.");
+  TORCH_CHECK(mat1.dense_dim() == mat2.dense_dim(),
+      "torch.add(", layout_str, ", ", layout_str,
+      "): expected both operands to have the same number of dense dimensions.");
+  const auto blocksize = at::sparse_csr::getBlockSize(mat1);
+  const auto blocksize2 = at::sparse_csr::getBlockSize(mat2);
+  TORCH_CHECK(blocksize == blocksize2,
+      "torch.add(", layout_str, ", ", layout_str,
+      "): expected both operands to have the same block size, but got (",
+      blocksize[0], ", ", blocksize[1], ") and (", blocksize2[0], ", ", blocksize2[1], ").");
+
+  auto [compressed1, plain1] = at::sparse_csr::getCompressedPlainIndices(mat1);
+  auto [compressed2, plain2] = at::sparse_csr::getCompressedPlainIndices(mat2);
+  const auto index_dtype = promoteTypes(compressed1.scalar_type(), compressed2.scalar_type());
+
+  if (mat2._nnz() == 0) {
+    auto out_values = mat1.values().to(common_dtype).to(out_dtype, /*non_blocking=*/false, /*copy=*/true);
+    result_impl->set_member_tensors(compressed1.to(index_dtype), plain1.to(index_dtype), out_values, mat1.sizes());
+    return;
+  }
+  if (mat1._nnz() == 0) {
+    auto values2 = mat2.values().to(common_dtype);
+    auto out_values = values2.new_zeros(values2.sizes()).add(values2, alpha).to(out_dtype);
+    result_impl->set_member_tensors(compressed2.to(index_dtype), plain2.to(index_dtype), out_values, mat1.sizes());
+    return;
+  }
+
+  const auto n_compressed = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      layout, "add_out_sparse_compressed_blocked",
+      [&] { return mat1.size(0) / blocksize[0]; },
+      [&] { return mat1.size(1) / blocksize[1]; });
+  const auto n_plain = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      layout, "add_out_sparse_compressed_blocked",
+      [&] { return mat1.size(1) / blocksize[1]; },
+      [&] { return mat1.size(0) / blocksize[0]; });
+
+  // int64 keys avoid overflow when the flattened block coordinate exceeds int32.
+  const auto coo1 = at::_convert_indices_from_csr_to_coo(compressed1, plain1).select(0, 0);
+  const auto coo2 = at::_convert_indices_from_csr_to_coo(compressed2, plain2).select(0, 0);
+  const auto key1 = coo1.mul(n_plain).add_(plain1.to(kLong));
+  const auto key2 = coo2.mul(n_plain).add_(plain2.to(kLong));
+  const auto n1 = mat1._nnz();
+  const auto values1 = mat1.values().to(common_dtype);
+  const auto values2 = mat2.values().to(common_dtype);
+
+  // Both key lists are sorted. pos[j] is the insertion point of key2[j]
+  // in key1 and also the location of a matching key, when one exists.
+  const auto pos = at::searchsorted(key1, key2, /*out_int32=*/false, /*right=*/false);
+  const auto matched = key1.index_select(0, pos.clamp_max(n1 - 1)).eq(key2);
+  const auto unmatched = matched.logical_not().to(kLong);
+  const auto n_new = unmatched.sum().item<int64_t>();
+  const auto nnz = n1 + n_new;
+
+  if (n_new == 0) {
+    if (n1 == mat2._nnz()) {
+      auto out_values = values1.add(values2, alpha).to(out_dtype);
+      result_impl->set_member_tensors(compressed1.to(index_dtype), plain1.to(index_dtype), out_values, mat1.sizes());
+    } else {
+      auto out_values = values1.clone();
+      out_values.index_copy_(0, pos, out_values.index_select(0, pos).add(values2, alpha));
+      result_impl->set_member_tensors(compressed1.to(index_dtype), plain1.to(index_dtype), out_values.to(out_dtype), mat1.sizes());
+    }
+    return;
+  }
+
+  // shift[i] counts mat2-only blocks before mat1's block i.
+  auto shift = at::zeros({n1 + 1}, key1.options());
+  shift.index_add_(0, pos, unmatched);
+  const auto out1 = at::arange(n1, key1.options()).add_(shift.cumsum(0).narrow(0, 0, n1));
+  // cumsum counts the current unmatched block, so subtract unmatched.
+  const auto out2 = pos.add(unmatched.cumsum(0)).sub_(unmatched);
+
+  auto value_shape = values1.sizes().vec();
+  value_shape[0] = nnz;
+  auto out_values = values1.new_zeros(value_shape);
+  out_values.index_copy_(0, out1, values1);
+  out_values.index_copy_(0, out2, out_values.index_select(0, out2).add(values2, alpha));
+
+  auto out_plain = at::empty({nnz}, plain1.options().dtype(index_dtype));
+  out_plain.index_copy_(0, out1, plain1.to(index_dtype));
+  out_plain.index_copy_(0, out2, plain2.to(index_dtype));
+  auto out_rows = at::empty({nnz}, key1.options());
+  out_rows.index_copy_(0, out1, coo1);
+  out_rows.index_copy_(0, out2, coo2);
+  auto out_compressed = at::_convert_indices_from_coo_to_csr(out_rows, n_compressed, index_dtype == ScalarType::Int);
+  result_impl->set_member_tensors(out_compressed, out_plain, out_values.to(out_dtype), mat1.sizes());
 }
 
 namespace cpu {
