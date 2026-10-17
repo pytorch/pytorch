@@ -719,6 +719,9 @@ class OpInfo:
     # function to generate inputs that will throw errors
     error_inputs_func: Callable = None
 
+    # additional boundary samples for numerical derivative checks
+    derivative_inputs_func: Callable = None
+
     # function to generate sparse (coo, csr, csc, bsr, bsc) inputs that will throw errors
     error_inputs_sparse_func: Callable = None
 
@@ -1467,6 +1470,25 @@ def test_foo(self, device, dtype, op):
         return TrackedInputIter(
             iter(references),
             "reference input",
+            item_callback=self._sample_callback_fn(use_subtests, device),
+            set_seed=set_seed,
+            restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
+        )
+
+    def derivative_inputs(self, device, dtype, requires_grad=False, **kwargs):
+        """Returns boundary samples used only by numerical derivative tests."""
+        set_seed = kwargs.pop("set_seed", True)
+        use_subtests = kwargs.pop("use_subtests", False)
+        samples = (
+            ()
+            if self.derivative_inputs_func is None
+            else self.derivative_inputs_func(
+                self, device, dtype, requires_grad, **kwargs
+            )
+        )
+        return TrackedInputIter(
+            iter(samples),
+            "derivative input",
             item_callback=self._sample_callback_fn(use_subtests, device),
             set_seed=set_seed,
             restrict_to_index=OPINFO_SAMPLE_INPUT_INDEX,
