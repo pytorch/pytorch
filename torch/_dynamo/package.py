@@ -653,14 +653,34 @@ class _DynamoCodeCacheEntry:
     bound_in: dict[_FunctionId, str] = dataclasses.field(default_factory=dict)
 
 
-def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
-    name = namespace.get("__name__")
-    if not isinstance(name, str):
-        return None
-    module = sys.modules.get(name)
-    if isinstance(module, types.ModuleType) and vars(module) is namespace:
-        return module
+def _globals_module_name(
+    namespace: dict[str, Any], preferred: str | None = None
+) -> str | None:
+    """The ``sys.modules`` key of the module whose namespace IS ``namespace``.
+
+    A file imported under two names is two modules sharing one file, and
+    ``inspect.getmodule`` maps a code object to a module by its file, so it can
+    answer with the other alias, whose globals and functions are not the frame's.
+    ``preferred`` is tried first, so a key that already names the owner (e.g. an
+    importable alias of ``__main__``) is kept. A module that rebinds ``__name__``
+    is still registered under ``__spec__.name``, so that is tried last.
+    """
+    for name in (
+        preferred,
+        namespace.get("__name__"),
+        getattr(namespace.get("__spec__"), "name", None),
+    ):
+        if not isinstance(name, str):
+            continue
+        module = sys.modules.get(name)
+        if isinstance(module, types.ModuleType) and vars(module) is namespace:
+            return name
     return None
+
+
+def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
+    name = _globals_module_name(namespace)
+    return sys.modules[name] if name is not None else None
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -739,9 +759,7 @@ def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     )
 
 
-def _get_code_source(
-    code: types.CodeType, module_hint: types.ModuleType | None = None
-) -> tuple[str, str]:
+def _get_code_source(code: types.CodeType, module: types.ModuleType) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
     a serialized handle to access the code object from the new process.
@@ -750,16 +768,15 @@ def _get_code_source(
        inside a closure with the wrapper object.
     2. When a function is defined as a nested function, then the code object will be
        stored on the co_consts field of the parent code object by Python compiler.
-    This function handles all of the corner cases above.
+    This function handles all of the corner cases above, searching ``module``.
     """
 
-    code_module = inspect.getmodule(code)
-    module = code_module or module_hint
-    if module is None:
-        raise PackageError(f"Cannot find module for code {code}")
-
     toplevel: Any = module
-    search_module_tree = sys.version_info < (3, 11) or code_module is None
+    # Code that is not its own module's (exec-generated, or reached through
+    # another alias) has a co_qualname that is no path from ``module``.
+    search_module_tree = (
+        sys.version_info < (3, 11) or inspect.getmodule(code) is not module
+    )
     if not search_module_tree:
         parts = code.co_qualname.split(".")
 
@@ -1274,9 +1291,9 @@ class CompilePackage:
             # set would: the re-saved string is never below the loaded one.
             self._device_types = frozenset((dynamo.device_type,))
         else:
-            self._add_function(
-                self._innermost_fn.__code__, self._innermost_fn.__module__
-            )
+            fn = self._innermost_fn
+            module_name = _globals_module_name(fn.__globals__, fn.__module__)
+            self._add_function(fn.__code__, module_name or fn.__module__)
         self._initialized = True
 
     def _add_function(
@@ -1330,21 +1347,39 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
+    @property
+    def _entry_module_name(self) -> str | None:
+        # Frames sharing the entry's globals keep the key the entry was recorded
+        # under, e.g. an importable alias of __main__ the driver can import.
+        entry = next(iter(self._codes.values()), None)
+        return entry.python_module if entry is not None else None
+
     def _add_user_function(
         self,
         code: types.CodeType,
         global_scope: dict[str, object] | None = None,
     ) -> None:
         code_module = inspect.getmodule(code)
-        module = code_module or (
+        globals_module = (
             _globals_module(global_scope) if global_scope is not None else None
         )
+        module = code_module or globals_module
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
-        function_name, code_source = _get_code_source(code, module)
+        try:
+            function_name, code_source = _get_code_source(code, module)
+        except PackageError:
+            # One file imported under two names is two modules, and
+            # inspect.getmodule can answer with the alias whose namespace the
+            # frame does not run with; fall back to the one it does.
+            if globals_module is None or globals_module is module:
+                raise
+            module = globals_module
+            function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
-            module.__name__,
+            _globals_module_name(vars(module), self._entry_module_name)
+            or module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
@@ -1434,13 +1469,17 @@ class CompilePackage:
     def add_resume_function(
         self,
         python_code: types.CodeType,
-        python_module: str,
+        global_scope: dict[str, Any],
         function_name: str,
-        bound_in: str,
+        root_scope: dict[str, Any],
     ) -> None:
+        module_name, bound_in = (
+            _globals_module_name(scope, self._entry_module_name) or scope["__name__"]
+            for scope in (global_scope, root_scope)
+        )
         self._add_function(
             python_code,
-            python_module,
+            module_name,
             function_name=_FunctionId(function_name),
             install_to_global=True,
             bound_in=bound_in,
