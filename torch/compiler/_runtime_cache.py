@@ -329,6 +329,16 @@ def record_triton_kernel(key: str, kernel: CachingAutotuner) -> None:
             instances.append(kernel)
 
 
+def record_inductor_triton_binary(cache_key: str) -> None:
+    # Inductor's binaries, including losing autotune candidates, share the
+    # Triton cache with JIT kernels; inductor_triton already ships the ones
+    # replay needs, so triton_runtime excludes these keys.
+    with _capture_lock:
+        owner = _capture
+        if owner is not None and owner.pid == os.getpid():
+            owner.inductor_triton_keys.add(cache_key)
+
+
 def clear_triton_kernels() -> None:
     with _frozen_triton_kernels_lock:
         _frozen_triton_kernels.clear()
@@ -528,6 +538,7 @@ class _RuntimeCapture:
         self.freeze_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
         self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
+        self.inductor_triton_keys: set[str] = set()
 
 
 _capture: _RuntimeCapture | None = None
@@ -642,6 +653,7 @@ def capture_scope() -> Iterator[None]:
             if owner.captures == 0:
                 owner.triton_kernels.clear()
                 owner.cpp_kernels.clear()
+                owner.inductor_triton_keys.clear()
                 # Under the lock, or a capture opening meanwhile would save
                 # this scope's directory as the settings to restore.
                 try:
@@ -728,10 +740,13 @@ def freeze_runtime_cache(
         with _capture_lock:
             kernels = {key: list(found) for key, found in owner.triton_kernels.items()}
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
+            inductor_triton_keys = frozenset(owner.inductor_triton_keys)
         static_payload = _freeze_triton_kernels(kernels)
         cpp_payload = _freeze_cpp_kernels(cpp_kernels)
         if cache is not None:
-            payload = cache.export_runtime_cache(context=_runtime_context())
+            payload = cache.export_runtime_cache(
+                context=_runtime_context(), exclude=inductor_triton_keys
+            )
             artifacts[TritonRuntimeCacheArtifact.type()] = [
                 TritonRuntimeCacheArtifact(hashlib.sha256(payload).hexdigest(), payload)
             ]
