@@ -268,6 +268,10 @@ def flex_gemm_epimod(
         zip(epilogue_arg_dtypes, epilogue_arg_kinds, strict=True)
     ):
         name = f"operand{index}"
+        if arg_dtype not in cute_dsl_utils.torch2cute_dtype_map:
+            raise NotImplementedError(
+                f"FlexGEMM QUACK does not support capture dtype {arg_dtype}"
+            )
         dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
         op_type = op_types[kind]
         if varlen_m and kind == "col" and dtype.width < 32:
