@@ -470,6 +470,7 @@
     "pinv",
     "polar",
     "qr",
+    "qr_piv",
     "slogdet",
     "solve",
     "solve_ex",

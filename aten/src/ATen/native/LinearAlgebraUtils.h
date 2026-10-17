@@ -421,6 +421,14 @@ inline std::tuple<bool, bool> _parse_qr_mode(std::string_view mode) {
   return std::make_tuple(compute_q, reduced);
 }
 
+// parse the "mode" param in linalg_qr_piv: return a tuple of bools (compute_q, reduced)
+inline std::tuple<bool, bool> _parse_qr_piv_mode(std::string_view mode) {
+  TORCH_CHECK(mode == "reduced" || mode == "complete" || mode == "r",
+              "qr_piv received unrecognized mode '", mode,
+              "' but expected one of 'reduced' (default), 'r', or 'complete'");
+  return std::make_tuple(mode != "r", mode != "complete");
+}
+
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
 inline std::tuple<DimVector, DimVector, int64_t> _compute_geometry_for_Q(
     const Tensor& input,
