@@ -1302,6 +1302,18 @@ class TestTensorCreation(TestCase):
 
         self.assertEqual(out, torch.stack((a,), 0), atol=0, rtol=0)
 
+    # With one input the per-input checks never run, so an expanded (stride-0)
+    # input needs the first-input contiguity check to stay on the cat path. The
+    # base is larger than the view, so a packed copy from its storage stays in
+    # bounds and shows up as wrong values.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test__stack_single_expanded_input(self, device, dtype):
+        base = torch.arange(1, 9, device=device, dtype=dtype)
+        a = base[:1].expand(4)
+
+        self.assertEqual(torch._stack((a,), 0), torch.stack((a,), 0), atol=0, rtol=0)
+
     def test_repeat_interleave(self, device):
         x = torch.tensor([0, 1, 2, 3], device=device)
         expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
