@@ -13,18 +13,13 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     StatelessSymbolicContext,
 )
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
 )
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    parametrize,
-    run_tests,
-    TEST_XPU,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, run_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -143,7 +138,7 @@ class TestDecomp(NNTestCase):
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]
-        if SM80OrLater or TEST_XPU
+        if PLATFORM_SUPPORTS_BF16
         else [torch.float],
     )
     @parametrize("m", [256, 4096])
@@ -190,7 +185,7 @@ class TestDecomp(NNTestCase):
     @parametrize(
         "dtype",
         [torch.float, torch.float16, torch.bfloat16]
-        if SM80OrLater or TEST_XPU
+        if PLATFORM_SUPPORTS_BF16
         else [torch.float],
     )
     @parametrize("m", [256, 4096])
@@ -268,7 +263,7 @@ class TestDecomp(NNTestCase):
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize(
         "dtype",
-        [torch.float, torch.bfloat16] if SM80OrLater or TEST_XPU else [torch.float],
+        [torch.float, torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [torch.float],
     )
     @parametrize("bs", [1, 2, 4, 10])
     def test_batched_mm(self, device, dtype, bs):

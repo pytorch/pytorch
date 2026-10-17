@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    TEST_CUDA,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -1029,7 +1030,10 @@ class DistMatrixOpsTest(DTensorContinuousTestBase):
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
 
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
+    @unittest.skipIf(
+        not TEST_CUDA or (torch.version.cuda and not SM90OrLater),
+        "Grouped gemm supported on SM90",
+    )
     @with_comms
     @skip_unless_torch_gpu
     @parametrize("backend", ["cublaslt", "cutlass"])

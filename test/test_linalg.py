@@ -42,7 +42,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM90, PLATFORM_SUPPORTS_BF16, SM90OrLater, tf32_enabled, tf32_on_and_off, \
     _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -7282,7 +7282,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test__int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == 'cuda' and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
@@ -7354,7 +7354,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == 'cuda' and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and CDNA5OrLater():
@@ -11986,7 +11986,7 @@ class TestGroupedMM(TestCase):
                 self.assertEqual(b.grad[b_idx], b_ref.grad)
             start = end
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -12019,7 +12019,7 @@ class TestGroupedMM(TestCase):
         offs = None if offsets is None else torch.tensor(offsets, device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=backward)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
         subtest(((25, 8192), (1, 1024, 8192), [25], True, False), name="rows_bn128"),
         subtest(((2, 49, 8192), (1024, 8192), [257, 1024], False, True), name="cols_bn256"),
@@ -12035,7 +12035,7 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs)
 
     @onlyOn(["cuda", "mps"])
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16)
     def test_grouped_mm_large_stride_fallback(self, device, dtype):
         # Forces MPS's oversized-stride guard and jagged-column transposed fallback.
@@ -12045,7 +12045,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     def test_grouped_mm_mismatched_dtypes(self, device):
         a = torch.ones(8, 16, device=device, dtype=torch.float16)
         b = torch.ones(4, 16, 16, device=device, dtype=torch.bfloat16)
@@ -12054,7 +12054,7 @@ class TestGroupedMM(TestCase):
             F.grouped_mm(a, b, offs=offs)
 
     @onlyOn(["cuda", "mps"])
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
     @largeMPSBufferTest((2**31 + 64) * torch.bfloat16.itemsize)

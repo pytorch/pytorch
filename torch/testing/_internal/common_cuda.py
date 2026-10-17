@@ -123,15 +123,24 @@ def _cuda_graph_tools_id_available():
 
 TEST_CUDA_GRAPH_TOOLS_ID = LazyVal(_cuda_graph_tools_id_available)
 
-SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
-SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
-SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
-SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5))
-SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
-SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
-SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
-SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
-SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
+# NVIDIA SM only. On ROCm, get_device_capability() is a gfx version, not an SM
+# number (gfx90a -> (9, 0), gfx1100 -> (11, 0), gfx1201 -> (12, 0)).
+def _sm_or_later(major: int, minor: int) -> bool:
+    return (
+        torch.version.hip is None
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (major, minor)
+    )
+
+SM53OrLater = LazyVal(lambda: _sm_or_later(5, 3))
+SM60OrLater = LazyVal(lambda: _sm_or_later(6, 0))
+SM70OrLater = LazyVal(lambda: _sm_or_later(7, 0))
+SM75OrLater = LazyVal(lambda: _sm_or_later(7, 5))
+SM80OrLater = LazyVal(lambda: _sm_or_later(8, 0))
+SM89OrLater = LazyVal(lambda: _sm_or_later(8, 9))
+SM90OrLater = LazyVal(lambda: _sm_or_later(9, 0))
+SM100OrLater = LazyVal(lambda: _sm_or_later(10, 0))
+SM120OrLater = LazyVal(lambda: _sm_or_later(12, 0))
 BF16X9_API_SUPPORTED = LazyVal(
     lambda: TEST_CUDA
     and not TEST_WITH_ROCM
@@ -326,9 +335,27 @@ def evaluate_platform_supports_half_atomics():
     return True
 
 
+def _cuda_sm_or_any_rocm(sm_gate):
+    if torch.version.cuda:
+        return bool(sm_gate)
+    return bool(torch.version.hip) and TEST_CUDA
+
+
+def evaluate_platform_supports_async_input_mm():
+    if torch.version.cuda:
+        return SM90OrLater
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
+
+
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
 PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
 PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
+# cuBLAS/cuSPARSE reduced-precision (fp16/bf16) GEMM and SDDMM
+PLATFORM_SUPPORTS_REDUCED_PRECISION_BLAS: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM53OrLater))
+# A kernel spinning on a host-written flag with a system-scope relaxed load
+PLATFORM_SUPPORTS_SYSTEM_SCOPE_SPIN_WAIT: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM70OrLater))
+PLATFORM_SUPPORTS_INT_MM: bool = LazyVal(lambda: _cuda_sm_or_any_rocm(SM80OrLater))
+PLATFORM_SUPPORTS_ASYNC_INPUT_MM: bool = LazyVal(lambda: evaluate_platform_supports_async_input_mm())
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
@@ -712,17 +739,9 @@ def xfailIfSM89PreCUDA13(func):
     return func
 
 def xfailIfSM100OrLater(func):
-    # SMxxx LazyVals are derived from torch.cuda.get_device_capability(), which
-    # on ROCm reports the gfx-arch major version (e.g. (11, 0) for gfx1100). That
-    # makes SM100OrLater spuriously true on AMD gfx10/11/12, so guard with
-    # TEST_WITH_ROCM to keep the xfail NVIDIA-only.
-    if TEST_WITH_ROCM:
-        return func
     return func if not SM100OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM120OrLater(func):
-    if TEST_WITH_ROCM:
-        return func
     return func if not SM120OrLater else unittest.expectedFailure(func)
 
 def xfailIfSM12X(func):

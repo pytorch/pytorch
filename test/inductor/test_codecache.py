@@ -5413,7 +5413,10 @@ class TestAutotuneCache(TestCase):
         self.assertIsNone(graph._compile_context)
 
     @requires_gpu_and_triton
-    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        "Requires SM80+",
+    )
     @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -5462,7 +5465,10 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_gpu_and_triton
-    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        "Requires SM80+",
+    )
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -5503,7 +5509,10 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_gpu_and_triton
-    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        "Requires SM80+",
+    )
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": True})
@@ -5564,7 +5573,10 @@ class TestAutotuneCache(TestCase):
 
     @requires_triton()
     @requires_gpu_and_triton
-    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        "Requires SM80+",
+    )
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": False})
@@ -5628,7 +5640,11 @@ class TestAutotuneCache(TestCase):
 
 class TestRemoteAOTAutogradCache(TestCase):
     @requires_gpu()
-    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON
+        and (not torch.cuda.is_available() or (torch.version.cuda and not SM80OrLater)),
+        "Requires SM80+",
+    )
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
@@ -5667,7 +5683,10 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @requires_gpu_and_triton
-    @unittest.skipIf(not HAS_XPU_AND_TRITON and not SM80OrLater, "Requires SM80+")
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and torch.version.cuda and not SM80OrLater,
+        "Requires SM80+",
+    )
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
     @torch._functorch.config.patch({"enable_autograd_cache": False})

@@ -996,7 +996,7 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyOn(["xpu", "cuda"])
-    @skipCUDAIf(not SM80OrLater, "SM80+ required")
+    @skipCUDAIf(torch.version.cuda is not None and not SM80OrLater, "SM80+ required")
     @skipIfTorchDynamo(
         "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
     )
