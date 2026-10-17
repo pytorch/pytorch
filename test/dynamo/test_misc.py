@@ -10698,6 +10698,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         self.assertEqual(compiled_fn(*args), fn(*args))
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_precompile_entries(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
@@ -10738,16 +10739,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         args = (torch.randn(3, 2),)
 
         compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
-            injected_bool.__code__,
-        )
-
+        # Like cache entries, the most recently loaded entry is checked first,
+        # so bool (which also passes the int guard) is loaded after int.
         _load_precompile_entry(
             fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager_int),
             injected_int.__code__,
+        )
+
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
         )
 
         _load_precompile_entry(
@@ -10766,9 +10769,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(compiled_fn(True), injected_bool(True))
         self.assertEqual(compiled_fn(10), injected_int(10))
         self.assertEqual(compiled_fn("10"), injected_str("10"))
+        # The hit on int moved it in front of bool.
+        self.assertEqual(compiled_fn(True), injected_int(True))
         _reset_precompile_entries(fn.__code__)
 
         self.assertEqual(compiled_fn(*args), fn(*args))
+
+        # Without LRU, entries keep load order and a hit is not moved.
+        with torch._dynamo.testing.lru_cache_reordering(False):
+            for guard_manager, injected in (
+                (guard_manager_bool, injected_bool),
+                (guard_manager_int, injected_int),
+            ):
+                _load_precompile_entry(
+                    fn.__code__,
+                    torch._dynamo.guards.GuardManagerWrapper(guard_manager),
+                    injected.__code__,
+                )
+            self.assertEqual(compiled_fn(10), injected_int(10))
+            self.assertEqual(compiled_fn(True), injected_bool(True))
+        _reset_precompile_entries(fn.__code__)
 
     def test_precompile_fail_on_recompile(self):
         from torch._C._dynamo.eval_frame import _load_precompile_entry
