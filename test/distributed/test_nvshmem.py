@@ -124,7 +124,10 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             else:
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
-        symm_mem.rendezvous(tensor, group=group_name)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # src_rank writes into every peer's buffer below, so each peer's zeros
+        # must land first.
+        hdl.barrier()
         torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
@@ -170,6 +173,10 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             y = torch.mm(x, w)
 
         # y should be a symm tensor
+        hdl = symm_mem.rendezvous(y, group=group_name)
+        # rank 0 writes into every peer's y below, so each peer's mm must land
+        # first.
+        hdl.barrier()
         torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
         expected = torch.mm(x0, w)
         self.assertEqual(y, expected)
