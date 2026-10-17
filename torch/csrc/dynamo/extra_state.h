@@ -179,6 +179,7 @@ bool try_lookup_without_guard_eval(
     PyCodeObject* code,
     PyObject* backend,
     int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict,
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result);
 
@@ -188,21 +189,24 @@ void lookup(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict,
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result);
 
-// Whether the frame has precompile entries, or the region or the default
-// bucket has any cache entries, for guard_complete_hook.
+// Whether the frame has precompile entries, or the region or (unless strict)
+// the default bucket has any cache entries, for guard_complete_hook.
 bool has_relevant_cache_entries(
     PyCodeObject* code,
-    int64_t isolate_recompiles_id);
+    int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict);
 
 // Whether a loaded artifact installed this frame's SKIP strategy.
 bool is_precompile_skip(PyCodeObject* code);
 
 CompileInputs get_compile_inputs(
     PyCodeObject* code,
-    int64_t isolate_recompiles_id);
+    int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict);
 
 // Applies the callback's result: the new strategy when apply_to_code, and a
 // cache entry for guarded_code unless it is None.  Returns the new entry's

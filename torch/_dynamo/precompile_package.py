@@ -1809,9 +1809,11 @@ class PrecompileSession(Generic[_P, _R]):
                 "PrecompileSession cannot be re-entered; start a new capture."
             )
         self._entered = True
-        # Its own cache region: a function captured (or compiled) earlier in
-        # this process would otherwise serve its existing cache entries, and
-        # this package would record nothing.
+        # Its own cache region, strict because it records into a package: a
+        # function captured (or compiled) earlier in this process would
+        # otherwise serve its existing cache entries, and this package would
+        # record nothing. Precompile entries and skips that an earlier
+        # CompilePackage.install put on the same code still serve it.
         self._compiled = torch._dynamo.optimize(
             self._backend,
             package=self._package,
