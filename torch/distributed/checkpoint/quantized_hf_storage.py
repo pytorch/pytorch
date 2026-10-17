@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import json
 import logging
 import math
@@ -7,7 +8,10 @@ from typing import Any
 
 import torch
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
-from torch.distributed.checkpoint.metadata import TensorStorageMetadata
+from torch.distributed.checkpoint.metadata import (
+    ChunkStorageMetadata,
+    TensorStorageMetadata,
+)
 from torch.distributed.checkpoint.planner import LoadPlanner, ReadItem
 
 from .hf_storage import HuggingFaceStorageReader
@@ -76,6 +80,39 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                     # Metadata used by planner to slice state dict.
                     tensor_metadata.size = dequantized_size
                     self._tensor_full_shapes[fqn] = dequantized_size
+                elif fqn in self._weight_scale_mapping and fqn.endswith(
+                    ".weight_packed"
+                ):
+                    size = tensor_metadata.size
+                    scale_fqn = self._weight_scale_mapping[fqn]
+                    scale_metadata = metadata.state_dict_metadata[scale_fqn]
+                    # int4 pack-quantized (int32 values, float scales) and NVFP4
+                    # (float8 scales, one per 16 values) use the same names. Only
+                    # 2D MXFP4 in whole 16-byte groups is dequantized; other
+                    # tensors load raw as before.
+                    is_mxfp4 = (
+                        isinstance(scale_metadata, TensorStorageMetadata)
+                        and len(size) == 2
+                        and size[1] % 16 == 0
+                        and tensor_metadata.properties.dtype == torch.uint8
+                        and scale_metadata.properties.dtype == torch.uint8
+                        and scale_metadata.size == torch.Size([size[0], size[1] // 16])
+                    )
+                    if not is_mxfp4:
+                        del self._weight_scale_mapping[fqn]
+                        self._tensor_full_shapes[fqn] = size
+                        continue
+                    rows, packed_cols = size
+                    # compressed-tensors MXFP4, e.g. Kimi K3: [out, in/2] -> [out, in].
+                    tensor_metadata.size = torch.Size([rows, packed_cols * 2])
+                    tensor_metadata.properties.dtype = self.target_dtype
+                    # The planner builds read items from chunks, not size.
+                    tensor_metadata.chunks = [
+                        ChunkStorageMetadata(
+                            offsets=torch.Size([0, 0]), sizes=tensor_metadata.size
+                        )
+                    ]
+                    self._tensor_full_shapes[fqn] = tensor_metadata.size
                 else:
                     self._tensor_full_shapes[fqn] = tensor_metadata.size
 
@@ -107,6 +144,11 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 blocks_name = tensor_name.replace("_scales", "_blocks")
                 if blocks_name in weight_map:
                     self._weight_scale_mapping[blocks_name] = tensor_name
+            # Handle compressed-tensors MXFP4 format: weight_packed and weight_scale.
+            elif tensor_name.endswith(".weight_scale"):
+                packed_name = tensor_name.replace(".weight_scale", ".weight_packed")
+                if packed_name in weight_map:
+                    self._weight_scale_mapping[packed_name] = tensor_name
 
     def _process_read_request(
         self, f: Any, req: ReadItem, planner: LoadPlanner
@@ -370,7 +412,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
             False otherwise
         """
         # Skip scale tensors themselves
-        if tensor_fqn.endswith((".weight_scale_inv", "_scales")):
+        if tensor_fqn.endswith((".weight_scale_inv", "_scales", ".weight_scale")):
             return False
 
         # Check if this weight tensor has a corresponding scale tensor
@@ -443,6 +485,22 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 offset_in_first_group = dim2_start_deq - (
                     group_start * values_per_group
                 )
+            elif tensor_fqn.endswith(".weight_packed"):
+                # compressed-tensors MXFP4: [out, in/2] bytes, one scale per 32
+                # values. These are the bytes of one GPT-OSS expert, so read
+                # whole groups and view them as [1, rows, groups, 16].
+                values_per_group = 32
+                row_start, col_start = req.storage_offsets
+                num_rows, num_cols = req.lengths
+                group_start = col_start // values_per_group
+                group_end = (
+                    col_start + num_cols + values_per_group - 1
+                ) // values_per_group
+                quantized_tensor = safetensor_file.get_slice(tensor_fqn)[
+                    row_start : row_start + num_rows,
+                    group_start * 16 : group_end * 16,
+                ].reshape(1, num_rows, -1, 16)
+                offset_in_first_group = col_start - group_start * values_per_group
             else:
                 # 2D quantized tensor, use 2d block partition.
                 weight_slices = tuple(
@@ -478,7 +536,20 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 raise ValueError(f"Could not find full tensor shape for {tensor_fqn}")
 
             # Determine which dequantization function to use.
-            if len(full_tensor_shape) == 2:
+            if tensor_fqn.endswith(".weight_packed"):
+                # Decode as one GPT-OSS expert: prepend an expert dim of 1.
+                dequantized_tensor = self._dequantize_tensor_mxfp4(
+                    blocks=quantized_tensor,
+                    scales=scale_inv.unsqueeze(0),
+                    req=dataclasses.replace(
+                        req,
+                        storage_offsets=torch.Size([0, *req.storage_offsets]),
+                        lengths=torch.Size([1, *req.lengths]),
+                    ),
+                    group_start=group_start,
+                    offset_in_first_group=offset_in_first_group,
+                ).squeeze(0)
+            elif len(full_tensor_shape) == 2:
                 # 2D block-wise quantization, e.g., used in deepseek v3.1
                 slice_info = self._get_slice_to_block_mapping(req)
                 dequantized_tensor = self._dequantize_tensor(

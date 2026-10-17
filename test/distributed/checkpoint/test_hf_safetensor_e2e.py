@@ -3,10 +3,13 @@
 import importlib
 import json
 import os
+from unittest.mock import MagicMock
 
 import torch
 import torch.distributed.checkpoint as dist_cp
 from torch import distributed as dist
+from torch.distributed.checkpoint.metadata import MetadataIndex
+from torch.distributed.checkpoint.planner import LoadItemType, ReadItem
 from torch.distributed.checkpoint.quantized_hf_storage import (
     QuantizedHuggingFaceStorageReader,
 )
@@ -275,6 +278,135 @@ class TestSingleRankSaveLoad(TestCase):
                 msg=f"Value mismatch for tensor {tensor_name}",
             )
 
+    @with_temp_dir
+    def test_compressed_tensors_mxfp4_loading(self) -> None:
+        """Dequantize compressed-tensors MXFP4 weight_packed using weight_scale."""
+        try:
+            from safetensors import safe_open
+            from safetensors.torch import save_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+        fp4_values = torch.tensor(
+            [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+            + [-0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0]
+        )
+
+        # Two values per byte, low nibble first; one E8M0 scale per 32 values.
+        rows, cols = 4, 96
+        prefix = "model.layers.1.block_sparse_moe.experts.0"
+        packed = torch.randint(0, 256, (rows, cols // 2), dtype=torch.uint8)
+        scale = torch.randint(120, 135, (rows, cols // 32), dtype=torch.uint8)
+        codes = torch.stack([packed & 0x0F, packed >> 4], dim=-1).reshape(rows, cols)
+        exponents = scale.repeat_interleave(32, dim=1).to(torch.float32) - 127
+        expected = fp4_values[codes.long()] * torch.pow(2.0, exponents)
+        unquantized = torch.randn(rows, cols)
+
+        # The scale lives in a different file than the packed weight.
+        files = {
+            "model-00001-of-00002.safetensors": {
+                f"{prefix}.w1.weight_packed": packed,
+                "model.layers.1.mlp_res_proj.weight": unquantized,
+            },
+            "model-00002-of-00002.safetensors": {f"{prefix}.w1.weight_scale": scale},
+        }
+        weight_map = {}
+        for file_name, tensors in files.items():
+            save_file(tensors, os.path.join(CHECKPOINT_DIR, file_name))
+            weight_map.update(dict.fromkeys(tensors, file_name))
+        with open(os.path.join(CHECKPOINT_DIR, "model.safetensors.index.json"), "w") as f:
+            json.dump({"weight_map": weight_map}, f)
+
+        state_dict_to_load = {
+            f"{prefix}.w1.weight_packed": torch.zeros(rows, cols),
+            "model.layers.1.mlp_res_proj.weight": torch.zeros(rows, cols),
+        }
+        reader = QuantizedHuggingFaceStorageReader(path=CHECKPOINT_DIR)
+        dist_cp.load(state_dict=state_dict_to_load, storage_reader=reader)
+
+        torch.testing.assert_close(
+            state_dict_to_load[f"{prefix}.w1.weight_packed"], expected
+        )
+        torch.testing.assert_close(
+            state_dict_to_load["model.layers.1.mlp_res_proj.weight"], unquantized
+        )
+
+        # A shard that starts and ends mid-group: rows 1:3, cols 40:90.
+        read_item = ReadItem(
+            type=LoadItemType.TENSOR,
+            storage_index=MetadataIndex(fqn=f"{prefix}.w1.weight_packed", offset=[0, 0]),
+            dest_index=MetadataIndex(fqn=f"{prefix}.w1.weight_packed", offset=[0, 0]),
+            storage_offsets=[1, 40],
+            dest_offsets=[0, 0],
+            lengths=[2, 50],
+        )
+        planner = MagicMock()
+        planner.resolve_tensor.return_value = torch.zeros(2, 50)
+        file_name = os.path.join(CHECKPOINT_DIR, "model-00001-of-00002.safetensors")
+        with safe_open(file_name, framework="pt") as f:
+            reader._process_read_request(f, read_item, planner)
+        torch.testing.assert_close(
+            planner.commit_tensor.call_args[0][1], expected[1:3, 40:90]
+        )
+
+        # Empty-state-dict loads allocate their destination from the metadata,
+        # so the result must come back dequantized, not truncated to uint8.
+        loaded = _load_state_dict_from_keys(
+            storage_reader=QuantizedHuggingFaceStorageReader(path=CHECKPOINT_DIR),
+        )
+        self.assertEqual(loaded[f"{prefix}.w1.weight_packed"].dtype, torch.float32)
+        torch.testing.assert_close(loaded[f"{prefix}.w1.weight_packed"], expected)
+
+        def assert_loads_raw(packed: torch.Tensor, scale: torch.Tensor) -> None:
+            tensors = {
+                f"{prefix}.w1.weight_packed": packed,
+                f"{prefix}.w1.weight_scale": scale,
+            }
+            for fqn, file_name in weight_map.items():
+                if fqn in tensors:
+                    save_file(
+                        {fqn: tensors[fqn]}, os.path.join(CHECKPOINT_DIR, file_name)
+                    )
+            state_dict = {fqn: torch.empty_like(t) for fqn, t in tensors.items()}
+            dist_cp.load(
+                state_dict=state_dict,
+                storage_reader=QuantizedHuggingFaceStorageReader(path=CHECKPOINT_DIR),
+            )
+            for fqn, t in tensors.items():
+                self.assertEqual(state_dict[fqn].dtype, t.dtype)
+                self.assertTrue(
+                    torch.equal(state_dict[fqn].view(torch.uint8), t.view(torch.uint8))
+                )
+
+        # Other formats with these names load raw, as before MXFP4 support.
+        # NVFP4: float8 scales, one per 16 values.
+        assert_loads_raw(
+            torch.randint(0, 256, (rows, cols // 2), dtype=torch.uint8),
+            torch.rand(rows, cols // 16).to(torch.float8_e4m3fn),
+        )
+        # A uint8 scale that is not one per 32 values.
+        assert_loads_raw(
+            torch.randint(0, 256, (rows, cols // 2), dtype=torch.uint8),
+            torch.randint(0, 256, (rows, cols // 16), dtype=torch.uint8),
+        )
+        # A width that is not a whole number of 16-byte groups.
+        assert_loads_raw(
+            torch.randint(0, 256, (rows, 40), dtype=torch.uint8),
+            torch.randint(0, 256, (rows, 40 // 16), dtype=torch.uint8),
+        )
+        # int4 pack-quantized: int32 [out, in/8] and a float scale per 128 values,
+        # which matches the MXFP4 scale shape.
+        assert_loads_raw(
+            torch.randint(0, 2**31 - 1, (rows, 256 // 8), dtype=torch.int32),
+            torch.randn(rows, 256 // 128).to(torch.bfloat16),
+        )
+        # int4 pack-quantized MoE weights stacked per expert are 3D.
+        assert_loads_raw(
+            torch.randint(0, 2**31 - 1, (2, rows, 256 // 8), dtype=torch.int32),
+            torch.randn(2, rows, 256 // 128).to(torch.bfloat16),
+        )
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
     @with_comms
