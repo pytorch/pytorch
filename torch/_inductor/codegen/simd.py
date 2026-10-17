@@ -189,6 +189,7 @@ class IterationRangesRoot(IterationRanges):
         tensor_dim: int | None,
         grid_dim: int | None,
         has_zdim: bool,
+        is_datadep: bool = False,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -208,12 +209,13 @@ class IterationRangesRoot(IterationRanges):
         # pid_cache["tl.program_id(0)"] = pid_m
         self.pid_cache: dict[str, str] = pid_cache
 
-        # True if the dimension is implemented as a single program looping over
-        # the full dimension (currently only used for non-persistent reduction)
+        # True if a program loops over the dimension in blocks.
 
-        if is_loop and not (self.is_reduction and grid_dim is None):
-            raise AssertionError("loop ranges must be reduction with no grid_dim")
+        if is_loop and grid_dim is not None:
+            raise AssertionError("loop ranges must have no grid_dim")
         self.is_loop = is_loop
+        # A dependent pointwise axis has is_datadep=True, is_reduction=False.
+        self.is_datadep = is_datadep
         # Index of corresponding dimension on triton tensors
         self.tensor_dim = tensor_dim
         # Index of corresponding dimension in the triton grid
@@ -453,6 +455,7 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
             # kernel prologue and closes over a stale reduction offset from a
             # previous loop iteration.
             is_loop=parent.is_loop,
+            is_datadep=parent.is_datadep,
             tensor_dim=parent.tensor_dim,
             grid_dim=parent.grid_dim,
             has_zdim=parent.has_zdim,
@@ -694,6 +697,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # Convert to dicts for O(1) index lookup.
         tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
         grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
+        datadep_prefixes = OrderedSet(
+            prefix
+            for prefix in active_prefixes
+            if numels[prefix].has(ir.DataDependentRange)
+        )
+        if datadep_prefixes:
+            grid_dim_map = filtered_index_map(
+                grid_dims, active_prefixes - datadep_prefixes
+            )
 
         range_trees = []
         for i, prefix in enumerate(active_prefixes):
@@ -709,7 +721,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     index,
                     self,  # type: ignore[arg-type]
                     pid_cache=pid_cache,
-                    is_loop=is_reduction and not self.persistent_reduction,
+                    is_loop=prefix in datadep_prefixes
+                    or (is_reduction and not self.persistent_reduction),
+                    is_datadep=prefix in datadep_prefixes,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
                     has_zdim="z" in numels,
@@ -6027,6 +6041,39 @@ class SIMDScheduling(BaseScheduling):
         Returns:
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
         """
+        if (numel * reduction_numel).has(ir.DataDependentRange):
+            # Keep each dependent range as its own loop:
+            #
+            #     for b in range(B):
+            #         for j in range(left_lengths[b]):
+            #             for k in range(right_lengths[b]):
+            #                 reduce_over_d(b, j, k)
+            #
+            # A J * K tile would lose the separate bounds. In a fused schedule,
+            # use the reduction node's ranges, including its reduction axes.
+            node = max(
+                EnableReduction.filter(node_schedule), key=lambda n: n.is_reduction()
+            )
+            pointwise_ranges, reduction_ranges = node.get_ranges()
+            tilings = [pointwise_ranges, reduction_ranges or [reduction_numel]]
+            if reduction_numel != 1:
+                # Dense neighbors can still share a reduction tile:
+                # [B, D, J] becomes [B * D, J], while dependent J and K
+                # stay separate in [B, J, K].
+                for i, ranges in enumerate(tilings):
+                    tiling = []
+                    for size in ranges:
+                        if (
+                            not tiling
+                            or isinstance(size, ir.DataDependentRange)
+                            or isinstance(tiling[-1], ir.DataDependentRange)
+                        ):
+                            tiling.append(size)
+                        else:
+                            tiling[-1] *= size
+                    tilings[i] = tiling
+            return cls.create_tiling(*tilings), None
+
         selection = cls.select_tiling_with_memory(
             node_schedule, numel, reduction_numel, coalesce_analysis
         )

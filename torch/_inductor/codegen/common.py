@@ -1293,6 +1293,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             f"{type(self).__name__}: check_bounds should be handled by CSEProxy"
         )
 
+    def register_datadep_range(self, value: OpVarT, symbol: sympy.Symbol) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: register_datadep_range should be handled by CSEProxy"
+        )
+
     def load(self, name: str, index: sympy.Expr) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: load should be handled by CSEProxy"
@@ -2511,6 +2516,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
 
+    def register_datadep_range(self, value: CSEVariable, symbol: sympy.Symbol) -> None:
+        raise NotImplementedError(
+            "Data-dependent loops are only implemented for Triton"
+        )
+
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """A load that depends on an index we have read"""
         prior = self.loads
@@ -3139,16 +3149,20 @@ class CSEProxy(DefaultHandler):
     ) -> None:
         return self.kernel.check_bounds(expr, size, lower, upper)
 
+    def register_datadep_range(self, value, symbol) -> None:
+        self.kernel.register_datadep_range(value, symbol)
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         if name in self.kernel.cse.invalidated_stores:
             # A load from an invalidated store requires us to
             # keep the actual buffer around
             V.kernel.must_keep_buffers.add(name)
-        if free_symbol_is_type(index, SymT.TMP):
-            return self.kernel.indirect_load(name, index)
         store_cache = self.kernel.cse.store_cache
         if name in store_cache:
             return store_cache[name]
+        if free_symbol_is_type(index, SymT.TMP):
+            return self.kernel.indirect_load(name, index)
+
         out = self.kernel.load(name, index)
         # count load that is not in the store_cache, and also not in the
         # cse cache.

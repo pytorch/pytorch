@@ -10940,6 +10940,14 @@ class Scheduler:
                     elif (
                         isinstance(cd, MemoryDep)
                         and isinstance(rd, MemoryDep)
+                        and self._fusable_data_dependent_read_and_write(
+                            rd, cd, node1, node2
+                        )
+                    ):
+                        remaining.remove(rd)
+                    elif (
+                        isinstance(cd, MemoryDep)
+                        and isinstance(rd, MemoryDep)
                         and MemoryDepMatch(
                             cd.rename(self.mutation_renames),
                             rd.rename(self.mutation_renames),
@@ -11048,6 +11056,55 @@ class Scheduler:
             and len(read.size) >= len(write.size)
             and read.size[: len(write.size)] == write.size
         )
+
+    def _fusable_data_dependent_read_and_write(
+        self,
+        read: MemoryDep,
+        write: MemoryDep,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        if (
+            read.name != write.name
+            or not isinstance(read.index, sympy.Symbol)
+            or not isinstance(write.index, sympy.Symbol)
+            or not symbol_is_type(read.index, SymT.TMP)
+            or not symbol_is_type(write.index, SymT.TMP)
+            or self.mode_requires_synchronization(write.mode)
+        ):
+            return False
+
+        for producer in node1.get_nodes():
+            if not (
+                isinstance(producer, SchedulerNode)
+                and isinstance(producer.node, ComputedBuffer)
+                and producer.node.data.datadep_output_indexer is not None
+                and write in producer.read_writes.writes
+                and any(
+                    isinstance(size, ir.DataDependentRange)
+                    for size in producer._body.var_ranges.values()
+                )
+            ):
+                continue
+            for consumer in node2.get_nodes():
+                if not (
+                    isinstance(consumer, SchedulerNode)
+                    and isinstance(consumer.node, ComputedBuffer)
+                    and read in consumer.read_writes.reads
+                    and tuple(producer._body.var_ranges.values())
+                    == tuple(consumer._body.var_ranges.values())
+                ):
+                    continue
+                # The datadep_output_indexer maps valid logical
+                # coordinates to unique output locations by contract.
+                # Compare the sliced address graphs, not body-local tmp numbers.
+                write_graph = producer._body.get_indirect_index_graph(write.index)
+                read_graph = consumer._body.get_indirect_index_graph(read.index)
+                if producer._body.index_graphs_match(
+                    write_graph, consumer._body, read_graph
+                ):
+                    return True
+        return False
 
     # StarDep doesn't match MemoryDep, and indirect indexing is not fusible.
     def fusable_read_and_write(self, read: Dep, write: MemoryDep) -> bool:

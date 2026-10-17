@@ -121,6 +121,8 @@ from .utils import (
     ceildiv,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    DataDependentRange,
+    decompose_index,
     developer_warning,
     do_bench_using_profiling,
     dtype_from_size,
@@ -1094,6 +1096,18 @@ class Loops(IRNode):
     dtype: torch.dtype
     inner_fn: Callable[..., Any]
     ranges: Sequence[_IntLike]
+    # Physical output shape used by ComputedBuffer.layout.size.
+    # For input [B, J(b), D], where NNZ = sum_b lengths[b]:
+    #
+    #     pointwise: [NNZ, D]
+    #     sum_J:     [B, D]
+    #     sum_D:     [NNZ]
+    datadep_output_flat_size: Sequence[_IntLike] | None = None
+    # Map the remaining logical output coordinates to a flat storage address.
+    datadep_output_indexer: Callable[[Sequence[Expr]], Any] | None = None
+    # Total valid body evaluations, including reduction coordinates.
+    # All three cases above evaluate the body NNZ * D times.
+    datadep_iteration_numel: _IntLike | None = None
 
     @cache_on_self_and_args("Loops")
     def get_free_symbol_uses(
@@ -1102,6 +1116,9 @@ class Loops(IRNode):
         return OrderedSet().union(
             *(get_free_symbols(e, unbacked_only) for e in self.ranges),
             self.inner_fn_free_symbols(unbacked_only),
+            get_free_symbols(self.datadep_iteration_numel, unbacked_only)
+            if self.datadep_iteration_numel is not None
+            else (),
         )
 
     def _to_str(self, names: Sequence[str]) -> str:
@@ -1208,21 +1225,33 @@ class Loops(IRNode):
     def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
-                return extract_read_writes(
+                reads = extract_read_writes(
                     self.make_loader(),
                     self.get_size(),
                     self.get_reduction_size(),
                 ).reads
             else:
-                return extract_read_writes(
+                reads = extract_read_writes(
                     self.make_loader(),
                     self.get_size(),
                 ).reads
+            if (
+                self.datadep_output_flat_size is not None
+                and self.datadep_output_indexer is not None
+            ):
+                reads |= extract_read_writes(
+                    self.datadep_output_indexer, self.get_size()
+                ).reads
+            return reads
 
     def get_read_names(self) -> OrderedSet[str]:
+        if self.datadep_output_flat_size is not None:
+            return OrderedSet(dep.name for dep in self.get_reads())
         return OrderedSet(self.inner_fn_opcount().read_buffers)
 
     def num_reads(self) -> int:
+        if self.datadep_output_flat_size is not None:
+            return len(self.get_read_names())
         return len(self.inner_fn_opcount().read_buffers)
 
     def get_reduction_size(self) -> Sequence[Expr]:
@@ -1275,7 +1304,14 @@ class Pointwise(Loops):
         vars: Sequence[Expr],
     ) -> None:
         loader = self.make_loader()
-        return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
+        if self.datadep_output_indexer is None:
+            return ops.store(output_name or "unnamed", indexer(vars), loader(vars))
+        value = loader(vars)
+        addr = self.datadep_output_indexer(vars)
+        if isinstance(addr, OpsValue):
+            sizes = cast(Sequence[_IntLike], self.datadep_output_flat_size)
+            addr = ops.indirect_indexing(addr, sympy_product(sizes), wrap_neg=False)
+        return ops.store(output_name or "unnamed", addr, value)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
@@ -1286,6 +1322,9 @@ class Pointwise(Loops):
             dtype=self.dtype,
             inner_fn=loader,
             ranges=self.ranges,
+            datadep_output_flat_size=self.datadep_output_flat_size,
+            datadep_output_indexer=self.datadep_output_indexer,
+            datadep_iteration_numel=self.datadep_iteration_numel,
         )
 
 
@@ -1470,7 +1509,11 @@ class Reduction(Loops):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
-        ops.store_reduction(output_name or "unnamed", indexer(vars), value)
+        addr = (self.datadep_output_indexer or indexer)(vars)
+        if isinstance(addr, OpsValue):
+            sizes = cast(Sequence[_IntLike], self.datadep_output_flat_size)
+            addr = ops.indirect_indexing(addr, sympy_product(sizes), wrap_neg=False)
+        ops.store_reduction(output_name or "unnamed", addr, value)
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)
@@ -1496,6 +1539,9 @@ class Reduction(Loops):
             dtype=self.dtype,
             inner_fn=loader,
             ranges=self.ranges,
+            datadep_output_flat_size=self.datadep_output_flat_size,
+            datadep_output_indexer=self.datadep_output_indexer,
+            datadep_iteration_numel=self.datadep_iteration_numel,
             reduction_ranges=self.reduction_ranges,
             reduction_type=self.reduction_type,
             src_dtype=self.src_dtype,
@@ -5777,6 +5823,7 @@ class ComputedBuffer(OperationBuffer):
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
             and not self._force_realize
+            and self.data.datadep_output_flat_size is None
         ):
             # inline this op rather than generating ops.load()
             return self.data.make_loader()
@@ -5837,6 +5884,11 @@ class ComputedBuffer(OperationBuffer):
         return None
 
     def decide_layout(self) -> None:
+        if (
+            isinstance(self.data, Loops)
+            and self.data.datadep_output_flat_size is not None
+        ):
+            self.freeze_layout()
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
             if order:
@@ -5852,7 +5904,15 @@ class ComputedBuffer(OperationBuffer):
         LoopBody,
         tuple[list[Expr], list[Expr]],
     ]:
-        args, var_ranges = dependencies.index_vars_squeeze(
+        index_vars_fn = dependencies.index_vars_squeeze
+        if any(
+            isinstance(size, DataDependentRange)
+            for size in itertools.chain(
+                self.get_pointwise_size(), self.get_reduction_size()
+            )
+        ):
+            index_vars_fn = dependencies.index_vars_no_squeeze
+        args, var_ranges = index_vars_fn(
             self.get_pointwise_size(), self.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
@@ -5906,6 +5966,46 @@ class ComputedBuffer(OperationBuffer):
             body,
             (index_vars, reduce_vars),
         ) = self.get_default_sizes_body()
+
+        if any(
+            isinstance(size, DataDependentRange)
+            for size in itertools.chain(index_size, reduce_size)
+        ):
+            dense_start = len(index_size)
+            for i, size in enumerate(index_size):
+                if isinstance(size, DataDependentRange):
+                    dense_start = i + 1
+
+            if dense_start < len(index_size):
+                # Put the combined dense suffix before the dependent loop:
+                #
+                #     for b in range(B):
+                #         for f in range(D * E):
+                #             for j in range(lengths[b]):
+                #                 compute(b, j, f // E, f % E)
+                #
+                # [B, J, D, E] becomes [B, D * E, J]. The body still uses
+                # (b, j, d, e), and the buffer keeps its [N, D, E] layout.
+                # Earlier dependent loops keep their original order.
+                dense_sizes = index_size[dense_start:]
+                index_size = [
+                    *index_size[: dense_start - 1],
+                    sympy_product(dense_sizes),
+                    index_size[dense_start - 1],
+                ]
+                args, var_ranges = dependencies.index_vars_no_squeeze(
+                    index_size, reduce_size, prefix="p"
+                )
+                iter_vars, reduce_vars = args
+                indices = [
+                    *iter_vars[:-2],
+                    iter_vars[-1],
+                    *decompose_index(iter_vars[-2], dense_sizes),
+                ]
+                body = LoopBody(
+                    body, [indices, reduce_vars], var_ranges, iter_vars, reduce_vars
+                )
+            return (index_size, reduce_size), body
 
         if recompute_sizes_body_func:
             (
@@ -11183,7 +11283,11 @@ class StorageBox(MutableBox):
             layout=FlexibleLayout(
                 device=device,
                 dtype=self.data.get_dtype(),
-                size=self.data.get_size(),
+                size=(
+                    self.data.get_size()
+                    if self.data.datadep_output_flat_size is None
+                    else self.data.datadep_output_flat_size
+                ),
                 is_pinned=False,
             ),
             data=self.data,

@@ -4906,6 +4906,9 @@ class PythonWrapperCodegen(CodeGen):
                 return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
+            elif isinstance(arg, ir.DataDependentRange):
+                # The kernel computes a separate runtime bound; this scalar is unused.
+                return "-1"
             else:
                 return pexpr(V.graph.sizevars.simplify(arg))
 

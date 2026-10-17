@@ -243,6 +243,10 @@ class OpsHandler(Generic[T]):
         """
         raise NotImplementedError
 
+    def register_datadep_range(self, value: T, symbol: sympy.Symbol) -> None:
+        """Associate a loop-range token with a scalar computed by inner_fn."""
+        raise NotImplementedError
+
     def load(self, name: str, index: sympy.Expr) -> T:
         """
         Load from the memory location 'name', offset by some indexing expression 'index'.
@@ -907,6 +911,10 @@ class NoopHandler(DefaultHandler):
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy.S.Zero
 
+    @staticmethod
+    def register_datadep_range(value, symbol):
+        return symbol
+
 
 class BasicMathOpsMixin:
     @staticmethod
@@ -1024,6 +1032,10 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
         return sympy_index_symbol(str(index_var))
 
+    @staticmethod
+    def register_datadep_range(value, symbol):
+        return symbol
+
 
 class KernelFormatterHandler(DefaultHandler):
     def __init__(self, parent_handler: OpsHandler[Any]):
@@ -1061,6 +1073,12 @@ class KernelFormatterHandler(DefaultHandler):
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Symbol:
         return self.parent_handler.indirect_indexing(*args, **kwargs)
+
+    def register_datadep_range(self, value, symbol):
+        self._output.writeline(
+            f"ops.register_datadep_range({value}, {sympy_str(symbol)})"
+        )
+        return self.parent_handler.register_datadep_range(value, symbol)
 
     def _write(self, line):
         # replace line with a new variable name
@@ -1143,6 +1161,10 @@ class OpCounterCSE(DefaultHandler):
     def indirect_indexing(self, *args, **kwargs):
         self._used_ops.add("indirect_indexing")
         return self.parent_handler.indirect_indexing(*args, **kwargs)
+
+    def register_datadep_range(self, *args, **kwargs):
+        self._used_ops.add("register_datadep_range")
+        return self.parent_handler.register_datadep_range(*args, **kwargs)
 
     def load(self, name: str, index: sympy.Expr) -> str:
         val = self.parent_handler.load(name, index)

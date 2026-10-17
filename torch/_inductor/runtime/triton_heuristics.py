@@ -4262,7 +4262,7 @@ def triton_config_reduction(
                 break
             rnumels[prefix] //= 2
 
-    cfg = _get_config({"x": x, **rnumels})
+    cfg = _get_config(size_hints, {"x": x, **rnumels})
     check_max_block(cfg)
     check_config(cfg, xnumel=size_hints["x"])
     config = InductorConfig(
@@ -4279,11 +4279,26 @@ def triton_config_reduction(
     return config
 
 
-def _get_config(numels: dict[str, int]) -> dict[str, int]:
+def _get_config(size_hints: dict[str, int], numels: dict[str, int]) -> dict[str, int]:
     """
     Convert numels ("x", "r0_", etc.) to block sizes ("XBLOCK", "R0_BLOCK"), etc.
     """
 
+    # size_hints contains every tiled axis; grid_prefixes selects launch axes.
+    # A reduction over D can have three pointwise axes but only one grid axis:
+    #
+    #     b = program_id(0) * ZBLOCK + arange(ZBLOCK)
+    #     for jstart in range(0, max(J[b]), YBLOCK):
+    #         j = jstart + arange(YBLOCK)
+    #         for kstart in range(0, max(K[b]), XBLOCK):
+    #             k = kstart + arange(XBLOCK)
+    #             out[b, j, k] = sum_over_d(b, j, k)  # masked
+    #
+    # ZBLOCK, YBLOCK and XBLOCK are all kernel arguments, including the loop
+    # blocks. A config supplying only X/Y would leave ZBLOCK missing and fail
+    # Triton compilation. Fill unspecified axes with 1, then preserve the
+    # block sizes selected by the heuristic or autotuner.
+    numels = {**dict.fromkeys(size_hints, 1), **numels}
     return {prefix.upper() + "BLOCK": numel for prefix, numel in numels.items()}
 
 
@@ -4602,6 +4617,7 @@ def triton_config_tiled_reduction(
     register_intensive=False,
     waves_per_eu=None,
     *,
+    z=1,
     warp_size: int = 32,
 ):
     """
@@ -4615,9 +4631,11 @@ def triton_config_tiled_reduction(
     # shrink sizes to size hints
     x = min(x, size_hints["x"])
     y = min(y, size_hints["y"])
+    if "z" in size_hints:
+        z = min(z, size_hints["z"])
 
     def total_numel() -> int:
-        return conditional_product(x, y, *rnumels.values())
+        return conditional_product(x, y, z, *rnumels.values())
 
     target = total_numel()
     if conditional_product(*size_hints.values()) < target:
@@ -4632,7 +4650,10 @@ def triton_config_tiled_reduction(
     while y < size_hints["y"] and total_numel() < target:
         y *= 2
 
-    cfg = _get_config({"x": x, "y": y, **rnumels})
+    numels = {"x": x, "y": y, **rnumels}
+    if "z" in size_hints:
+        numels["z"] = z
+    cfg = _get_config(size_hints, numels)
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
         num_warps,
@@ -4640,7 +4661,9 @@ def triton_config_tiled_reduction(
         register_intensive=register_intensive,
         warp_size=warp_size,
     )
-    check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
+    check_config(
+        cfg, xnumel=size_hints["x"], ynumel=size_hints["y"], znumel=size_hints.get("z")
+    )
     check_max_block(cfg)
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
     if torch.version.hip:
@@ -5500,20 +5523,23 @@ class GridExpr:
 
 class Grid1D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        (prefix,) = self.inductor_meta.get("grid_prefixes", ("x",))
+        self.x_grid = self.ceildiv(f"{prefix}numel", meta.get(f"{prefix.upper()}BLOCK"))
 
 
 class Grid2D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
+        x, y = self.inductor_meta.get("grid_prefixes", ("x", "y"))
+        self.x_grid = self.ceildiv(f"{x}numel", meta.get(f"{x.upper()}BLOCK"))
+        self.y_grid = self.ceildiv(f"{y}numel", meta.get(f"{y.upper()}BLOCK"))
 
 
 class Grid3D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
-        self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
-        self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+        x, y, z = self.inductor_meta.get("grid_prefixes", ("x", "y", "z"))
+        self.x_grid = self.ceildiv(f"{x}numel", meta.get(f"{x.upper()}BLOCK"))
+        self.y_grid = self.ceildiv(f"{y}numel", meta.get(f"{y.upper()}BLOCK"))
+        self.z_grid = self.ceildiv(f"{z}numel", meta.get(f"{z.upper()}BLOCK"))
 
 
 class BatchMatmulGrid3D(GridExpr):
@@ -5525,11 +5551,13 @@ class BatchMatmulGrid3D(GridExpr):
 
 class Grid2DWithYZOverflow(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
-        self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
+        x, y = self.inductor_meta.get("grid_prefixes", ("x", "y"))
+        self.x_grid = self.ceildiv(f"{x}numel", meta.get(f"{x.upper()}BLOCK"))
         self.prefix.extend(
             [
                 self.assign_tmp(
-                    "y_grid_raw_", self.ceildiv("ynumel", meta.get("YBLOCK"))
+                    "y_grid_raw_",
+                    self.ceildiv(f"{y}numel", meta.get(f"{y.upper()}BLOCK")),
                 ),
                 self.assign_tmp(
                     "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
