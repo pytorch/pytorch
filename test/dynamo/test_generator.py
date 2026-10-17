@@ -2256,6 +2256,20 @@ class TestGeneratorCoroutine(GeneratorTestsBase):
         g.close()  # close normally
 
     @make_dynamo_test
+    def test_gi_frame_f_back(self):
+        def f():
+            yield
+
+        g = f()
+        frame = g.gi_frame
+        self.assertIsNone(frame.f_back)
+        self.assertIs(g.gi_frame, frame)
+        next(g)
+        self.assertIsNone(g.gi_frame.f_back)
+        self.assertEqual(list(g), [])
+        self.assertIsNone(g.gi_frame)
+
+    @make_dynamo_test
     def test_generator_exit_not_caught_by_except_exception(self):
         log = []
 
