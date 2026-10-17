@@ -145,14 +145,24 @@ input instead of returning a separate gradient tensor::
 
     @staticmethod
     def backward(ctx, grad_output):
-        (buffer,) = ctx.input_grad_buffers
-        if buffer is not None:
-            custom_backward_kernel(grad_output, out=buffer, accumulate=True)
-            return None
-        return custom_backward_kernel(grad_output)
+        x, y = ctx.saved_tensors
+        x_buffer, y_buffer = ctx.input_grad_buffers
 
-Each input is independent: for example, a fused linear backward may write
-``grad_input`` into its available buffer while returning ``grad_weight`` normally.
+        if x_buffer is not None:
+            kernel_out(grad_output, y, out=x_buffer)
+            grad_x = None
+        else:
+            grad_x = kernel(grad_output, y)
+
+        if y_buffer is not None:
+            kernel_out(grad_output, x, out=y_buffer)
+            grad_y = None
+        else:
+            grad_y = kernel(grad_output, x)
+
+        return grad_x, grad_y
+
+Each input is independent, so neither, either, or both buffers may be available.
 Buffer availability depends on backward execution order, so the ``None`` fallback is
 required. The first producer normally receives ``None``; a later producer can receive
 the partial sum produced so far. The buffer may only be used synchronously while that

@@ -28,6 +28,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -112,6 +113,9 @@ static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
+
+// Whether the current node call has exposed an input gradient buffer.
+static thread_local bool input_grad_buffer_exposed = false;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total
 // nested
@@ -425,27 +429,24 @@ variable_list get_current_input_grad_buffers(Node* node) {
       current_node && current_node.get() == node,
       "input_grad_buffers can only be accessed from the currently executing "
       "autograd.Function backward()");
+  // Final callbacks run while the GraphTask mutex is held. During reentrant
+  // backward, current_node can still refer to the suspended outer node, so
+  // reject post-processing before acquiring that mutex below.
   TORCH_CHECK(
-      graph_task->exec_info_.empty(),
-      "input_grad_buffers is only supported by backward() without the inputs "
-      "argument");
+      !graph_task->future_completed_.load(),
+      "input_grad_buffers cannot be accessed during backward post-processing");
   TORCH_CHECK(
-      !at::GradMode::is_enabled(),
-      "input_grad_buffers does not support backward(create_graph=True)");
+      !graph_task->thread_locals_.get_grad_mode(),
+      "input_grad_buffers does not support create_graph=True");
   TORCH_CHECK(
       !AnomalyMode::is_enabled(),
       "input_grad_buffers does not support anomaly detection");
   TORCH_CHECK(
-      node->post_hooks().empty(),
-      "input_grad_buffers does not support hooks registered on the producing "
-      "autograd node");
+      !at::globalContext().overrideStaleCaptureStream(),
+      "input_grad_buffers does not support "
+      "set_override_stale_capture_stream(True)");
 
-  const auto producer_device = node->device();
-  auto opt_producer_stream = node->stream();
-  if (opt_producer_stream.has_value()) {
-    opt_producer_stream =
-        at::accelerator::getCurrentStream(producer_device.index());
-  }
+  const auto opt_producer_stream = node->stream();
 
   variable_list result(node->next_edges().size());
   std::lock_guard<std::mutex> lock(graph_task->mutex_);
@@ -465,11 +466,8 @@ variable_list get_current_input_grad_buffers(Node* node) {
         ? input_buffer.opt_overridden_consumer_stream
         : next.function->stream();
     result[i] = input_buffer.get_for_direct_accumulation(
-        next.input_nr,
-        producer_device,
-        opt_producer_stream,
-        next.function->device(),
-        opt_consumer_stream);
+        next.input_nr, opt_producer_stream, opt_consumer_stream);
+    input_grad_buffer_exposed |= result[i].defined();
   }
   return result;
 }
@@ -1078,6 +1076,12 @@ static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
+  const bool previous_input_grad_buffer_exposed =
+      std::exchange(input_grad_buffer_exposed, false);
+  auto restore_input_grad_buffer_exposure = c10::make_scope_exit(
+      [previous_input_grad_buffer_exposed]() {
+        input_grad_buffer_exposed = previous_input_grad_buffer_exposed;
+      });
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
@@ -1359,6 +1363,10 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
+  TORCH_CHECK(
+      !input_grad_buffer_exposed,
+      "Calling backward or grad reentrantly after accessing a non-None "
+      "ctx.input_grad_buffers entry is not supported");
   validate_outputs(
       root_edges,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)

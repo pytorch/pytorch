@@ -1360,7 +1360,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 source = AttrSource(self.source, "needs_input_grad")
                 # type: ignore[attr-defined]
                 return VariableTracker.build(tx, self.value.needs_input_grad, source)
-
         return super().getattro_impl(tx, name)
 
 

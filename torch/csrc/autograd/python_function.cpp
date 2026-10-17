@@ -1446,8 +1446,19 @@ PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
 PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS
   auto* py_fn = reinterpret_cast<THPFunction*>(self);
-  check_legacy_fn_attr_access(py_fn->cdata, "input_grad_buffers");
-  auto buffers = get_current_input_grad_buffers(py_fn->cdata.get());
+  auto node = py_fn->cdata;
+  check_legacy_fn_attr_access(node, "input_grad_buffers");
+  TORCH_CHECK(
+      node->post_hooks().empty(),
+      "input_grad_buffers does not support post-hooks on the producing "
+      "autograd node because directly accumulated gradients are returned as "
+      "None and cannot be observed or replaced by those hooks");
+
+  variable_list buffers;
+  {
+    pybind11::gil_scoped_release no_gil;
+    buffers = get_current_input_grad_buffers(node.get());
+  }
 
   THPObjectPtr result(
       PyTuple_New(static_cast<Py_ssize_t>(py_fn->is_variable_input.size())));
@@ -1457,19 +1468,19 @@ PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
 
   size_t variable_idx = 0;
   for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
-    PyObject* item = nullptr;
+    THPObjectPtr item;
     if (!py_fn->is_variable_input[i] || !buffers[variable_idx].defined()) {
       item = Py_NewRef(Py_None);
     } else {
       item = THPVariable_Wrap(buffers[variable_idx]);
-      if (!item) {
-        return nullptr;
-      }
+    }
+    if (!item) {
+      return nullptr;
     }
     if (py_fn->is_variable_input[i]) {
       ++variable_idx;
     }
-    PyTuple_SET_ITEM(result.get(), i, item);
+    PyTuple_SET_ITEM(result.get(), i, item.release());
   }
   TORCH_INTERNAL_ASSERT(variable_idx == buffers.size());
   return result.release();
@@ -1837,8 +1848,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* args, PyObject* kwargs) {
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
-      auto result =
-          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
+      THPObjectPtr result(
+          PyObject_CallObject(setup_context_fn, ctx_input_output_tuple));
       if (!result) {
         return nullptr;
       }
@@ -2237,7 +2248,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr,
      nullptr},
-    {"input_grad_buffers",
+    {"_input_grad_buffers",
      (getter)THPFunction_input_grad_buffers,
      nullptr,
      nullptr,

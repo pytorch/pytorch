@@ -263,6 +263,10 @@ def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     torch._C._increment_version(tensor)
 
 
+def queue_callback(callback):
+    Variable._execution_engine.queue_callback(callback)
+
+
 class saved_tensors_hooks:
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 

@@ -45,9 +45,11 @@ struct InputBuffer {
         ready_events(size),
         ready_streams(size) {}
   InputBuffer(const InputBuffer& other) = delete;
+  InputBuffer& operator=(const InputBuffer&) = delete;
   InputBuffer(InputBuffer&& other) = default;
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)) {}
   InputBuffer& operator=(InputBuffer&& other) = default;
+  ~InputBuffer() = default;
 
   // Accumulates the variable at a specified index.
   // The optional CUDA streams determine which stream the accumulation
@@ -61,9 +63,7 @@ struct InputBuffer {
 
   TORCH_API Variable get_for_direct_accumulation(
       size_t pos,
-      const at::Device& producer_device,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const at::Device& consumer_device,
       const std::optional<c10::Stream>& opt_consumer_stream);
 
   Variable operator[](size_t pos) {
@@ -94,22 +94,17 @@ struct InputBuffer {
   std::optional<c10::Stream> opt_overridden_consumer_stream;
 
  private:
-  struct DirectAccumulationInfo {
-    std::thread::id thread_id;
-    at::Device device;
-    std::optional<c10::Stream> stream;
-  };
-
   void validate_direct_accumulation(
       size_t pos,
       const at::Device& device,
       const std::optional<c10::Stream>& opt_producer_stream,
-      const std::optional<c10::Stream>& opt_consumer_stream) const;
+      const std::optional<c10::Stream>& opt_consumer_stream,
+      std::thread::id expected_thread) const;
 
   // add() validates later producers before they touch an exposed buffer.
   // Keep the per-slot state out of the common allocation path.
-  std::unique_ptr<std::optional<DirectAccumulationInfo>[]>
-      direct_accumulation_info_;
+  std::unique_ptr<std::optional<std::thread::id>[]>
+      direct_accumulation_threads_ = nullptr;
 };
 
 } // namespace torch::autograd
