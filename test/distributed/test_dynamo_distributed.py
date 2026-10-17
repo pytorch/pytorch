@@ -92,6 +92,28 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 
+def _precompiled_guard_collective_entry(x):
+    return x.sin()
+
+
+def _load_as_precompile_entries(fn, example):
+    """Move ``fn``'s compiled entries into precompile entries, as loading an
+    artifact in a fresh process would install them."""
+    from torch._C._dynamo.eval_frame import _load_precompile_entry
+    from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+    torch.compile(fn, backend="eager", dynamic=False)(example)
+    entries = [
+        (entry.guard_manager, entry.code)
+        for entry in _debug_get_cache_entry_list(fn.__code__)
+    ]
+    torch._dynamo.reset_code(fn.__code__)
+    for guard_manager, code in entries:
+        _load_precompile_entry(fn.__code__, guard_manager, code)
+    counter = CompileCounter()
+    return torch.compile(fn, backend=counter, dynamic=False), counter
+
+
 @contextmanager
 def enable_guard_collectives():
     old = set_enable_guard_collectives(True)
@@ -377,6 +399,45 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not dist.is_gloo_available(), "requires gloo")
+    def test_dynamo_pgs_inherit_default_pg_timeout(self):
+        # The fake backend exposes no options carrying the configured timeout, so
+        # the timeout has to come from what c10d recorded for the default group.
+        from torch._dynamo import distributed as dynamo_distributed
+
+        timeout = timedelta(seconds=7200)
+        dist.init_process_group(
+            backend="fake",
+            store=dist.HashStore(),
+            rank=0,
+            world_size=1,
+            timeout=timeout,
+        )
+        self.addCleanup(dist.destroy_process_group)
+        self.assertEqual(dist.distributed_c10d._get_process_group_timeout(), timeout)
+
+        with (
+            patch.object(dynamo_distributed, "_GUARD_PG", None),
+            patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
+        ):
+            guard_pg = dynamo_distributed.get_guard_pg()
+            compile_sync_pg = dynamo_distributed.get_compile_sync_pg()
+
+        for pg in (guard_pg, compile_sync_pg):
+            self.assertEqual(
+                dist.distributed_c10d._get_process_group_timeout(pg), timeout
+            )
+        self.assertEqual(
+            compile_sync_pg._get_backend(torch.device("cpu")).options._timeout,
+            timeout,
+        )
+
+        new_timeout = timedelta(seconds=60)
+        dist.set_timeout(new_timeout)
+        self.assertEqual(
+            dist.distributed_c10d._get_process_group_timeout(), new_timeout
+        )
+
     @_expectedFailureIf_transformers_ge_5_2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
@@ -1535,6 +1596,88 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.distributed.all_gather_object(res, len(metrics))
             for r in res[1:]:
                 self.assertEqual(res[0], r)
+
+    @skip_if_lt_x_gpu(2)
+    @enable_guard_collectives()
+    def test_guard_collective_precompile_entries_propagate_miss(self):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            x = torch.randn(4, device=self.rank)
+            compiled, counter = _load_as_precompile_entries(
+                _precompiled_guard_collective_entry, x
+            )
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 0)
+
+            # Only rank 1 misses the precompile entry; every rank recompiles.
+            if self.rank == 1:
+                x = torch.randn(5, device=self.rank)
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_guard_collective_unanimous_precompile_skip_runs_eagerly(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.eval_frame import guard_collectives_hook
+        from torch._dynamo.types import GuardCollectiveState
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            x = torch.randn(4, device=self.rank)
+            fn = _precompiled_guard_collective_entry
+            _load_precompile_skip(fn.__code__)
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter)
+            states = []
+
+            def record_and_sync(state):
+                states.append(state)
+                return guard_collectives_hook(state)
+
+            old_hook = set_guard_complete_hook(record_and_sync)
+            try:
+                self.assertEqual(compiled(x), x.sin())
+            finally:
+                set_guard_complete_hook(old_hook)
+            self.assertEqual(states, [GuardCollectiveState.SKIP])
+            self.assertEqual(counter.frame_count, 0)
+
+    @skip_if_lt_x_gpu(2)
+    @enable_guard_collectives()
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
+    def test_guard_collective_precompile_skip_propagates_miss(self):
+        from torch._C._dynamo.eval_frame import _load_precompile_skip
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            x = torch.randn(4, device=self.rank)
+            fn = _precompiled_guard_collective_entry
+            # Rank 0's artifact skips the frame; rank 1's compiled it.
+            if self.rank == 0:
+                _load_precompile_skip(fn.__code__)
+                counter = CompileCounter()
+                compiled = torch.compile(fn, backend=counter, dynamic=False)
+            else:
+                compiled, counter = _load_as_precompile_entries(fn, x)
+            # A SKIP/HIT mix runs each rank's own path and never recompiles,
+            # however often it repeats.
+            for _ in range(5):
+                self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 0)
+            # Only rank 1 misses; every rank recompiles.
+            if self.rank == 1:
+                x = torch.randn(5, device=self.rank)
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 1)
+            # Both ranks now hit the entry compiled for the miss.
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 1)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)

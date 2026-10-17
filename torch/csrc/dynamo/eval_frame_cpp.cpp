@@ -25,6 +25,9 @@ namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
 std::unordered_set<PyCodeObject*> breakpoint_code_objects;
 
+// Mirrors torch._dynamo.types.GuardCollectiveState.
+enum class GuardCollectiveState { Miss = 0, Hit = 1, Skip = 2 };
+
 // RAII guard that calls __exit__ on a Python context manager when destroyed.
 struct DebugContextGuard {
   py::object ctx;
@@ -504,6 +507,7 @@ PyObject* dynamo__custom_eval_frame(
   // (deliberate "do not trace" marks must apply across regions), but
   // does not inherit RUN_ONLY (recompile-limit hits are per-region).
   int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
+  bool isolate_recompiles_strict = get_current_isolate_recompiles_strict();
   FrameExecStrategy strategy{DEFAULT, DEFAULT};
   // In run-only mode a code object without a cache is never compiled, so do
   // not create one for it.
@@ -520,7 +524,14 @@ PyObject* dynamo__custom_eval_frame(
   recursive_callback =
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
-  if (strategy.cur_action == FrameAction::SKIP) {
+  // A frame a loaded artifact skips takes part in the guard collective, since
+  // another rank's artifact may have compiled it. Its skip only answers calls
+  // its cache entries miss: those exist once a peer's miss compiled it. When
+  // it runs eagerly, its recursive action applies as for any SKIP frame.
+  const bool precompile_skip = strategy.cur_action == FrameAction::SKIP &&
+      guard_complete_hook != nullptr && is_precompile_skip(code);
+
+  if (strategy.cur_action == FrameAction::SKIP && !precompile_skip) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -541,6 +552,7 @@ PyObject* dynamo__custom_eval_frame(
           code,
           backend,
           isolate_recompiles_id,
+          isolate_recompiles_strict,
           get_skip_guard_eval_unsafe(),
           &cache_hit)) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
@@ -551,6 +563,7 @@ PyObject* dynamo__custom_eval_frame(
         locals.get(),
         backend,
         isolate_recompiles_id,
+        isolate_recompiles_strict,
         get_skip_guard_eval_unsafe(),
         &cache_hit);
     _pytorch_record_function_exit(rf);
@@ -571,16 +584,38 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // NB: We only do guard collectives when there are compiled code entries
-  // for the current region (or the default region); this reduces
-  // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region.
-  bool has_relevant_entries =
-      has_relevant_cache_entries(code, isolate_recompiles_id);
-  if (guard_complete_hook != nullptr && has_relevant_entries) {
+  // for the current region (or the default region), precompile entries or a
+  // skip loaded from an artifact; this reduces overtriggering and we don't
+  // need to do guard collectives the very first time we've seen a frame in
+  // this region. Counting precompile entries and skips assumes every rank
+  // installed the same artifact; a rank without them skips the collective the
+  // others wait in. It also assumes the frames each rank reaches next issue
+  // matching collectives: a rank that skips non-recursively runs the frame
+  // eagerly, so its callees may join their own collectives, while a rank that
+  // hit runs code with those callees inlined (or its own resume functions),
+  // and the ranks then mispair. A recursive skip runs its callees without
+  // Dynamo, which leaves only the resume-function case.
+  if (guard_complete_hook != nullptr &&
+      (precompile_skip ||
+       has_relevant_cache_entries(
+           code, isolate_recompiles_id, isolate_recompiles_strict))) {
     py::handle guard_complete_hook_handle(guard_complete_hook);
-    // False means force compilation (someone cache missed)
-    py::object res = guard_complete_hook_handle(!cache_hit.code.is_none());
-    if (!py::cast<bool>(res)) {
+    GuardCollectiveState local_state = !cache_hit.code.is_none()
+        ? GuardCollectiveState::Hit
+        : (precompile_skip ? GuardCollectiveState::Skip
+                           : GuardCollectiveState::Miss);
+    auto state = static_cast<GuardCollectiveState>(py::cast<int>(
+        guard_complete_hook_handle(static_cast<int>(local_state))));
+    // Only a miss sends a skipped frame to the compiler, so a hook that
+    // returns a bool (True == Hit) still runs it eagerly.
+    if (local_state == GuardCollectiveState::Skip &&
+        state != GuardCollectiveState::Miss) {
+      DEBUG_TRACE("skip %s", get_frame_name(frame));
+      eval_default();
+      return eval_result;
+    }
+    // Any rank's miss forces the miss path on every rank.
+    if (state != GuardCollectiveState::Hit) {
       cache_hit.code = py::none();
     }
   }
@@ -614,7 +649,8 @@ PyObject* dynamo__custom_eval_frame(
   if (locals == nullptr) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
   }
-  CompileInputs inputs = get_compile_inputs(code, isolate_recompiles_id);
+  CompileInputs inputs = get_compile_inputs(
+      code, isolate_recompiles_id, isolate_recompiles_strict);
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
@@ -652,7 +688,16 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // recursive frame action
-  if (strategy.recursive_action == FrameAction::DEFAULT) {
+  if (precompile_skip) {
+    // A peer's miss forced this compile. With a graph, callees run like the
+    // peers' compiled code (their graph breaks and resume functions go through
+    // Dynamo); with none, the frame keeps the artifact's skip, callees too.
+    if (new_strategy.cur_action == FrameAction::SKIP) {
+      new_strategy.recursive_action = strategy.recursive_action;
+    }
+    recursive_callback =
+        _callback_from_action(callback, new_strategy.recursive_action);
+  } else if (strategy.recursive_action == FrameAction::DEFAULT) {
     // old recursive action overrides new recursive action
     recursive_callback = _callback_from_action(
         recursive_callback, new_strategy.recursive_action);
