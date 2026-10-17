@@ -8299,6 +8299,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                         )
                         self.assertEqual(expected, actual)
 
+    def test_cross_entropy_loss_dim_dynamic(self):
+        cnt = CompileCounter()
+        compiled = torch.compile(F.cross_entropy, dynamic=True, backend=cnt)
+
+        def check(N, T, C):
+            x = torch.randn(N, T, C)
+            for target in (torch.randint(C, (N, T)), torch.rand(N, T, C).softmax(-1)):
+                for reduction in ["none", "mean", "sum"]:
+                    expected = F.cross_entropy(x, target, reduction=reduction, dim=-1)
+                    actual = compiled(x, target, reduction=reduction, dim=-1)
+                    self.assertEqual(expected, actual)
+
+        check(2, 3, 5)
+        frame_count = cnt.frame_count
+        check(3, 4, 7)
+        self.assertEqual(cnt.frame_count, frame_count)
+
     def test_repr(self):
         class Config:
             def __repr__(self):

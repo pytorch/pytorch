@@ -7220,6 +7220,34 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
         yield SampleInput(input, target, **kwargs)
 
+def sample_inputs_cross_entropy_dim(op_info, device, dtype, requires_grad, **kwargs):
+    num_classes = 3
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_target(shape, dim, probabilities_target):
+        if probabilities_target:
+            return make_input(shape, low=0, high=1)
+        class_dim = dim % len(shape)
+        batch_shape = shape[:class_dim] + shape[class_dim + 1:]
+        return make_tensor(batch_shape, low=0, high=num_classes, device=device, dtype=torch.long)
+
+    # Classes last (the layout that is not copied), then in the middle, first, and unbatched.
+    shapes_dims_and_kwargs = [
+        *[((2, 4, num_classes), -1, dict(reduction=reduction)) for reduction in ("mean", "sum", "none")],
+        ((2, 4, num_classes, 2), 2, {}),
+        ((num_classes, 4), 0, {}),
+        ((num_classes,), -1, {}),
+    ]
+    for (shape, dim, kwargs), probabilities_target in itertools.product(shapes_dims_and_kwargs, (False, True)):
+        yield SampleInput(make_input(shape), make_target(shape, dim, probabilities_target), dim=dim, **kwargs)
+
+    shape = (2, 4, num_classes)
+    target = make_target(shape, -1, False)
+    # make sure at least one item in target is not ignored
+    target[0, 0] = 0
+    weight = make_tensor((num_classes,), device=device, dtype=dtype)
+    yield SampleInput(make_input(shape), target, weight=weight, ignore_index=1, dim=-1)
+
 def _large_logit_linear_cross_entropy_samples(device, dtype, requires_grad, **kwargs):
     """Samples whose logits are large, which the curated shapes are not.
 
@@ -15239,6 +15267,22 @@ op_db: list[OpInfo] = [
                          dtypes=(torch.half,), device_type="mps"),
 
         )
+    ),
+    OpInfo(
+        "nn.functional.cross_entropy",
+        variant_test_name="dim",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_cross_entropy_dim,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # The alias annotation check needs the inputs of aten::cross_entropy_loss to be graph
+            # inputs, but with dim they are moved and flattened in Python first.
+            DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
+            DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
+                         dtypes=(torch.half,), device_type="mps"),
+        ),
     ),
     OpInfo(
         "nn.functional.linear_cross_entropy",

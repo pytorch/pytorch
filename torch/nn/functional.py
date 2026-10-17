@@ -3585,14 +3585,15 @@ def cross_entropy(
             # dim 1 would make log_softmax copy the whole input.
             is_prob_target = target.shape == input.shape
             input = input.movedim(dim, -1)
-            batch_shape = list(input.shape[:-1])
+            # pyrefly: ignore [bad-assignment]
+            batch_shape = input.shape[:-1]
             if is_prob_target:
                 target = target.movedim(dim, -1).flatten(0, -2)
-            elif list(target.shape) == batch_shape:
+            elif target.shape == batch_shape:
                 target = target.flatten()
             else:
                 raise ValueError(
-                    f"Expected target size {batch_shape}, got {list(target.shape)}"
+                    f"Expected target size {list(input.shape[:-1])}, got {list(target.shape)}"
                 )
             input = input.flatten(0, -2)
     loss = torch._C._nn.cross_entropy_loss(
