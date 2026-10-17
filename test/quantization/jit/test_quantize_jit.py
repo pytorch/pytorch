@@ -61,6 +61,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
     skipIfNoFBGEMM,
+    skipIfNoFBGEMMFp16Linear,
     SkipQuantModel,
     test_only_eval_fn,
 )
@@ -3912,7 +3913,7 @@ class TestQuantizeJit(QuantizationTestCase):
                     model_fake_quantized(self.calib_data[0][0]), result_eager
                 )
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
     def test_linear_dynamic_fp16(self):
         linear_model = SingleLayerLinearModel().eval()
         # Create weight tensor values that are beyond fp16 max

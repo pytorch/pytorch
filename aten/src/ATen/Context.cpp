@@ -851,7 +851,7 @@ at::QEngine Context::qEngine() const {
     qengine = at::kONEDNN;
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
     if (fbgemm::fbgemmSupportedCPU()) {
       /* X86 is enabled if and only if fbgemm is available.
        * It combines goodness of fbgemm and onednn by dispatching.
@@ -890,7 +890,10 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     engines.push_back(at::kONEDNN);
 #endif
 
-#ifdef USE_FBGEMM
+    // FBGEMM's int8 quantized GEMM/conv kernels do not run on AArch64, so
+    // X86/FBGEMM are not registered there; fp16 linear prepack uses FBGEMM
+    // under ONEDNN instead (see QLinearPackWeightFp16).
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);
       // The X86 qengine is available if and only if FBGEMM is available
