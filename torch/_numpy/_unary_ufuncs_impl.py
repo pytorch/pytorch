@@ -35,7 +35,6 @@ from torch import (  # noqa: F401
     rad2deg,
     rad2deg as degrees,
     reciprocal,
-    round as fix,
     round as rint,
     sign,
     signbit,
@@ -46,12 +45,14 @@ from torch import (  # noqa: F401
     tan,
     tanh,
     trunc,
+    trunc as fix,
 )
 
 
 # special cases: torch does not export these names
 def cbrt(x: torch.Tensor) -> torch.Tensor:
-    return torch.pow(x, 1 / 3)
+    x_t = torch.as_tensor(x)
+    return torch.copysign(torch.pow(x_t.abs(), 1 / 3), x_t)
 
 
 def positive(x: torch.Tensor) -> torch.Tensor:
