@@ -689,6 +689,7 @@ view of a storage and defines numeric operations on it.
     Tensor.atanh_
     Tensor.arctanh
     Tensor.arctanh_
+    Tensor.tobytes
     Tensor.tolist
     Tensor.topk
     Tensor.to_dense
