@@ -308,7 +308,9 @@ bool get_frame_exec_strategy(
 }
 
 void set_code_exec_strategy(PyCodeObject* code, FrameExecStrategy strategy) {
-  get_or_init_extra_state(code)->strategy = strategy;
+  ExtraState* extra_state = get_or_init_extra_state(code);
+  extra_state->strategy = strategy;
+  extra_state->precompile_skip = false;
 }
 
 bool try_lookup_without_guard_eval(
@@ -490,6 +492,11 @@ bool has_relevant_cache_entries(
   return found;
 }
 
+bool is_precompile_skip(PyCodeObject* code) {
+  ExtraState* extra_state = get_extra_state(code);
+  return extra_state != nullptr && extra_state->precompile_skip;
+}
+
 CompileInputs get_compile_inputs(
     PyCodeObject* code,
     int64_t isolate_recompiles_id) {
@@ -648,6 +655,13 @@ void _load_precompile_entry(
 
 bool _get_lru_cache() {
   return use_lru;
+}
+
+void _load_precompile_skip(const py::handle& code_obj, bool recursive) {
+  ExtraState* extra = get_or_init_extra_state(code_from_handle(code_obj));
+  extra->strategy = FrameExecStrategy{
+      FrameAction::SKIP, recursive ? FrameAction::SKIP : FrameAction::DEFAULT};
+  extra->precompile_skip = true;
 }
 
 // Existing lists keep their order when the mode flips, but lookup's merged

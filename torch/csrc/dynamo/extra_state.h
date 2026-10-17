@@ -83,6 +83,13 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
   // Per-region strategies for isolated compiles. When an isolated region
   // hits its recompile limit, only that region goes RUN_ONLY.
   std::unordered_map<int64_t, FrameExecStrategy> region_strategy_map;
+  // A loaded artifact skips this frame (and, for a recursive skip, its
+  // callees) and set its strategy to SKIP. Under guard collectives that skip
+  // is reported, so a peer whose artifact compiled the frame does not run it
+  // alone.
+  // set_code_exec_strategy clears it; a compile result does not, so a forced
+  // recompile that again traces no graph keeps reporting the skip.
+  bool precompile_skip{false};
 
   ExtraState(PyCodeObject* orig_code_arg);
   std::list<CacheEntry>& cache_entry_list(int64_t isolate_recompiles_id);
@@ -190,6 +197,9 @@ bool has_relevant_cache_entries(
     PyCodeObject* code,
     int64_t isolate_recompiles_id);
 
+// Whether a loaded artifact installed this frame's SKIP strategy.
+bool is_precompile_skip(PyCodeObject* code);
+
 CompileInputs get_compile_inputs(
     PyCodeObject* code,
     int64_t isolate_recompiles_id);
@@ -219,6 +229,7 @@ void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code);
+void _load_precompile_skip(const py::handle& code_obj, bool recursive);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
 bool _get_lru_cache();
 bool _set_lru_cache(py::object boolean);
