@@ -276,7 +276,7 @@ struct WelfordOp {
   }
   template <typename TI>
   static inline acc_t load(TI v) {
-    return acc_t(static_cast<float>(v), 0, 1);
+    return acc_t(static_cast<float>(v), static_cast<float>(v - v), 1);
   }
   static inline acc_t load(float3 partial) {
     return partial;
