@@ -194,6 +194,11 @@ class FileTimerServer:
                       A daemon thread will not block a process to stop.
         log_event: Callable[[Dict[str, str]], None], an optional callback for
                 logging the events in JSON format.
+
+        kill_server_on_reap: bool, also send the reap signal to the process
+                running this server after reaping a worker. Off by default
+                since the server usually runs inside the elastic agent, which
+                must survive to restart or fail the worker group.
     """
 
     def __init__(
@@ -203,11 +208,13 @@ class FileTimerServer:
         max_interval: float = 10,
         daemon: bool = True,
         log_event: Callable[[str, FileTimerRequest | None], None] | None = None,
+        kill_server_on_reap: bool = False,
     ) -> None:
         self._file_path = file_path
         self._run_id = run_id
         self._max_interval = max_interval
         self._daemon = daemon
+        self._kill_server_on_reap = kill_server_on_reap
         self._timers: dict[tuple[int, str], FileTimerRequest] = {}
         self._stop_signaled = False
         self._watchdog_thread: threading.Thread | None = None
@@ -351,7 +358,7 @@ class FileTimerServer:
                     "Error reaping worker=[%s]. Will retry on next watchdog.",
                     worker_pid,
                 )
-        if kill_process and reap_signal > 0:
+        if self._kill_server_on_reap and kill_process and reap_signal > 0:
             logger.info(
                 "Terminating the server process=[%s] because of expired timers",
                 os.getpid(),
