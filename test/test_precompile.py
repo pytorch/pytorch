@@ -4959,6 +4959,11 @@ class TestPrecompileDynamoCapture(TestCase):
         tracer = DynamoTracer(require_no_risky_drops=False)
         with self._capture(fn, backend="eager", tracer=tracer) as cap:
             y = cap(self.model, self.x2)
+            # The capture's compile guarded through a minted key, or there is
+            # nothing for the install to seed.
+            self.assertTrue(
+                any(name.startswith("___unnamed_scope") for name in vars(self.mod))
+            )
         with open(self.artifact) as f:
             self.assertIn('SERVING_MODE = "installed"', f.read())
         self._serve_in_fresh_process([((self.x2,), {}, y)], mode="installed")
