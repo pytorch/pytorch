@@ -11514,7 +11514,12 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
     @parametrize(
         "case",
         (
-            ("unaligned_n", 293, "relu", "no .*config_constraints.*swap_ab"),
+            (
+                "unaligned_n",
+                293,
+                "relu",
+                "mat2 requires.*16-byte aligned outer strides",
+            ),
             (
                 "local_n_reduce_feed_main",
                 128,
