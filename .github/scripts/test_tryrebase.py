@@ -460,6 +460,7 @@ class TestNativeStackRebaseEndToEnd(TryRebaseMainTestCase, LineStackTestCase):
         with without_identity_variables():
             self.assertEqual(self.run_main(), 0)
         self.assertUpdated(self.stack, before, self.own, "user/a", "user/b", "user/c")
+        self.assertMergesCleanly(self.stack, 103, self.own)
         self.assertEqual(
             self.comments(),
             [
