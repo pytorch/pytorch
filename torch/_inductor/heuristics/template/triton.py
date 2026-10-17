@@ -23,6 +23,8 @@ from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import bmm_template
 from ...kernel.mm import (
     blackwell_ws_persistent_tma_mm_template,
+    bmg_persistent_mm_template,
+    bmg_tiled2d_mm_template,
     mm_template,
     persistent_mm_template,
     persistent_tdm_mm_template,
@@ -4153,6 +4155,104 @@ class XPUInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, XPUConfigHeuri
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.int8_mm_configs
+
+
+class BMGMMTemplateConfigMixin(MMTemplateConfigMixin):
+    """Shared logic for the BMG templates, which load operands through tensor
+    descriptors: pass operand row-majorness and skip layouts that a descriptor
+    cannot describe (no unit stride, or outer stride not 16-byte aligned)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Configs were tuned as exact tiles; do not rescale them per shape.
+        self.should_scale_configs = False
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        if not isinstance(kernel_inputs, MMKernelInputs):
+            return
+        sizevars = V.graph.sizevars
+        flags = {}
+        for key, node in zip(("A_ROW_MAJOR", "B_ROW_MAJOR"), kernel_inputs.mat1mat2()):
+            stride = [
+                sizevars.replace_backed_symbols_with_hints(s) for s in node.get_stride()
+            ]
+            inner = tma_inner_dim(stride)
+            if len(stride) != 2 or inner is None:
+                return
+            outer_bytes = stride[1 - inner] * node.get_dtype().itemsize
+            if not sizevars.statically_known_multiple_of(outer_bytes, 16):
+                return
+            flags[key] = inner == 1
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {**template_kwargs, **flags}
+
+
+@register_template_heuristic(bmg_persistent_mm_template.uid, "xpu")
+class XPUBMGPersistentMMTemplateConfigHeuristic(
+    BMGMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """BMG persistent MM template heuristic for XPU"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = [
+            GemmConfig(16, 512, 64, 2, 8),
+            GemmConfig(32, 256, 32, 2, 16),
+            GemmConfig(32, 256, 128, 3, 32),
+            GemmConfig(128, 128, 64, 2, 16),
+            GemmConfig(128, 128, 64, 3, 16),
+            GemmConfig(128, 128, 64, 3, 32),
+            GemmConfig(128, 128, 128, 2, 16),
+            GemmConfig(128, 256, 16, 4, 32),
+            GemmConfig(128, 256, 32, 3, 32),
+            GemmConfig(128, 256, 64, 2, 32),
+            GemmConfig(128, 512, 32, 2, 32),
+            GemmConfig(128, 512, 32, 3, 32),
+            GemmConfig(128, 512, 32, 4, 32),
+            GemmConfig(256, 128, 64, 2, 32),
+            GemmConfig(256, 256, 32, 5, 32),
+            GemmConfig(512, 128, 32, 1, 32),
+        ]
+        self.exhaustive_configs = self.mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {**template_kwargs, "NUM_SMS": get_num_sms()}
+
+
+@register_template_heuristic(bmg_tiled2d_mm_template.uid, "xpu")
+class XPUBMGTiled2DMMTemplateConfigHeuristic(
+    BMGMMTemplateConfigMixin, XPUConfigHeuristic
+):
+    """BMG tiled 2D MM template heuristic for XPU (small M)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = [
+            GemmConfig(4, 512, 256, 1, 8),
+            GemmConfig(8, 128, 32, 2, 4),
+            GemmConfig(8, 256, 128, 3, 8),
+            GemmConfig(16, 64, 64, 4, 4),
+            GemmConfig(16, 128, 64, 4, 8),
+            GemmConfig(32, 128, 64, 3, 16),
+            GemmConfig(32, 256, 64, 1, 8),
+            GemmConfig(32, 512, 128, 1, 16),
+        ]
+        self.exhaustive_configs = self.mm_configs
 
 
 @register_template_heuristic(mm_plus_mm_template.uid, "xpu")
