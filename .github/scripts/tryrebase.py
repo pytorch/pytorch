@@ -121,8 +121,8 @@ def rebase_native_stack_onto(
     """Merge `onto_branch` into the branches of `pr`'s GitHub-native stack up to `pr`
     (see build_native_stack_rebase) and fast-forward them. A stacked PR's branch is
     never force-pushed, as the PR above it is based on its commits. A stack that
-    already has `onto_branch` counts as rebased, so that `merge -r` goes on to its
-    merge step: a stack cut from a newer main already has viable/strict."""
+    already has `onto_branch` counts as rebased, so that `merge -r` still merges it:
+    a stack cut from a newer main already has viable/strict."""
     default_branch = pr.default_branch()
     onto = onto_branch.removeprefix(f"refs/remotes/{repo.remote}/")
     if onto not in (default_branch, VIABLE_STRICT_BRANCH):

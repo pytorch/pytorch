@@ -664,7 +664,7 @@ Occasionally, things might fall through the cracks (sorry!). In case your PR is 
 
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
-The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it and reopens them. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A rebase is refused if a ghstack PR is below the commented PR in its stack.
+The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it and reopens them. `@pytorchbot rebase` merges `main` or `viable/strict` into the branches of the commented PR and the PRs below it, without force-pushing them. A merge or rebase is refused if a ghstack PR is below the commented PR in its stack.
 
 ## GreenLight
 
@@ -674,7 +674,7 @@ A PR is eligible when one rule in `merge_rules.yaml` names you and covers every 
 
 The Dr. CI comment on your PR (the pytorchbot comment) shows whether the PR is eligible, when GreenLight's review starts, and whether the result is `PR approved to be merged without human review` or `PR requires human review`. An approval appears on the PR as a review from `pytorchgreenlight[bot]`.
 
-You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a ghstack merge every PR in the stack is checked, so one PR without a current approval holds up the whole stack. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
+You still land the change yourself with `@pytorchbot merge`. When GreenLight's approval is the only thing authorizing the merge, the merge waits until GreenLight has approved the exact commit being landed, retrying for up to 60 minutes and commenting once on the PR to say so; on a stacked merge (ghstack or GitHub-native) every PR that the merge lands is checked, so one PR without a current approval holds up all of them. Pushing during that window gets the new commit reviewed but ends the merge command, so re-issue it afterwards. A force merge does not wait: in that situation `@pytorchbot merge -f` is refused outright. Merges that a human approval already authorizes are unaffected by all of this.
 
 `PR requires human review` is not a block, but merging while it stands is refused immediately rather than waiting. Either push a commit so GreenLight reviews the new content, or get an approval from a human reviewer with merge rights for the files you touched and merge as usual.
 
