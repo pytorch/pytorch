@@ -4,6 +4,7 @@ import contextlib
 from functools import partial
 from collections import namedtuple
 import os
+import pickle
 import sys
 import torch
 import torch.nn as nn
@@ -345,6 +346,10 @@ def make_strided_sdpa_input(
 
 class TestTransformersGeneric(NNTestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_sdp_backend_pickle(self):
+        for backend in SDPBackend.__members__.values():
+            self.assertEqual(pickle.loads(pickle.dumps(backend)), backend)
 
     @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
     def test_encoder_padding_and_src_mask_bool(self):
@@ -2068,6 +2073,125 @@ class TestSDPAFailureModes(NNTestCase):
                         "No available kernel|No viable backend",
                         lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
                     )
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "CUTLASS mem efficient attention alignment check is CUDA-only")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
+    def test_mem_efficient_attention_misaligned_batch_stride_sm80_or_later(self, device):
+        if torch.cuda.get_device_capability(device)[0] < 8:
+            self.skipTest("sm80 or newer requires aligned mem efficient attention kernels")
+
+        # The kernel itself does not check the batch stride.
+        B, H, S, D = 2, 2, 64, 64
+        q = torch.randn(B, H * S * D + 1, dtype=torch.float16, device=device)[:, :H * S * D].view(B, H, S, D)
+        k = torch.randn(B, H, S, D, dtype=torch.float16, device=device)
+        v = torch.randn(B, H, S, D, dtype=torch.float16, device=device)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
+            self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, "storage offsets and strides"):
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "No available kernel",
+                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
+                )
+
+    def _skip_if_fused_backend_unsupported(self, backend):
+        if backend == SDPBackend.FLASH_ATTENTION and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            self.skipTest("Flash attention is not supported")
+        if backend == SDPBackend.CUDNN_ATTENTION and not PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+            self.skipTest("cuDNN attention is not supported")
+
+    def _make_misaligned(self, layout, B, H, S, D, device, requires_grad=False):
+        # "offset" misaligns the data pointer, "stride" misaligns every row but the first,
+        # "expanded" misaligns the data pointer of a tensor broadcast over heads.
+        if layout == "offset":
+            storage = torch.randn(B * H * S * D + 1, dtype=torch.float16, device=device, requires_grad=requires_grad)
+            return storage[1:].view(B, S, H, D).transpose(1, 2)
+        if layout == "expanded":
+            storage = torch.randn(B * S * D + 1, dtype=torch.float16, device=device, requires_grad=requires_grad)
+            return storage[1:].view(B, 1, S, D).expand(B, H, S, D)
+        storage = torch.randn(B, H, S, D + 1, dtype=torch.float16, device=device, requires_grad=requires_grad)
+        return storage[..., :D]
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "Flash and cuDNN attention alignment checks are CUDA-only")
+    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    @parametrize("misaligned", ["query", "key", "value"])
+    @parametrize("layout", ["offset", "stride", "expanded"])
+    def test_fused_attention_misaligned_inputs(self, device, backend, misaligned, layout):
+        self._skip_if_fused_backend_unsupported(backend)
+        B, H, S, D = 2, 2, 64, 64
+        make_tensor = partial(torch.randn, B, H, S, D, dtype=torch.float16, device=device, requires_grad=True)
+        tensors = {name: make_tensor() for name in ["query", "key", "value"]}
+        tensors[misaligned] = self._make_misaligned(layout, B, H, S, D, device, requires_grad=True)
+        q, k, v = tensors["query"], tensors["key"], tensors["value"]
+        grad_out = torch.randn(B, H, S, D, dtype=torch.float16, device=device)
+
+        # SDPA copies misaligned inputs into aligned memory instead of falling back.
+        # The default priority order puts math ahead of cuDNN before SM90.
+        with sdpa_kernel(backends=[backend, SDPBackend.MATH], set_priority=True):
+            self.assertEqual(torch._fused_sdp_choice(q, k, v), backend.value)
+        with sdpa_kernel(backends=[backend]):
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            # The copy keeps the input's layout, so the output strides match an aligned input's.
+            aligned_q = q.detach().clone(memory_format=torch.preserve_format)
+            aligned = torch.nn.functional.scaled_dot_product_attention(aligned_q, k, v)
+            self.assertEqual(actual.stride(), aligned.stride())
+        actual_grads = torch.autograd.grad(actual, (q, k, v), grad_out)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        expected_grads = torch.autograd.grad(expected, (q, k, v), grad_out)
+        self.assertEqual(actual, expected, atol=2e-3, rtol=2e-3)
+        self.assertEqual(actual_grads, expected_grads, atol=2e-3, rtol=2e-3)
+
+        # The private ops bypass SDPA and must not launch kernels on misaligned memory.
+        with self.assertRaisesRegex(RuntimeError, "16-byte"):
+            if backend == SDPBackend.FLASH_ATTENTION:
+                torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)
+            else:
+                torch.ops.aten._scaled_dot_product_cudnn_attention(q, k, v, None, False)
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "cuDNN attention alignment checks are CUDA-only")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN attention is not supported")
+    def test_cudnn_attention_misaligned_attn_mask(self, device):
+        B, H, S, D = 2, 2, 64, 64
+        make_tensor = partial(torch.randn, B, H, S, D, dtype=torch.float16, device=device)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        # Only the distinct elements of the expanded mask are copied.
+        mask = torch.randn(S * S + 1, dtype=torch.float16, device=device)[1:].view(1, 1, S, S).expand(B, H, S, S)
+
+        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = torch.nn.functional.scaled_dot_product_attention(q, k, v, mask)
+        self.assertEqual(actual, expected, atol=2e-3, rtol=2e-3)
+        with self.assertRaisesRegex(RuntimeError, "attn_bias data pointer"):
+            torch.ops.aten._scaled_dot_product_cudnn_attention(q, k, v, mask, False)
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "Flash and cuDNN attention alignment checks are CUDA-only")
+    # Flash already copies a stride-misaligned grad_out when transposing it to BSHD.
+    @parametrize("backend,layout", [
+        (SDPBackend.FLASH_ATTENTION, "offset"),
+        (SDPBackend.CUDNN_ATTENTION, "offset"),
+        (SDPBackend.CUDNN_ATTENTION, "stride"),
+    ])
+    def test_fused_attention_misaligned_grad_out(self, device, backend, layout):
+        self._skip_if_fused_backend_unsupported(backend)
+        B, H, S, D = 2, 2, 64, 64
+        make_tensor = partial(torch.randn, B, H, S, D, dtype=torch.float16, device=device, requires_grad=True)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        # Autograd can produce misaligned gradient views, e.g. from cat backward.
+        grad_out = self._make_misaligned(layout, B, H, S, D, device)
+
+        with sdpa_kernel(backends=[backend]):
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        actual = torch.autograd.grad(out, (q, k, v), grad_out, retain_graph=True)
+        expected = torch.autograd.grad(out, (q, k, v), grad_out.contiguous().clone())
+        self.assertEqual(actual, expected, atol=2e-3, rtol=2e-3)
 
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
@@ -6602,6 +6726,39 @@ class TestSDPAAccelerator(NNTestCase):
                 *zip(grads_ref, grads_ref_lp, grads),
                 fudge_factors=fudge_factors
             )
+
+    @skipIfXpu(msg="NotImplementedError 'aten::_efficient_attention_backward'")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
+    def test_mem_eff_backward_outside_capture_after_graph_replay(self, device):
+        # A forward captured in a CUDA graph returns its dropout seed/offset on
+        # device; running backward on them outside capture used to segfault.
+        q, k, v = (torch.randn(2, 4, 128, 64, device=device, dtype=torch.float16) for _ in range(3))
+        fwd = torch.ops.aten._scaled_dot_product_efficient_attention
+        bwd = torch.ops.aten._scaled_dot_product_efficient_attention_backward
+        dropout_p = 0.1
+
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            fwd(q, k, v, None, True, dropout_p, False)
+        torch.cuda.current_stream().wait_stream(s)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            out, lse, seed, offset = fwd(q, k, v, None, True, dropout_p, False)
+        g.replay()
+        self.assertTrue(seed.is_cuda and offset.is_cuda)
+
+        grad_out = torch.ones_like(out)
+        args = (grad_out, q, k, v, None, out, lse, seed, offset, dropout_p, [True, True, True, False], False)
+        grads = bwd(*args)
+        # Reference: the same backward captured and replayed, which has always
+        # consumed device seed/offset. ROCm backends need device seed/offset,
+        # so a CPU-copy reference is not portable.
+        g_bwd = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g_bwd):
+            grads_ref = bwd(*args)
+        g_bwd.replay()
+        self.assertEqual(grads[:3], grads_ref[:3])
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
