@@ -26,7 +26,11 @@ from . import (
     is_initialized,
 )
 from ._memory_viz import memory as _memory, segments as _segments
-from ._utils import _check_cuda_bindings, _cuda_bindings_driver as _drv
+from ._utils import (
+    _check_cuda_bindings,
+    _check_cuda_runtime_bindings,
+    _cuda_bindings_driver as _drv,
+)
 from .green_contexts import get_num_locality_domains, is_localization_supported
 
 
@@ -1881,15 +1885,23 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
 
 
 def _make_uvm_pool():
-    r"""Build a Python-callback MemPool backed by CUDA managed memory."""
+    r"""Build a Python-callback MemPool backed by CUDA or HIP managed memory."""
     try:
         from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
     except ImportError:
+        package = (
+            "hip-python-interop" if torch.version.hip is not None else "cuda-python"
+        )
         raise ImportError(
-            "torch.cuda._use_uvm() requires the 'cuda-python' package "
+            f"torch.cuda._use_uvm() requires the '{package}' package "
             "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
             "and cudaFree."
         ) from None
+    if torch.version.hip is not None and not getattr(_rt, "HIP_PYTHON", False):
+        raise ImportError(
+            "torch.cuda._use_uvm() on ROCm requires the 'hip-python-interop' "
+            "package (cuda.bindings.runtime)."
+        )
 
     _advise_uses_struct = hasattr(_rt, "cudaMemLocation")
 
@@ -1938,33 +1950,36 @@ def _make_uvm_pool():
             if result[0] == _runtime.cudaError_t.cudaErrorMemoryAllocation:
                 return 0
             ptr = int(
-                _check_cuda_bindings(
-                    result, msg=f"CUDA error in cudaMallocManaged({size})"
+                _check_cuda_runtime_bindings(
+                    result, _runtime, msg=f"CUDA error in cudaMallocManaged({size})"
                 )
             )
             try:
                 if _device_supports_uvm_advise(device, _runtime):
-                    _check_cuda_bindings(
+                    _check_cuda_runtime_bindings(
                         _mem_advise(
                             ptr,
                             size,
                             _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
                             device,
                         ),
+                        _runtime,
                         msg="CUDA error in cudaMemAdvise(SetPreferredLocation)",
                     )
-                    _check_cuda_bindings(
+                    _check_cuda_runtime_bindings(
                         _mem_advise(
                             ptr,
                             size,
                             _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
                             device,
                         ),
+                        _runtime,
                         msg="CUDA error in cudaMemAdvise(SetAccessedBy)",
                     )
             except Exception:
-                _check_cuda_bindings(
+                _check_cuda_runtime_bindings(
                     _runtime.cudaFree(ptr),
+                    _runtime,
                     msg="CUDA error in cudaFree while cleaning up after cudaMemAdvise failure",
                 )
                 raise
@@ -1973,8 +1988,9 @@ def _make_uvm_pool():
     def _uvm_free(ptr, size, device, _stream, _runtime=_rt):
         if ptr:
             with torch.cuda.device(device):
-                _check_cuda_bindings(
+                _check_cuda_runtime_bindings(
                     _runtime.cudaFree(ptr),
+                    _runtime,
                     msg="CUDA error in cudaFree while releasing a UVM allocation",
                 )
 
@@ -1997,7 +2013,7 @@ def _use_uvm(device: "Device" = None):
 
     Example::
 
-        >>> # xdoctest: +SKIP(reason="requires CUDA and cuda-python")
+        >>> # xdoctest: +SKIP(reason="requires a GPU and runtime Python bindings")
         >>> with torch.cuda._use_uvm():
         ...     x = torch.randn(1024, 1024, device="cuda")
         ...     y = x @ x.T  # computed on GPU, pages in/out as needed
@@ -2010,7 +2026,8 @@ def _use_uvm(device: "Device" = None):
         onto the calling thread so that backward allocations also use UVM.
 
     .. note::
-        Requires the ``cuda-python`` package (``cuda.bindings``).
+        Requires ``cuda-python`` on CUDA or ``hip-python-interop`` on ROCm.
+        Both packages provide the ``cuda.bindings`` module used here.
     """
     pool = _make_uvm_pool()
     with use_mem_pool(pool, device=device):
