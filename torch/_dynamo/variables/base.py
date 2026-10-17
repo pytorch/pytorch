@@ -809,10 +809,18 @@ def _wrap_objobjproc(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # sq_contains via __contains__: one arg, impl returns a bool.
+    if kwargs or len(args) != 1:
+        obj_type = self.python_type()
+        owner = getattr(obj_type.__contains__, "__objclass__", obj_type).__name__
     if kwargs:
-        raise_type_error(tx, "this method takes no keyword arguments")
+        raise_type_error(
+            tx, f"{owner}.__contains__() takes no keyword arguments"
+        )
     if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+        raise_type_error(
+            tx,
+            f"{owner}.__contains__() takes exactly one argument ({len(args)} given)",
+        )
     [other] = args
     return func(self, tx, other)
 
