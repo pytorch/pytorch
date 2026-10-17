@@ -1798,6 +1798,52 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
 
+    def test_install_survives_a_cold_bundled_autotune_cache(self, device):
+        # AutotuneCacheBundler keeps one bundle per compile context, left open
+        # on a remote-cache miss, and install() post-compiles both of the
+        # frame's variants in one.
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
+        from torch._inductor.runtime.autotune_cache import (
+            _AutotuneCacheBundlerImpl as Bundler,
+        )
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        args = [
+            torch.randn(4, device=device, dtype=dtype)
+            for dtype in (torch.float32, torch.float64)
+        ]
+        cold = unittest.mock.Mock()
+        cold.get.return_value = None
+        ctx = DiskDynamoStore()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+            patch(
+                "torch._inductor.runtime.autotune_cache.create_cache",
+                return_value=cold,
+            ),
+            # Without Triton the bundler has no backend hash and fails before
+            # it reaches the one-bundle check.
+            patch.object(Bundler, "_get_backend_hash", return_value="backend"),
+        ):
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
+            for x in args:
+                compiled_fn(x)
+            self.assertEqual(len(package.cached_backends), 2)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            with torch.compiler.set_stance("fail_on_recompile"):
+                for x in args:
+                    self.assertEqual(compiled_fn(x), fn(x))
+
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
         if device != "cpu" and backend == "inductor" and not has_triton():
