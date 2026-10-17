@@ -5655,19 +5655,13 @@ class TestPrecompileDynamoCapture(TestCase):
         self.model.load_state_dict(state)
         self._serve_in_fresh_process([((self.x2,), {}, None)], grads)
 
-    def test_a_cold_bundled_autotune_cache_does_not_break_a_training_capture(self):
-        # The bundled autotune remote cache opens one bundle per compile context
-        # and closes it on the first compiled call; the capture lowers the
-        # backward with the forward, before either runs.
+    @contextlib.contextmanager
+    def _cold_bundled_autotune_cache(self):
         from torch._inductor.runtime.autotune_cache import (
             _AutotuneCacheBundlerImpl as Bundler,
         )
         from torch._inductor.utils import fresh_cache
 
-        single = self.mod.single
-        reference = copy.deepcopy(self.model)
-        expected = single(reference, self.x2)
-        expected.sum().backward()
         cold = mock.Mock()
         cold.get.return_value = None
         # Without Triton the bundler has no backend hash and fails before it
@@ -5681,6 +5675,17 @@ class TestPrecompileDynamoCapture(TestCase):
             ),
             mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
         ):
+            yield
+
+    def test_a_cold_bundled_autotune_cache_does_not_break_a_training_capture(self):
+        # The bundled autotune remote cache opens one bundle per compile context
+        # and closes it on the first compiled call; the capture lowers the
+        # backward with the forward, before either runs.
+        single = self.mod.single
+        reference = copy.deepcopy(self.model)
+        expected = single(reference, self.x2)
+        expected.sum().backward()
+        with self._cold_bundled_autotune_cache():
             with self._capture(single, backend="inductor") as cap:
                 y = cap(self.model, self.x2)
                 y.sum().backward()
@@ -5695,32 +5700,28 @@ class TestPrecompileDynamoCapture(TestCase):
         for p, ref in zip(self.model.parameters(), reference.parameters()):
             self.assertEqual(p.grad, ref.grad)
 
+    def test_the_capture_bundled_autotune_patch_keeps_the_fx_graph_cache_key(self):
+        # _capture_config turns the flag off; were it hashed, capture would miss
+        # every FX graph cache entry a flag-on torch.compile run wrote.
+        def hashed_config(flag):
+            with torch._inductor.config.patch(bundled_autotune_remote_cache=flag):
+                return torch._inductor.config.save_config_portable(
+                    ignore_private_configs=False, readonly_values=True
+                )
+
+        self.assertEqual(hashed_config(True), hashed_config(False))
+
     @skipIfCrossRef
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_cold_bundled_autotune_cache_does_not_break_an_installed_load(self):
         # An installed artifact's load post-compiles the forward and the
-        # backward in install()'s one compile context, so it hits the same
-        # one-bundle limit the capture does.
-        from torch._inductor.runtime.autotune_cache import (
-            _AutotuneCacheBundlerImpl as Bundler,
-        )
-        from torch._inductor.utils import fresh_cache
-
+        # backward in install()'s one compile context, the one-bundle limit
+        # the capture hits; CompilePackage.install() turns the flag off.
         fn = self.mod.calls_breaking_helper
         reference = copy.deepcopy(self.model)
         fn(reference, self.x2).sum().backward()
         grads = {n: p.grad for n, p in reference.named_parameters()}
-        cold = mock.Mock()
-        cold.get.return_value = None
-        with (
-            fresh_cache(),
-            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
-            mock.patch(
-                "torch._inductor.runtime.autotune_cache.create_cache",
-                return_value=cold,
-            ),
-            mock.patch.object(Bundler, "_get_backend_hash", return_value="backend"),
-        ):
+        with self._cold_bundled_autotune_cache():
             with self._capture(fn, backend="inductor") as cap:
                 y = cap(self.model, self.x2)
                 y.sum().backward()
