@@ -9,7 +9,7 @@ import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
@@ -28,6 +28,9 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
+from torch.fx.experimental import _config as fx_config
+from torch.fx.experimental.symbolic_shapes import DimDynamic
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -937,6 +940,43 @@ class TestIndexExprUpperBounds(InductorTestCase):
         )
         regular.indexing_node_schedule = [overflow]
         self.assertTrue(regular.any_index_expr_overflows_int32())
+
+
+@instantiate_parametrized_tests
+class TestSliceNormalization(InductorTestCase):
+    @parametrize("size_oblivious", [False, True])
+    @parametrize("bounds", [(0, 8, 1), (8, 20, 1), (-8, -2, 2), (20, 8, 1)])
+    def test_backed_slice_clamps(self, size_oblivious, bounds):
+        start, end, step = bounds
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            sizevars = SizeVarAllocator()
+            symbol = sizevars.shape_env.create_symbol(
+                16, source=ConstantSource("slice_size"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            buffer = ir.InputBuffer(
+                name="slice_input",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [symbol], [1]
+                ),
+            )
+            guards_before = list(sizevars.shape_env.guards)
+            with V.set_graph_handler(SimpleNamespace(sizevars=sizevars)):
+                view = ir.SliceView.create(ir.StorageBox(buffer), 0, start, end, step)
+
+            if size_oblivious:
+                self.assertEqual(sizevars.shape_env.guards, guards_before)
+            elif bounds == (0, 8, 1):
+                self.assertGreater(len(sizevars.shape_env.guards), len(guards_before))
+
+            for length in (2, 5, 8, 9, 16, 32) if size_oblivious else (16,):
+                with self.subTest(length=length):
+                    layout = view.get_layout()
+                    size = int(sympy.sympify(view.get_size()[0]).subs(symbol, length))
+                    stride = int(sympy.sympify(layout.stride[0]).subs(symbol, length))
+                    offset = int(sympy.sympify(layout.offset).subs(symbol, length))
+                    source = torch.arange(length, dtype=torch.float32)
+                    actual = torch.as_strided(source, (size,), (stride,), offset)
+                    self.assertEqual(actual, source[start:end:step])
 
 
 class TestEvaluateMinMax(InductorTestCase):
