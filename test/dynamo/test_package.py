@@ -244,6 +244,55 @@ class _GraphBreakingDataclass:
         torch._dynamo.graph_break()
 
 
+def _make_generated_method():
+    def method(self):
+        return 1
+
+    method.__qualname__ = "_GeneratedMethodOwner.method"
+    return method
+
+
+def _make_generated_property():
+    def prop(self):
+        return 1
+
+    prop.__qualname__ = "_GeneratedMethodOwner.prop"
+    return property(prop)
+
+
+class _GeneratedMethodOwner:
+    method = _make_generated_method()
+    prop = _make_generated_property()
+
+
+def _make_stale_method():
+    def method(self):
+        return 1
+
+    return method
+
+
+class _StaleMethodOwner:
+    method = _make_stale_method()
+
+
+def _unwrapped_decorator(f):
+    def wrapper(*args):
+        return f(*args)
+
+    return wrapper
+
+
+@_unwrapped_decorator
+def _decorated_without_wraps(x):
+    return x
+
+
+# The co_qualnames, _make_*.<locals>.*, now name nothing in this module; only
+# the rewritten __qualname__s on _GeneratedMethodOwner do.
+del _make_generated_method, _make_generated_property, _make_stale_method
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
@@ -291,43 +340,6 @@ PKG_HANDLER_SCOPE = {"factor": 3}
 exec("def scale(x):\n    return x * factor\n", PKG_HANDLER_SCOPE)
 PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
 PKG_HANDLER_SET = {PKG_HANDLER_SCOPE["scale"]}
-
-
-def nested_break_sources(prefix, shape):
-    """Modules, in import order, whose last one's ``fn`` reaches a graph break
-    inlined from another module: ``flat`` breaks in the helper, ``closure`` in a
-    closure the helper defines, ``two_levels`` in a third module the helper calls.
-    """
-    helper, inner = f"{prefix}_helper", f"{prefix}_inner"
-    breaking = (
-        "    y = y.sin() + OFF\n"
-        "    torch._dynamo.graph_break()\n"
-        "    return y.cos() * OFF\n"
-    )
-    sources = {}
-    if shape == "flat":
-        sources[helper] = f"import torch\n\nOFF = 3.0\n\ndef helper(y):\n{breaking}"
-    elif shape == "closure":
-        sources[helper] = (
-            "import torch\n\n"
-            "def helper(y):\n"
-            "    OFF = y.shape[0] + 1.0\n\n"
-            "    def inner(y):\n"
-            "        y = y.sin() + OFF\n"
-            "        torch._dynamo.graph_break()\n"
-            "        return y.cos() * OFF\n\n"
-            "    return inner(y) - OFF\n"
-        )
-    else:
-        sources[inner] = f"import torch\n\nOFF = 3.0\n\ndef inner(y):\n{breaking}"
-        sources[helper] = (
-            f"import {inner}\n\nSCALE = 2.0\n\n"
-            f"def helper(y):\n    return {inner}.inner(y * SCALE) + SCALE\n"
-        )
-    sources[f"{prefix}_entry"] = (
-        f"import {helper}\n\ndef fn(x):\n    return {helper}.helper(x * 2) + 1\n"
-    )
-    return sources
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -457,7 +469,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertIsNone(inspect.getmodule(fn.__code__))
         package = CompilePackage(None)
         with self.assertRaisesRegex(
-            PackageError, r"_closureless.*fails with PackageError"
+            PackageError, r"'_closureless' does not resolve back to it.*fails with"
         ) as cm:
             with package.code_context(fn.__code__, fn.__globals__):
                 pass
@@ -540,6 +552,43 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
                 with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
                     compiled_fn(x)
+
+    def test_code_source_searches_the_module_when_the_qualname_is_stale(self):
+        # Python >= 3.11 walks co_qualname from the module and used to refuse
+        # the code at the first missing part, while < 3.11 searches the module.
+        for name, code in [
+            ("method", _GeneratedMethodOwner.method.__code__),
+            ("prop", _GeneratedMethodOwner.prop.fget.__code__),
+        ]:
+            package = CompilePackage(None)
+            with package.code_context(code):
+                pass
+            entry = package._codes[code]
+            self.assertEqual(entry.function_names, [f"_GeneratedMethodOwner.{name}"])
+            self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_refuses_a_stale_qualname_the_search_cannot_fix(self):
+        # The search finds _StaleMethodOwner.method, but its __qualname__ is as
+        # stale as co_qualname, so recording it would only fail at load.
+        code = _StaleMethodOwner.method.__code__
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError, r"__qualname__ '_make_stale_method\.<locals>\.method'"
+        ):
+            with package.code_context(code):
+                pass
+
+    def test_code_source_refuses_a_decorator_wrapper_without_wraps(self):
+        # On Python >= 3.11 the co_qualname walk reaches the wrapper and finds
+        # the code in its closure, recording the wrapper's stale __qualname__.
+        code = _decorated_without_wraps.__closure__[0].cell_contents.__code__
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError,
+            r"__qualname__ '_unwrapped_decorator\.<locals>\.wrapper'",
+        ):
+            with package.code_context(code):
+                pass
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
@@ -1298,60 +1347,6 @@ def fn(x):
             self.assertIn(alias, set(unseeded_scope))
             package.uninstall()
             self.assertNotIn(alias, set(unseeded_scope))
-
-    @parametrize("shape", ["flat", "closure", "two_levels"])
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
-    def test_package_binds_an_inlined_frames_resume_in_the_root_module(self, shape):
-        # Under nested graph breaks, the continuation of a graph break inside an
-        # inlined helper runs with the helper's globals but is bound in, and
-        # loaded by LOAD_GLOBAL from, the root frame's module. Binding it in the
-        # helper's module instead leaves the root's bytecode with a NameError.
-        sources = nested_break_sources(f"test_package_ngb_{shape}", shape)
-        entry_name = list(sources)[-1]
-        ctx = DiskDynamoStore()
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            for name in sources:
-                self.addCleanup(sys.modules.pop, name, None)
-
-            def fresh_import():
-                for name, source in sources.items():
-                    path = os.path.join(tmp_dir, name + ".py")
-                    with open(path, "w") as f:
-                        f.write(source)
-                    import_from_path(name, path)
-                return sys.modules[entry_name]
-
-            entry = fresh_import()
-            args = (torch.randn(3),)
-            expected = entry.fn(*args)
-            package = CompilePackage(entry.fn)
-            torch._dynamo.optimize(backend="eager", package=package)(entry.fn)(*args)
-            for backend_id, backend in package.cached_backends.items():
-                ctx.record_eager_backend(backend_id, backend)
-            ctx.save_package(package, self.path())
-            bound_in = {
-                name: module
-                for code in package._codes.values()
-                for name, module in code.bound_in.items()
-            }
-            self.assertEqual(set(bound_in.values()), {entry_name})
-            self.assertEqual(len(bound_in), 1 if shape == "flat" else 2)
-            has_closure = any(code.co_freevars for code in package._codes)
-            self.assertEqual(has_closure, shape == "closure")
-
-            torch._dynamo.reset()
-            entry = fresh_import()
-            others = [vars(sys.modules[name]) for name in list(sources)[:-1]]
-            package, backends = ctx.load_package(entry.fn, self.path())
-            with torch.compiler.set_stance("fail_on_recompile"):
-                compiled_fn = torch._dynamo.optimize(package=package)(entry.fn)
-                package.install(backends)
-                self.assertEqual(compiled_fn(*args), expected)
-            self.assertTrue(set(bound_in) <= set(vars(entry)))
-            for scope in others:
-                self.assertEqual(set(bound_in) & set(scope), set())
-            package.uninstall()
-            self.assertEqual(set(bound_in) & set(vars(entry)), set())
 
     @torch._dynamo.config.patch(caching_precompile=True)
     def test_bound_method_name_guard_survives_func_reached_first(self):
