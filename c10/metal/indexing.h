@@ -314,7 +314,7 @@ kernel void unary_inner_contiguous_castout(
     template <typename T>                                                       \
     inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> operator()( \
         const T x) {                                                            \
-      return T(NAME(x));                                                        \
+      return T(NAME(static_cast<::c10::metal::opmath_t<T>>(x)));                \
     }                                                                           \
     template <typename T>                                                       \
     inline ::metal::enable_if_t<::metal::is_integral_v<T>, float> operator()(   \

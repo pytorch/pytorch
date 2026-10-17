@@ -1288,10 +1288,8 @@ class TestUnaryUfuncs(TestCase):
 
     def _helper_test_igamma(self, loglo, loghi, device, dtype, torch_fcn, scipy_fcn):
         exp1 = 2.71828182846
-        vec1 = torch.logspace(
-            loglo, loghi, steps=500, base=exp1, dtype=torch.float64, device=device
-        ).unsqueeze(-1)
-        vec1 = vec1.to(dtype)
+        vec1 = torch.logspace(loglo, loghi, steps=500, base=exp1, dtype=torch.float64)
+        vec1 = vec1.unsqueeze(-1).to(device=device, dtype=dtype)
         inputs = [
             (vec1, vec1.transpose(0, 1)),
             (vec1, vec1),  # for large number, it should approach 0.5
@@ -1507,6 +1505,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @expectedFailureMPS  # log_ndtr is not implemented on MPS
     def test_special_log_ndtr_vs_scipy(self, device, dtype):
         def check_equal(t):
             # Test by comparing with scipy

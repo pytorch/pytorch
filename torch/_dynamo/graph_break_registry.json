@@ -679,6 +679,16 @@
       ]
     }
   ],
+  "GB5108": [
+    {
+      "Gb_type": "autograd inputs from an external mapping proxy",
+      "Context": "",
+      "Explanation": "Dynamo cannot identify the underlying mapping or its items/values overrides.",
+      "Hints": [
+        "Construct the mapping proxy inside the compiled region."
+      ]
+    }
+  ],
   "GB0046": [
     {
       "Gb_type": "Encountered torch.is_inference_mode_enabled during tracing",
@@ -1426,6 +1436,16 @@
       ]
     }
   ],
+  "GB9131": [
+    {
+      "Gb_type": "Skipped function wrapper __dict__ access",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model the copied dictionary of this function wrapper.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
@@ -1803,6 +1823,16 @@
       ]
     }
   ],
+  "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -1829,6 +1859,17 @@
       "Explanation": "Dynamo does not support virtual iteration on {self.python_type_name()}. Add tp_iteritem_impl to this VariableTracker subclass.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2492": [
+    {
+      "Gb_type": "autograd.Function.apply: invalid set_output_grad_dtype",
+      "Context": "declarations {ctx.output_grad_dtypes} for {num_grad_args} outputs",
+      "Explanation": "ctx.set_output_grad_dtype must declare one dtype per forward output, and None for non-tensor outputs.",
+      "Hints": [
+        "Pass one torch.dtype or None per forward output, and None ",
+        "for non-tensor outputs."
       ]
     }
   ],
@@ -2110,6 +2151,16 @@
       "Hints": [
         "Move triton.set_allocator() outside of the torch.compile region ",
         "(call it before the compiled function)."
+      ]
+    }
+  ],
+  "GB6716": [
+    {
+      "Gb_type": "autograd.Function.apply: set_output_grad_dtype arity mismatch",
+      "Context": "{len(ctx.output_grad_dtypes)} declarations for {len(fwd_out_vts)} outputs",
+      "Explanation": "ctx.set_output_grad_dtype must declare one dtype per forward output.",
+      "Hints": [
+        "Pass one torch.dtype or None per forward output."
       ]
     }
   ],
@@ -3488,6 +3539,16 @@
       "Gb_type": "Unhinted data-dependent torch.Size element in torch._C._infer_size",
       "Context": "symbolic size: {item.sym_num}",
       "Explanation": "Dynamo cannot safely validate that a data-dependent torch.Size element fits in the signed int64 range.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4518": [
+    {
+      "Gb_type": "Unsupported autograd.Function context `set_output_grad_dtype`",
+      "Context": "call_method {self} set_output_grad_dtype {args}",
+      "Explanation": "Dynamo only supports tracing a single ctx.set_output_grad_dtype call with constant torch.dtype or None arguments inside autograd.Function.apply.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
