@@ -1,0 +1,69 @@
+name: Deprecation tracking
+description: Track a deprecation, freeze, or removal of a PyTorch API or component
+title: "[deprecation] "
+labels: ["module: deprecation", "slowroll"]
+
+body:
+- type: markdown
+  attributes:
+    value: >
+      One issue per deprecated API or frozen component. After filing, attach this issue as a sub-issue of the
+      umbrella [#201298](https://github.com/pytorch/pytorch/issues/201298).
+      See [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/AI_POLICY.md) policy.
+- type: input
+  id: api
+  attributes:
+    label: API or component
+    description: e.g. `torch.foo`, `torch.nn.functional.bar(..., baz=)`, C++ frontend `torch::nn`
+  validations:
+    required: true
+- type: dropdown
+  id: kind
+  attributes:
+    label: Kind
+    options:
+      - Removal
+      - Behavior change
+      - Frozen component
+  validations:
+    required: true
+- type: input
+  id: deprecated-in
+  attributes:
+    label: Deprecated in
+    description: Release that first ships the warning or freeze, e.g. `2.15`
+  validations:
+    required: true
+- type: input
+  id: removal-target
+  attributes:
+    label: Removal target
+    description: At least two releases after "Deprecated in", e.g. `2.17`. Use `none` for a frozen component with no removal plan.
+  validations:
+    required: true
+- type: input
+  id: next-step
+  attributes:
+    label: Next step
+    description: The next action and the release it ships in, e.g. `remove in 2.17`, `error in 2.16`. Used to assign milestones.
+  validations:
+    required: true
+- type: textarea
+  id: replacement
+  attributes:
+    label: Replacement and migration
+    description: What users should use instead, or how to keep the current behavior.
+  validations:
+    required: true
+- type: input
+  id: owner
+  attributes:
+    label: Owner
+    description: GitHub handle responsible for the next step
+  validations:
+    required: true
+- type: textarea
+  id: prs
+  attributes:
+    label: PRs
+    description: Deprecation PR, and later the error/removal PRs

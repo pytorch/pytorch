@@ -35,11 +35,17 @@ When asked to review a PR, always use the /pr-review skill.
 
 # Deprecations
 
-When deprecating, freezing, or removing a public API or component, use the
-/deprecate-feature skill. Deprecation warnings must name the removal version
-(at least two releases after the deprecation), and every deprecation, freeze,
-and removal must be tracked in the umbrella issue
-https://github.com/pytorch/pytorch/issues/201298.
+Any change that deprecates, freezes, or removes a public API or component MUST
+follow the /deprecate-feature skill. The change is not complete until:
+
+- the warning names the start version, the removal version (at least two
+  releases later), and its tracking issue URL;
+- the tracking issue, filed with the deprecation issue form, is labeled
+  `module: deprecation` and `slowroll`, has an up-to-date `Next step`, and is a
+  sub-issue of the umbrella https://github.com/pytorch/pytorch/issues/201298;
+- the PR body says `Part of #<tracking issue>`.
+
+If any of these is missing, report it as unfinished work.
 
 # Environment
 
