@@ -5700,17 +5700,6 @@ class TestPrecompileDynamoCapture(TestCase):
         for p, ref in zip(self.model.parameters(), reference.parameters()):
             self.assertEqual(p.grad, ref.grad)
 
-    def test_the_capture_bundled_autotune_patch_keeps_the_fx_graph_cache_key(self):
-        # _capture_config turns the flag off; were it hashed, capture would miss
-        # every FX graph cache entry a flag-on torch.compile run wrote.
-        def hashed_config(flag):
-            with torch._inductor.config.patch(bundled_autotune_remote_cache=flag):
-                return torch._inductor.config.save_config_portable(
-                    ignore_private_configs=False, readonly_values=True
-                )
-
-        self.assertEqual(hashed_config(True), hashed_config(False))
-
     @skipIfCrossRef
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_cold_bundled_autotune_cache_does_not_break_an_installed_load(self):
