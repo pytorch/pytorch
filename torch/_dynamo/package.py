@@ -663,12 +663,21 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
         raise AssertionError(
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
-    fn: Any = sys.modules[entry.python_module]
-    parts = entry.function_names[0].split(".")
+    return _lookup_code_path(
+        entry.python_module, entry.function_names[0], entry.code_source
+    )
+
+
+def _lookup_code_path(
+    python_module: str, function_name: str, code_source: str | None
+) -> types.CodeType:
+    entry = (python_module, function_name, code_source)
+    fn: Any = sys.modules[python_module]
+    parts = function_name.split(".")
     for part in parts:
         fn = getattr(fn, part)
-    if entry.code_source:
-        parts = entry.code_source.split(".")
+    if code_source:
+        parts = code_source.split(".")
         for part in parts:
             if part.endswith("]"):
                 index_begin = part.rfind("[")
@@ -745,13 +754,20 @@ def _get_code_source(
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    search_module_tree = code_module is None
-    if sys.version_info >= (3, 11) and not search_module_tree:
+    search_module_tree = sys.version_info < (3, 11) or code_module is None
+    if not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
-                _raise_resolution_error(code, toplevel)
+                # co_qualname is fixed at compile time and names where the def
+                # statement ran: a factory deleted afterwards, or one that
+                # exec'd it under a module's filename. The function can still
+                # be reachable from the module under a rewritten __qualname__,
+                # so search the module the way Python < 3.11 always does.
+                toplevel = module
+                search_module_tree = True
+                break
             toplevel = getattr(toplevel, part)
             if (
                 inspect.isfunction(toplevel)
@@ -816,7 +832,7 @@ def _get_code_source(
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11) or search_module_tree:
+        if search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -859,7 +875,26 @@ def _get_code_source(
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    return toplevel.__qualname__, code_source.strip(".")
+    function_name, code_source = toplevel.__qualname__, code_source.strip(".")
+    # The recorded __qualname__ can be stale (a factory-made function, or a
+    # wrapper from a decorator without functools.wraps), so replay the lookup
+    # the loader will do.
+    cause: Exception | None = None
+    try:
+        found = _lookup_code_path(module.__name__, function_name, code_source)
+    except Exception as e:
+        # A replay can fail in many ways (a missing attribute, a None
+        # __closure__, an index out of range); each means unreplayable.
+        found, cause = None, e
+    if found is not code:
+        outcome = f"fails with {cause!r}" if cause else "finds other code"
+        raise PackageError(
+            f"Cannot resolve a fully qualified name for {code}. Lookup scope: "
+            f"{toplevel}. Its __qualname__ {function_name!r} does not resolve back "
+            f"to it: replaying {module.__name__}:{function_name} ({code_source}) "
+            f"{outcome}"
+        ) from cause
+    return function_name, code_source
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1304,26 +1339,6 @@ class CompilePackage:
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
-        if code_module is None:
-            # The module search records the found function's __qualname__,
-            # which the loader replays with plain getattr. dataclasses rename
-            # what they exec() to its attribute path; a helper that does not
-            # would otherwise only fail at load.
-            cause: Exception | None = None
-            try:
-                resolves = _lookup_code(self._codes[code]) is code
-            except Exception as e:
-                # A replay can fail in many ways (a missing attribute, a None
-                # __closure__, an index out of range); each means unreplayable.
-                resolves, cause = False, e
-            if not resolves:
-                del self._codes[code]
-                outcome = f"fails with {cause!r}" if cause else "finds other code"
-                raise PackageError(
-                    f"Cannot resolve a fully qualified name for {code}: replaying "
-                    f"the recorded path {module.__name__}:{function_name} "
-                    f"({code_source}) {outcome}"
-                ) from cause
 
     @property
     def current_entry(self) -> _DynamoCodeCacheEntry | None:
