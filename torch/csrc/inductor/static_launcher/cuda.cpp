@@ -81,6 +81,7 @@ CUdeviceptr getPointer(PyObject* obj) {
       "Pointer argument must be either uint64 or have data_ptr method")
   auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
   auto ret = THPObjectPtr{PyObject_Call(ptr, empty_tuple, nullptr)};
+  TORCH_CHECK(ret != nullptr, "data_ptr() call failed");
   TORCH_CHECK(
       THPUtils_checkLong(ret),
       "data_ptr method of Pointer object must return 64-bit int");
