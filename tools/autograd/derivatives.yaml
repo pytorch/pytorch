@@ -579,8 +579,8 @@
   result: auto_linear
 
 - name: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
-  self: norm_backward(grad, self - other, p, result)
-  other: -norm_backward(grad, self - other, p, result)
+  self: handle_r_to_c(self.scalar_type(), norm_backward(grad, self - other, p, result))
+  other: handle_r_to_c(other.scalar_type(), norm_backward(-grad, self - other, p, result))
   result: norm_jvp(self_p - other_p, self_t - other_t, p, result, {}, false)
 
 # The backward formula is done in this order to improve numerical stability
