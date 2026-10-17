@@ -33,6 +33,14 @@ Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch fi
 
 When asked to review a PR, always use the /pr-review skill.
 
+# Deprecations
+
+When deprecating, freezing, or removing a public API or component, use the
+/deprecate-feature skill. Deprecation warnings must name the removal version
+(at least two releases after the deprecation), and every deprecation, freeze,
+and removal must be tracked in the umbrella issue
+https://github.com/pytorch/pytorch/issues/201298.
+
 # Environment
 
 If any tool you're trying to use (pip, python, spin, etc) is missing, check for
