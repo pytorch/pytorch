@@ -79,10 +79,12 @@ from torch._inductor.debug import (
     save_args_for_compile_fx_inner,
 )
 from torch._inductor.output_code import (
+    annotate_fx_graph_runnable,
     CompiledAOTI,
     CompiledFxGraph,
     CompiledFxGraphConstantsWithGm,
     copy_strided_storage_,
+    fx_graph_runnable_metadata,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -1259,6 +1261,7 @@ def _compile_fx_inner(
                     remote_cache,
                     is_backward=graph_kwargs.get("is_backward", False),
                     constants=constants,
+                    fx_kwargs=graph_kwargs,
                 )
             else:
                 log.debug("Failed to generate FX cache key")
@@ -1630,14 +1633,11 @@ class _InProcessFxCompile(FxCompile):
                     is_inference=is_inference,
                 )
                 produced.append(fd.getvalue())
-                return produced[0]
+                return annotate_fx_graph_runnable(produced[0], graph_kwargs)
 
             trace_structured(
                 "artifact",
-                metadata_fn=lambda: {
-                    "name": "fx_graph_runnable",
-                    "encoding": "string",
-                },
+                metadata_fn=lambda: fx_graph_runnable_metadata(graph_kwargs),
                 payload_fn=_fx_graph_runnable_payload,
             )
             runnable_graph_str = produced[0] if produced else ""
