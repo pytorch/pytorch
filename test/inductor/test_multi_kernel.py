@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
+from torch._dynamo.utils import counters
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
@@ -16,6 +17,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -112,6 +114,20 @@ class MultiKernelTest(TestCase):
         }
         return multi_kernel_call
 
+    def test_run_binds_the_picked_kernel(self):
+        events = []
+        call = self._benchmark_lock_call(events)
+        call.picked_kernel, call._recorded = 1, True
+        call.run("arg")
+        self.assertIs(call.run, call._kernels[1].run)
+        # Args split across slices still need filtering, so that call stays unbound.
+        split = self._benchmark_lock_call(events)
+        split.arg_index = {i: [slice(0, 1), slice(2, 3)] for i in (0, 1)}
+        split.picked_kernel, split._recorded = 0, True
+        split.run("a", "b", "c")
+        self.assertNotIn("run", vars(split))
+        self.assertEqual(events, ["run_1", "run_0"])
+
     def test_benchmark_sub_kernels_holds_gpu_lock_across_candidates(self):
         events = []
         multi_kernel_call = self._benchmark_lock_call(events)
@@ -195,6 +211,77 @@ class MultiKernelTest(TestCase):
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+
+    @requires_triton()
+    @config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": True,
+            "use_static_triton_launcher": True,
+            "fx_graph_remote_cache": False,
+            "compile_threads": 1,
+        }
+    )
+    def test_warm_fx_graph_cache(self):
+        # The warm compile rebuilds sub-kernels from the FX graph cache, and MultiKernelCall hashes their fn.cache_key.
+        from torch._inductor import codecache
+
+        x = torch.rand(2, 1024, device=GPU_TYPE)
+        ref = torch.softmax(x, -1)
+        for _ in range(2):
+            codecache.PyCodeCache.cache_clear(purge=True)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(torch.softmax)(x, -1), ref)
+        # Otherwise a cache miss on the second compile would pass without restoring any sub-kernel.
+        self.assertGreater(
+            counters["inductor"]["triton_bundler_load_static_autotuner"], 0
+        )
+
+    @requires_triton()
+    @unittest.skipIf(not SM90OrLater, "requires TMA support")
+    @config.patch(
+        {
+            "assume_aligned_inputs": True,
+            "compile_threads": 2,
+            "max_autotune_pointwise": True,
+            "triton.autotune_tensor_descriptor": "auto",
+            "triton.cudagraphs": False,
+            "triton.multi_kernel": 0,
+            "triton.use_tensor_descriptor": True,
+        }
+    )
+    def test_multi_kernel_resolves_triton_futures_once(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        if not AsyncCompile.wait_process_pool_ready():
+            self.skipTest("requires the parallel compile pool")
+
+        def fn(x, weight):
+            scale = torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + 1e-6)
+            return (x.float() * scale).to(x.dtype) * weight
+
+        # This decoder reduction shape reproduces duplicate resolution.
+        x = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        weight = torch.ones(
+            4096, device=GPU_TYPE, dtype=torch.bfloat16, requires_grad=True
+        )
+        with torch.no_grad():
+            ref = fn(x, weight)
+        counters.clear()
+        actual = torch.compile(fn)(x, weight)
+        actual.float().pow(2).mean().backward()
+        self.assertEqual(actual, ref)
+
+        submitted = (
+            counters["inductor"]["async_compile_cache_miss"]
+            - counters["inductor"]["async_compile_cache_hit"]
+        )
+        # Forward and backward produce three two-choice pools.
+        self.assertEqual(submitted, 6)
+        self.assertEqual(
+            counters["inductor"]["async_compile_triton_get_result"],
+            submitted,
+            "Triton future resolved more than once",
+        )
 
     @requires_triton()
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")

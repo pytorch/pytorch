@@ -509,7 +509,13 @@ class AsyncCompile:
         if isinstance(pool, SubprocPool):
             pool.wakeup()
 
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+    def triton(
+        self,
+        kernel_name: str,
+        source_code: str,
+        device_str: str = "cuda",
+        optional: bool = False,
+    ):
         """
         Async_compile.triton is more complicated than the other backends because
         we're trying to optimize compile time as much as possible for this hot callsite.
@@ -530,6 +536,8 @@ class AsyncCompile:
           in the parent lazily when we require it.
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
           and pickled to us via `CachingAutotuner.save_cache_hook`.
+
+        An optional kernel that fails to compile comes back as its exception, which MultiKernelCall drops.
         """
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code
@@ -580,6 +588,14 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                if optional:
+                    # The FX graph cache bundles dropped kernels too; loading one here lets its failure be returned.
+                    try:
+                        kernel = future.result()
+                    except Exception as e:
+                        return e
+                    record_triton_kernel(source_key, kernel)
+                    return kernel
                 record_triton_kernel(source_key, future.static_autotuner)
             if is_parallel:
                 return future
@@ -648,14 +664,21 @@ class AsyncCompile:
                 extra_config,
             )
 
-            def get_result() -> CachingAutotuner:
+            def get_result() -> CachingAutotuner | Exception:
+                counters["inductor"]["async_compile_triton_get_result"] += 1
                 try:
                     kernel, elapsed_us = task.result()
                 except SubprocException as e:
+                    if optional:
+                        return e.with_name(kernel_name)
                     raise e.with_name(kernel_name) from e
+                except Exception as e:
+                    # Thread-mode workers raise their compile errors unwrapped.
+                    if optional:
+                        return e
+                    raise
 
-                # Now that we've compiled, we should clear the future
-                # so it can't be used again
+                # Clear the future now that we've compiled
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
@@ -664,16 +687,22 @@ class AsyncCompile:
                 if not self.should_use_thread_workers():
                     kernel.restore_after_unpickle(old_values=None)
 
-                kernel.precompile(
-                    warm_cache_only=False,
-                    reload_kernel=reload_kernel_in_parent,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                )
+                try:
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        reload_kernel=reload_kernel_in_parent,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    )
+                except Exception as e:
+                    if optional:
+                        return e
+                    raise
                 record_triton_kernel(source_key, kernel)
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
-            future = LambdaFuture(get_result, future=task)
+            # A multi-kernel and wait() can resolve the same future; precompile each kernel once.
+            future = LambdaFuture(functools.cache(get_result), future=task)
             CompiledTritonKernels.save(source_code, future)
             return future
         else:
@@ -701,6 +730,8 @@ class AsyncCompile:
                     return kernel
                 except Exception as e:
                     fail = str(e)
+                    if optional:
+                        return e
                     raise
                 finally:
                     log_triton_builds(fail=fail)
