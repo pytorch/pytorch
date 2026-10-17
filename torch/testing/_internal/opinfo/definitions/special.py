@@ -125,7 +125,6 @@ def sample_inputs_erfcx(op_info, device, dtype, requires_grad, **kwargs):
 _unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 
-
 op_db: list[OpInfo] = [
     UnaryUfuncInfo(
         "special.i0e",
