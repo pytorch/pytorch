@@ -68,6 +68,31 @@ class TestSingleRankSaveLoad(TestCase):
             )
 
     @with_temp_dir
+    def test_save_non_contiguous_tensor(self) -> None:
+        try:
+            from safetensors.torch import load_file
+        except ImportError:
+            print("safetensors not installed")
+            return
+
+        CHECKPOINT_DIR = self.temp_dir
+
+        weight = torch.rand(4, 8, 6)
+        state_dict_to_save = {"weight_t": weight.transpose(1, 2)}
+        self.assertFalse(state_dict_to_save["weight_t"].is_contiguous())
+        dist_cp.save(
+            state_dict=state_dict_to_save,
+            storage_writer=dist_cp.HuggingFaceStorageWriter(path=CHECKPOINT_DIR),
+        )
+
+        state_dict_loaded = load_file(
+            CHECKPOINT_DIR + "/model-00001-of-00001.safetensors"
+        )
+        self.assertTrue(
+            torch.equal(state_dict_loaded["weight_t"], weight.transpose(1, 2))
+        )
+
+    @with_temp_dir
     def test_load(self) -> None:
         try:
             from safetensors.torch import save_file
