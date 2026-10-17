@@ -78,7 +78,6 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
     try:
         rc = gh_graphql(GH_GET_PR_STACK_QUERY, owner=org, name=project, number=pr_num)
     except GHGraphQLError as e:
-        # Its message has the whole query, too long for the PR comments that quote it
         errors = "; ".join(str(err.get("message")) for err in e.response["errors"])
         raise NativeStackError(f"GraphQL errors: {errors}") from e
     stack = rc["data"]["repository"]["pullRequest"]["stack"]
