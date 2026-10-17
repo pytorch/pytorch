@@ -1,0 +1,45 @@
+# Owner(s): ["module: rocm"]
+# DO NOT MERGE. One-GPU probe that the DPX+NPS2 stale-XCC failure does not
+# show up on DPX+NPS1.
+name: rocm-mi350-dpx-nps1-coherence
+
+on:
+  workflow_dispatch:
+  # This event runs in pytorch/pytorch, where the runner is registered.
+  # The label is unique to one machine, so other jobs are not scheduled there.
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  coherence:
+    name: dpx-nps1-cross-xcc
+    runs-on: linux.rocm.gpu.mi350.1.dpx.nps1
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and run the cross-XCC probe
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          src="${GITHUB_WORKSPACE}/.github/ci/rocm-dpx-nps1"
+          command -v hipcc
+          hipcc --version
+          amd-smi partition || true
+          hipcc -O2 -w --offload-arch=gfx950 "$src/coh.hip" -o "$RUNNER_TEMP/coh"
+          export HIP_FORCE_DEV_KERNARG=0
+          unset ROCR_VISIBLE_DEVICES || true
+          "$RUNNER_TEMP/coh" 2000 gpu | tee "$RUNNER_TEMP/gpu.txt"
+          "$RUNNER_TEMP/coh" 2000 h2d | tee "$RUNNER_TEMP/h2d.txt"
+          grep -q 'stale_launches=0 stale_blocks=0' "$RUNNER_TEMP/gpu.txt"
+          grep -q 'stale_launches=0 stale_blocks=0' "$RUNNER_TEMP/h2d.txt"
+          echo "DPX+NPS1 cross-XCC probe is coherent"
