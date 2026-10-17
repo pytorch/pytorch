@@ -187,7 +187,7 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
         # stance path (eval_frame._create_wrapped_callback, behind set_stance)
         # rebuilds a plain ConvertFrame with no package and is outside a capture
         # session's contract.
-        if self._inner_convert._package is None:
+        if self._package is None:
             return lambda backend: type(self)(
                 backend, self._hooks, recompile_limit=self._recompile_limit
             )
@@ -1609,11 +1609,14 @@ class _CapturePackage(CompilePackage):
     def add_resume_function(
         self,
         python_code: types.CodeType,
-        python_module: str,
+        global_scope: dict[str, Any],
         function_name: str,
+        root_scope: dict[str, Any],
     ) -> None:
         self.note_compute()
-        super().add_resume_function(python_code, python_module, function_name)
+        super().add_resume_function(
+            python_code, global_scope, function_name, root_scope
+        )
 
 
 def _summarize(
@@ -1806,9 +1809,11 @@ class PrecompileSession(Generic[_P, _R]):
                 "PrecompileSession cannot be re-entered; start a new capture."
             )
         self._entered = True
-        # Its own cache region: a function captured (or compiled) earlier in
-        # this process would otherwise serve its existing cache entries, and
-        # this package would record nothing.
+        # Its own cache region, strict because it records into a package: a
+        # function captured (or compiled) earlier in this process would
+        # otherwise serve its existing cache entries, and this package would
+        # record nothing. Precompile entries and skips that an earlier
+        # CompilePackage.install put on the same code still serve it.
         self._compiled = torch._dynamo.optimize(
             self._backend,
             package=self._package,

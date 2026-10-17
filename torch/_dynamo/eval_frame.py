@@ -58,10 +58,12 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
+    get_eval_frame_isolate_recompiles_strict,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
+    set_eval_frame_isolate_recompiles_strict,
     set_fullgraph_compiled_frame_count,
     set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
@@ -76,6 +78,7 @@ from torch._dynamo.types import (
     ConvertFrameReturn,
     FrameAction,
     FrameExecStrategy,
+    GuardCollectiveState,
 )
 from torch._export.utils import _compiling_state_context
 from torch._library.opaque_object import is_custom_class
@@ -298,9 +301,17 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
-        if trace_rules.check(frame.f_code):
+        if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
-        if not convert_frame.has_tensor_in_frame(frame):
+        # A frame the backend would not compile is no recompile. The backend's
+        # package sits on the first wrapper in the chain that keeps one.
+        backend: Any = self._torchdynamo_orig_backend
+        while not hasattr(backend, "_package") and hasattr(
+            backend, "_torchdynamo_orig_backend"
+        ):
+            backend = backend._torchdynamo_orig_backend
+        package = getattr(backend, "_package", None)
+        if convert_frame.skips_tensor_free_frame(package, frame):
             return ConvertFrameReturn()
 
         # convert_frame would skip a disable(recursive=False) frame rather than
@@ -491,8 +502,8 @@ def _get_cache_entries_for_region(
 
     Returns only entries owned by the requested bucket. During an actual
     lookup, isolated regions also fall back read-only to the default
-    bucket for BC-friendly reuse — this helper does not include those
-    fallback entries.
+    bucket for BC-friendly reuse, except strict ones that record into a
+    package — this helper does not include those fallback entries.
     """
     if callable(code):
         code = code.__code__
@@ -742,17 +753,24 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
+    from .decorators import _nonrecursive_disable_wrapper_code
+
     if isinstance(f, types.CodeType):
-        reset_code(f)
+        code = f
     elif hasattr(f, "__code__"):
-        reset_code(f.__code__)
+        code = f.__code__
     elif hasattr(getattr(f, "forward", None), "__code__"):
-        reset_code(f.forward.__code__)
+        code = f.forward.__code__
     else:
         from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
+        return
+    # Every disable(recursive=False) wrapper shares this code; resetting it
+    # would drop its import-time skip for all of them.
+    if code is not _nonrecursive_disable_wrapper_code:
+        reset_code(code)
 
 
 def nothing() -> None:
@@ -885,22 +903,26 @@ def _log_traced_frames() -> None:
     log.info(msg)
 
 
-def guard_collectives_hook(guard_eval_result: bool) -> bool:
+def guard_collectives_hook(guard_eval_result: int) -> int:
     import torch.distributed as dist
     from torch._dynamo.utils import dynamo_timed
 
-    # guard_eval_result == True  ==>  cache hit
+    # guard_eval_result is a GuardCollectiveState
     if pg := distributed.get_guard_pg():
         with dynamo_timed(
             "guard_collective", log_pt2_compile_event=False, log_waitcounter=True
         ):
             log.debug("guard_collective %s", guard_eval_result)
             # TODO: a bit awkward to time, this isn't inside of the dynamo compile region
-            all_results = [None] * pg.size()
-            dist.all_gather_object(all_results, guard_eval_result, group=pg)
-            # True = everyone hit, OK to run
-            # False = someone missed, force recompile everywhere
-            res = all(all_results)
+            all_results: list[int | None] = [None] * pg.size()
+            dist.all_gather_object(all_results, int(guard_eval_result), group=pg)
+            # Any MISS forces recompile everywhere. Otherwise no rank compiles,
+            # so each keeps its own HIT (run cached code) or SKIP (run eagerly);
+            # forcing a SKIP/HIT mix to compile would recompile on every call.
+            if GuardCollectiveState.MISS in all_results:
+                res = GuardCollectiveState.MISS
+            else:
+                res = guard_eval_result
             log.debug("guard_collective %s -> %s", guard_eval_result, res)
             return res
     return guard_eval_result
@@ -955,6 +977,9 @@ class _TorchDynamoContext:
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
         )
+        # A region that records into a package must not serve a call from the
+        # default region's cache: that entry would be missing from the package.
+        self._isolate_recompiles_strict = isolate_recompiles and package is not None
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -1279,6 +1304,11 @@ class _TorchDynamoContext:
                 prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
                     self._isolate_recompiles_id
                 )
+                prior_isolate_recompiles_strict = (
+                    set_eval_frame_isolate_recompiles_strict(
+                        self._isolate_recompiles_strict
+                    )
+                )
                 prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     current_error_on_graph_break = _get_error_on_graph_break()
@@ -1361,6 +1391,9 @@ class _TorchDynamoContext:
                         set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                         set_eval_frame_isolate_recompiles_id(
                             prior_isolate_recompiles_id
+                        )
+                        set_eval_frame_isolate_recompiles_strict(
+                            prior_isolate_recompiles_strict
                         )
                         for cleanup in cleanups:
                             cleanup()
@@ -1955,7 +1988,9 @@ def _optimize(
     if config.caching_precompile and package is None:
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None, dynamo=None, ignore_inlined_sources=False, explicit=False
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
@@ -2898,7 +2933,9 @@ def _optimize_assert(
         # and OptimizeContext.
         from .package import CompilePackage
 
-        package = CompilePackage(fn=None, dynamo=None, ignore_inlined_sources=False)
+        package = CompilePackage(
+            fn=None, dynamo=None, ignore_inlined_sources=False, explicit=False
+        )
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(

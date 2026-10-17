@@ -6673,8 +6673,12 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
         # When a hook causes a graph break on an inbuilt nn.Module, the module's
         # forward should still be traced after the graph break.
 
+        change_input = False
+
         @torch._dynamo.disable
         def my_hook(module, inp):
+            if change_input:
+                return (inp[0][:1],)
             return inp
 
         class Wrapper(nn.Module):
@@ -6691,13 +6695,27 @@ def forward(self, L_x_ : torch.Tensor, s77 : torch.SymInt, s27 : torch.SymInt):
 
         backend = EagerAndRecordGraphs()
         torch._dynamo.reset()
-        compiled = torch.compile(model, backend=backend)
-        output = compiled(torch.randn(3, 10))
+        compiled = torch.compile(model, backend=backend, dynamic=False)
+        x = torch.randn(3, 10)
+        output = compiled(x)
 
         self.assertEqual(output.shape, torch.Size([3, 5]))
         self.assertEqual(len(backend.graphs), 1)
         graph_code = backend.graphs[0].print_readable(print_output=False)
         self.assertIn("torch._C._nn.linear", graph_code)
+
+        # The resumed nn.Linear.forward frame must be recognized as traceable
+        # under fail_on_recompile too, so a guard miss on it raises instead of
+        # silently running eagerly.
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled(x), output)
+            change_input = True
+            with self.assertRaisesRegex(
+                RuntimeError, "function name: 'forward'"
+            ) as raised:
+                compiled(x)
+            self.assertIn(lin.forward.__code__.co_filename, str(raised.exception))
+        self.assertEqual(len(backend.graphs), 1)
 
     @torch._dynamo.config.patch(record_runtime_overhead=True)
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
