@@ -13761,6 +13761,15 @@ class TestAutogradDeviceType(TestCase):
             prev = prev * t2
         reentrant_root = prev
 
+        # The engine does not cancel a running child graph when the parent
+        # errors, so hold the child until the parent's error has been checked.
+        child_can_finish = threading.Event()
+
+        def wait_for_parent_error(grad):
+            child_can_finish.wait()
+
+        reentrant_root.register_hook(wait_for_parent_error)
+
         class ReentrantFunc(Function):
             @staticmethod
             def forward(ctx, inp):
@@ -13776,15 +13785,17 @@ class TestAutogradDeviceType(TestCase):
         t6 = ReentrantFunc.apply(t3)
         t7 = t6 * t6
 
-        # Parent graph will error out first, while child graph will continue executing.
-        with self.assertRaisesRegex(Exception, "Simulate error"):
-            torch.autograd.backward([t5.sum(), t7.sum()])
+        try:
+            # Parent graph will error out first, while child graph will continue executing.
+            with self.assertRaisesRegex(Exception, "Simulate error"):
+                torch.autograd.backward([t5.sum(), t7.sum()])
 
-        # No grads should be accumulated since child graph will stop execution
-        # after parent receives error.
-        self.assertIsNone(t2.grad)
-        self.assertIsNone(t1.grad)
-        self.assertIsNone(t3.grad)
+            # No grads should be accumulated before the child graph finishes.
+            self.assertIsNone(t2.grad)
+            self.assertIsNone(t1.grad)
+            self.assertIsNone(t3.grad)
+        finally:
+            child_can_finish.set()
 
     @onlyAccelerator
     def test_reentrant_parent_error_on_cpu(self, device):
