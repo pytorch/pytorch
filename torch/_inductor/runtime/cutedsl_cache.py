@@ -21,6 +21,14 @@ from typing import Any
 
 
 log = logging.getLogger(__name__)
+_MAX_MEMORY_CACHE_ENTRIES = 32
+
+
+def _cache_memory_value(mem_cache: dict[Any, Any], key: Any, value: Any) -> None:
+    mem_cache.pop(key, None)
+    if len(mem_cache) >= _MAX_MEMORY_CACHE_ENTRIES:
+        mem_cache.pop(next(iter(mem_cache)), None)
+    mem_cache[key] = value
 
 
 def _fix_elf_dup_text_flags(data: bytes) -> bytes:
@@ -95,8 +103,10 @@ def disk_cache_get(
 ) -> Any | None:
     """Look up a compiled CuTe DSL function, checking memory then disk."""
     mem_key = (runtime_key, device_index)
-    if mem_key in mem_cache:
-        return mem_cache[mem_key]
+    value = mem_cache.get(mem_key)
+    if value is not None:
+        _cache_memory_value(mem_cache, mem_key, value)
+        return value
 
     h = _make_disk_key(
         module_path, config_key, runtime_key, device_index, device_capability
@@ -113,7 +123,7 @@ def disk_cache_get(
 
             m = cute.runtime.load_module(str(obj_path), enable_tvm_ffi=True)
             fn = m.func
-            mem_cache[mem_key] = fn
+            _cache_memory_value(mem_cache, mem_key, fn)
             return fn
         except Exception:
             log.debug("Failed to load cached artifact %s", obj_path, exc_info=True)
@@ -131,7 +141,7 @@ def disk_cache_set(
 ) -> None:
     """Store a compiled CuTe DSL function to memory and disk."""
     mem_key = (runtime_key, device_index)
-    mem_cache[mem_key] = compiled_fn
+    _cache_memory_value(mem_cache, mem_key, compiled_fn)
 
     h = _make_disk_key(
         module_path, config_key, runtime_key, device_index, device_capability
