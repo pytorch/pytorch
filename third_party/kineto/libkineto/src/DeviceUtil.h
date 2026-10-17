@@ -70,8 +70,13 @@
 // clang-format on
 
 #elif defined(HAS_ROCTRACER)
+#include <stdexcept>
+
 #include <hip/hip_runtime.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
+
+#include "ThrowUtil.h"
 
 #define CUDA_CALL(call)                                   \
   {                                                       \
@@ -85,6 +90,40 @@
           (int)_status_);                                 \
     }                                                     \
   }
+
+// rocprofiler-sdk returns a status from every call and reports nothing else
+// on failure, so the status string is the only diagnostic. ROCPROF_CALL logs
+// and hands the status back to the caller for cases where some failures are
+// expected (e.g. stopping an already-stopped context); ROCPROF_CALL_THROW is
+// for paths where any failure must abort, such as tool initialization.
+#define ROCPROF_CALL(call)                                       \
+  [&]() -> rocprofiler_status_t {                                \
+    rocprofiler_status_t _status_ = call;                        \
+    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {                \
+      LOG(WARNING) << fmt::format(                               \
+          "function {} failed with error {} ({})",               \
+          #call,                                                 \
+          rocprofiler_get_status_string(_status_),               \
+          (int)_status_);                                        \
+    }                                                            \
+    return _status_;                                             \
+  }()
+
+// clang-format off
+#define ROCPROF_CALL_THROW(call)                       \
+  do {                                                 \
+    rocprofiler_status_t _status_ = (call);            \
+    if (_status_ != ROCPROFILER_STATUS_SUCCESS) {      \
+      KINETO_THROW(                                    \
+          std::runtime_error,                          \
+          fmt::format(                                 \
+              "{} failed: {} ({})",                    \
+              #call,                                   \
+              rocprofiler_get_status_string(_status_), \
+              (int)_status_));                         \
+    }                                                  \
+  } while (false)
+// clang-format on
 
 #define CUPTI_CALL(call) call
 
