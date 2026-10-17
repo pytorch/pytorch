@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import inspect
+import io
 import sys
 import unittest
 from collections import defaultdict
@@ -4495,13 +4496,11 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(eager.graphs), 2)
 
     @parametrize("name", ("stdout", "stderr"))
-    def test_contextlib_suppress(self, name):
-        counters.clear()
-        eager = EagerAndRecordGraphs()
+    def test_contextlib_redirect(self, name):
+        orig_stdout, orig_stderr = sys.stdout, sys.stderr
 
         def fn(t):
             y = t.sin()
-            # ensure we graph break on the suppress call below
             if name == "stdout":
                 ctx = contextlib.redirect_stdout(sys.stderr)
             else:
@@ -4509,18 +4508,37 @@ class GraphModule(torch.nn.Module):
 
             with ctx:
                 y += t.cos()
-            return y.tan()
+                redirected = sys.stdout is sys.stderr
+            return y.tan(), redirected
 
         t = torch.randn(2)
         expected = fn(t)
-        got = torch.compile(backend=eager, fullgraph=False)(fn)(t)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(t)
         self.assertEqual(expected, got)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        name = f"redirect_{name}" if name in ("stdout", "stderr") else name
-        self.assertRegex(
-            next(iter(counters["graph_break"])),
-            f"<class 'contextlib.{name}'> not supported",
-        )
+        self.assertIs(sys.stdout, orig_stdout)
+        self.assertIs(sys.stderr, orig_stderr)
+
+    @parametrize("name", ("stdout", "stderr"))
+    def test_redirect_to_stringio(self, name):
+        redirect = getattr(contextlib, f"redirect_{name}")
+        orig = getattr(sys, name)
+
+        def fn(t):
+            f = io.StringIO("xyz", newline="\r\n")
+            with redirect(f) as target:
+                n = getattr(sys, name).write("a\n")
+            return t.sin() + n, f, target is f, f.getvalue(), f.tell()
+
+        t = torch.randn(2)
+        expected = fn(t)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertIs(getattr(sys, name), orig)
+        self.assertEqual(expected[0], got[0])
+        self.assertEqual(expected[2:], got[2:])
+        self.assertEqual(got[1].__getstate__(), expected[1].__getstate__())
+        expected[1].write("b\n")
+        got[1].write("b\n")
+        self.assertEqual(got[1].getvalue(), expected[1].getvalue())
 
     def test_contextlib_nullcontext(self):
         counters.clear()
