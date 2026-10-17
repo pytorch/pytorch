@@ -41,6 +41,7 @@ __all__ = [
     "LRScheduler",
 ]
 
+# Kept for backward compatibility; no longer emitted.
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "
     "deprecated where possible. Please use `scheduler.step()` to step the "
@@ -239,12 +240,10 @@ class LRScheduler:
         """Step the scheduler.
 
         Args:
-            epoch (int, optional):
-                .. deprecated:: 1.4
-                    If provided, sets :attr:`last_epoch` to ``epoch`` and uses
-                    :meth:`_get_closed_form_lr` if it is available. This is not
-                    universally supported. Use :meth:`step` without arguments
-                    instead.
+            epoch (int, optional): If provided, sets :attr:`last_epoch` to
+                ``epoch`` and uses :meth:`_get_closed_form_lr` if it is
+                available. This is not universally supported. Prefer calling
+                :meth:`step` without arguments.
 
         .. note::
             Call this method after calling the optimizer's
@@ -277,8 +276,6 @@ class LRScheduler:
                 )
 
         self._step_count += 1
-        if epoch is not None:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self._update_lr(epoch)
 
     def _update_lr(self, epoch: int | None = None) -> None:
@@ -1699,8 +1696,6 @@ class ReduceLROnPlateau(LRScheduler):
         current = float(metrics)
         if epoch is None:
             epoch = self.last_epoch + 1
-        else:
-            warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self.last_epoch = epoch
 
         if self._is_better(current, self.best):
