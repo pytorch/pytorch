@@ -751,7 +751,6 @@ def _build_installed_forward():
     import sys as _sys
 
     import torch
-    import torch._inductor.config as _inductor_config
     from torch._C._dynamo.eval_frame import _debug_get_cache_entry_list
     from torch._dynamo.eval_frame import (
         _RecompileRefusedError,
@@ -833,11 +832,7 @@ def _build_installed_forward():
             if not _ALLOW_SERVE_TIME_COMPILES:
                 context.callback = _RefuseRecompileCallback(context.callback)
             compiled = context(fn)
-        # install() post-compiles each frame's forward and backward in one
-        # compile context, which AutotuneCacheBundler allows one bundle; see
-        # _capture_config.
-        with _inductor_config.patch(bundled_autotune_remote_cache=False):
-            package.install(package_state["backends"])
+        package.install(package_state["backends"])
     except _PrecompileError:
         raise
     except Exception as _e:
