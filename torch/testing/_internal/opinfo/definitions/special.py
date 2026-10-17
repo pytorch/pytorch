@@ -938,22 +938,6 @@ python_ref_db: list[OpInfo] = [
                 }
             ),
         ),
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
