@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/cuda/SideAwareState.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
@@ -1570,6 +1571,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
               callPythonDeallocator(state, ptr, size, device, stream);
             });
       });
+
+  namespace side_aware = at::native::side_aware;
+  m.def("_cuda_side_aware_register_range", &side_aware::register_striped_range);
+  m.def(
+      "_cuda_side_aware_unregister_range",
+      &side_aware::unregister_striped_range);
+  m.def("_cuda_set_side_aware", &side_aware::set_enabled);
+  m.def("_cuda_get_side_aware", &side_aware::enabled);
+  m.def("_cuda_side_aware_launch_count", &side_aware::launch_count);
+  m.def("_cuda_side_aware_sm_sides", &side_aware::sm_sides);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
