@@ -11668,6 +11668,41 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
         )
 
+    @parametrize("dtype", (torch.int32, torch.bool, torch.float32))
+    @parametrize("inplace", (False, True))
+    def test_index_copy_invalid_index_dtype(self, dtype, inplace):
+        def fn(x, index, source):
+            if inplace:
+                return x.index_copy_(0, index, source)
+            return x.index_copy(0, index, source)
+
+        x = torch.zeros(2, 3, device=self.device)
+        index = torch.tensor([0], dtype=dtype, device=self.device)
+        source = torch.ones(1, 3, device=self.device)
+        msg = "Expected a long tensor for index"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x, index, source)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.compile(fn, fullgraph=True)(x, index, source)
+
+    @parametrize("inplace", (False, True))
+    @parametrize("index_shape", ((), (1,), (0,)))
+    def test_index_copy_long_index(self, inplace, index_shape):
+        def fn(x, index, source):
+            if inplace:
+                return x.index_copy_(0, index, source)
+            return x.index_copy(0, index, source)
+
+        x = torch.zeros(2, 3, device=self.device)
+        index = torch.zeros(index_shape, dtype=torch.int64, device=self.device)
+        source = torch.ones(index.numel(), 3, device=self.device)
+        expected_input = x.clone()
+        expected = fn(expected_input, index, source)
+        actual_input = x.clone()
+        actual = torch.compile(fn, fullgraph=True)(actual_input, index, source)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_input, expected_input)
+
     def test_index_copy_error_checks(self):
         cases = (
             (
