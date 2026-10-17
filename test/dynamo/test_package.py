@@ -1879,6 +1879,42 @@ def entry(x):
         self.assertEqual(len(codes), 2)
         self.assertEqual({entry.python_module for entry in codes}, {name})
 
+    def test_reset_keeps_nonrecursive_disable_wrapper_skipped(self):
+        # A bound method's innermost fn is the shared non-recursive disable
+        # wrapper, so this package's top-level code is the wrapper's code.
+        # Installing it must not let reset() strip its import-time skip.
+        class Mod(torch.nn.Module):
+            @torch._dynamo.disable(recursive=False)
+            def forward(self, x):
+                return self.inner(x) * 2
+
+            def inner(self, x):
+                return x.cos() + 1
+
+        ctx = DiskDynamoStore()
+        mod = Mod()
+        x = torch.randn(4)
+        package = CompilePackage(mod.forward)
+        torch._dynamo.optimize(backend="eager", package=package)(mod)(x)
+        for backend_id, bknd in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, bknd)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(mod.forward, self.path())
+        self.assertIs(
+            next(iter(package._codes)),
+            torch._dynamo.decorators._nonrecursive_disable_wrapper_code,
+        )
+        package.install(backends)
+        torch._dynamo.reset()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(mod, backend=cnt)(x), mod(x))
+        # Only inner() is compiled; forward() itself stays eager.
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
         # active TracingContext (e.g. precompile warm-load). Reconstructing the
