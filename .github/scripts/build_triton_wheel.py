@@ -13,6 +13,10 @@ from tempfile import TemporaryDirectory
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
+# Release wheels are built from release/X.Y.x, not upstream's tag, so they
+# shouldn't share a filename with the wheel on PyPI.
+PYTORCH_LOCAL_VERSION = "pt"
+
 
 def read_triton_pin(device: str = "cuda") -> str:
     triton_file = "triton.txt"
@@ -35,6 +39,14 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
     if src not in inp:
         raise RuntimeError(f"Can't find ${src} in the input")
     return inp.replace(src, dst)
+
+
+def wheel_version_suffix(*, package_name: str, release: bool) -> str:
+    # rocm/xpu already have their own package names. torch pins
+    # triton==X.Y.Z, which still matches X.Y.Z+pt.
+    if release and package_name == "triton":
+        return f"+{PYTORCH_LOCAL_VERSION}"
+    return ""
 
 
 def patch_init_py(
@@ -104,8 +116,16 @@ def build_triton(
             check_call(["git", "fetch", "origin", commit_hash], cwd=triton_basedir)
             check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
+        version_suffix = wheel_version_suffix(
+            package_name=triton_pkg_name, release=release
+        )
+
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
+        if version_suffix:
+            # setup.py takes the wheel version from its own TRITON_VERSION,
+            # not __init__.py, so the suffix has to be passed this way
+            env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
         if sys.platform != "win32":
             env["TRITON_EXT_ENABLED"] = "ON"
         if with_clang_ldd:
@@ -113,7 +133,7 @@ def build_triton(
 
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
-            version=f"{version}",
+            version=f"{version}{version_suffix}",
             expected_version=read_triton_version(device),
         )
 
