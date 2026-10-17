@@ -41,6 +41,12 @@ void vmapIncompatibleInplaceError(const char* schema_name);
 
 Tensor maybePadToLogicalRank(const Tensor& tensor, std::optional<int64_t> has_bdim, int64_t logical_rank);
 
+// In eager, a CPU 0-dim tensor may be mixed with tensors on another device.
+// Under vmap, a batched tensor that is 0-dim per example is physically 1-dim,
+// so it has to be moved to `device` explicitly to keep the eager semantics.
+Tensor move_cpu_logical_scalar_to_device(
+    const Tensor& tensor, std::optional<int64_t> tensor_bdim, c10::Device device);
+
 void check_randomness(RandomnessType randomness);
 void check_randomness(RandomnessType randomness, bool any_tensor_bdim);
 
@@ -178,12 +184,20 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
 
 inline void handle_pointwise_ops(std::vector<std::pair<Tensor, std::optional<int64_t>>> &tensor_inputs) {
   int64_t out_logical_rank = 0;
+  std::optional<c10::Device> non_cpu_device;
   for (auto& tensor_input : tensor_inputs) {
     int64_t cur_logical_rank = rankWithoutBatchDim(tensor_input.first, tensor_input.second);
     out_logical_rank = std::max(out_logical_rank, cur_logical_rank);
+    if (!non_cpu_device && !tensor_input.first.device().is_cpu()) {
+      non_cpu_device = tensor_input.first.device();
+    }
   }
   for (auto& tensor_input: tensor_inputs) {
     tensor_input.first = moveBatchDimToFront(tensor_input.first, tensor_input.second);
+    if (non_cpu_device) {
+      tensor_input.first = move_cpu_logical_scalar_to_device(
+          tensor_input.first, tensor_input.second, *non_cpu_device);
+    }
     tensor_input.first = maybePadToLogicalRank(tensor_input.first, tensor_input.second, out_logical_rank);
   }
 }
