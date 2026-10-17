@@ -97,10 +97,10 @@ else:
     def _maybe_traced_group(mesh: "DeviceMesh", mesh_dim: int) -> ProcessGroup | None:
         """Resolve the group via an in-graph op when tracing under CooR.
 
-        Under compile_on_one_rank and an active make_fx/proxy trace, return the
-        group as the output of _dtensor.mesh_get_process_group so the
+        Under compile_on_one_rank and Dynamo or an active make_fx trace, return
+        the group as the output of _dtensor.mesh_get_process_group so the
         ProcessGroup is extracted from the (graph-input) mesh at runtime instead
-        of being baked into the graph as an unserializable torchbind constant.
+        of being baked into the graph as an unserializable ProcessGroup constant.
         Returns None to take the eager path otherwise. Mirrors
         _functional_collectives._resolve_group, but also covers eager collectives
         (dist.all_reduce -> c10d.allreduce_) that bind the ProcessGroup directly.
@@ -110,19 +110,21 @@ else:
         """
         if not torch.compiler.config.compile_on_one_rank:
             return None
-        # Under torch.compile, Dynamo lifts the ProcessGroup from the mesh's
-        # _pg_registry itself (see _get_pg_from_name); the op-emitting path here
-        # is only for make_fx tracing. is_compiling() folds to a constant under
-        # Dynamo, so this returns cleanly without tracing the op below.
-        if torch.compiler.is_compiling():
-            return None
-        from torch.fx.experimental.proxy_tensor import get_proxy_mode
+        # Under Dynamo, always emit the op: otherwise Dynamo lifts the
+        # ProcessGroup out of mesh._pg_registry as its own graph input, which
+        # AOTAutograd then bakes into the graph as a constant.
+        if not torch.compiler.is_dynamo_compiling():
+            # Non-Dynamo code that runs during a compile/export session (e.g.
+            # AOTAutograd tracing) keeps resolving the group eagerly.
+            if torch.compiler.is_compiling():
+                return None
+            from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
-        # get_proxy_mode() is None in eager and inside the op's own fake/eager
-        # impl (the proxy mode is popped while dispatching), so this does not
-        # recurse.
-        if get_proxy_mode() is None:
-            return None
+            # get_proxy_mode() is None in eager and inside the op's own
+            # fake/eager impl (the proxy mode is popped while dispatching), so
+            # this does not recurse.
+            if get_proxy_mode() is None:
+                return None
         # Ensure the op is registered without a module-level circular import.
         from torch.distributed.tensor import _collective_utils  # noqa: F401
 
@@ -877,9 +879,15 @@ else:
 
             root_to_flatten_mapping = root_mesh._flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
-                dim_group_name = root_to_flatten_mapping[
-                    mesh_dim  # type: ignore[index]
-                ]._dim_group_names[0]
+                flat_mesh = root_to_flatten_mapping[mesh_dim]  # type: ignore[index]
+                # TODO: make_fx cannot reconstruct a flattened submesh from the
+                # root mesh input yet (_device_mesh_reconstruct_fn), so only
+                # Dynamo resolves this group in-graph; make_fx still bakes it.
+                if torch.compiler.is_dynamo_compiling():
+                    traced = _maybe_traced_group(flat_mesh, 0)
+                    if traced is not None:
+                        return traced
+                dim_group_name = flat_mesh._dim_group_names[0]
                 return not_none(_get_pg_from_name(root_mesh, dim_group_name))
             else:
                 mesh_dim = (

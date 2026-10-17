@@ -1405,6 +1405,50 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         )
 
     @torch._dynamo.config.patch(recompile_limit=8)
+    def test_package_region_reasons_skip_default_bucket(self):
+        """A region that records into a package never falls back to the
+        default bucket, so its recompile reasons leave those entries out."""
+        from torch._dynamo.package import CompilePackage
+
+        default_fails: list[str] = []
+        region_fails: list[str] = []
+
+        def f(x):
+            return x.sum()
+
+        opt_default = torch._dynamo.optimize(
+            "eager",
+            guard_fail_fn=lambda e: default_fails.append(e.reason),
+            dynamic=False,
+        )(f)
+        opt_strict = torch._dynamo.optimize(
+            "eager",
+            guard_fail_fn=lambda e: region_fails.append(e.reason),
+            dynamic=False,
+            isolate_recompiles=True,
+            package=CompilePackage(f),
+        )(f)
+        opt_default(torch.randn(3))
+        opt_strict(torch.randn(4))
+        opt_strict(torch.randn(5))
+        self.assertTrue(region_fails)
+        self.assertEqual(default_fails, [])
+
+    def test_package_region_restores_strict_flag_when_the_call_raises(self):
+        from torch._C._dynamo.eval_frame import get_eval_frame_isolate_recompiles_strict
+        from torch._dynamo.package import CompilePackage
+
+        def f(x):
+            raise RuntimeError("boom")
+
+        opt = torch._dynamo.optimize(
+            "eager", isolate_recompiles=True, package=CompilePackage(f)
+        )(f)
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            opt(torch.randn(2))
+        self.assertFalse(get_eval_frame_isolate_recompiles_strict())
+
+    @torch._dynamo.config.patch(recompile_limit=8)
     def test_non_isolated_reasons_unchanged(self):
         """Regression: recompile-reason logging for non-isolated compiles
         (id=-1) must still work. The split between cache_entries and

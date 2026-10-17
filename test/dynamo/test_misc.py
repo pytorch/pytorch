@@ -10698,6 +10698,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         self.assertEqual(compiled_fn(*args), fn(*args))
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_precompile_entries(self):
         from torch._C._dynamo.eval_frame import (
             _load_precompile_entry,
@@ -10738,16 +10739,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         args = (torch.randn(3, 2),)
 
         compiled_fn = torch.compile(fn, backend="eager")
-        _load_precompile_entry(
-            fn.__code__,
-            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
-            injected_bool.__code__,
-        )
-
+        # Like cache entries, the most recently loaded entry is checked first,
+        # so bool (which also passes the int guard) is loaded after int.
         _load_precompile_entry(
             fn.__code__,
             torch._dynamo.guards.GuardManagerWrapper(guard_manager_int),
             injected_int.__code__,
+        )
+
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager_bool),
+            injected_bool.__code__,
         )
 
         _load_precompile_entry(
@@ -10766,9 +10769,508 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(compiled_fn(True), injected_bool(True))
         self.assertEqual(compiled_fn(10), injected_int(10))
         self.assertEqual(compiled_fn("10"), injected_str("10"))
+        # The hit on int moved it in front of bool.
+        self.assertEqual(compiled_fn(True), injected_int(True))
         _reset_precompile_entries(fn.__code__)
 
         self.assertEqual(compiled_fn(*args), fn(*args))
+
+        # Without LRU, entries keep load order and a hit is not moved.
+        with torch._dynamo.testing.lru_cache_reordering(False):
+            for guard_manager, injected in (
+                (guard_manager_bool, injected_bool),
+                (guard_manager_int, injected_int),
+            ):
+                _load_precompile_entry(
+                    fn.__code__,
+                    torch._dynamo.guards.GuardManagerWrapper(guard_manager),
+                    injected.__code__,
+                )
+            self.assertEqual(compiled_fn(10), injected_int(10))
+            self.assertEqual(compiled_fn(True), injected_bool(True))
+        _reset_precompile_entries(fn.__code__)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @torch._dynamo.testing.lru_cache_reordering(True)
+    def test_precompile_entry_yields_to_a_newer_cache_entry(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+
+        def fn(x):
+            return x + 1
+
+        guard_manager = torch._dynamo.guards.RootGuardManager()
+        guard_manager.add_lambda_guard(lambda L: L["x"].shape[0] == 3, [], None)
+
+        def injected(x):
+            return x + 100
+
+        compiled_fn = torch.compile(fn, backend="eager", dynamic=True)
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(guard_manager),
+            injected.__code__,
+        )
+        x = torch.randn(3)
+        self.assertEqual(compiled_fn(x), injected(x))
+        # No precompile entry admits this call, so it compiles a dynamic entry
+        # that also admits x. torch.compile serves a frame's newest entry
+        # first, so that entry now serves x as well.
+        wider = torch.randn(5)
+        self.assertEqual(compiled_fn(wider), fn(wider))
+        self.assertEqual(compiled_fn(x), fn(x))
+        _reset_precompile_entries(fn.__code__)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @parametrize("peer_missed", [False, True])
+    def test_precompile_entry_guard_complete_hook(self, peer_missed):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="eager", dynamic=False)(x)
+        entries = [
+            (e.guard_manager, e.code) for e in _debug_get_cache_entry_list(fn.__code__)
+        ]
+        torch._dynamo.reset_code(fn.__code__)
+        for guard_manager, code in entries:
+            _load_precompile_entry(fn.__code__, guard_manager, code)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        guard_results = []
+
+        # Returning False is what the guard collective does when a peer missed.
+        def hook(hit):
+            guard_results.append(hit)
+            return hit and not peer_missed
+
+        old_hook = set_guard_complete_hook(hook)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [True])
+            self.assertEqual(cnt.frame_count, int(peer_missed))
+            if not peer_missed:
+                y = torch.randn(4)
+                self.assertEqual(compiled_fn(y), fn(y))
+                self.assertEqual(guard_results, [True, False])
+                self.assertEqual(cnt.frame_count, 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+            _reset_precompile_entries(fn.__code__)
+            torch._dynamo.reset_code(fn.__code__)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_precompile_skip_reports_guard_collective_skip(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+        self.assertIs(type(guard_results[0]), int)
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @parametrize("hook_result", [True, 1])
+    def test_precompile_skip_runs_eagerly_when_guard_collective_hits(self, hook_result):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        # A bool hook's True, or a peer's HIT, is not a miss.
+        old_hook = set_guard_complete_hook(lambda state: hook_result)
+        try:
+            for _ in range(3):
+                self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_precompile_skip_compiles_when_guard_collective_misses(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        guard_results = []
+
+        # What the guard collective returns when another rank hit or missed.
+        def peer_disagreed(state):
+            guard_results.append(state)
+            return GuardCollectiveState.MISS
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(peer_disagreed)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+            self.assertEqual(cnt.frame_count, 1)
+            # The entry compiled for the peer now serves the frame.
+            guard_results.clear()
+            set_guard_complete_hook(record)
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [GuardCollectiveState.HIT])
+            self.assertEqual(cnt.frame_count, 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_precompile_skip_survives_a_recompile_that_traces_no_graph(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__)
+        guard_results = []
+
+        def peer_disagreed(state):
+            guard_results.append(state)
+            return GuardCollectiveState.MISS
+
+        old_hook = set_guard_complete_hook(peer_disagreed)
+        try:
+            # An int input traces no graph, so the forced recompile skips the
+            # frame again, and the next call must still join the collective.
+            self.assertEqual(compiled_fn(3), 4)
+            self.assertEqual(compiled_fn(3), 4)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(
+            guard_results, [GuardCollectiveState.SKIP, GuardCollectiveState.SKIP]
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False, recompile_limit=2
+    )
+    def test_precompile_skip_mixed_with_peer_hit_does_not_recompile(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.eval_frame import guard_collectives_hook
+        from torch._dynamo.types import GuardCollectiveState
+
+        def skipped(x):
+            return x + 1
+
+        def compiled(x):
+            return x + 2
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(compiled, backend=cnt)
+        compiled_fn(x)
+        skipped_fn = torch.compile(skipped, backend=cnt)
+        _load_precompile_skip(skipped.__code__)
+        gathered = []
+        peer_state = None
+
+        # A 2-rank all_gather whose other rank reports peer_state.
+        def gather(out, state, group=None):
+            gathered.append(state)
+            out[:] = [state, peer_state]
+
+        fake_pg = mock.Mock(size=lambda: 2)
+        calls = 5
+        counters.clear()
+        old_hook = set_guard_complete_hook(guard_collectives_hook)
+        try:
+            with (
+                patch("torch._dynamo.distributed.get_guard_pg", lambda: fake_pg),
+                patch("torch.distributed.all_gather_object", gather),
+            ):
+                # The skipping rank, with an int input that traces no graph and
+                # a tensor input that would compile one.
+                peer_state = GuardCollectiveState.HIT
+                for _ in range(calls):
+                    self.assertEqual(skipped_fn(3), 4)
+                    self.assertEqual(skipped_fn(x), x + 1)
+                self.assertEqual(gathered, [GuardCollectiveState.SKIP] * 2 * calls)
+                # The rank that compiled the frame keeps hitting its entry.
+                gathered.clear()
+                peer_state = GuardCollectiveState.SKIP
+                for _ in range(calls):
+                    self.assertEqual(compiled_fn(x), x + 2)
+                self.assertEqual(gathered, [GuardCollectiveState.HIT] * calls)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(counters["frames"]["total"], 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @parametrize("recursive", [False, True])
+    def test_recursive_precompile_skip_reports_skip_and_skips_callees(self, recursive):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def callee(x):
+            return x + 1
+
+        def fn(x):
+            return callee(x)
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__, recursive=recursive)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), x + 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+        # Only a non-recursive skip lets the callee reach Dynamo as its own frame.
+        self.assertEqual(cnt.frame_count, 0 if recursive else 1)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_recursive_precompile_skip_survives_a_recompile_that_traces_no_graph(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def callee(x):
+            return x + 1
+
+        # The int input never reaches callee, which Dynamo would otherwise
+        # mark skipped on its own for having no tensors.
+        def fn(x):
+            return x + 1 if isinstance(x, int) else callee(x)
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__, recursive=True)
+        guard_results = []
+        hook_result = GuardCollectiveState.MISS
+
+        def hook(state):
+            guard_results.append(state)
+            return hook_result
+
+        old_hook = set_guard_complete_hook(hook)
+        try:
+            # An int input traces no graph, so the recompile a peer's miss
+            # forces leaves the frame skipped, callees included.
+            self.assertEqual(compiled_fn(3), 4)
+            hook_result = GuardCollectiveState.HIT
+            self.assertEqual(compiled_fn(x), x + 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(
+            guard_results, [GuardCollectiveState.SKIP, GuardCollectiveState.SKIP]
+        )
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    def test_recursive_precompile_skip_recompile_with_a_graph_compiles_callees(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_skip,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.types import GuardCollectiveState
+
+        def callee(x):
+            return x * 2
+
+        def fn(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return callee(y)
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        _load_precompile_skip(fn.__code__, recursive=True)
+        guard_results = []
+        hook_result = GuardCollectiveState.MISS
+
+        def hook(state):
+            guard_results.append(state)
+            return hook_result if hook_result is not None else state
+
+        old_hook = set_guard_complete_hook(hook)
+        try:
+            # The recompile a peer's miss forces produces a graph, so the
+            # resume function (and the callee it calls) reaches Dynamo like
+            # the peers' compiled code instead of keeping the recursive skip.
+            self.assertEqual(compiled_fn(x), (x + 1) * 2)
+            self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+            self.assertEqual(cnt.frame_count, 2)
+            guard_results.clear()
+            hook_result = None
+            self.assertEqual(compiled_fn(x), (x + 1) * 2)
+        finally:
+            set_guard_complete_hook(old_hook)
+        # fn and its resume function both hit their new entries.
+        self.assertEqual(
+            guard_results, [GuardCollectiveState.HIT, GuardCollectiveState.HIT]
+        )
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_skip_code_does_not_run_guard_complete_hook(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt)
+        torch._dynamo.eval_frame.skip_code(fn.__code__)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [])
+        self.assertEqual(cnt.frame_count, 0)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
+    @torch._dynamo.testing.lru_cache_reordering(False)
+    def test_precompile_entry_without_lru_follows_an_older_cache_entry(self):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+        )
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def fn(x):
+            return x + 1
+
+        def injected(x):
+            return x + 100
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(3)
+        self.assertEqual(compiled_fn(x), fn(x))
+        # Without LRU the oldest entry is tried first, so the cache entry
+        # outranks this newer guardless precompile entry, and the no-guard
+        # fast path must not serve the precompile entry.
+        _load_precompile_entry(
+            fn.__code__,
+            torch._dynamo.guards.GuardManagerWrapper(
+                torch._dynamo.guards.RootGuardManager()
+            ),
+            injected.__code__,
+        )
+        self.assertEqual(compiled_fn(x), fn(x))
+        # An invalidated cache entry no longer outranks it, so the fast path
+        # serves the precompile entry without a guarded lookup.
+        (entry,) = _debug_get_cache_entry_list(fn)
+        manager = entry.guard_manager
+        manager.extra_state.invalidate(
+            manager.cache_entry, torch._dynamo.guards.DeletedGuardManagerWrapper("")
+        )
+        with torch.profiler.profile() as prof:
+            self.assertEqual(compiled_fn(x), injected(x))
+        self.assertFalse(
+            any("TorchDynamo Cache Lookup" in e.name for e in prof.events())
+        )
+        _reset_precompile_entries(fn.__code__)
 
     def test_precompile_fail_on_recompile(self):
         from torch._C._dynamo.eval_frame import _load_precompile_entry
@@ -16360,6 +16862,73 @@ fn
 
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_no_zero_one_recompile(self):
+        buf = torch.randn(64)
+        # (8, 3): the first offset equals the size 8, which duck sizing would tie.
+        for offsets in ((5, 0, 1, 7), (0, 5, 1, 7), (1, 0, 5), (8, 3)):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnt, dynamic=True)
+            def fn(x):
+                return x * 2
+
+            for offset in offsets:
+                x = buf[offset : offset + 8]
+                self.assertEqual(fn(x), x * 2)
+            self.assertEqual(cnt.frame_count, 1, offsets)
+
+    @torch.fx.experimental._config.patch(dynamic_storage_offset=True)
+    def test_dynamic_storage_offset_range(self):
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        shape_env = ShapeEnv()
+        _, _, offset = shape_env.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(64)[0:8],
+            ConstantSource("x"),
+            symbolic_context=StatelessSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC]
+            ),
+        )
+        expr = offset.node.expr
+        self.assertEqual(shape_env.var_to_range[expr], ValueRanges(0, int_oo))
+        self.assertTrue(expr.is_nonnegative)
+        self.assertIsNone(expr.is_positive)
+
+        def fn(x):
+            if x.storage_offset() > 0:
+                return x * 2
+            return x + 1
+
+        buf = torch.randn(64)
+        # (0, 5): the offset-0 graph refines the symbol to 0, which still needs a guard.
+        for offsets in ((5, 0, 1), (0, 5)):
+            torch._dynamo.reset()
+            opt_fn = torch.compile(fn, backend="eager", dynamic=True)
+            for offset in offsets:
+                x = buf[offset : offset + 8]
+                self.assertEqual(opt_fn(x), fn(x), offsets)
+
+    def test_storage_offset_refined_to_constant_is_guarded(self):
+        def fn(x):
+            if x.storage_offset() > 2:
+                return x * 2
+            return x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, dynamic=True)
+        buf = torch.randn(64)
+        # Offset 2 refines the offset symbol's [2, int_oo] range to the constant 2.
+        for offset in (2, 5):
+            x = buf[offset : offset + 8]
+            self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_infer_unbacked_size_gt_zero(self):

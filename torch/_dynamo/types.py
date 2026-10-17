@@ -14,6 +14,7 @@ ensuring type safety and clear contracts between different components of the sys
 import dataclasses
 import types
 from collections.abc import Callable, Mapping
+from enum import IntEnum
 from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
@@ -130,11 +131,24 @@ class DynamoGuardHook(Protocol):
     ) -> None: ...
 
 
+class GuardCollectiveState(IntEnum):
+    """A rank's guard result for one frame, as exchanged by guard collectives.
+
+    MISS and HIT keep the values of the ``False`` / ``True`` a guard-complete
+    hook used to take and return. SKIP is a frame a loaded artifact skips (no
+    compiled code, or bypassed/lossy, with its callees), which runs eagerly.
+    """
+
+    MISS = 0
+    HIT = 1
+    SKIP = 2
+
+
 class DynamoGuardCompleteHook(Protocol):
     def __call__(
         self,
-        cache_hit: bool,
-    ) -> bool: ...
+        local_state: int,
+    ) -> int: ...
 
 
 class ProfilerStartHook(Protocol):
