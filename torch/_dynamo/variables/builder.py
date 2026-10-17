@@ -1390,6 +1390,11 @@ class VariableBuilder:
                     result,  # type: ignore[arg-type]
                     source=self.source,
                 )
+                # OrderedDict has tp_dictoffset: the instance __dict__ mutates
+                # alongside the dict contents.
+                return self.tx.output.side_effects.track_object_existing(
+                    value, result, mutation_type_cls=ValueAndAttributeMutationExisting
+                )
             else:
                 result = ConstDictVariable(
                     result,  # type: ignore[arg-type]
