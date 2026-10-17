@@ -512,6 +512,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.bincount: lambda input, weights=None, minlength=0: -1,
         torch.binomial: lambda count, prob, generator=None: -1,
         torch.bitwise_and: lambda input, other, out=None: -1,
+        torch.bitwise_count: lambda input, out=None: -1,
         torch.bitwise_not: lambda input, out=None: -1,
         torch.bitwise_or: lambda input, other, out=None: -1,
         torch.bitwise_xor: lambda input, other, out=None: -1,
