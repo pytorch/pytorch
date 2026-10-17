@@ -1081,6 +1081,70 @@ class TestLinalg(TestCase):
             self.assertEqual(H, Href, atol=1e-9, rtol=1e-7)
 
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.double, torch.cdouble)
+    def test_solve_det_slogdet_forward_over_reverse_without_create_graph(
+        self, device, dtype
+    ):
+        # Regression for #200600: with create_graph=False, the saved-LU path in
+        # linalg_solve / det / slogdet backward drops A's forward-mode tangent.
+        # Compare create_graph=False against create_graph=True on well-conditioned
+        # random inputs (vector/matrix RHS, left, batched, real/complex).
+        gen = torch.Generator(device=device).manual_seed(0)
+
+        def well_conditioned(batch, n):
+            A = torch.randn(
+                *batch, n, n, generator=gen, device=device, dtype=dtype
+            )
+            return A + (n + 1) * torch.eye(n, device=device, dtype=dtype)
+
+        def tangent_of_grad(f, A0, V, create_graph):
+            with fwAD.dual_level():
+                A = fwAD.make_dual(A0, V)
+                out = f(A)
+                # autograd.grad needs a real scalar; complex det/solve outputs
+                # are not valid as implicit grad targets.
+                scalar = out.real.sum() if out.is_complex() else out.sum()
+                g, = torch.autograd.grad(
+                    scalar, A0, create_graph=create_graph
+                )
+                return fwAD.unpack_dual(g).tangent
+
+        def check(f, A0, V):
+            t_false = tangent_of_grad(f, A0, V, create_graph=False)
+            t_true = tangent_of_grad(f, A0, V, create_graph=True)
+            self.assertIsNotNone(t_false)
+            self.assertEqual(t_false, t_true)
+
+        # det / slogdet
+        for batch in ((), (2,)):
+            A0 = well_conditioned(batch, 3).requires_grad_()
+            V = torch.randn_like(A0)
+            check(torch.linalg.det, A0, V)
+            check(lambda X: torch.linalg.slogdet(X).logabsdet, A0, V)
+
+        # linalg.solve: left True/False, vector vs matrix B, batched.
+        # left=False with a vector RHS is not supported.
+        for batch, n, left, vector_b in product(
+            ((), (2,)), (3,), (True, False), (True, False)
+        ):
+            if not left and vector_b:
+                continue
+            A0 = well_conditioned(batch, n).requires_grad_()
+            V = torch.randn_like(A0)
+            if vector_b:
+                B = torch.randn(*batch, n, generator=gen, device=device, dtype=dtype)
+            else:
+                B = torch.randn(
+                    *batch, n, 2, generator=gen, device=device, dtype=dtype
+                )
+            check(
+                lambda X, B=B, left=left: torch.linalg.solve(X, B, left=left),
+                A0,
+                V,
+            )
+
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):

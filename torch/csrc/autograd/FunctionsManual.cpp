@@ -4737,8 +4737,9 @@ Tensor linalg_det_backward(
   auto d = at::diag_embed(d_diag.unsqueeze(-1).expand_as(pivots)).mT();
   auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
 
-  // Optimisation if we are not going to compute higher-order gradients
-  if (!at::GradMode::is_enabled()) {
+  // Optimisation if we are not going to compute higher-order gradients.
+  // Also recompute when A carries a forward tangent (saved LU would drop it).
+  if (!at::GradMode::is_enabled() && !isFwGradDefined(A)) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
     // is invertible det is C^1, so if it's not invertible, we can apply a
     // perturbation to the LU decomposition and use the resulting matrix as a
@@ -4890,7 +4891,8 @@ Tensor slogdet_backward(
   // since this function is not differentiable on singular matrices
   // Optimisation, Make it F-transposed as it's what lu_solve expects
   auto d = at::diag_embed(g.unsqueeze(-1).expand_as(pivots)).mT();
-  if (!at::GradMode::is_enabled()) {
+  // Also recompute when A carries a forward tangent (saved LU would drop it).
+  if (!at::GradMode::is_enabled() && !isFwGradDefined(A)) {
     auto use_A_T = A.is_contiguous() && !A.is_complex();
     return at::linalg_lu_solve(
         LU, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
@@ -6674,10 +6676,11 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
     return vector_case ? X.squeeze(-1) : X;
   };
 
-  // If the user is going to compute higher order gradients, then we need to
-  // recompute the LU and the pivots
+  // Recompute when higher-order grads are needed, or when A carries a forward
+  // tangent, which the saved LU would drop (forward-over-reverse with
+  // create_graph=False).
   Tensor gB_;
-  if (at::GradMode::is_enabled()) {
+  if (at::GradMode::is_enabled() || isFwGradDefined(A)) {
     gB_ = at::linalg_solve(A.mH(), vector_to_matrix(gX), left);
   } else {
     gB_ = at::linalg_lu_solve(
