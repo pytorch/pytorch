@@ -7139,7 +7139,15 @@ def multi_head_attention_forward(
             attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
         if not torch.jit.is_scripting():
             del q_scaled, k
-        attn_output_weights = softmax(attn_output_weights, dim=-1)
+        if attn_mask is not None:
+            # A fully masked row (all -inf) is 0/0 under plain softmax and gives
+            # NaN weights; autograd then carries the NaN into every parameter
+            # gradient, even when the caller excludes that row from the loss.
+            # _safe_softmax returns 0 for fully masked rows, NaN-free in both
+            # forward and backward: the same semantic SDPA uses (gh-133882).
+            attn_output_weights = torch._safe_softmax(attn_output_weights, dim=-1)
+        else:
+            attn_output_weights = softmax(attn_output_weights, dim=-1)
         if dropout_p > 0.0:
             attn_output_weights = dropout(attn_output_weights, p=dropout_p)
 
