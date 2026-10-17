@@ -64,14 +64,13 @@ from torch.testing._internal.common_utils import (
     first_sample,
     HardwareClassification,
     IS_CI,
-    IS_FBCODE,
     is_iterable_of_tensors,
     IS_S390X,
-    IS_SANDCASTLE,
     noncontiguous_like,
     parametrize,
     run_tests,
     set_default_dtype,
+    skipIfMeta,
     skipIfMPS,
     skipIfTorchDynamo,
     skipIfTorchInductor,
@@ -1907,9 +1906,7 @@ class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
     # in aten/src/ATen/native/README.md for more details
-    @unittest.skipIf(
-        IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
-    )
+    @skipIfMeta("__torch_dispatch__ does not work in fbcode")
     @skipOps(
         {
             xfail("item"),
@@ -1952,9 +1949,7 @@ class TestCompositeCompliance(TestCase):
                 op, args, kwargs, self.assertEqual
             )
 
-    @unittest.skipIf(
-        IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
-    )
+    @skipIfMeta("__torch_dispatch__ does not work in fbcode")
     @skipOps(
         {
             xfail("istft"),
@@ -1990,9 +1985,7 @@ class TestCompositeCompliance(TestCase):
                 self.assertEqual,
             )
 
-    @unittest.skipIf(
-        IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
-    )
+    @skipIfMeta("__torch_dispatch__ does not work in fbcode")
     @skipOps(
         {
             xfail("narrow"),

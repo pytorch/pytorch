@@ -3,7 +3,6 @@
 import io
 import os
 import sys
-import unittest
 
 import torch
 import torch._C
@@ -11,11 +10,10 @@ from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     find_library_location,
-    IS_FBCODE,
     IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     raise_on_run_directly,
+    skipIfMetaOr,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -58,8 +56,8 @@ class BasicModule(torch.nn.Module):
 
 
 # This is ignored in IS_WINDOWS or IS_MACOS cases. Hence we need the one in TestBackends.
-@unittest.skipIf(
-    IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+@skipIfMetaOr(
+    IS_WINDOWS or IS_MACOS,
     "Non-portable load_library call used in test",
 )
 class JitBackendTestCase(JitTestCase):
@@ -442,8 +440,8 @@ class SelectiveLoweringTest(JitBackendTestCase):
 
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-@unittest.skipIf(
-    IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+@skipIfMetaOr(
+    IS_WINDOWS or IS_MACOS,
     "Non-portable load_library call used in test",
 )
 class TestBackends(JitTestCase):
@@ -501,8 +499,8 @@ class BasicModuleAdd(torch.nn.Module):
 
 
 # This is ignored in IS_WINDOWS or IS_MACOS cases. Hence we need the one in TestBackends.
-@unittest.skipIf(
-    IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+@skipIfMetaOr(
+    IS_WINDOWS or IS_MACOS,
     "Non-portable load_library call used in test",
 )
 class JitBackendTestCaseWithCompiler(JitTestCase):
@@ -684,8 +682,8 @@ class CompModuleTestWithCompiler(JitBackendTestCase):
 
 
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-@unittest.skipIf(
-    IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+@skipIfMetaOr(
+    IS_WINDOWS or IS_MACOS,
     "Non-portable load_library call used in test",
 )
 class TestBackendsWithCompiler(JitTestCase):
