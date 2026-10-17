@@ -67,6 +67,97 @@ POOL_BACKWARD_FNS = {
 }
 
 
+aten = torch.ops.aten
+
+
+def _max_pool_idx(t):
+    pool = F.max_pool2d if t.ndim == 4 else F.max_pool3d
+    return pool(t, 3, 2, return_indices=True)[1]
+
+
+def _adaptive_max_pool_idx(t):
+    if t.ndim == 4:
+        return F.adaptive_max_pool2d(t, (5, 5), return_indices=True)[1]
+    return F.adaptive_max_pool3d(t, (3, 3, 3), return_indices=True)[1]
+
+
+# name -> (spatial_rank, indices fn, backward fn, linear in grad_output).
+# Kernel 3 / stride 2 and the adaptive output sizes make the windows overlap,
+# so the indices contain duplicates.
+POOL_BACKWARD_PARTIAL_FNS = {
+    "avg_pool2d_backward": (
+        2,
+        _max_pool_idx,
+        lambda g, x, i: aten.avg_pool2d_backward(
+            g, x, [3, 3], [2, 2], [0, 0], False, True, None
+        ),
+        True,
+    ),
+    "avg_pool3d_backward": (
+        3,
+        _max_pool_idx,
+        lambda g, x, i: aten.avg_pool3d_backward(
+            g, x, [3, 3, 3], [2, 2, 2], [0, 0, 0], False, True, None
+        ),
+        True,
+    ),
+    "_adaptive_avg_pool2d_backward": (
+        2,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten._adaptive_avg_pool2d_backward(g, x),
+        True,
+    ),
+    "_adaptive_avg_pool3d_backward": (
+        3,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten._adaptive_avg_pool3d_backward(g, x),
+        True,
+    ),
+    "max_pool2d_with_indices_backward": (
+        2,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_pool2d_with_indices_backward(
+            g, x, [3, 3], [2, 2], [0, 0], [1, 1], False, i
+        ),
+        True,
+    ),
+    "max_pool3d_with_indices_backward": (
+        3,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_pool3d_with_indices_backward(
+            g, x, [3, 3, 3], [2, 2, 2], [0, 0, 0], [1, 1, 1], False, i
+        ),
+        True,
+    ),
+    "adaptive_max_pool2d_backward": (
+        2,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten.adaptive_max_pool2d_backward(g, x, i),
+        True,
+    ),
+    "adaptive_max_pool3d_backward": (
+        3,
+        _adaptive_max_pool_idx,
+        lambda g, x, i: aten.adaptive_max_pool3d_backward(g, x, i),
+        True,
+    ),
+    # max_unpool keeps one of the duplicates instead of adding them, so it is
+    # not linear and a Partial input must be reduced first.
+    "max_unpool2d": (
+        2,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_unpool2d(g, i, x.shape[2:]),
+        False,
+    ),
+    "max_unpool3d": (
+        3,
+        _max_pool_idx,
+        lambda g, x, i: aten.max_unpool3d(g, i, x.shape[2:], [2, 2, 2], [0, 0, 0]),
+        False,
+    ),
+}
+
+
 class DistMathOpsTest(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
@@ -1790,22 +1881,23 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             self.assertTrue(dt_x.grad.placements[0].is_shard(shard_dim))
 
     @with_comms
-    @parametrize("op_name", ["avg_pool2d_backward", "max_unpool2d"])
+    @parametrize("op_name", list(POOL_BACKWARD_PARTIAL_FNS))
     @parametrize("reduce_op", ["sum", "avg"])
     def test_pooling_backward_partial(self, op_name, reduce_op):
-        aten = torch.ops.aten
-        ops = {
-            "avg_pool2d_backward": lambda g, x, idx: aten.avg_pool2d_backward(
-                g, x, [2, 2], [2, 2], [0, 0], False, True, None
-            ),
-            "max_unpool2d": lambda g, x, idx: aten.max_unpool2d(g, idx, [8, 8]),
-        }
-        fn = ops[op_name]
+        spatial_rank, index_fn, fn, linear = POOL_BACKWARD_PARTIAL_FNS[op_name]
         device_mesh = self.build_device_mesh()
-        x = torch.randn(12, 12, 8, 8, device=self.device_type)
-        _, idx = F.max_pool2d(x, 2, return_indices=True)
-        g = torch.randn(12, 12, 4, 4, device=self.device_type)
-        local_g = g / self.world_size if reduce_op == "sum" else g
+        size = 16 if spatial_rank == 2 else 8
+        x = torch.randn(12, 12, *(size,) * spatial_rank, device=self.device_type)
+        idx = index_fn(x)
+        # Positions that share an index get the same value, so the reference
+        # does not depend on which duplicate max_unpool happens to keep.
+        values = torch.randn(12, 12, size**spatial_rank, device=self.device_type)
+        g = values.gather(2, idx.flatten(2)).view_as(idx)
+        # Every rank holds a different share; the shares reduce back to g.
+        shares = torch.randn(self.world_size, *g.shape, device=self.device_type)
+        total = g if reduce_op == "sum" else g * self.world_size
+        shares[-1] = total - shares[:-1].sum(0)
+        local_g = map_local_for_rank(self.rank, lambda rank: shares[rank])
         dt_g = DTensor.from_local(
             local_g, device_mesh, [Partial(reduce_op)], run_check=False
         )
@@ -1814,8 +1906,12 @@ class DistMathOpsTest(DTensorContinuousTestBase):
 
         with CommDebugMode() as comm_mode:
             dt_out = fn(dt_g, dt_x, dt_idx)
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertEqual(dt_out.placements, (Partial(reduce_op),))
+        if linear:
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(dt_out.placements, (Partial(reduce_op),))
+        else:
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertFalse(dt_out.placements[0].is_partial())
         self.assertEqual(dt_out.full_tensor(), fn(g, x, idx))
 
     @with_comms
