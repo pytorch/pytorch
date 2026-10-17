@@ -9,28 +9,29 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
-#include <map>
 #include <unordered_map>
 #include <utility>
 
 namespace c10d::symmetric_memory {
 
-// The previous guarded operation of one capture context.
-struct GroupStreamGuard::Frontier {
-  // Recorded at the end of each guarded operation of the context on that
-  // operation's stream. A wait binds to the most recent record, so one event
-  // per context suffices.
+// The last guarded operation of one capture context: the event recorded
+// after its launch and the stream it launched on. A wait binds to the most
+// recent record, so one event per context suffices.
+struct GroupStreamGuard::LastOp {
   c10::cuda::CUDAEvent done;
-  // Stream of the previous guarded operation of the context.
-  std::optional<c10::cuda::CUDAStream> last_stream;
+  std::optional<c10::cuda::CUDAStream> stream;
 };
 
 struct GroupStreamGuard::State {
   std::mutex mu;
-  // One frontier per capture context, nullopt for eager. A single frontier
-  // would let an operation of one context overwrite another's, and the next
-  // operation of that other context would then wait on nothing.
-  std::map<std::optional<c10::CaptureId_t>, Frontier> frontiers;
+  // An event can only be waited on from the capture context it was recorded
+  // in, so eager operations and the current capture each keep their own last
+  // operation. One capture is tracked at a time: a new capture id takes over
+  // the capture slot, so captures interleaved from several threads are not
+  // ordered within themselves.
+  LastOp eager;
+  std::optional<c10::CaptureId_t> capture_id;
+  LastOp capture;
   // Owning group, for liveness only.
   std::optional<c10::weak_intrusive_ptr<c10d::ProcessGroup>> pg;
 };
@@ -86,51 +87,36 @@ std::shared_ptr<GroupStreamGuard::State> get_group_stream_state(
 
 } // namespace
 
-void GroupStreamGuard::init_(const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
+GroupStreamGuard::GroupStreamGuard(const std::string& group_name) {
+  const auto pg = c10d::resolve_process_group(group_name);
   TORCH_CHECK(pg != nullptr, "GroupStreamGuard: null ProcessGroup");
   const auto cur = c10::cuda::getCurrentCUDAStream();
   state_ = get_group_stream_state(pg, cur.device_index());
   lock_ = std::unique_lock<std::mutex>(state_->mu);
+
   const auto capture = c10::cuda::captureIdMayInitCtx(cur.stream());
-
-  // Drop the frontiers of captures that have ended, comparing streams rather
-  // than querying them, since a stored stream may since have been destroyed
-  // (an external stream). A stream is in at most one capture and stays in it
-  // until the capture ends, so a capture frontier whose last stream now runs
-  // in another context is never needed again. At most one dead frontier per
-  // stream remains.
-  auto& frontiers = state_->frontiers;
-  std::erase_if(frontiers, [&](const auto& entry) {
-    const auto& [ctx, f] = entry;
-    return ctx.has_value() && ctx != capture &&
-        (!f.last_stream.has_value() || *f.last_stream == cur);
-  });
-  auto it = frontiers.try_emplace(capture).first;
-
-  auto& frontier = it->second;
-  if (frontier.last_stream.has_value() && *frontier.last_stream != cur) {
+  last_ = &state_->eager;
+  if (capture.has_value()) {
+    if (state_->capture_id != capture) {
+      // A new capture: the previous capture's event cannot be waited on from
+      // here, so its slot starts over.
+      state_->capture_id = capture;
+      state_->capture.stream.reset();
+    }
+    last_ = &state_->capture;
+  }
+  if (last_->stream.has_value() && *last_->stream != cur) {
     // Waits for the previous pad operation of this context only: the event
     // was recorded just after its launch.
-    frontier.done.block(cur);
+    last_->done.block(cur);
   }
-  frontier.last_stream = cur;
-  frontier_ = &frontier;
-}
-
-GroupStreamGuard::GroupStreamGuard(const std::string& group_name) {
-  init_(c10d::resolve_process_group(group_name));
-}
-
-GroupStreamGuard::GroupStreamGuard(
-    const std::string& /*group_name*/,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& pg) {
-  init_(pg);
+  last_->stream = cur;
 }
 
 GroupStreamGuard::~GroupStreamGuard() {
   // Still under state_->mu, so the next guard's wait cannot be enqueued
   // before this record. Unconditional: the next stream is unknown here.
-  if (frontier_ == nullptr || !frontier_->last_stream.has_value()) {
+  if (last_ == nullptr || !last_->stream.has_value()) {
     return;
   }
   // record() throws on a stream carrying an earlier launch error, which in a
@@ -139,7 +125,7 @@ GroupStreamGuard::~GroupStreamGuard() {
   // clears a non-sticky error, so this warning is its only report.
   bool recorded = false;
   try {
-    frontier_->done.record(*frontier_->last_stream);
+    last_->done.record(*last_->stream);
     recorded = true;
   } catch (const std::exception& e) {
     TORCH_WARN(
@@ -153,7 +139,7 @@ GroupStreamGuard::~GroupStreamGuard() {
   if (!recorded) {
     // No event to wait on: the next operation of this context runs unordered
     // against this one.
-    frontier_->last_stream.reset();
+    last_->stream.reset();
   }
 }
 
