@@ -561,6 +561,8 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
       Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
       at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
     }
+    // Finish staging on every thread before publishing the block's signal.
+    __syncthreads();
   }
   // TODO make it sync with one block for no-copy case
   sync_remote_blocks<true, true>(signal_pads, rank, world_size);
@@ -823,7 +825,8 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
   static_assert(alignment % sizeof(T) == 0);
   constexpr size_t numel_per_thread = alignment / sizeof(T);
 
-  sync_remote_blocks<false, true>(signal_pads, rank, world_size);
+  // Publish preceding kernel writes before peers overwrite this buffer.
+  sync_remote_blocks<true, true>(signal_pads, rank, world_size);
   __syncthreads();
 
   const size_t numel_per_rank =
