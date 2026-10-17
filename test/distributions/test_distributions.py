@@ -4253,6 +4253,14 @@ class TestDistributions(DistributionsTestCase):
             invalid_sample = torch.cat([sample, sample.new_ones(1, dim)], dim=0)
             self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
 
+    def test_independent_empty_batch(self):
+        base = Normal(torch.zeros(0, 3), torch.ones(0, 3))
+        dist = Independent(base, 1)
+        value = torch.zeros(0, 3)
+
+        self.assertEqual(dist.log_prob(value).shape, torch.Size((0,)))
+        self.assertEqual(dist.entropy().shape, torch.Size((0,)))
+
     @expectedFailureMPS
     def test_independent_shape(self):
         for Dist, params in _get_examples():
