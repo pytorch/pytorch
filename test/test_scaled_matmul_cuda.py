@@ -3147,6 +3147,58 @@ class TestFP8Matmul(TestCase):
                 swizzle_b=[SwizzleType.SWIZZLE_32_4_4, ],
             )
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
+    @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
+    @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    def test_blockwise_output_dtype(self, device, recipe, output_dtype) -> None:
+        # The CUDA MXFP4 kernel only writes row-major bf16 without bias; anything
+        # else used to be silently wrong (e.g. fp32 out read back packed bf16).
+        if recipe == "mxfp4" and IS_SM12X:
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        M, K, N = 128, 256, 256
+        block_k = 16 if recipe == "nvfp4" else 32
+        scale_dtype = torch.float8_e4m3fn if recipe == "nvfp4" else torch.float8_e8m0fnu
+        # FP4-representable values with unit scales make the fp32 result exact.
+        fp4_values = torch.tensor([0, 0.5, 1, 1.5, 2, 3, 4, 6], device=device)
+        x = fp4_values[torch.randint(0, 8, (M, K), device=device)] * (torch.randint(0, 2, (M, K), device=device) * 2 - 1)
+        y = fp4_values[torch.randint(0, 8, (N, K), device=device)] * (torch.randint(0, 2, (N, K), device=device) * 2 - 1)
+        if recipe == "mxfp8":
+            x_lowp, y_lowp = x.to(e4m3_type), y.to(e4m3_type)
+        else:
+            x_lowp = _bfloat16_to_float4_e2m1fn_x2(x.bfloat16())
+            y_lowp = _bfloat16_to_float4_e2m1fn_x2(y.bfloat16())
+        scale_a = to_blocked(torch.ones(M, K // block_k, device=device).to(scale_dtype))
+        scale_b = to_blocked(torch.ones(N, K // block_k, device=device).to(scale_dtype))
+        block = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
+        swizzle = SwizzleType.SWIZZLE_32_4_4
+        ref = x @ y.t()
+        bias = torch.randn(N, device=device).to(output_dtype)
+
+        def run(bias=None):
+            return scaled_mm(
+                x_lowp, y_lowp.t(), scale_a, block, scale_b, block,
+                swizzle_a=swizzle, swizzle_b=swizzle, bias=bias, output_dtype=output_dtype,
+            )
+
+        if recipe == "mxfp4" and output_dtype != torch.bfloat16:
+            with self.assertRaisesRegex(ValueError, "MXFP4 scaled_mm on CUDA only supports bfloat16 output"):
+                run()
+            return
+        out = run()
+        self.assertEqual(out.dtype, output_dtype)
+        self.assertEqual(out, ref.to(output_dtype), atol=0, rtol=0)
+
+        if recipe != "mxfp4":
+            return
+        with self.assertRaisesRegex(ValueError, "MXFP4 scaled_mm on CUDA does not support bias"):
+            run(bias)
+        out_t = torch.empty(N, M, device=device, dtype=output_dtype).t()
+        with self.assertRaisesRegex(ValueError, "MXFP4 scaled_mm on CUDA requires a contiguous output tensor"):
+            torch.ops.aten._scaled_mm_v2.out(
+                x_lowp, y_lowp.t(), [scale_a], [block.value], [swizzle.value],
+                [scale_b], [block.value], [swizzle.value], None, output_dtype, out=out_t,
+            )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
