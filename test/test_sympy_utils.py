@@ -47,6 +47,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
+from torch._inductor.codegen.cpp_utils import CppPrinter as InductorCppPrinter
 from torch._inductor.index_propagation import TypedExpr
 
 
@@ -232,6 +233,39 @@ class TestNumbers(TestCase):
 
 
 class TestCppPrinter(TestCase):
+    def test_inductor_int64_comparisons_with_oversized_bounds(self):
+        printer = InductorCppPrinter()
+        for name, bound, relation, reverse in itertools.product(
+            ("s0", "u0"),
+            (-(1 << 63) - 1, 1 << 63, -10 * (sys.maxsize // 2), 10 * (sys.maxsize // 2)),
+            (sympy.Le, sympy.Lt, sympy.Ge, sympy.Gt, sympy.Eq, sympy.Ne),
+            (False, True),
+        ):
+            symbol = sympy.Symbol(name, integer=True)
+            args = (sympy.Integer(bound), symbol) if reverse else (symbol, sympy.Integer(bound))
+            expr = relation(*args, evaluate=False)
+            with self.subTest(name=name, bound=bound, relation=relation, reverse=reverse):
+                expected = bool(expr.subs(symbol, 0))
+                self.assertEqual(
+                    printer.doprint(expr, simplify=False),
+                    "true" if expected else "false",
+                )
+                for value in (-(1 << 63), sys.maxsize):
+                    self.assertEqual(bool(expr.subs(symbol, value)), expected)
+
+    def test_inductor_preserves_finite_bounds_and_rejects_oversized_arithmetic(self):
+        printer = InductorCppPrinter()
+        symbol = sympy.Symbol("u0", integer=True)
+        self.assertEqual(printer.doprint(symbol <= 7, simplify=False), "u0 <= 7L")
+        self.assertEqual(printer.doprint(symbol >= 0, simplify=False), "u0 >= 0L")
+        for expr in (
+            symbol + (1 << 63),
+            sympy.Symbol("zuf0") <= (1 << 63),
+            sympy.Symbol("s0", real=True) <= (1 << 63),
+        ):
+            with self.subTest(expr=expr), self.assertRaises(OverflowError):
+                printer.doprint(expr, simplify=False)
+
     def test_min_max_preserve_float_expressions(self):
         s0 = sympy.Symbol("s0")
         expr = TorchSymMin(
