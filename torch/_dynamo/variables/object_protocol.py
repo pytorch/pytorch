@@ -30,8 +30,6 @@ from torch._C._dynamo import (
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
-    handle_observed_exception,
-    ObservedTypeError,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
@@ -450,22 +448,23 @@ def generic_is_true(
     if obj.tp_as_number.nb_bool:
         return obj.nb_bool_impl(tx)
 
-    try:
-        length = generic_size(tx, obj)
-        from .tensor import SymNodeVariable
+    # An absent length slot makes the object truthy, but errors from an
+    # existing slot must propagate. PyObject_IsTrue checks mapping length first.
+    if obj.tp_as_mapping.mp_length is not None:
+        length = obj.mp_length_impl(tx)
+    elif obj.tp_as_sequence.sq_length is not None:
+        length = obj.sq_length_impl(tx)
+    else:
+        return ConstantVariable.create(True)
 
-        if isinstance(length, SymNodeVariable):
-            return SymNodeVariable.create(tx, length.as_proxy() > 0)
-        length_val = length.as_python_constant()
-        if length_val < 0:
-            raise_observed_exception(
-                ValueError, tx, args=["__len__() should return >= 0"]
-            )
-        return ConstantVariable.create(length_val > 0)
-    except ObservedTypeError:
-        handle_observed_exception(tx)
+    from .tensor import SymNodeVariable
 
-    return ConstantVariable.create(True)
+    if isinstance(length, SymNodeVariable):
+        return SymNodeVariable.create(tx, length.as_proxy() > 0)
+    length_val = length.as_python_constant()
+    if length_val < 0:
+        raise_observed_exception(ValueError, tx, args=["__len__() should return >= 0"])
+    return ConstantVariable.create(length_val > 0)
 
 
 _repr_running: set[int] = set()
