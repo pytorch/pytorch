@@ -110,6 +110,7 @@ from .eval_frame import (
     Constraint,
     dynamo_tls,
     get_eval_frame_isolate_recompiles_id,
+    get_eval_frame_isolate_recompiles_strict,
     innermost_backend,
     skip_code,
     TorchPatcher,
@@ -683,9 +684,12 @@ class ConvertFrameAssert:
         isolate_recompiles_id = get_eval_frame_isolate_recompiles_id()
         cache_entries = _get_cache_entries_for_region(code, isolate_recompiles_id)
         # For recompile-reason logging: lookup() also checks the default (-1)
-        # bucket for isolated regions, so include those entries here to avoid
-        # dropping their guard-failure reasons.
-        if isolate_recompiles_id >= 0:
+        # bucket for non-strict isolated regions, so include those entries here
+        # to avoid dropping their guard-failure reasons.
+        if (
+            isolate_recompiles_id >= 0
+            and not get_eval_frame_isolate_recompiles_strict()
+        ):
             cache_entries_for_reasons = cache_entries + _get_cache_entries_for_region(
                 code, -1
             )
