@@ -2135,6 +2135,99 @@ def entry(x):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    def test_installed_skip_reports_guard_collective_skip(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+        from torch._dynamo.types import GuardCollectiveState
+
+        def fn(x):
+            return x + 1
+
+        # No tensor ops: the frame is recorded with no guarded code.
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(3)
+        dynamo = package.cache_entry()
+        self.assertEqual([len(c.guarded_codes) for c in dynamo.codes], [0])
+
+        torch._dynamo.reset()
+        package = CompilePackage(fn, dynamo)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=counter, package=package)(fn)
+        package.install({})
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        old_hook = set_guard_complete_hook(record)
+        try:
+            self.assertEqual(compiled_fn(3), 4)
+        finally:
+            set_guard_complete_hook(old_hook)
+        self.assertEqual(guard_results, [GuardCollectiveState.SKIP])
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_skip_hold_transitions_report_guard_collective_skip(self):
+        from torch._C._dynamo.eval_frame import set_guard_complete_hook
+        from torch._dynamo.package import _update_skip_hold
+        from torch._dynamo.types import GuardCollectiveState
+
+        def callee(x):
+            return x + 1
+
+        def fn(x):
+            return callee(x)
+
+        # No tensor ops: the frame is recorded with no guarded code.
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(backend="eager", package=package)(fn)(3)
+        dynamo = package.cache_entry()
+
+        torch._dynamo.reset()
+        package = CompilePackage(fn, dynamo)
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=counter, package=package)(fn)
+        package.install({})
+        x = torch.ones(2)
+        guard_results = []
+
+        def record(state):
+            guard_results.append(state)
+            return state
+
+        def reports():
+            guard_results.clear()
+            self.assertEqual(compiled_fn(x), x + 1)
+            return list(guard_results)
+
+        code = fn.__code__
+        old_hook = set_guard_complete_hook(record)
+        try:
+            _update_skip_hold(code, True, hold=True)
+            self.assertEqual(reports(), [GuardCollectiveState.SKIP])
+            # A recursive hold skips the callee too.
+            self.assertEqual(counter.frame_count, 0)
+            # The recursive hold goes; the package's non-recursive one remains,
+            # so the callee compiles as its own frame.
+            _update_skip_hold(code, True, hold=False)
+            self.assertEqual(reports(), [GuardCollectiveState.SKIP])
+            self.assertEqual(counter.frame_count, 1)
+            # A second package's non-recursive hold goes; the first remains.
+            # The callee now hits its entry.
+            _update_skip_hold(code, False, hold=True)
+            _update_skip_hold(code, False, hold=False)
+            self.assertEqual(
+                reports(), [GuardCollectiveState.SKIP, GuardCollectiveState.HIT]
+            )
+            self.assertEqual(counter.frame_count, 1)
+            # The last hold goes: the frame compiles, with no entries to guard
+            # on yet, so it issues no collective.
+            package.uninstall()
+            self.assertEqual(reports(), [])
+            self.assertEqual(counter.frame_count, 2)
+        finally:
+            set_guard_complete_hook(old_hook)
+
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
         # active TracingContext (e.g. precompile warm-load). Reconstructing the
