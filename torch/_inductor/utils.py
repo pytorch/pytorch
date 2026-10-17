@@ -5016,6 +5016,16 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def is_strict_cuda_triton(device: torch.device | None) -> bool:
+    return (
+        config.strict_pointwise
+        and config.cuda_backend == "triton"
+        and torch.version.hip is None
+        and device is not None
+        and device.type == "cuda"
+    )
+
+
 def device_supports_fp64(device: torch.device | None) -> bool:
     """Check if the given device supports float64."""
     if device is not None and device.type == "xpu":

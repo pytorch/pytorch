@@ -95,6 +95,7 @@ from .utils import (
     is_gpu,
     is_nvidia_sm100_or_later,
     is_pointwise_use,
+    is_strict_cuda_triton,
     is_triton_fp8_dtype_supported,
     is_view,
     needs_fallback_due_to_atomic_add_limitations,
@@ -1436,6 +1437,39 @@ def trunc(x):
     if is_integer_type(x):
         return clone(x)
     fn = ops_wrapper("trunc")
+    return make_pointwise(fn)(x)
+
+
+@register_lowering(aten.round.decimals, type_promotion_kind=None)
+def round_decimals(x, decimals=0):
+    dtype = x.get_dtype()
+    if not (
+        is_strict_cuda_triton(x.get_device())
+        and dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    ):
+        return fallback_handler(aten.round.decimals, add_to_fallback_set=False)(
+            x, decimals=decimals
+        )
+    low_precision = dtype in (torch.float16, torch.bfloat16)
+    compute_dtype = torch.float32 if low_precision else dtype
+    try:
+        factor = 10.0 ** (decimals if decimals >= 0 else -decimals)
+    except OverflowError:
+        factor = float("inf")
+    factor = torch.tensor(factor, dtype=dtype, device="cpu").item()
+
+    def fn(value):
+        if low_precision:
+            value = ops.to_dtype(value, compute_dtype)
+        scale = ops.constant(factor, compute_dtype)
+        scaled = ops.div_rn(value, scale) if decimals < 0 else ops.mul(value, scale)
+        if low_precision:
+            # Eager's half/bfloat16 arithmetic rounds before nearbyint.
+            scaled = ops.to_dtype(scaled, dtype, use_compute_types=False)
+            scaled = ops.to_dtype(scaled, compute_dtype)
+        rounded = ops.round(scaled)
+        return ops.mul(rounded, scale) if decimals < 0 else ops.div_rn(rounded, scale)
+
     return make_pointwise(fn)(x)
 
 
@@ -8831,6 +8865,26 @@ register_op_dtype_propagation_rules(
 @register_lowering(aten.remainder, broadcast=True)
 def remainder(a, b):
     a, b = promote_constants((a, b), round_scalar_constants=True)
+    dtype = a.get_dtype()
+    if any(is_strict_cuda_triton(arg.get_device()) for arg in (a, b)) and dtype in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+    ):
+        compute_dtype = (
+            torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+        )
+
+        def fn(x, y):
+            x = ops.to_dtype(x, compute_dtype)
+            y = ops.to_dtype(y, compute_dtype)
+            mod = ops.fmod(x, y)
+            zero = ops.constant(0.0, compute_dtype)
+            opposite = ops.ne(ops.lt(mod, zero), ops.lt(y, zero))
+            correct_sign = ops.logical_and(ops.ne(mod, zero), opposite)
+            return ops.where(correct_sign, ops.add(mod, y), mod)
+
+        return make_pointwise(fn)(a, b)
     fn = ops_wrapper("remainder")
     return make_pointwise(fn)(a, b)
 
@@ -8871,7 +8925,48 @@ register_pointwise_numeric(aten.asinh)
 register_pointwise_numeric(aten.atan2)
 register_pointwise_numeric(aten.atan)
 register_pointwise_numeric(aten.atanh)
-register_pointwise_numeric(aten.copysign)
+_copysign_default_lowering = register_pointwise_numeric(aten.copysign)
+
+
+@register_lowering(
+    [aten.copysign.Tensor, aten.copysign.Scalar],
+    broadcast=False,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def copysign(a, b):
+    dtype = a.get_dtype()
+    if not (
+        any(
+            isinstance(arg, TensorBox) and is_strict_cuda_triton(arg.get_device())
+            for arg in (a, b)
+        )
+        and dtype in (torch.float16, torch.bfloat16)
+    ):
+        return _copysign_default_lowering(a, b)
+    a, b = promote_constants((a, b))
+    a_bits = TensorBox(DtypeView.create(a, torch.int16))
+    b_bits = TensorBox(DtypeView.create(b, torch.int16))
+    # Extract CPU scalars as integers to preserve their original NaN bits.
+    if a_bits.get_device() == torch.device("cpu"):
+        a_bits = clone(a_bits)
+        a_bits.realize()
+    if b_bits.get_device() == torch.device("cpu"):
+        b_bits = clone(b_bits)
+        b_bits.realize()
+    a_bits, b_bits = broadcast_tensors(a_bits, b_bits)
+
+    def fn(magnitude, sign):
+        return ops.bitwise_or(
+            ops.bitwise_and(magnitude, ops.constant(0x7FFF, torch.int16)),
+            ops.bitwise_and(sign, ops.constant(-0x8000, torch.int16)),
+        )
+
+    result = make_pointwise(fn)(a_bits, b_bits)
+    # Keep raw NaN encodings through the output reinterpretation.
+    result.realize()
+    return to_dtype_bitcast(result, dtype)
+
+
 register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
