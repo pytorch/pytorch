@@ -95,6 +95,7 @@ except ImportError:
 
 if has_triton_package():
     import triton
+    import triton.language as tl
 
     # triton.constexpr_function was introduced in Triton 3.5.
     if hasattr(triton, "constexpr_function"):
@@ -251,6 +252,58 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(can_use(shape=(size,), storage=size))
         self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
         self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_kernel_unwraps_scalar_constants(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        @triton.jit
+        def kernel(X, Y, N, scalar, BLOCK: tl.constexpr):
+            offsets = tl.arange(0, BLOCK)
+            value = tl.load(X + offsets, offsets < N, 0)
+            tl.store(Y + offsets, value + scalar, offsets < N)
+
+        layout = ir.FixedLayout(torch.device("cuda"), torch.float32, [8], [1])
+        x = ir.TensorBox.create(ir.InputBuffer(name="x", layout=layout))
+        y = ir.TensorBox.create(ir.InputBuffer(name="y", layout=layout))
+        size = sympy.Symbol("s0", integer=True, positive=True)
+        kernel_idx = kernel_side_table.add_kernel(kernel)
+        self._graph.current_node = next(iter(self._gm.graph.nodes))
+
+        for value, dtype, expected, signature in (
+            (2.5, torch.float32, 2.5, "fp32"),
+            (2, torch.float32, 2.0, "fp32"),
+            (2**40 + 3, torch.int64, 2**40 + 3, "i64"),
+            (1, torch.bool, True, "i1"),
+        ):
+            with self.subTest(dtype=dtype):
+                node = ir.UserDefinedTritonKernel(
+                    kernel_idx=kernel_idx,
+                    grid=[[1, 1, 1]],
+                    tma_descriptor_metadata={},
+                    kernel_args={
+                        "X": x,
+                        "Y": y,
+                        "N": size,
+                        "scalar": ir.Constant(
+                            value=value, dtype=dtype, device=torch.device("cpu")
+                        ),
+                        "BLOCK": 32,
+                    },
+                    launch_kwargs=(),
+                )
+                scalar = node.get_kwargs_value("scalar")
+                self.assertEqual(scalar, expected)
+                self.assertIs(type(scalar), type(expected))
+                self.assertIs(node.get_kwargs_value("N"), size)
+                self.assertEqual(
+                    triton_utils.signature_of(
+                        SizeArg("scalar", scalar),
+                        size_dtype=None,
+                        use_fp64_for_python_float=False,
+                    ),
+                    signature,
+                )
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):

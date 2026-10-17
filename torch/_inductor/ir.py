@@ -59,6 +59,7 @@ from torch._library.opaque_object import get_opaque_obj_repr, is_custom_class_ob
 from torch._native.ops.reductions import inner_tree_plan
 from torch._prims_common import (
     compute_required_storage_length,
+    dtype_to_type,
     is_boolean_dtype,
     is_contiguous_for_memory_format_or_false,
     is_float_dtype,
@@ -9043,6 +9044,12 @@ class UserDefinedTritonKernel(ExternKernel):
         kwargs: dict[str, IRNode] = {}
         constant_args: list[IRNode] = []
 
+        kernel_args = {
+            key: dtype_to_type(value.dtype)(value.value)
+            if isinstance(value, Constant)
+            else value
+            for key, value in kernel_args.items()
+        }
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
