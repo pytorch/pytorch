@@ -3769,6 +3769,193 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(p.keys()), list("bc"))
 
 
+class OrderedDictAttributeTests(torch._dynamo.test_case.TestCase):
+    """Attribute semantics of exact collections.OrderedDict (tp_dictoffset)."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_fresh_setattr(self):
+        def f(x):
+            d = OrderedDict()
+            d._metadata = 1
+            return x + d._metadata
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_fresh_nested_setattr(self):
+        def f(x):
+            d = OrderedDict()
+            d._metadata = OrderedDict()
+            d._metadata[""] = {"version": 1}
+            return x + len(d._metadata)
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_fresh_hasattr_after_setattr(self):
+        def f(x):
+            d = OrderedDict()
+            d._metadata = 1
+            return x + int(hasattr(d, "_metadata"))
+
+        x = torch.ones(2)
+        ref = f(x)
+        res = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
+    def test_fresh_attribute_escapes(self):
+        def f(x):
+            d = OrderedDict()
+            d._metadata = 1
+            d["a"] = 2
+            return d
+
+        res = torch.compile(f, backend="eager", fullgraph=True)(torch.ones(2))
+        self.assertIs(type(res), OrderedDict)
+        self.assertEqual(dict(res), {"a": 2})
+        self.assertEqual(res._metadata, 1)
+
+    def test_input_setattr_replayed(self):
+        def f(d, x):
+            d._metadata = 1
+            return x
+
+        d = OrderedDict()
+        torch.compile(f, backend="eager", fullgraph=True)(d, torch.ones(2))
+        self.assertEqual(d._metadata, 1)
+
+    def test_input_read_existing_attr(self):
+        def f(d, x):
+            return x + d.base
+
+        d = OrderedDict()
+        d.base = 3
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(d, torch.ones(2)), f(d, torch.ones(2)))
+
+        # The read is guarded on the attribute value.
+        counts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(f, backend=counts, fullgraph=True)
+        self.assertEqual(compiled(d, torch.ones(2)), torch.ones(2) + 3)
+        d.base = 4
+        self.assertEqual(compiled(d, torch.ones(2)), torch.ones(2) + 4)
+        self.assertEqual(counts.frame_count, 2)
+
+    def test_input_delete_attr(self):
+        def f(d, x):
+            del d.base
+            return x
+
+        d = OrderedDict()
+        d.base = 3
+        res = torch.compile(f, backend="eager", fullgraph=True)(d, torch.ones(2))
+        self.assertEqual(res, torch.ones(2))
+        self.assertNotIn("base", d.__dict__)
+
+    def test_hasattr_after_delete(self):
+        def f(d, x):
+            del d.base
+            return x + int(hasattr(d, "base"))
+
+        x = torch.ones(2)
+        d = OrderedDict()
+        d.base = 3
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(d, x), x)
+
+        def g(x):
+            d = OrderedDict()
+            d.base = 3
+            del d.base
+            return x + int(hasattr(d, "base"))
+
+        self.assertEqual(torch.compile(g, backend="eager", fullgraph=True)(x), x)
+
+    def test_delete_absent_attr_guard(self):
+        def f(d, x):
+            try:
+                del d.base
+                return x + 1
+            except AttributeError:
+                return x + 100
+
+        x = torch.ones(2)
+        d = OrderedDict()
+        counts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(f, backend=counts, fullgraph=True, dynamic=False)
+        self.assertEqual(compiled(d, x), x + 100)
+        self.assertEqual(counts.frame_count, 1)
+
+        # The AttributeError path is guarded on the instance dict: a later
+        # setattr must recompile instead of reusing the cached frame.
+        d.base = 3
+        self.assertEqual(compiled(d, x), x + 1)
+        self.assertEqual(counts.frame_count, 2)
+        self.assertNotIn("base", d.__dict__)
+
+    def test_delete_present_attr_guard(self):
+        def f(d, x):
+            try:
+                del d.base
+                return x + 1
+            except AttributeError:
+                return x + 100
+
+        x = torch.ones(2)
+        d = OrderedDict()
+        d.base = 3
+        counts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(f, backend=counts, fullgraph=True, dynamic=False)
+        self.assertEqual(compiled(d, x), x + 1)
+        self.assertEqual(counts.frame_count, 1)
+        self.assertNotIn("base", d.__dict__)
+
+        # The successful-delete path is guarded too: an object without the
+        # attribute must recompile into the AttributeError path.
+        self.assertEqual(compiled(OrderedDict(), x), x + 100)
+        self.assertEqual(counts.frame_count, 2)
+
+    def test_state_dict_fullgraph(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 2)
+
+            def forward(self, x):
+                return x + len(self.state_dict())
+
+        m = M()
+        x = torch.randn(4)
+        self.assertEqual(
+            torch.compile(m.forward, backend="eager", fullgraph=True)(x), m.forward(x)
+        )
+
+        def get_state_dict(x):
+            return m.state_dict()
+
+        ref = m.state_dict()
+        res = torch.compile(get_state_dict, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(res), OrderedDict)
+        self.assertEqual(list(res.keys()), list(ref.keys()))
+        for key in ref:
+            self.assertEqual(res[key], ref[key])
+        self.assertIn("_metadata", res.__dict__)
+        self.assertEqual(res._metadata, ref._metadata)
+
+    def test_dict_setattr_still_graph_breaks(self):
+        def f(x):
+            d = {}
+            d.foo = 1
+            return x
+
+        with self.assertRaises(Unsupported):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(2))
+
+
 class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
     """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
 

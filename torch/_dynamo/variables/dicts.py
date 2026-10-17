@@ -943,6 +943,172 @@ class OrderedDictVariable(ConstDictVariable):
         "popitem": Method(popitem),
     }
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__"):
+            return self._call_setattro(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def _call_setattro(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tp_setattro. OrderedDict has tp_dictoffset, so instance attributes
+        # live in __dict__ and any name can be stored; deleting a name that is
+        # absent raises AttributeError. Plain dict and defaultdict have no
+        # tp_dictoffset and keep their old (unsupported) behavior.
+        nargs = 2 if name == "__setattr__" else 1
+        if kwargs:
+            raise_type_error(tx, f"{name}() takes no keyword arguments")
+        check_positional(tx, name, len(args), nargs, nargs)
+        try:
+            attr = args[0].as_python_constant()
+        except NotImplementedError:
+            unimplemented(
+                gb_type="non-const attribute name on OrderedDict",
+                context=f"object={self}, name={args[0]}",
+                explanation="Dynamo does not support setting an attribute of an "
+                "OrderedDict with a non-constant name.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not isinstance(attr, str):
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{args[0].python_type_name()}'",
+            )
+
+        se = tx.output.side_effects
+        if not se.is_attribute_mutation(self):
+            if self.source is not None:
+                unimplemented(
+                    gb_type="Attribute mutation on a sourced untracked OrderedDict",
+                    context=f"object={self}, name={attr}",
+                    explanation="Dynamo does not support setting attributes on this "
+                    "OrderedDict, which is not tracked for mutation.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            se.track_attribute_mutation_new(self)
+
+        if name == "__delattr__":
+            present = self._instance_attr_exists(tx, attr)
+            # The existence test reads the live instance dict, which is not
+            # replayed: pin it so a later change recompiles instead of reusing
+            # a frame that took the other branch.
+            self._guard_attr_presence(tx, attr, present)
+            if not present:
+                raise_observed_exception(
+                    AttributeError,
+                    tx,
+                    args=[
+                        f"'{self.python_type_name()}' object has no attribute '{attr}'"
+                    ],
+                )
+            value = variables.DeletedVariable()
+        else:
+            value = args[1]
+        se.store_attr(self, attr, value)
+        return ConstantVariable.create(None)
+
+    def _live_instance(self, tx: "InstructionTranslatorBase") -> object | None:
+        # The Python object behind this VT's source. Sources that do not
+        # resolve right now (e.g. locals of an inlined frame) decline.
+        if self.source is None:
+            return None
+        try:
+            return tx.output.resolve_source_value(self.source)
+        except Exception:
+            return None
+
+    def _live_instance_dict(
+        self, tx: "InstructionTranslatorBase"
+    ) -> dict[str, Any] | None:
+        # OrderedDict has tp_dictoffset: attributes live in the instance dict.
+        instance = self._live_instance(tx)
+        if instance is None:
+            return None
+        return getattr(instance, "__dict__", None)
+
+    def _instance_attr_exists(self, tx: "InstructionTranslatorBase", name: str) -> bool:
+        se = tx.output.side_effects
+        if se.has_pending_mutation_of_attr(self, name):
+            return not isinstance(
+                se.load_attr(self, name, deleted_ok=True), variables.DeletedVariable
+            )
+        instance_dict = self._live_instance_dict(tx)
+        return instance_dict is not None and name in instance_dict
+
+    def _guard_attr_presence(
+        self, tx: "InstructionTranslatorBase", name: str, present: bool
+    ) -> None:
+        se = tx.output.side_effects
+        source = self.source
+        if source is None or se.has_pending_mutation_of_attr(self, name):
+            # A fresh object is fully modeled in-graph, and a pending mutation
+            # is replayed on this frame, so neither needs a guard.
+            return
+        if not present and self._live_instance_dict(tx) is None:
+            # Absence came from a source that does not resolve; do not bake the
+            # AttributeError into the frame without being able to guard it.
+            unimplemented(
+                gb_type="Attribute deletion on an unresolvable OrderedDict",
+                context=f"object={self}, name={name}",
+                explanation="Dynamo cannot inspect the instance attributes of this "
+                "OrderedDict, so it cannot tell whether the delete raises.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        guard_builder = (
+            GuardBuilder.HASATTR
+            if present
+            else GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT
+        )
+        install_guard(source.make_guard(functools.partial(guard_builder, attr=name)))
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        se = tx.output.side_effects
+        if se.has_pending_mutation_of_attr(self, name):
+            value = se.load_attr(self, name, deleted_ok=True)
+            if isinstance(value, variables.DeletedVariable):
+                return None
+            return value
+        instance_dict = self._live_instance_dict(tx)
+        source = self.source
+        if source is None or instance_dict is None or name not in instance_dict:
+            return None
+        return VariableTracker.build(tx, instance_dict[name], AttrSource(source, name))
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        se = tx.output.side_effects
+        if se.has_pending_mutation_of_attr(self, name):
+            value = se.load_attr(self, name, deleted_ok=True)
+            return ConstantVariable.create(
+                not isinstance(value, variables.DeletedVariable)
+            )
+        if hasattr(self.python_type(), name):
+            return ConstantVariable.create(True)
+        source = self.source
+        if source is None:
+            return ConstantVariable.create(False)
+        instance = self._live_instance(tx)
+        if instance is None:
+            # Attribute presence is unknown without the live object.
+            return super().call_obj_hasattr(tx, name)
+        install_guard(
+            source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+        )
+        return ConstantVariable.create(hasattr(instance, name))
+
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
 
