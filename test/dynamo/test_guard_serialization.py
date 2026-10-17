@@ -258,6 +258,22 @@ _MODE = _Mode.FAST
 _torch_add = torch.add
 
 
+@torch.library.custom_op("guard_serialization_test::triple", mutates_args=())
+def _custom_triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+_custom_triple.register_fake(torch.empty_like)
+
+
+@torch.library.custom_op("guard_serialization_test::halve", mutates_args=())
+def _custom_halve(x: torch.Tensor) -> torch.Tensor:
+    return x / 2
+
+
+_custom_halve.register_fake(torch.empty_like)
+
+
 class _TupleOwner:
     class Point(NamedTuple):
         x: int
@@ -1649,6 +1665,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
             GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
         self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
+
+    def test_a_custom_op_def_pickles_by_its_registered_name(self):
+        from torch._library.custom_ops import OPDEFS
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"op": _custom_triple})
+        self.assertIs(load_guards_state(buf.getvalue())["op"], _custom_triple)
+        self.assertTrue(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+        # Redefining the op under the same name replaces it in the registry.
+        with mock.patch.dict(OPDEFS, {_custom_triple._qualname: _custom_halve}):
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+            with self.assertRaisesRegex(TypeError, "cannot pickle"):
+                GuardsStatePickler({}, {}, {}, {}, io.BytesIO()).dump(
+                    {"op": _custom_triple}
+                )
+        # A serving process that never imported the module defining the op.
+        with mock.patch.dict(OPDEFS):
+            del OPDEFS[_custom_triple._qualname]
+            with self.assertRaisesRegex(RuntimeError, "import the module"):
+                load_guards_state(buf.getvalue())
 
     def test_a_main_class_resolves_against_the_loading_main(self):
         main = sys.modules["__main__"]
@@ -3864,6 +3900,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_custom_op_def(self):
+        def fn(x):
+            return _custom_triple(x) + 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_custom_triple": _custom_halve}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_portable_identity_guard_values(self):
         class Local:
             pass
@@ -4844,6 +4891,185 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(ref, loaded, {"x": x}, True)
         finally:
             torch.set_default_device(device)
+
+    def test_autograd_saved_tensors_hooks_compare_by_content(self):
+        def pack(x):
+            return x * 2
+
+        def unpack(x):
+            return x / 2
+
+        def other_unpack(x):
+            return x / 3
+
+        def fn(x):
+            return x + 1
+
+        def trace(*fns):
+            return tuple(torch.fx.symbolic_trace(f) for f in fns)
+
+        x = torch.randn(3, 2)
+        captured = trace(pack, unpack)
+        with torch.autograd.graph.saved_tensors_hooks(*captured):
+            ref, loaded = self._test_serialization(
+                "AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x
+            )
+        # A serving process installs its own copies of the hooks, so the ids
+        # the capturing process saw never recur.
+        with torch.autograd.graph.saved_tensors_hooks(*trace(pack, unpack)):
+            self._test_check_fn(ref, ref, {"x": x}, False)
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*trace(pack, other_unpack)):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+        self._test_check_fn(loaded, loaded, {"x": x}, False)
+        with torch.autograd.graph.saved_tensors_hooks(*captured):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+
+    def test_autograd_saved_tensors_hooks_compare_user_cache_hash(self):
+        def fn(x):
+            return x + 1
+
+        def hooks(user_hash):
+            pack = torch.fx.symbolic_trace(lambda x: x * 2)
+            unpack = torch.fx.symbolic_trace(lambda x: x / 2)
+            next(iter(pack.graph.nodes)).meta["user_cache_hash"] = user_hash
+            return pack, unpack
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks("v1")):
+            ref, loaded = self._test_serialization(
+                "AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x
+            )
+        with torch.autograd.graph.saved_tensors_hooks(*hooks("v1")):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks("v2")):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_reuses_result_per_hook_set(self):
+        def fn(x):
+            return x + 1
+
+        def trace(*fns):
+            return tuple(torch.fx.symbolic_trace(f) for f in fns)
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(
+            *trace(lambda x: x * 2, lambda x: x / 2)
+        ):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        matching = trace(lambda x: x * 2, lambda x: x / 2)
+        other = trace(lambda x: x * 3, lambda x: x / 3)
+        for hooks, expected in ((matching, True), (other, False), (matching, True)):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                for _ in range(2):
+                    self._test_check_fn(loaded, loaded, {"x": x}, expected)
+
+    def test_autograd_saved_tensors_hooks_rejects_opaque_call(self):
+        def fn(x):
+            return x + 1
+
+        def hook_calling(target, user_hash=None):
+            graph = torch.fx.Graph()
+            node = graph.call_function(target, (graph.placeholder("x"),))
+            node.meta["is_wrapped"] = True
+            if user_hash is not None:
+                node.meta["user_cache_hash"] = user_hash
+            graph.output(node)
+            return torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        def double():
+            def scale(x):
+                return x * 2
+
+            return scale
+
+        def triple():
+            def scale(x):
+                return x * 3
+
+            return scale
+
+        def hooks(target, user_hash=None):
+            return (
+                hook_calling(target, user_hash),
+                torch.fx.symbolic_trace(lambda x: x / 2),
+            )
+
+        x = torch.randn(3, 2)
+        self.assertEqual(hooks(double())[0].code, hooks(triple())[0].code)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double())):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        # The rendered code names scale but not its body, so nothing tells
+        # these two apart; the loaded guard accepts neither.
+        for target in (double(), triple()):
+            with torch.autograd.graph.saved_tensors_hooks(*hooks(target)):
+                self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(triple(), "v2")):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+        # A target check_node_safe fails to introspect is unverifiable too, not
+        # an error at capture or guard evaluation.
+        with (
+            torch.autograd.graph.saved_tensors_hooks(*hooks(double(), "v1")),
+            mock.patch(
+                "torch._functorch._aot_autograd.autograd_cache.check_node_safe",
+                side_effect=AttributeError("__name__"),
+            ),
+        ):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_matches_traced_tensor_methods(self):
+        def fn(x):
+            return x + 1
+
+        def hooks(dtype):
+            return (
+                torch.fx.symbolic_trace(lambda x: x.to(dtype)),
+                torch.fx.symbolic_trace(lambda x: x.to(torch.float32)),
+            )
+
+        x = torch.randn(3, 2)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
+            _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
+            self._test_check_fn(loaded, loaded, {"x": x}, True)
+        with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.float16)):
+            self._test_check_fn(loaded, loaded, {"x": x}, False)
+
+    def test_autograd_saved_tensors_hooks_not_inlineable_at_capture(self):
+        def fn(x):
+            return x + 1
+
+        def hooks():
+            return (
+                torch.fx.symbolic_trace(lambda x: x * 2),
+                torch.fx.symbolic_trace(lambda x: x / 2),
+            )
+
+        def capture():
+            return self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
+
+        def capture_under_python_hooks():
+            with torch.autograd.graph.saved_tensors_hooks(
+                lambda x: x * 2, lambda x: x / 2
+            ):
+                return capture()
+
+        x = torch.randn(3, 2)
+        for ref, loaded in (capture(), capture_under_python_hooks()):
+            self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch.autograd.graph.saved_tensors_hooks(
+                lambda x: x * 3, lambda x: x / 3
+            ):
+                self._test_check_fn(ref, loaded, {"x": x}, True)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks()):
+                self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_shape_env(self):
         def fn(x):
