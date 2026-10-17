@@ -4,6 +4,7 @@
 -r requirements-build.txt
 
 # Install / Development extra requirements
+bitarray>=3.11.0
 build[uv]  # for building sdist and wheel
 expecttest>=0.3.0
 filelock
