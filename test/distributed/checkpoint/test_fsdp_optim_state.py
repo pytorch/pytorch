@@ -9,12 +9,9 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     _get_device_type,
     DTensorContinuousTestBase,
@@ -25,6 +22,8 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = NUM_DEVICES
 
     def _create_model(self):
@@ -64,7 +63,7 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_get_set_state_dict_forwards_fsdp_process_group(self):
+    def test_get_set_state_dict_forwards_fsdp_process_group(self, device):
         custom_pg = dist.new_group(ranks=list(range(self.world_size)))
 
         model = self._create_model()
@@ -116,8 +115,13 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     @with_temp_dir
-    @parametrize("pass_planner", [True, False])
-    def test_load_sharded_optimizer_state_dict(self, pass_planner) -> None:
+    def test_load_sharded_optimizer_state_dict(self, device) -> None:
+        self.run_subtests(
+            {"pass_planner": [True, False]},
+            self._test_load_sharded_optimizer_state_dict,
+        )
+
+    def _test_load_sharded_optimizer_state_dict(self, pass_planner: bool) -> None:
         CHECKPOINT_DIR = self.temp_dir
         planner = dcp.DefaultLoadPlanner() if pass_planner else None
 
@@ -192,6 +196,13 @@ class FsdpOptimStateCheckpoint(DTensorContinuousTestBase):
                     self.assertEqual(state, state2)
 
 
-instantiate_parametrized_tests(FsdpOptimStateCheckpoint)
+instantiate_device_type_tests(
+    FsdpOptimStateCheckpoint,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+
 if __name__ == "__main__":
     run_tests()
