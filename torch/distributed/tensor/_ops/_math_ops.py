@@ -1859,16 +1859,22 @@ def interp_pool_1out_2in_strategy(
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     # 1 output + 2 inputs = 3 placements: [output, grad_output/self, self/indices]
-    # Linear in the first input; the second only supplies shape or indices.
     input_meta = cast(TensorMeta, args_schema[0])
     strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 3,
-        [Partial("sum"), Partial("sum"), Replicate()],
-        [Partial("avg"), Partial("avg"), Replicate()],
     ]
     spatial_rank = POOL_SPATIAL_RANK[op]
     if len(input_meta.shape) >= spatial_rank + 2:
         strategies.append([_ShardingPlaceholder(1)] * 3)
+    if op not in (aten.max_unpool2d.default, aten.max_unpool3d.default):
+        # The avg-pool backward ops are linear in grad_output and only read the
+        # shape of self, so P(sum/avg) pass through. max_unpool is excluded:
+        # overlapping windows give duplicate indices, and it overwrites rather
+        # than accumulates at them, so summing per-rank partial results would
+        # mix values from different duplicates.
+        for reduce_op in ("sum", "avg"):
+            p = Partial(reduce_op)
+            strategies.append([p, p, Replicate()])
     return strategies
 
 
