@@ -287,13 +287,15 @@ class AOTInductorModelContainer {
       AOTIProxyExecutorHandle proxy_executor) {
     std::shared_lock model_lk(model_exec_mutex_);
 
-    auto& const_folded = active().fold_state;
-    if (const_folded == ConstantState::INITIALIZED) {
+    // A swap can change the active buffer while the lock is not held, so
+    // look it up again after every acquisition.
+    while (active().fold_state == ConstantState::INITIALIZED) {
       // Do NOT call get_available_model() before upgrading to exclusive lock.
       // Holding a model across the upgrade causes a deadlock when another
       // thread holds a shared lock and waits for the model.
       model_lk.unlock();
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      auto& const_folded = active().fold_state;
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
         auto* model = get_available_model();
@@ -313,11 +315,11 @@ class AOTInductorModelContainer {
       }
       constants_folding_lk.unlock();
       model_lk.lock();
-    } else {
-      AOTI_RUNTIME_CHECK(
-          const_folded == ConstantState::FOLDED,
-          "Unknown constant state: " + toStringConstantState(const_folded));
     }
+    AOTI_RUNTIME_CHECK(
+        active().fold_state == ConstantState::FOLDED,
+        "Unknown constant state: " +
+            toStringConstantState(active().fold_state));
 
     [[maybe_unused]] auto stream_lock = acquire_stream_lock(stream);
     auto* model = get_available_model(stream);
@@ -486,12 +488,11 @@ class AOTInductorModelContainer {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
     AOTInductorModel* model;
-    auto& const_folded =
-        inactive_buffer ? inactive().fold_state : active().fold_state;
     if (!inactive_buffer) {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
+      auto& const_folded = active().fold_state;
       model = get_available_model();
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
@@ -507,6 +508,7 @@ class AOTInductorModelContainer {
       return_model_to_pending(model);
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
+      auto& const_folded = inactive().fold_state;
       [[maybe_unused]] auto stream_lock = acquire_stream_lock(stream);
       model = get_available_model(stream);
 
