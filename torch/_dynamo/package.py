@@ -1565,6 +1565,7 @@ class CompilePackage:
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
+        from .decorators import _nonrecursive_disable_wrapper_code
         from .output_graph import get_builtins_dict
 
         self.uninstall()
@@ -1626,6 +1627,13 @@ class CompilePackage:
                 if entry.bypassed:
                     # If the entry is bypassed, do not install backends
                     # or guarded codes.
+                    continue
+
+                if target_code is _nonrecursive_disable_wrapper_code:
+                    # A package keyed on a bound disable(recursive=False) method
+                    # has as its top-level code the wrapper code every such
+                    # disable shares. Dynamo never compiles it, and enrolling it
+                    # in input_codes would let reset() strip its import-time skip.
                     continue
 
                 input_codes.add(target_code)
