@@ -67,6 +67,7 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    GenericAttrSource,
     GetItemSource,
     RandomValueSource,
     TypeMROSource,
@@ -3753,7 +3754,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     tp_getset = {"__class__": GetSet(_class_vt, readonly_setter)}
 
     def generic_getattr(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        *,
+        explicit_call: bool = False,
     ) -> VariableTracker:
         """Dynamo implementation of CPython's PyObject_GenericGetAttr.
 
@@ -3761,12 +3766,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         - tp_getattro_impl (for objects without a custom __getattribute__)
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
+        - BuiltinVariable.call_method for object.__getattribute__(obj, name)
 
         The algorithm: MRO walk → data descriptor → instance __dict__ →
         non-data descriptor / plain class attr → dynamic fallback →
         __getattr__ → AttributeError.
+
+        ``explicit_call=True`` is for an explicit object.__getattribute__ call.
+        It skips the __getattr__ step, since only CPython's tp_getattro slot
+        wrapper (slot_tp_getattr_hook) falls back to __getattr__. Guards then
+        read the attribute through object.__getattribute__ too: a plain getattr
+        would run the class's __getattribute__ override instead of the lookup
+        traced here.
         """
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        source: Source | None = None
+        if self.source:
+            source_cls = (
+                GenericAttrSource
+                if explicit_call and self._object_has_getattribute
+                else AttrSource
+            )
+            source = source_cls(self.source, name)
 
         if name == "__dict__":
             if not hasattr(self.value, "__dict__"):
@@ -3807,7 +3827,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.resolve_data_descriptor(tx, name, type_attr, source)
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
-        result = self.lookup_instance_dict(tx, name)
+        result = self.lookup_instance_dict(tx, name, source=source)
         if result is not None:
             return result
 
@@ -3846,19 +3866,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 pass
 
         # Step 6: __getattr__ fallback.
-        result = self.call_getattr_fallback(tx, name)
-        if result is not None:
-            if (
-                self.source
-                and isinstance(self, variables.UnspecializedNNModuleVariable)
-                and hasattr(self.value, "__dict__")
-                and name not in self.value.__dict__
-            ):
-                # A pending deletion in the traced code can reach here with the
-                # name still in the live dict; guarding absence then would fail
-                # on the frame it was created.
-                install_not_in_instance_dict_guard(self.source, name)
-            return result
+        if not explicit_call:
+            result = self.call_getattr_fallback(tx, name)
+            if result is not None:
+                if (
+                    self.source
+                    and isinstance(self, variables.UnspecializedNNModuleVariable)
+                    and hasattr(self.value, "__dict__")
+                    and name not in self.value.__dict__
+                ):
+                    # A pending deletion in the traced code can reach here with the
+                    # name still in the live dict; guarding absence then would fail
+                    # on the frame it was created.
+                    install_not_in_instance_dict_guard(self.source, name)
+                return result
 
         # Step 7: AttributeError.
         raise_observed_exception(
@@ -4144,9 +4165,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).call_function(tx, [self, owner_var], {})
 
     def lookup_instance_dict(
-        self, tx: "InstructionTranslatorBase", name: str
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        source: Source | None = None,
     ) -> VariableTracker | None:
-        source: Source | None = AttrSource(self.source, name) if self.source else None
+        if source is None and self.source:
+            source = AttrSource(self.source, name)
 
         if tx.output.side_effects.has_pending_mutation_of_attr(
             self,
