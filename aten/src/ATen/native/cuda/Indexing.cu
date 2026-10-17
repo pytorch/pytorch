@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
@@ -11,9 +12,11 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
@@ -26,14 +29,17 @@
 #include <ATen/ops/_assert_async.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
+#include <ATen/ops/cumsum.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_reduce_native.h>
+#include <ATen/ops/index_select_backward_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #include <ATen/ops/scatter_reduce_native.h>
@@ -42,11 +48,16 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
+#if defined(USE_ROCM)
+#include <ATen/cuda/cub.cuh>
+#endif
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <limits>
+#include <type_traits>
 
 #include <c10/macros/Macros.h>
 
@@ -505,6 +516,616 @@ __global__ void indexing_backward_kernel_quantized(
 namespace at::native {
 
 namespace {
+
+#if defined(USE_ROCM)
+constexpr int64_t INDEX_SELECT_BACKWARD_CHUNK_SIZE = 512;
+constexpr int64_t INDEX_SELECT_BACKWARD_LONG_RUN_SIZE = 8192;
+constexpr int64_t INDEX_SELECT_BACKWARD_MIN_SORT_SIZE = 1000000;
+constexpr int64_t INDEX_SELECT_BACKWARD_MAX_SCRATCH_BYTES = 64 * 1024 * 1024;
+
+// Returns the first segment offset greater than value. Fixed chunk boundaries
+// use this device-side upper_bound to find the duplicate run that owns them.
+template <typename offset_t>
+__device__ __forceinline__ int64_t index_select_backward_upper_bound(
+    const offset_t* offsets,
+    int64_t count,
+    int64_t value) {
+  int64_t first = 0;
+  while (count > 0) {
+    const int64_t step = count / 2;
+    const int64_t current = first + step;
+    if (static_cast<int64_t>(offsets[current]) <= value) {
+      first = current + 1;
+      count -= step + 1;
+    } else {
+      count = step;
+    }
+  }
+  return first;
+}
+
+// Classifies runs that need two-pass reduction and records their fixed-size
+// chunk counts. Short and unused segments write zero so an exclusive scan can
+// turn this array into compact long-run scratch offsets.
+__global__ void index_select_backward_long_chunk_counts_kernel(
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    int32_t* long_chunk_counts,
+    int64_t num_indices,
+    int64_t max_segments) {
+  const int64_t num_segments = *num_segments_ptr;
+  for (int64_t segment = blockIdx.x * blockDim.x + threadIdx.x;
+       segment < max_segments;
+       segment += blockDim.x * gridDim.x) {
+    int32_t count = 0;
+    if (segment < num_segments) {
+      const int64_t begin = static_cast<int64_t>(segment_offsets[segment]);
+      const int64_t end = segment + 1 < num_segments
+          ? static_cast<int64_t>(segment_offsets[segment + 1])
+          : num_indices;
+      const int64_t length = end - begin;
+      if (length >= INDEX_SELECT_BACKWARD_LONG_RUN_SIZE) {
+        count = static_cast<int32_t>(
+            (length + INDEX_SELECT_BACKWARD_CHUNK_SIZE - 1) /
+            INDEX_SELECT_BACKWARD_CHUNK_SIZE);
+      }
+    }
+    long_chunk_counts[segment] = count;
+  }
+}
+
+// Generic compact reducer for supported scalar types and feature widths. One
+// block resolves a segment-start or fixed-boundary candidate, skips long runs,
+// and directly stores unique chunks or atomically combines split chunks.
+template <
+    typename scalar_t,
+    typename acc_t,
+    typename index_t,
+    int values_per_thread>
+__global__ void index_select_backward_compact_kernel(
+    const scalar_t* grad,
+    const index_t* sorted_indices,
+    const int32_t* sorted_positions,
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    const int32_t* long_chunk_counts,
+    acc_t* grad_input,
+    int64_t num_indices,
+    int64_t num_rows,
+    int64_t outer_size,
+    int64_t inner_size,
+    int64_t max_segments) {
+  static_assert(values_per_thread == 1 || values_per_thread == 2);
+  __shared__ int64_t chunk_begin;
+  __shared__ int64_t chunk_end;
+  __shared__ int64_t output_row;
+  __shared__ bool single_chunk;
+
+  const int64_t num_boundaries =
+      (num_indices - 1) / INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+  const int64_t candidates_per_outer = max_segments + num_boundaries;
+  const int64_t max_work = outer_size * candidates_per_outer;
+  const int64_t num_segments = *num_segments_ptr;
+
+  for (int64_t work = blockIdx.x; work < max_work; work += gridDim.x) {
+    const int64_t candidate = work % candidates_per_outer;
+    const int64_t outer = work / candidates_per_outer;
+    if (candidate < max_segments && candidate >= num_segments) {
+      continue;
+    }
+
+    if (threadIdx.x == 0) {
+      int64_t begin;
+      int64_t segment;
+      int64_t run_end = num_indices;
+      const bool starts_run = candidate < max_segments;
+      if (starts_run) {
+        segment = candidate;
+        begin = static_cast<int64_t>(segment_offsets[segment]);
+        if (segment + 1 < num_segments) {
+          run_end = static_cast<int64_t>(segment_offsets[segment + 1]);
+        }
+      } else {
+        begin =
+            (candidate - max_segments + 1) * INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+        if (sorted_indices[begin] != sorted_indices[begin - 1]) {
+          begin = -1;
+          segment = -1;
+        } else {
+          const int64_t next_segment = index_select_backward_upper_bound(
+              segment_offsets, num_segments, begin);
+          segment = next_segment - 1;
+          if (next_segment < num_segments) {
+            run_end = static_cast<int64_t>(segment_offsets[next_segment]);
+          }
+        }
+      }
+
+      if (begin >= 0 && long_chunk_counts != nullptr &&
+          long_chunk_counts[segment] != 0) {
+        begin = -1;
+      }
+      if (begin >= 0) {
+        const index_t row = sorted_indices[begin];
+        const int64_t boundary_end =
+            ((begin / INDEX_SELECT_BACKWARD_CHUNK_SIZE) + 1) *
+            INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+        const int64_t end = boundary_end < run_end ? boundary_end : run_end;
+        chunk_begin = begin;
+        chunk_end = end;
+        output_row = static_cast<int64_t>(row);
+        single_chunk = starts_run && end == run_end;
+      } else {
+        chunk_begin = -1;
+      }
+    }
+    __syncthreads();
+
+    if (chunk_begin >= 0) {
+      if constexpr (values_per_thread == 2) {
+        static_assert(std::is_same_v<scalar_t, c10::BFloat16>);
+        static_assert(std::is_same_v<acc_t, c10::BFloat16>);
+        const int64_t feature = threadIdx.x * 2;
+        acc_t sum0 = acc_t(0);
+        acc_t sum1 = acc_t(0);
+        for (int64_t current = chunk_begin; current < chunk_end; ++current) {
+          const int64_t source_row =
+              static_cast<int64_t>(sorted_positions[current]);
+          const int64_t source_offset =
+              (outer * num_indices + source_row) * inner_size;
+          const auto values = memory::load_vector<2>(
+              grad + source_offset, static_cast<uint32_t>(threadIdx.x));
+          sum0 += static_cast<acc_t>(values.val[0]);
+          sum1 += static_cast<acc_t>(values.val[1]);
+        }
+        const int64_t output_offset =
+            (outer * num_rows + output_row) * inner_size + feature;
+        if (single_chunk) {
+          grad_input[output_offset] = sum0;
+          grad_input[output_offset + 1] = sum1;
+        } else {
+          gpuAtomicAddNoReturn(grad_input + output_offset, sum0);
+          gpuAtomicAddNoReturn(grad_input + output_offset + 1, sum1);
+        }
+      } else {
+        for (int64_t feature = threadIdx.x; feature < inner_size;
+             feature += blockDim.x) {
+          acc_t sum = acc_t(0);
+          for (int64_t current = chunk_begin; current < chunk_end; ++current) {
+            const int64_t source_row =
+                static_cast<int64_t>(sorted_positions[current]);
+            const int64_t source_offset =
+                (outer * num_indices + source_row) * inner_size + feature;
+            sum += static_cast<acc_t>(grad[source_offset]);
+          }
+          const int64_t output_offset =
+              (outer * num_rows + output_row) * inner_size + feature;
+          if (single_chunk) {
+            grad_input[output_offset] = sum;
+          } else {
+            gpuAtomicAddNoReturn(grad_input + output_offset, sum);
+          }
+        }
+      }
+    }
+    __syncthreads();
+  }
+}
+
+// Broadcasts 64-bit metadata from logical lane zero by shuffling its two
+// 32-bit halves. The explicit width isolates subgroups packed into one wave64.
+__device__ __forceinline__ int64_t index_select_backward_wave_broadcast_int64(
+    int64_t value,
+    int width) {
+  union Bits {
+    int64_t value;
+    uint32_t words[2];
+  } bits = {.value = value};
+  bits.words[0] = WARP_SHFL(bits.words[0], 0, width);
+  bits.words[1] = WARP_SHFL(bits.words[1], 0, width);
+  return bits.value;
+}
+
+// Describes whether a compact candidate is skipped, uniquely owns its output
+// row, or contributes one of multiple chunks through an atomic add.
+enum class IndexSelectBackwardCompactMode : uint32_t {
+  Invalid = 0,
+  Direct = 1,
+  Atomic = 2,
+};
+
+// Atomically adds two adjacent BF16 values with the gfx942/gfx950 packed
+// instruction. Callers provide a 4-byte-aligned pair; unsupported targets use
+// two scalar atomics as a correctness fallback.
+__device__ __forceinline__ void index_select_backward_atomic_add_bfloat16_pair(
+    c10::BFloat16* output,
+    c10::BFloat16 value0,
+    c10::BFloat16 value1) {
+  using packed_t = short __attribute__((ext_vector_type(2)));
+  union PackedBFloat16 {
+    c10::BFloat16 values[2];
+    packed_t packed;
+  } value = {};
+  value.values[0] = value0;
+  value.values[1] = value1;
+  if (__builtin_amdgcn_is_invocable(
+          __builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
+    __builtin_amdgcn_flat_atomic_fadd_v2bf16(
+        reinterpret_cast<packed_t*>(output), value.packed);
+  } else {
+    gpuAtomicAddNoReturn(output, value0);
+    gpuAtomicAddNoReturn(output + 1, value1);
+  }
+}
+
+// Reduces non-long sorted runs with one logical subgroup per segment start or
+// fixed chunk boundary. Each lane accumulates eight BF16 features; uniquely
+// owned rows store directly, while split rows commit packed atomic pairs.
+template <int64_t feature_size, typename index_t>
+__global__ void index_select_backward_compact_bfloat16_kernel(
+    const c10::BFloat16* grad,
+    const index_t* sorted_indices,
+    const int32_t* sorted_positions,
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    const int32_t* long_chunk_counts,
+    c10::BFloat16* grad_input,
+    int64_t num_indices,
+    int64_t num_rows,
+    int64_t outer_size) {
+  static_assert(
+      feature_size == 64 || feature_size == 128 || feature_size == 256);
+  constexpr int64_t kValuesPerLane = 8;
+  constexpr int64_t kThreadsPerBlock = 256;
+  constexpr int64_t kFeatureSize = feature_size;
+  constexpr int64_t kGroupSize = kFeatureSize / kValuesPerLane;
+  constexpr int64_t kGroupsPerBlock = kThreadsPerBlock / kGroupSize;
+  static_assert(kFeatureSize % kValuesPerLane == 0);
+  static_assert((kGroupSize & (kGroupSize - 1)) == 0);
+  static_assert(64 % kGroupSize == 0);
+  static_assert(kGroupSize * kGroupsPerBlock == kThreadsPerBlock);
+  const int64_t lane = threadIdx.x;
+  const int64_t wave = threadIdx.y;
+  int64_t num_segments = lane == 0 ? *num_segments_ptr : 0;
+  num_segments =
+      index_select_backward_wave_broadcast_int64(num_segments, kGroupSize);
+  const int64_t num_boundaries =
+      (num_indices - 1) / INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+  const int64_t candidates_per_outer = num_segments + num_boundaries;
+  const int64_t actual_work = outer_size * candidates_per_outer;
+  const int64_t work_stride =
+      static_cast<int64_t>(gridDim.x) * kGroupsPerBlock;
+
+  for (int64_t work =
+           static_cast<int64_t>(blockIdx.x) * kGroupsPerBlock + wave;
+       work < actual_work;
+       work += work_stride) {
+    const int64_t candidate = work % candidates_per_outer;
+    const int64_t outer = work / candidates_per_outer;
+    int64_t chunk_begin = -1;
+    int64_t chunk_end = -1;
+    int64_t output_row = -1;
+    auto mode = IndexSelectBackwardCompactMode::Invalid;
+
+    if (lane == 0) {
+      int64_t segment;
+      int64_t run_end = num_indices;
+      const bool starts_run = candidate < num_segments;
+      if (starts_run) {
+        segment = candidate;
+        chunk_begin = static_cast<int64_t>(segment_offsets[segment]);
+        if (segment + 1 < num_segments) {
+          run_end = static_cast<int64_t>(segment_offsets[segment + 1]);
+        }
+      } else {
+        chunk_begin =
+            (candidate - num_segments + 1) * INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+        if (sorted_indices[chunk_begin] != sorted_indices[chunk_begin - 1]) {
+          chunk_begin = -1;
+          segment = -1;
+        } else {
+          const int64_t next_segment = index_select_backward_upper_bound(
+              segment_offsets, num_segments, chunk_begin);
+          segment = next_segment - 1;
+          if (next_segment < num_segments) {
+            run_end = static_cast<int64_t>(segment_offsets[next_segment]);
+          }
+        }
+      }
+
+      if (chunk_begin >= 0 && long_chunk_counts != nullptr &&
+          long_chunk_counts[segment] != 0) {
+        chunk_begin = -1;
+      }
+      if (chunk_begin >= 0) {
+        const int64_t boundary_end =
+            ((chunk_begin / INDEX_SELECT_BACKWARD_CHUNK_SIZE) + 1) *
+            INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+        chunk_end = boundary_end < run_end ? boundary_end : run_end;
+        output_row = static_cast<int64_t>(sorted_indices[chunk_begin]);
+        mode = starts_run && chunk_end == run_end
+            ? IndexSelectBackwardCompactMode::Direct
+            : IndexSelectBackwardCompactMode::Atomic;
+      }
+    }
+
+    chunk_begin =
+        index_select_backward_wave_broadcast_int64(chunk_begin, kGroupSize);
+    chunk_end =
+        index_select_backward_wave_broadcast_int64(chunk_end, kGroupSize);
+    output_row =
+        index_select_backward_wave_broadcast_int64(output_row, kGroupSize);
+    mode = static_cast<IndexSelectBackwardCompactMode>(WARP_SHFL(
+        static_cast<uint32_t>(mode), 0, kGroupSize));
+    if (mode == IndexSelectBackwardCompactMode::Invalid) {
+      continue;
+    }
+
+    const int64_t feature = lane * kValuesPerLane;
+    const int64_t output_offset =
+        (outer * num_rows + output_row) * kFeatureSize + feature;
+    if constexpr (kValuesPerLane == 4) {
+      c10::BFloat16 sum0 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum1 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum2 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum3 = c10::BFloat16(0.0f);
+      for (int64_t current = chunk_begin; current < chunk_end; ++current) {
+        const int64_t source_row =
+            static_cast<int64_t>(sorted_positions[current]);
+        const int64_t source_offset =
+            (outer * num_indices + source_row) * kFeatureSize;
+        const uint32_t vector_offset = static_cast<uint32_t>(lane * 2);
+        const auto values01 =
+            memory::load_vector<2>(grad + source_offset, vector_offset);
+        const auto values23 =
+            memory::load_vector<2>(grad + source_offset, vector_offset + 1);
+        sum0 += values01.val[0];
+        sum1 += values01.val[1];
+        sum2 += values23.val[0];
+        sum3 += values23.val[1];
+      }
+      if (mode == IndexSelectBackwardCompactMode::Direct) {
+        grad_input[output_offset] = sum0;
+        grad_input[output_offset + 1] = sum1;
+        grad_input[output_offset + 2] = sum2;
+        grad_input[output_offset + 3] = sum3;
+      } else {
+        index_select_backward_atomic_add_bfloat16_pair(
+            grad_input + output_offset, sum0, sum1);
+        index_select_backward_atomic_add_bfloat16_pair(
+            grad_input + output_offset + 2, sum2, sum3);
+      }
+    } else {
+      static_assert(kValuesPerLane == 8);
+      c10::BFloat16 sum0 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum1 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum2 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum3 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum4 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum5 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum6 = c10::BFloat16(0.0f);
+      c10::BFloat16 sum7 = c10::BFloat16(0.0f);
+      for (int64_t current = chunk_begin; current < chunk_end; ++current) {
+        const int64_t source_row =
+            static_cast<int64_t>(sorted_positions[current]);
+        const int64_t source_offset =
+            (outer * num_indices + source_row) * kFeatureSize;
+        const uint32_t vector_offset = static_cast<uint32_t>(lane * 4);
+        const auto values01 =
+            memory::load_vector<2>(grad + source_offset, vector_offset);
+        const auto values23 =
+            memory::load_vector<2>(grad + source_offset, vector_offset + 1);
+        const auto values45 =
+            memory::load_vector<2>(grad + source_offset, vector_offset + 2);
+        const auto values67 =
+            memory::load_vector<2>(grad + source_offset, vector_offset + 3);
+        sum0 += values01.val[0];
+        sum1 += values01.val[1];
+        sum2 += values23.val[0];
+        sum3 += values23.val[1];
+        sum4 += values45.val[0];
+        sum5 += values45.val[1];
+        sum6 += values67.val[0];
+        sum7 += values67.val[1];
+      }
+      if (mode == IndexSelectBackwardCompactMode::Direct) {
+        grad_input[output_offset] = sum0;
+        grad_input[output_offset + 1] = sum1;
+        grad_input[output_offset + 2] = sum2;
+        grad_input[output_offset + 3] = sum3;
+        grad_input[output_offset + 4] = sum4;
+        grad_input[output_offset + 5] = sum5;
+        grad_input[output_offset + 6] = sum6;
+        grad_input[output_offset + 7] = sum7;
+      } else {
+        index_select_backward_atomic_add_bfloat16_pair(
+            grad_input + output_offset, sum0, sum1);
+        index_select_backward_atomic_add_bfloat16_pair(
+            grad_input + output_offset + 2, sum2, sum3);
+        index_select_backward_atomic_add_bfloat16_pair(
+            grad_input + output_offset + 4, sum4, sum5);
+        index_select_backward_atomic_add_bfloat16_pair(
+            grad_input + output_offset + 6, sum6, sum7);
+      }
+    }
+  }
+}
+
+// First pass for exceptionally long runs. Each logical work item reduces at
+// most one fixed-size source chunk into bounded scratch, tiled over the
+// flattened outer and feature dimensions.
+template <
+    typename scalar_t,
+    typename acc_t,
+    typename index_t,
+    int values_per_thread>
+__global__ void index_select_backward_long_first_pass_kernel(
+    const scalar_t* grad,
+    const int32_t* sorted_positions,
+    const int32_t* segment_offsets,
+    const int64_t* num_segments_ptr,
+    const int32_t* long_chunk_counts,
+    const int32_t* long_chunk_offsets,
+    acc_t* scratch,
+    int64_t num_indices,
+    int64_t max_segments,
+    int64_t max_long_chunks,
+    int64_t inner_size,
+    int64_t feature_offset,
+    int64_t feature_count) {
+  static_assert(values_per_thread == 1 || values_per_thread == 2);
+  for (int64_t chunk = blockIdx.x; chunk < max_long_chunks;
+       chunk += gridDim.x) {
+    const int64_t segment = index_select_backward_upper_bound(
+                                long_chunk_offsets, max_segments, chunk) -
+        1;
+    if (segment < 0 || segment >= max_segments) {
+      continue;
+    }
+    const int64_t first_chunk =
+        static_cast<int64_t>(long_chunk_offsets[segment]);
+    const int64_t chunk_count =
+        static_cast<int64_t>(long_chunk_counts[segment]);
+    const int64_t chunk_in_segment = chunk - first_chunk;
+    if (chunk_count == 0 || chunk_in_segment < 0 ||
+        chunk_in_segment >= chunk_count) {
+      continue;
+    }
+
+    const int64_t begin =
+        static_cast<int64_t>(segment_offsets[segment]) +
+        chunk_in_segment * INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+    const int64_t num_segments = *num_segments_ptr;
+    const int64_t run_end = segment + 1 < num_segments
+        ? static_cast<int64_t>(segment_offsets[segment + 1])
+        : num_indices;
+    const int64_t unbounded_end = begin + INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+    const int64_t end = unbounded_end < run_end ? unbounded_end : run_end;
+
+    if constexpr (values_per_thread == 2) {
+      static_assert(std::is_same_v<scalar_t, c10::BFloat16>);
+      static_assert(std::is_same_v<acc_t, c10::BFloat16>);
+      for (int64_t local_feature = threadIdx.x * 2;
+           local_feature + 1 < feature_count;
+           local_feature += blockDim.x * 2) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        acc_t sum0 = acc_t(0);
+        acc_t sum1 = acc_t(0);
+        for (int64_t current = begin; current < end; ++current) {
+          const int64_t source_row =
+              static_cast<int64_t>(sorted_positions[current]);
+          const int64_t source_offset =
+              (outer * num_indices + source_row) * inner_size;
+          const auto values = memory::load_vector<2>(
+              grad + source_offset, static_cast<uint32_t>(feature / 2));
+          sum0 += static_cast<acc_t>(values.val[0]);
+          sum1 += static_cast<acc_t>(values.val[1]);
+        }
+        const int64_t scratch_offset =
+            chunk * feature_count + local_feature;
+        scratch[scratch_offset] = sum0;
+        scratch[scratch_offset + 1] = sum1;
+      }
+    } else {
+      for (int64_t local_feature = threadIdx.x;
+           local_feature < feature_count;
+           local_feature += blockDim.x) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        acc_t sum = acc_t(0);
+        for (int64_t current = begin; current < end; ++current) {
+          const int64_t source_row =
+              static_cast<int64_t>(sorted_positions[current]);
+          const int64_t source_offset =
+              (outer * num_indices + source_row) * inner_size + feature;
+          sum += static_cast<acc_t>(grad[source_offset]);
+        }
+        scratch[chunk * feature_count + local_feature] = sum;
+      }
+    }
+  }
+}
+
+// Finalizes each long run by summing its first-pass scratch chunks in order and
+// storing the destination row once. Long runs are excluded from compact
+// reduction, so this pass needs no output atomics.
+template <typename acc_t, typename index_t, int values_per_thread>
+__global__ void index_select_backward_long_final_pass_kernel(
+    const index_t* sorted_indices,
+    const int32_t* segment_offsets,
+    const int32_t* long_chunk_counts,
+    const int32_t* long_chunk_offsets,
+    const acc_t* scratch,
+    acc_t* grad_input,
+    int64_t num_rows,
+    int64_t max_segments,
+    int64_t max_long_chunks,
+    int64_t inner_size,
+    int64_t feature_offset,
+    int64_t feature_count) {
+  static_assert(values_per_thread == 1 || values_per_thread == 2);
+  for (int64_t chunk = blockIdx.x; chunk < max_long_chunks;
+       chunk += gridDim.x) {
+    const int64_t segment = index_select_backward_upper_bound(
+                                long_chunk_offsets, max_segments, chunk) -
+        1;
+    if (segment < 0 || segment >= max_segments) {
+      continue;
+    }
+    const int64_t first_chunk =
+        static_cast<int64_t>(long_chunk_offsets[segment]);
+    const int64_t chunk_count =
+        static_cast<int64_t>(long_chunk_counts[segment]);
+    if (chunk != first_chunk || chunk_count == 0) {
+      continue;
+    }
+
+    const int64_t output_row = static_cast<int64_t>(
+        sorted_indices[static_cast<int64_t>(segment_offsets[segment])]);
+    if constexpr (values_per_thread == 2) {
+      static_assert(std::is_same_v<acc_t, c10::BFloat16>);
+      for (int64_t local_feature = threadIdx.x * 2;
+           local_feature + 1 < feature_count;
+           local_feature += blockDim.x * 2) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        acc_t sum0 = acc_t(0);
+        acc_t sum1 = acc_t(0);
+        for (int64_t current = 0; current < chunk_count; ++current) {
+          const int64_t scratch_offset =
+              (first_chunk + current) * feature_count + local_feature;
+          sum0 += scratch[scratch_offset];
+          sum1 += scratch[scratch_offset + 1];
+        }
+        const int64_t output_offset =
+            (outer * num_rows + output_row) * inner_size + feature;
+        grad_input[output_offset] = sum0;
+        grad_input[output_offset + 1] = sum1;
+      }
+    } else {
+      for (int64_t local_feature = threadIdx.x;
+           local_feature < feature_count;
+           local_feature += blockDim.x) {
+        const int64_t flat_feature = feature_offset + local_feature;
+        const int64_t outer = flat_feature / inner_size;
+        const int64_t feature = flat_feature % inner_size;
+        acc_t sum = acc_t(0);
+        for (int64_t current = 0; current < chunk_count; ++current) {
+          sum += scratch[(first_chunk + current) * feature_count +
+                         local_feature];
+        }
+        const int64_t output_offset =
+            (outer * num_rows + output_row) * inner_size + feature;
+        grad_input[output_offset] = sum;
+      }
+    }
+  }
+}
+#endif
 
 class ReduceMultiply {
 public:
@@ -1768,6 +2389,420 @@ Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   Tensor out = at::empty({0}, self.options());
   at::native::index_select_out_cuda(self, dim, index, out);
   return out;
+}
+
+// Dispatches index_select backward to the ROCm sorted-reduction path only for
+// large supported workloads on gfx942/gfx950. Small, unsupported, misaligned,
+// subclass, deterministic, and non-ROCm cases retain native index_add_ behavior.
+Tensor index_select_backward_cuda(
+    const Tensor& grad,
+    IntArrayRef self_sizes,
+    int64_t dim,
+    const Tensor& index) {
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(grad));
+  Tensor result;
+  {
+    result = grad.new_zeros(self_sizes, grad.options());
+  }
+  if (isTensorSubclassLike(index)) {
+    return result.index_add(dim, index, grad);
+  }
+  dim = at::maybe_wrap_dim(dim, result.dim());
+
+#if defined(USE_ROCM)
+  const auto dtype = grad.scalar_type();
+  const bool supported_dtype =
+      dtype == at::kHalf || dtype == at::kBFloat16 || dtype == at::kFloat ||
+      dtype == at::kDouble;
+  const bool use_sorted_backward =
+      at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"}) &&
+      !globalContext().deterministicAlgorithms() && grad.is_contiguous() &&
+      index.device() == grad.device() && index.is_contiguous() &&
+      index.dim() <= 1 &&
+      (index.scalar_type() == at::kInt || index.scalar_type() == at::kLong) &&
+      supported_dtype && index.numel() <= std::numeric_limits<int>::max();
+
+  if (use_sorted_backward) {
+    const int64_t num_indices = index.numel();
+    const int64_t num_rows = result.dim() == 0 ? 1 : result.size(dim);
+    int64_t outer_size = 1;
+    int64_t inner_size = 1;
+    for (const auto d : c10::irange(result.dim())) {
+      if (static_cast<int64_t>(d) < dim) {
+        outer_size *= result.size(d);
+      } else if (static_cast<int64_t>(d) > dim) {
+        inner_size *= result.size(d);
+      }
+    }
+
+    bool valid_grad_shape = grad.dim() == result.dim();
+    if (valid_grad_shape) {
+      for (const auto d : c10::irange(result.dim())) {
+        const auto expected_size =
+            static_cast<int64_t>(d) == dim ? num_indices : result.size(d);
+        valid_grad_shape = valid_grad_shape && grad.size(d) == expected_size;
+      }
+    }
+    if (!valid_grad_shape) {
+      return result.index_add_(dim, index, grad);
+    }
+    if (num_indices == 0 || outer_size == 0 || inner_size == 0) {
+      return result;
+    }
+    const bool supported_inner_size =
+        inner_size == 64 || inner_size == 128 || inner_size == 256;
+    if (num_indices < INDEX_SELECT_BACKWARD_MIN_SORT_SIZE ||
+        !supported_inner_size) {
+      return result.index_add_(dim, index, grad);
+    }
+
+    if (num_rows == 0 || num_rows > std::numeric_limits<int>::max()) {
+      return result.index_add_(dim, index, grad);
+    }
+    const auto position_options = index.options().dtype(at::kInt);
+    const int64_t max_segments = std::min(num_indices, num_rows);
+    const int64_t num_boundaries =
+        (num_indices - 1) / INDEX_SELECT_BACKWARD_CHUNK_SIZE;
+    const int64_t max_candidates = max_segments + num_boundaries;
+    if (max_candidates > std::numeric_limits<int64_t>::max() / outer_size) {
+      return result.index_add_(dim, index, grad);
+    }
+
+    Tensor sorted_indices;
+    Tensor original_positions;
+    Tensor positions;
+    Tensor segment_offsets;
+    Tensor num_segments;
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    {
+      sorted_indices = at::empty_like(index, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      original_positions = at::empty({num_indices}, position_options);
+      positions = at::arange(num_indices, position_options);
+      segment_offsets = at::empty({max_segments}, position_options);
+      num_segments = at::empty({}, index.options().dtype(at::kLong));
+      auto [index_min, index_max] = at::aminmax(index);
+      at::_assert_async(index_min >= 0);
+      at::_assert_async(index_max < num_rows);
+    }
+
+    {
+      AT_DISPATCH_INDEX_TYPES(
+          index.scalar_type(), "index_select_backward_sort", [&] {
+            {
+              cuda::cub::radix_sort_pairs(
+                  index.const_data_ptr<index_t>(),
+                  sorted_indices.mutable_data_ptr<index_t>(),
+                  positions.const_data_ptr<int32_t>(),
+                  original_positions.mutable_data_ptr<int32_t>(),
+                  num_indices,
+                  false,
+                  0,
+                  cuda::cub::get_num_bits(num_rows));
+            }
+
+            {
+              cuda::cub::unique_by_key(
+                  sorted_indices.const_data_ptr<index_t>(),
+                  cccl_counting_iterator<int32_t>{0},
+                  segment_offsets.mutable_data_ptr<int32_t>(),
+                  num_segments.mutable_data_ptr<int64_t>(),
+                  num_indices);
+            }
+          });
+    }
+
+    const int64_t multiprocessor_count =
+        at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+    const bool use_long_reduction =
+        num_indices >= INDEX_SELECT_BACKWARD_LONG_RUN_SIZE;
+    int64_t max_long_chunks = 0;
+    Tensor long_chunk_counts;
+    Tensor long_chunk_offsets;
+    if (use_long_reduction) {
+      max_long_chunks =
+          num_indices / INDEX_SELECT_BACKWARD_CHUNK_SIZE +
+          num_indices / INDEX_SELECT_BACKWARD_LONG_RUN_SIZE;
+      TORCH_INTERNAL_ASSERT(max_long_chunks > 0);
+      long_chunk_counts = positions;
+      long_chunk_offsets = at::empty({max_segments}, position_options);
+      constexpr int metadata_threads = 256;
+      const int metadata_grid = static_cast<int>(std::min<int64_t>(
+          ceil_div(max_segments, static_cast<int64_t>(metadata_threads)),
+          multiprocessor_count * 8));
+      index_select_backward_long_chunk_counts_kernel
+          <<<metadata_grid, metadata_threads, 0, stream>>>(
+              segment_offsets.const_data_ptr<int32_t>(),
+              num_segments.const_data_ptr<int64_t>(),
+              long_chunk_counts.mutable_data_ptr<int32_t>(),
+              num_indices,
+              max_segments);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      cuda::cub::exclusive_sum(
+          long_chunk_counts.const_data_ptr<int32_t>(),
+          long_chunk_offsets.mutable_data_ptr<int32_t>(),
+          max_segments);
+    }
+
+    const bool packed_scratch_fits =
+        !use_long_reduction ||
+        max_long_chunks <=
+            INDEX_SELECT_BACKWARD_MAX_SCRATCH_BYTES /
+                (2 * static_cast<int64_t>(sizeof(c10::BFloat16)));
+    const bool use_packed_bfloat16 =
+        dtype == at::kBFloat16 && supported_inner_size && packed_scratch_fits &&
+        memory::can_vectorize_up_to<c10::BFloat16>(reinterpret_cast<const char*>(
+            grad.const_data_ptr<c10::BFloat16>())) >= 2;
+    const int threads = use_packed_bfloat16
+        ? 64
+        : inner_size <= 64 ? 64 : inner_size <= 128 ? 128 : 256;
+    const int64_t max_blocks = multiprocessor_count * 8;
+    const int64_t max_work = outer_size * max_candidates;
+    const int grid =
+        static_cast<int>(std::min<int64_t>(max_work, max_blocks));
+    const int32_t* long_chunk_counts_ptr = use_long_reduction
+        ? long_chunk_counts.const_data_ptr<int32_t>()
+        : nullptr;
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        grad.scalar_type(),
+        "index_select_backward_sorted",
+        [&] {
+          using acc_t = std::conditional_t<
+              std::is_same_v<scalar_t, c10::BFloat16>,
+              c10::BFloat16,
+              at::opmath_type<scalar_t>>;
+          Tensor accumulation;
+          const int64_t feature_plane = outer_size * inner_size;
+          int64_t scratch_feature_tile = 0;
+          Tensor long_scratch;
+          accumulation = result;
+          if constexpr (!std::is_same_v<scalar_t, acc_t>) {
+            accumulation = at::zeros(
+                result.sizes(), result.options().dtype(toOpMathType(dtype)));
+          }
+
+          if (use_long_reduction) {
+            TORCH_INTERNAL_ASSERT(
+                max_long_chunks <=
+                std::numeric_limits<int64_t>::max() /
+                    static_cast<int64_t>(sizeof(acc_t)));
+            const int64_t bytes_per_feature =
+                max_long_chunks * static_cast<int64_t>(sizeof(acc_t));
+            int64_t max_scratch_features =
+                INDEX_SELECT_BACKWARD_MAX_SCRATCH_BYTES / bytes_per_feature;
+            if (use_packed_bfloat16) {
+              max_scratch_features -= max_scratch_features % 2;
+              TORCH_INTERNAL_ASSERT(max_scratch_features >= 2);
+            } else {
+              TORCH_INTERNAL_ASSERT(max_scratch_features >= 1);
+            }
+            scratch_feature_tile =
+                std::min<int64_t>(feature_plane, max_scratch_features);
+            if (use_packed_bfloat16) {
+              scratch_feature_tile -= scratch_feature_tile % 2;
+            }
+            TORCH_INTERNAL_ASSERT(
+                scratch_feature_tile > 0 &&
+                max_long_chunks <=
+                    std::numeric_limits<int64_t>::max() /
+                        scratch_feature_tile);
+            long_scratch = at::empty(
+                {max_long_chunks, scratch_feature_tile}, accumulation.options());
+          }
+
+          AT_DISPATCH_INDEX_TYPES(
+              index.scalar_type(), "index_select_backward_sorted_index", [&] {
+                {
+                  if (use_packed_bfloat16) {
+                    if constexpr (
+                        std::is_same_v<scalar_t, c10::BFloat16> &&
+                        std::is_same_v<acc_t, c10::BFloat16>) {
+                      const auto launch_packed_bfloat16 =
+                          [&](auto feature_size_constant) {
+                            constexpr int64_t packed_feature_size =
+                                decltype(feature_size_constant)::value;
+                            constexpr int64_t packed_values_per_lane = 8;
+                            constexpr int64_t packed_group_size =
+                                packed_feature_size / packed_values_per_lane;
+                            constexpr int64_t packed_groups_per_block =
+                                256 / packed_group_size;
+                            const int packed_grid = static_cast<int>(
+                                std::min<int64_t>(
+                                    ceil_div(
+                                        max_work, packed_groups_per_block),
+                                    max_blocks));
+                            const dim3 packed_block(
+                                packed_group_size, packed_groups_per_block);
+                            index_select_backward_compact_bfloat16_kernel<
+                                packed_feature_size,
+                                index_t><<<packed_grid, packed_block, 0, stream>>>(
+                                grad.const_data_ptr<c10::BFloat16>(),
+                                sorted_indices.const_data_ptr<index_t>(),
+                                original_positions.const_data_ptr<int32_t>(),
+                                segment_offsets.const_data_ptr<int32_t>(),
+                                num_segments.const_data_ptr<int64_t>(),
+                                long_chunk_counts_ptr,
+                                accumulation.mutable_data_ptr<c10::BFloat16>(),
+                                num_indices,
+                                num_rows,
+                                outer_size);
+                          };
+                      switch (inner_size) {
+                        case 64:
+                          launch_packed_bfloat16(
+                              std::integral_constant<int64_t, 64>{});
+                          break;
+                        case 128:
+                          launch_packed_bfloat16(
+                              std::integral_constant<int64_t, 128>{});
+                          break;
+                        case 256:
+                          launch_packed_bfloat16(
+                              std::integral_constant<int64_t, 256>{});
+                          break;
+                        default:
+                          TORCH_INTERNAL_ASSERT(false);
+                      }
+                      C10_CUDA_KERNEL_LAUNCH_CHECK();
+                    } else {
+                      TORCH_INTERNAL_ASSERT(false);
+                    }
+                } else {
+                  index_select_backward_compact_kernel<
+                      scalar_t,
+                      acc_t,
+                      index_t,
+                      1><<<grid, threads, 0, stream>>>(
+                      grad.const_data_ptr<scalar_t>(),
+                      sorted_indices.const_data_ptr<index_t>(),
+                      original_positions.const_data_ptr<int32_t>(),
+                      segment_offsets.const_data_ptr<int32_t>(),
+                      num_segments.const_data_ptr<int64_t>(),
+                      long_chunk_counts_ptr,
+                      accumulation.mutable_data_ptr<acc_t>(),
+                      num_indices,
+                      num_rows,
+                      outer_size,
+                      inner_size,
+                      max_segments);
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                  }
+                }
+
+                if (use_long_reduction) {
+                  const int64_t long_max_blocks =
+                      multiprocessor_count *
+                      (use_packed_bfloat16 ? 16 : 8);
+                  const int long_grid = static_cast<int>(
+                      std::min<int64_t>(max_long_chunks, long_max_blocks));
+                  for (int64_t feature_offset = 0;
+                       feature_offset < feature_plane;
+                       feature_offset += scratch_feature_tile) {
+                    const int64_t feature_count = std::min<int64_t>(
+                        scratch_feature_tile, feature_plane - feature_offset);
+                      if (use_packed_bfloat16) {
+                        if constexpr (
+                            std::is_same_v<scalar_t, c10::BFloat16> &&
+                            std::is_same_v<acc_t, c10::BFloat16>) {
+                          {
+                            index_select_backward_long_first_pass_kernel<
+                                scalar_t,
+                                acc_t,
+                                index_t,
+                                2><<<long_grid, 64, 0, stream>>>(
+                                grad.const_data_ptr<scalar_t>(),
+                                original_positions.const_data_ptr<int32_t>(),
+                                segment_offsets.const_data_ptr<int32_t>(),
+                                num_segments.const_data_ptr<int64_t>(),
+                                long_chunk_counts.const_data_ptr<int32_t>(),
+                                long_chunk_offsets.const_data_ptr<int32_t>(),
+                                long_scratch.mutable_data_ptr<acc_t>(),
+                                num_indices,
+                                max_segments,
+                                max_long_chunks,
+                                inner_size,
+                                feature_offset,
+                                feature_count);
+                            C10_CUDA_KERNEL_LAUNCH_CHECK();
+                          }
+                          {
+                            index_select_backward_long_final_pass_kernel<
+                                acc_t,
+                                index_t,
+                                2><<<long_grid, 64, 0, stream>>>(
+                                sorted_indices.const_data_ptr<index_t>(),
+                                segment_offsets.const_data_ptr<int32_t>(),
+                                long_chunk_counts.const_data_ptr<int32_t>(),
+                                long_chunk_offsets.const_data_ptr<int32_t>(),
+                                long_scratch.const_data_ptr<acc_t>(),
+                                accumulation.mutable_data_ptr<acc_t>(),
+                                num_rows,
+                                max_segments,
+                                max_long_chunks,
+                                inner_size,
+                                feature_offset,
+                                feature_count);
+                            C10_CUDA_KERNEL_LAUNCH_CHECK();
+                          }
+                        } else {
+                          TORCH_INTERNAL_ASSERT(false);
+                        }
+                      } else {
+                        {
+                          index_select_backward_long_first_pass_kernel<
+                              scalar_t,
+                              acc_t,
+                              index_t,
+                              1><<<long_grid, threads, 0, stream>>>(
+                              grad.const_data_ptr<scalar_t>(),
+                              original_positions.const_data_ptr<int32_t>(),
+                              segment_offsets.const_data_ptr<int32_t>(),
+                              num_segments.const_data_ptr<int64_t>(),
+                              long_chunk_counts.const_data_ptr<int32_t>(),
+                              long_chunk_offsets.const_data_ptr<int32_t>(),
+                              long_scratch.mutable_data_ptr<acc_t>(),
+                              num_indices,
+                              max_segments,
+                              max_long_chunks,
+                              inner_size,
+                              feature_offset,
+                              feature_count);
+                          C10_CUDA_KERNEL_LAUNCH_CHECK();
+                        }
+                        {
+                          index_select_backward_long_final_pass_kernel<
+                              acc_t,
+                              index_t,
+                              1><<<long_grid, threads, 0, stream>>>(
+                              sorted_indices.const_data_ptr<index_t>(),
+                              segment_offsets.const_data_ptr<int32_t>(),
+                              long_chunk_counts.const_data_ptr<int32_t>(),
+                              long_chunk_offsets.const_data_ptr<int32_t>(),
+                              long_scratch.const_data_ptr<acc_t>(),
+                              accumulation.mutable_data_ptr<acc_t>(),
+                              num_rows,
+                              max_segments,
+                              max_long_chunks,
+                              inner_size,
+                              feature_offset,
+                              feature_count);
+                          C10_CUDA_KERNEL_LAUNCH_CHECK();
+                        }
+                    }
+                  }
+                }
+              });
+          if constexpr (!std::is_same_v<scalar_t, acc_t>) {
+            result.copy_(accumulation);
+          }
+        });
+    return result;
+  }
+#endif
+
+  return result.index_add_(dim, index, grad);
 }
 
 Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
