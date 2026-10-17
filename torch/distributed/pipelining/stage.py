@@ -1976,6 +1976,7 @@ class PipelineStage(_PipelineStageBase):
             group=self._get_p2p_group(src_stage, self.stage_index),
             device=self.device,
             use_batch=True,
+            weights_only=True,
         )
         if len(objects) != 1:
             raise PipeliningMetadataError(
@@ -1991,6 +1992,7 @@ class PipelineStage(_PipelineStageBase):
             group=self._get_p2p_group(self.stage_index, dst_stage),
             device=self.device,
             use_batch=True,
+            weights_only=True,
         )
 
     def _is_same_rank(self, other_stage: int) -> bool:
