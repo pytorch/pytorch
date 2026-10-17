@@ -70,9 +70,10 @@ static EpTensor make_ep_tensor(const at::Tensor& t, std::string_view group_name)
             dynamic_cast<sm::NCCLSymmetricMemory*>(symm_mem.get());
         if (nccl_sm != nullptr) {
             ncclWindow_t win = nccl_sm->get_window();
-            void* base = nccl_sm->get_buffer_ptrs()[nccl_sm->get_rank()];
-            uint64_t offset = static_cast<uint8_t*>(t.data_ptr()) -
-                              static_cast<uint8_t*>(base);
+            TORCH_CHECK(win != ncclWindow_t{}, "nccl_ep: NCCL symmetric memory window is null");
+            // window base is the signal pad, not the data buffer.
+            // data_ptr - buffer_ptr misses buffer_offset_ and points into the pad.
+            const uint64_t offset = nccl_sm->get_window_offset() + static_cast<uint64_t>(t.storage_offset()) * t.element_size();
             return EpTensor(win, offset, t);
         }
     }
@@ -108,16 +109,29 @@ static ncclComm_t get_nccl_comm(
         pg->getGroupName());
 }
 
+// Destructors are noexcept; a throwing CHECK would std::terminate. The NCCL
+// comm may already be gone (cached TokenSwitch past destroy_process_group).
+// Warn and leak instead of throwing. Library NCCL_CHECK_RESULT still exit()s.
+static void warn_destroy_result(ncclResult_t r, const char* what) {
+    if (r != ncclSuccess) {
+        TORCH_WARN(what, " ignoring ", ncclGetErrorString(r));
+    }
+}
+
 NcclEpGroup::~NcclEpGroup() {
     if (group) {
-        ncclEpGroupDestroy(reinterpret_cast<ncclEpGroup_t>(group));
+        warn_destroy_result(
+            ncclEpGroupDestroy(reinterpret_cast<ncclEpGroup_t>(group)),
+            "NcclEpGroup::~NcclEpGroup()");
         group = nullptr;
     }
 }
 
 NcclEpHandle::~NcclEpHandle() {
     if (handle) {
-        ncclEpHandleDestroy(reinterpret_cast<ncclEpHandle_t>(handle));
+        warn_destroy_result(
+            ncclEpHandleDestroy(reinterpret_cast<ncclEpHandle_t>(handle)),
+            "NcclEpHandle::~NcclEpHandle()");
         handle = nullptr;
     }
 }
@@ -128,6 +142,14 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     int64_t max_dispatch_tokens_per_rank,
     int64_t max_recv_tokens_per_rank,
     int64_t max_token_bytes) {
+    const int64_t world_size = pg->getSize();
+    TORCH_CHECK(
+        world_size > 0 && num_experts % world_size == 0,
+        "nccl_ep: num_experts (",
+        num_experts,
+        ") must be divisible by world size (",
+        world_size,
+        ")");
     ncclComm_t comm = get_nccl_comm(pg);
 
     ncclEpGroupConfig_t config = NCCL_EP_GROUP_CONFIG_INIT;
@@ -148,6 +170,7 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     auto result = c10::make_intrusive<NcclEpGroup>();
     result->group = ep_group;
     result->group_name = pg->getGroupName();
+    result->num_local_experts = num_experts / world_size;
     return result;
 }
 
@@ -162,6 +185,36 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     auto recv_total_counter = at::empty(
         {1}, topk_idx.options().dtype(at::kInt));
 
+    // HT FLAT needs a live int32 counter to use the pec scan kernel; mixing
+    // pec then nopec on a reused group has hit illegal-address in the nopec JIT.
+    // Expert-major uses the library's internal counter; rank-major is LL-only.
+    at::Tensor expert_counter;
+    if (recv_expert_counter.has_value()) {
+      expert_counter = *recv_expert_counter;
+      TORCH_CHECK(
+          expert_counter.dim() == 1 &&
+              expert_counter.scalar_type() == at::kInt &&
+              expert_counter.device() == topk_idx.device() &&
+              expert_counter.numel() == group->num_local_experts,
+          "nccl_ep_create_handle: recv_expert_counter must be a 1D int32 tensor on ",
+          topk_idx.device(),
+          " with ",
+          group->num_local_experts,
+          " elements; got ",
+          expert_counter.scalar_type(),
+          " on ",
+          expert_counter.device(),
+          " with ",
+          expert_counter.numel(),
+          " elements");
+    } else if (layout == NcclEpLayout::Flat) {
+      TORCH_CHECK(
+          group->num_local_experts > 0,
+          "nccl_ep_create_handle: group has no local experts");
+      expert_counter = at::zeros(
+          {group->num_local_experts}, topk_idx.options().dtype(at::kInt));
+    }
+
     EpTensor topk(topk_idx);
     EpTensor total(recv_total_counter);
 
@@ -169,8 +222,8 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     layout_info.recv_total_counter = &total.desc;
 
     std::optional<EpTensor> counter;
-    if (recv_expert_counter) {
-        counter.emplace(*recv_expert_counter);
+    if (expert_counter.defined()) {
+        counter.emplace(expert_counter);
         layout_info.expert_counters = &counter->desc;
     }
 
@@ -188,7 +241,8 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
         layout,
         group->group_name,
         topk_idx,
-        std::move(recv_total_counter));
+        std::move(recv_total_counter),
+        std::move(expert_counter));
 }
 
 int64_t nccl_ep_handle_get_num_recv_tokens(
