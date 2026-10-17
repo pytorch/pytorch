@@ -122,10 +122,10 @@ def compute_native_function_declaration(
     if isinstance(g, NativeFunctionsGroup):
         if metadata is not None and metadata.structured:
             if backend_index.external:
-                # Structured hasn't been tested with external backends yet.
-                raise AssertionError(
-                    "Structured external backend functions are not implemented yet."
-                )
+                # Structured external backends are not implemented in torchgen;
+                # out-of-tree backends that mark kernels structured generate their
+                # own structured declarations in their own repo, so emit nothing.
+                return []
             else:
                 return gen_structured(g, backend_index)
         else:
