@@ -92,6 +92,9 @@ def compiled_region_with_backend_id_for_package_test():
     return __compiled_fn_0_00000000_0000_0000_0000_000000000000()  # noqa: F821
 
 
+PKG_SCALE = 3
+
+
 class UnpicklableConfig:
     # Like ConfigThatCannotPickle, but the failure is not an AttributeError.
     scale = 2.0
@@ -449,7 +452,7 @@ import bbmod
 
 code = bbmod.f().g.__code__
 with mock.patch.object(package.sys, "version_info", (3, 10, 0)):
-    name, path = package._get_code_source(code)
+    name, path = package._get_code_source(code, bbmod)
 print(eval(f"bbmod.{name}.{path}") is code)
 """
         with tempfile.TemporaryDirectory() as d:
@@ -1680,6 +1683,138 @@ def add(x, y):
 
         torch._dynamo.reset()
         self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 0)
+
+    def _round_trip_under_fail_on_recompile(self, fn, x):
+        ctx = DiskDynamoStore()
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(fn)
+        expected = compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(
+            package=package, guard_filter_fn=default_guard_filter_fn
+        )(fn)
+        package.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), expected)
+        return package
+
+    # Without nested graph breaks, the break makes helper a frame of its own.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_package_records_an_aliased_modules_own_frames(self):
+        # One file imported under two names is two modules, and
+        # inspect.getmodule maps a code object to whichever one it saw last.
+        # Recording helper's frame under the other alias looked for its code
+        # there and failed the compiled call.
+        source = """
+import torch
+
+
+def helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos()
+
+
+def entry(x):
+    return helper(x + 1) * 2
+"""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "aliased.py")
+        with open(path, "w") as f:
+            f.write(source)
+        names = [f"test_package_alias_{i}" for i in range(2)]
+        for name in names:
+            self.addCleanup(sys.modules.pop, name, None)
+        first, second = (import_from_path(name, path) for name in names)
+        self.assertIs(inspect.getmodule(first.helper.__code__), second)
+
+        package = self._round_trip_under_fail_on_recompile(first.entry, torch.randn(4))
+        modules = {entry.python_module for entry in package.cache_entry().codes}
+        self.assertEqual(modules, {first.__name__})
+
+    def test_package_records_the_entry_under_its_globals_module(self):
+        # functools.wraps copies __module__ from the wrapped function, so the
+        # wrapper's __module__ names a module whose namespace is not the one
+        # its guards and installed globals belong in.
+        @functools.wraps(torch.sin)
+        def wrapper(x):
+            return torch.sin(x) + PKG_SCALE
+
+        self.assertEqual(wrapper.__module__, "torch")
+        package = self._round_trip_under_fail_on_recompile(wrapper, torch.randn(4))
+        self.assertEqual(package.cache_entry().codes[0].python_module, __name__)
+
+    def test_package_keeps_an_entry_module_alias_that_owns_its_globals(self):
+        # A __module__ naming another sys.modules key for the same module (here
+        # an importable alias of this test module) is kept, not replaced by the
+        # globals' own __name__.
+        def entry(x):
+            return x.sin() + PKG_SCALE
+
+        alias = "test_package_entry_alias"
+        sys.modules[alias] = sys.modules[__name__]
+        self.addCleanup(sys.modules.pop, alias, None)
+        entry.__module__ = alias
+        package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
+        self.assertEqual(package.cache_entry().codes[0].python_module, alias)
+
+    # Without nested graph breaks, hooked_forward becomes a frame of its own.
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_package_keeps_the_entry_module_alias_for_frames_sharing_its_globals(
+        self,
+    ):
+        # The child frame (hooked_forward) and the resume functions run with the
+        # entry's globals, so they are recorded under the entry's alias too.
+        def entry(x):
+            y = hooked_forward(x, x) + x
+            torch._dynamo.graph_break()
+            return y + PKG_SCALE
+
+        alias = "test_package_entry_alias"
+        sys.modules[alias] = sys.modules[__name__]
+        self.addCleanup(sys.modules.pop, alias, None)
+        entry.__module__ = alias
+        package = self._round_trip_under_fail_on_recompile(entry, torch.randn(4))
+        codes = package.cache_entry().codes
+        self.assertGreater(len(codes), 2)
+        self.assertEqual({code.python_module for code in codes}, {alias})
+
+    def test_package_records_a_renamed_module_under_its_spec_name(self):
+        # A module that rebinds __name__ is still registered under its spec
+        # name, and that is the only key a loading process can find it by.
+        source = """
+import torch
+
+__name__ = "test_package_renamed_public"
+
+
+def entry(x):
+    x = x.sin()
+    torch._dynamo.graph_break()
+    return x * 2
+"""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "renamed.py")
+        with open(path, "w") as f:
+            f.write(source)
+        name = "test_package_renamed"
+        self.addCleanup(sys.modules.pop, name, None)
+        module = import_from_path(name, path)
+        self.assertNotIn(module.entry.__module__, sys.modules)
+
+        package = self._round_trip_under_fail_on_recompile(module.entry, torch.randn(4))
+        codes = package.cache_entry().codes
+        self.assertEqual(len(codes), 2)
+        self.assertEqual({entry.python_module for entry in codes}, {name})
 
     def test_import_source_unpickle_without_trace(self):
         # Deserializing an ImportSource happens at torch.compile() time with no
