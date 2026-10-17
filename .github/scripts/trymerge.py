@@ -2924,8 +2924,9 @@ def revert_with_dependents(
             prs_to_revert = " ".join(p.get_pr_url() for _, p in shas_and_prs)
             print(f"About to revert native stack of PRs: {prs_to_revert}")
     except Exception as e:
-        print(f"Failed to fetch dependent PRs: {e}, fall over to single revert")
-        traceback.print_exc()
+        raise RuntimeError(
+            f"Could not look up the PRs stacked on #{pr.pr_num}, so nothing was reverted, please try again"
+        ) from e
     revert_msg = commit_reverts(
         repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
     )
@@ -3327,35 +3328,36 @@ def merge(
     raise RuntimeError(msg)
 
 
+def format_failure_comment(e: Exception, title: str, run_url: str | None) -> str:
+    """Render an exception as the PR comment mergebot posts on failure.
+
+    Debugging detail (workflow link, failing rule, a failed GraphQL query) goes
+    in a collapsed section, since it is not helpful to most devs.
+    """
+    details: list[str] = []
+    if run_url is not None:
+        details.append(f'Raised by <a href="{run_url}">workflow job</a>')
+    if isinstance(e, MergeRuleFailedError) and e.rule:
+        details.append(f"Failing merge rule: {e.rule.name}")
+    if isinstance(e, GHGraphQLError):
+        details.append(e.details_markdown())
+
+    msg = f"## {title}\n**Reason**: {e}\n"
+    if details:
+        # Blank lines around each part so markdown renders inside <details>
+        msg += "\n<details><summary>Details for Dev Infra team</summary>\n\n"
+        msg += "\n\n".join(details)
+        msg += "\n</details>\n"
+    return msg
+
+
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
 
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
-        exception = f"**Reason**: {e}"
-
-        failing_rule = None
-        if isinstance(e, MergeRuleFailedError):
-            failing_rule = e.rule.name if e.rule else None
-
-        internal_debugging = ""
-        run_url = os.getenv("GH_RUN_URL")
-        if run_url is not None:
-            # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = "\n".join(
-                line
-                for line in (
-                    "<details><summary>Details for Dev Infra team</summary>",
-                    f'Raised by <a href="{run_url}">workflow job</a>\n',
-                    f"Failing merge rule: {failing_rule}" if failing_rule else "",
-                    "</details>",
-                )
-                if line
-            )  # ignore empty lines during the join
-
-        msg = "\n".join((f"## {title}", f"{exception}", "", f"{internal_debugging}"))
-
+        msg = format_failure_comment(e, title, os.getenv("GH_RUN_URL"))
         gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         traceback.print_exc()
 

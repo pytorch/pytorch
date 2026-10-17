@@ -238,6 +238,7 @@ manual_torch_name_rule_map: dict[
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/162374
     "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
+    "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present": UserFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch.backends.cuda.SDPAParams": TorchInGraphFunctionVariable,
@@ -593,6 +594,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
+        "torch._C._copy_backend_meta",
         "torch._C._cpu._init_amx",
         "torch._C._cpu._get_cpu_capability",
         "torch._C._crash_if_aten_asan",
@@ -3006,7 +3008,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.modules.utils._ntuple",
         "torch.nn.modules.utils._quadruple",
         "torch.nn.modules.utils._reverse_repeat_tuple",
-        "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present",
         "torch.nn.parameter.is_lazy",
         "torch.norm",
         "torch.quantization.default_eval_fn",
