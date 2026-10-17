@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
     onlyNativeDeviceTypes,
     onlyOn,
     OpDTypes,
@@ -1381,6 +1382,34 @@ class TestBinaryUfuncsDevice(TestCase):
         res = [num / d for d in denom]
         ref = [num * (1 / d) for d in denom]
         self.assertEqual(res, ref, atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_division_by_scalar_without_finite_normal_reciprocal(self, device, dtype):
+        # 1/s overflows or is subnormal in opmath, so CUDA must divide by s
+        # instead of multiplying by 1/s; this matches CPU exactly.
+        opmath = torch.finfo(torch.double if dtype == torch.double else torch.float)
+        a = torch.tensor([0.0, 1.0, -2.5, 3.0, 30.0], dtype=torch.double) * opmath.tiny
+        a = torch.cat([a, torch.tensor([1.0, -7.5, 100.0], dtype=torch.double)])
+        a = a.to(dtype)
+        for s in (opmath.tiny / 8, -opmath.tiny / 5, opmath.max / 2, -opmath.max):
+            for rounding_mode in (None, "trunc", "floor"):
+                expect = torch.div(a, s, rounding_mode=rounding_mode)
+                actual = torch.div(a.to(device), s, rounding_mode=rounding_mode)
+                self.assertEqual(actual, expect, atol=0, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_div_trunc_by_scalar_matches_cpu(self, device, dtype):
+        # trunc(a * (1/s)) can be off by a whole integer, e.g. -17373096 / 7.
+        # Large magnitudes make the quotient's fractional part coarse.
+        scale = 2**29 if dtype == torch.double else 1
+        a = torch.arange(-(2**22), 2**22, 997, dtype=dtype) * 7 * scale
+        a = torch.cat([a, torch.tensor([-17373096.0], dtype=dtype)])
+        for s in (7.0, 49.0):
+            expect = torch.div(a, s, rounding_mode="trunc")
+            actual = torch.div(a.to(device), s, rounding_mode="trunc")
+            self.assertEqual(actual, expect, atol=0, rtol=0)
 
     # Tests that trying to add, inplace, a device tensor to a CPU tensor
     #   throws the correct error message

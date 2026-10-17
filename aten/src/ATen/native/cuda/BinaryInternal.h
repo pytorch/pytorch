@@ -13,6 +13,7 @@
 #include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
+#include <cmath>
 #include <type_traits>
 
 namespace at::native::binary_internal {
@@ -39,6 +40,20 @@ struct MulFunctor<bool> {
     return a && b;
   }
 };
+
+// Whether a host-computed reciprocal 1/b of a CPU scalar divisor can replace
+// division by b: it must not have overflowed or become subnormal.
+template <typename T>
+bool is_usable_reciprocal(T inv_b) {
+  return inv_b == T(0) || std::isnormal(inv_b);
+}
+
+template <typename T>
+bool is_usable_reciprocal(c10::complex<T> inv_b) {
+  return is_usable_reciprocal(inv_b.real()) &&
+      is_usable_reciprocal(inv_b.imag());
+}
+
 void div_true_kernel_cuda(TensorIteratorBase& iter);
 void div_trunc_kernel_cuda(TensorIteratorBase& iter);
 } // namespace at::native::binary_internal
