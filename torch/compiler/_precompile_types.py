@@ -128,7 +128,7 @@ class PrecompileSummary:
         uncovered_frames: The ``co_name`` of each frame the capture ran that
             ended with no guarded code and was not bypassed, so the artifact
             cannot serve it: a thin wrapper whose graphs all landed in an inner
-            frame, a frame Dynamo gave up on, or a frame whose compile raised
+            frame, or a frame whose compile raised
             (its message is in ``capture_errors``, so one failure shows in both
             digest clauses). A different cause from ``bypassed``,
             never the same frame; a frame that hit the recompile limit before it
@@ -137,6 +137,12 @@ class PrecompileSummary:
             the package holds an entry for but never ran is not one, so this is
             not ``frames`` minus ``bypassed`` minus the frames that hold guarded
             code.
+        eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame
+            Dynamo gave up on during the capture and ran eagerly from then on (a
+            graph break it could not resume from, such as one inside a loop).
+            Not a gap, and not in ``uncovered_frames``: a load runs the frame
+            eagerly as the capturing process did, serving only the variants its
+            earlier calls compiled, if any.
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
             guard on a bare argument name pins in some variant (``self.eps`` is
             not a bare name) while no other variant of the same frame guards the
@@ -200,6 +206,7 @@ class PrecompileSummary:
     bypassed: tuple[str, ...] = ()
     truncated: tuple[str, ...] = ()
     uncovered_frames: tuple[str, ...] = ()
+    eager_fallbacks: tuple[str, ...] = ()
     wont_generalize: tuple[str, ...] = ()
     dropped_guards: tuple[tuple[str, str], ...] = ()
     kept_guards: tuple[tuple[str, str], ...] = ()
@@ -270,6 +277,9 @@ class PrecompileSummary:
             base += f", {count(policy, 'policy-dropped guard')}"
         if self.wont_generalize:
             base += f", {count(len(self.wont_generalize), 'value-pinned source')}"
+        if self.eager_fallbacks:
+            fallbacks = some(self.eager_fallbacks)
+            base += f", {count(len(self.eager_fallbacks), 'eager fallback')}: {fallbacks}"
         if self.uncovered_frames:
             base += f", {len(self.uncovered_frames)} UNCOVERED: {some(self.uncovered_frames)}"
         if self.truncated:

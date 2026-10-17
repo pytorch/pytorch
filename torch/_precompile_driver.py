@@ -649,6 +649,8 @@ def _build_multigraph_forward():
                 for manager, variant in bound:
                     if manager.check(f_locals):
                         return variant(*args, **kwargs)
+            if eager_fallback:
+                return _function(target, closure)(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call ({len(variants)} captured). Either a guard on the call's "
@@ -657,6 +659,9 @@ def _build_multigraph_forward():
                 f"captured: the artifact serves only what capture exercised, so add "
                 f"an example covering it and recapture."
             )
+
+        # Capture ran a call its variants missed eagerly (see _multigraph_frames).
+        eager_fallback = frame.get("eager_fallback", False)
 
         def _bind(closure):
             return [(manager, _function(body, closure)) for manager, body in variants]
