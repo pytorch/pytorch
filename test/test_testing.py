@@ -443,7 +443,9 @@ if __name__ == '__main__':
     @slowTest
     def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
         # test to ensure common_distributed.py override should not early terminate CUDA.
-        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+        # Run from a real file. python -c cannot be the spawn main module, so
+        # the worker would fail to unpickle this test class.
+        script = """\
 #!/usr/bin/env python3
 
 import torch
@@ -452,6 +454,17 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import MultiProcessTestCase
 
 class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
+
+    @property
+    def world_size(self):
+        # One worker is enough to fault the device. The default world size
+        # would run this index once per rank.
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # The parent only joins children. Spawn one so the body runs.
+        self._spawn_processes()
 
     @slowTest
     def test_throw_unrecoverable_cuda_exception(self, device):
@@ -473,9 +486,33 @@ instantiate_device_type_tests(
 
 if __name__ == '__main__':
     run_tests()
-""")
-        # we are currently disabling CUDA early termination for distributed tests.
-        self.assertIn('errors=2', stderr)
+"""
+        # Run this suite from a real .py file.
+        fd, path = tempfile.mkstemp(suffix=".py")
+        os.close(fd)
+        try:
+            with open(path, "w") as f:
+                f.write(script)
+            env = os.environ.copy()
+            env["PYTORCH_API_USAGE_STDERR"] = "1"
+            env.pop("CI", None)
+            env.pop("TEST_SHOWLOCALS", None)
+            proc = subprocess.run(
+                [sys.executable, path],
+                env=env,
+                capture_output=True,
+            )
+        finally:
+            os.remove(path)
+        stderr = proc.stderr.decode("utf-8", errors="replace")
+        # The worker faults the device. Distributed tests disable early
+        # termination, so the following case must still run.
+        self.assertTrue(
+            has_device_side_assert(stderr),
+            lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+        if torch.version.cuda:
+            self.assertIn('errors=2', stderr)
 
     @expectedFailureMeta  # This is only supported for CPU and CUDA
     @onlyNativeDeviceTypes
