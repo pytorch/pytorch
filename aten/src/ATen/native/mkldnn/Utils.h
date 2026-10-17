@@ -86,7 +86,7 @@ const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_
 #endif // AT_MKLDNN_ENABLED()
 }
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(_M_ARM64)
 inline bool mkldnn_bf16_device_check_arm() {
   return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
