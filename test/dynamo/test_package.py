@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import collections
 import contextlib
 import dataclasses
@@ -1350,6 +1351,32 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
         sources = self._recorded_unnamed_scope_sources(package)
         self.assertIn("___set_getitem", "".join(s.name for s in sources.values()))
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+
+    def test_install_binds_an_unnamed_scope_reached_through_builtins(self):
+        # The namespace's source is rooted at the builtins dict key, which a
+        # fresh process does not have either, so install() binds that first.
+        builtins.pkg_builtin_scale = PKG_HANDLER_SCOPE["scale"]
+        self.addCleanup(delattr, builtins, "pkg_builtin_scale")
+
+        def fn(x):
+            return pkg_builtin_scale(x.sin())  # noqa: F821
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict__")
+        }
+        self.assertTrue(builtins_keys)
+        package, _, compiled_fn = self._install_unnamed_scope_package(
+            ctx, fn, names | builtins_keys
+        )
+        sources = self._recorded_unnamed_scope_sources(package)
+        self.assertIn("__builtins_dict__", "".join(s.name for s in sources.values()))
         for name in names:
             self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
         x = torch.randn(4)
