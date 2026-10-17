@@ -1609,14 +1609,11 @@ class _CapturePackage(CompilePackage):
     def add_resume_function(
         self,
         python_code: types.CodeType,
-        global_scope: dict[str, Any],
+        python_module: str,
         function_name: str,
-        root_scope: dict[str, Any],
     ) -> None:
         self.note_compute()
-        super().add_resume_function(
-            python_code, global_scope, function_name, root_scope
-        )
+        super().add_resume_function(python_code, python_module, function_name)
 
 
 def _summarize(

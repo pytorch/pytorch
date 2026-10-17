@@ -2119,7 +2119,6 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
             "python_module": code.python_module,
             "import_sources": dict(code.import_sources),
             "resume_names": list(code.function_names) if code.install_to_global else [],
-            "bound_in": dict(code.bound_in),
             "variants": [
                 {
                     "guards_state": guarded.guards_state,

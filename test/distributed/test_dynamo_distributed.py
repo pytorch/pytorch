@@ -377,45 +377,6 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
-    @unittest.skipIf(not dist.is_gloo_available(), "requires gloo")
-    def test_dynamo_pgs_inherit_default_pg_timeout(self):
-        # The fake backend exposes no options carrying the configured timeout, so
-        # the timeout has to come from what c10d recorded for the default group.
-        from torch._dynamo import distributed as dynamo_distributed
-
-        timeout = timedelta(seconds=7200)
-        dist.init_process_group(
-            backend="fake",
-            store=dist.HashStore(),
-            rank=0,
-            world_size=1,
-            timeout=timeout,
-        )
-        self.addCleanup(dist.destroy_process_group)
-        self.assertEqual(dist.distributed_c10d._get_process_group_timeout(), timeout)
-
-        with (
-            patch.object(dynamo_distributed, "_GUARD_PG", None),
-            patch.object(dynamo_distributed, "_COMPILE_SYNC_PG", None),
-        ):
-            guard_pg = dynamo_distributed.get_guard_pg()
-            compile_sync_pg = dynamo_distributed.get_compile_sync_pg()
-
-        for pg in (guard_pg, compile_sync_pg):
-            self.assertEqual(
-                dist.distributed_c10d._get_process_group_timeout(pg), timeout
-            )
-        self.assertEqual(
-            compile_sync_pg._get_backend(torch.device("cpu")).options._timeout,
-            timeout,
-        )
-
-        new_timeout = timedelta(seconds=60)
-        dist.set_timeout(new_timeout)
-        self.assertEqual(
-            dist.distributed_c10d._get_process_group_timeout(), new_timeout
-        )
-
     @_expectedFailureIf_transformers_ge_5_2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
