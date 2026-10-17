@@ -3729,6 +3729,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
         self._test_new_group_local_sync_duplicate_pg(backend="gloo")
 
     @requires_gloo()
+    def test_new_group_after_local_sync_subset(self):
+        self._test_new_group_after_local_sync_subset(backend="gloo")
+
+    @requires_gloo()
     def test_new_group_ordered(self):
         self._test_new_group_ordered(backend="gloo")
 
