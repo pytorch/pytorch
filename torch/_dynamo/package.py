@@ -1555,10 +1555,19 @@ class CompilePackage:
                     # is taken over from its CleanupHook, so uninstall() drops
                     # it, and anyone else's is left alone.
                     sources = guards_state.output_graph.unnamed_scope_sources
+                    closure_vars = torch._dynamo.guards._get_closure_vars()
                     for name, source in sources.items():
                         try:
-                            namespace = eval(source.name, {"G": runtime_global_scope})
-                        except Exception:
+                            namespace = source.get_value(
+                                {"G": runtime_global_scope}, closure_vars, {}
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                "leaving %s unbound, %s raised: %r",
+                                name,
+                                source.name,
+                                e,
+                            )
                             continue
                         if isinstance(namespace, dict):
                             self._install_global(
