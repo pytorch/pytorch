@@ -256,49 +256,15 @@ def check_all_strides(
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
-def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
+def check_contiguous_sizes_strides(sizes, strides):
     """
     Performs an equality check between actual stride & expected stride (based on composed sizes),
     handling contiguous stride representations:
     e.g. torch.empty(u0, u1, u2).contiguous().stride() -> (Max(1, u1) * Max(1, u2), Max(1, u2), 1)
     and we'd like to treat this equal to (u1 * u2, u2, 1) for comparison purposes.
+    Returns False on data dependency.
     """
-
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        is_nested_int,
-    )
-
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-
-    expected_stride = 1
-    expected_stride_max = 1
-
-    # pyrefly: ignore [bad-assignment]
-    for x, y in reversed(tuple(zip(sizes, strides))):
-        # Skips checking strides when a dimension has length 1.
-        if maybe_guard_or_false(x == 1):
-            continue
-
-        if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
-            y != expected_stride_max
-        ):
-            return False
-
-        #  We symbolically check both paths to maximize the cases where this function
-        #  returns true. This is because make_contiguous_strides_for adds the max
-        #  symbolically, and in some other situations the max might not be there.
-        #  And we want to ensure we return true in both cases.
-        expected_stride_max *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
-
-        expected_stride *= x
-
-    return True
+    return torch._C._is_contiguous_or_false(sizes, strides)
 
 
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp
@@ -309,79 +275,28 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    if not false_if_dde:
+        return torch._C._is_contiguous(a.shape, a.stride(), a.numel())
 
-    def eval_eager(x):
-        return bool(x)
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-
-    if maybe_guard_or_false(a.numel() < 2):
+    if guard_or_false(a.numel() < 2):
         return True
 
-    return check_contiguous_sizes_strides(
-        a.shape, a.stride(), false_if_dde=false_if_dde
-    )
+    return check_contiguous_sizes_strides(a.shape, a.stride())
 
 
 # This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
 def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
-    # NHWC or not channels last 2D contiguous
-    if a.ndim != 4:
-        return False
-
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-
-    expected_stride = 1
-    for idx in (1, 3, 2, 0):
-        length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
-            continue
-
-        stride = a.stride()[idx]
-        if maybe_guard_or_true(stride != expected_stride):
-            return False
-
-        expected_stride *= length
-
-    return True
+    if false_if_dde:
+        return torch._C._is_channels_last_contiguous_2d_or_false(a.shape, a.stride())
+    return torch._C._is_channels_last_contiguous_2d(a.shape, a.stride())
 
 
 def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
-    # NDHWC or not channels last 3D contiguous
-    if a.ndim != 5:
-        return False
-
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-
-    expected_stride = 1
-    for idx in (1, 4, 3, 2, 0):
-        length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
-            continue
-
-        stride = a.stride()[idx]
-        if maybe_guard_or_true(stride != expected_stride):
-            return False
-
-        expected_stride *= length
-
-    return True
+    if false_if_dde:
+        return torch._C._is_channels_last_contiguous_3d_or_false(a.shape, a.stride())
+    return torch._C._is_channels_last_contiguous_3d(a.shape, a.stride())
 
 
 _memory_formats = {
@@ -527,7 +442,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     # verify actual strides match the expected (composed sizes)
     sizes = [x.size for x in lengths_and_strides][::-1]
     strides = [x.stride for x in lengths_and_strides][::-1]
-    return check_contiguous_sizes_strides(sizes, strides, false_if_dde=True)
+    return check_contiguous_sizes_strides(sizes, strides)
 
 
 def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
