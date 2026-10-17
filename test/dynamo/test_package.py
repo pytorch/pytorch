@@ -271,6 +271,10 @@ class PkgScaler:
 
 PKG_SCALER = PkgScaler()
 
+PKG_HANDLER_SCOPE = {"factor": 3}
+exec("def scale(x):\n    return x * factor\n", PKG_HANDLER_SCOPE)
+PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
+
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -943,8 +947,12 @@ print(eval(f"bbmod.{name}.{path}") is code)
         # generated code. install() keeps that binding, and the hook firing
         # afterwards must not delete it from under the installed guards.
         ctx = DiskDynamoStore()
+        # Hold the code objects already registered, so none is collected and its
+        # id reused by a code object of the compile below.
+        held = [ref() for ref in list(CleanupManager.instance.refs.values())]
         before = set(CleanupManager.instance.refs)
         fn, names = self._save_record_package(ctx)
+        self.addCleanup(lambda: [fn.__globals__.pop(name, None) for name in names])
         # Pin the live compile's code objects so its hooks fire after install().
         pinned = [
             ref()
@@ -959,6 +967,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package, backends = ctx.load_package(fn, self.path())
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
+        self.addCleanup(package.uninstall)
         del pinned
         gc.collect()
 
@@ -971,6 +980,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         # Taken over from the hook, so nothing would drop it if uninstall() didn't.
         package.uninstall()
         self.assertFalse(names & fn.__globals__.keys())
+        del held
 
     def test_install_binds_unnamed_scope_globals_to_the_live_namespace(self):
         # The bytecode replays log.append through the key, so binding the
@@ -978,13 +988,16 @@ print(eval(f"bbmod.{name}.{path}") is code)
         def fn(x):
             return PKG_LOGGER.scale(x.sin())
 
+        # Trace against an empty list, and leave it empty for a rerun.
+        log = PKG_LOG_SCOPE["log"]
+        log.clear()
+        self.addCleanup(log.clear)
         ctx = DiskDynamoStore()
         fn, names = self._save_unnamed_scope_package(ctx, fn)
         _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
         for name in names:
             self.assertIs(fn.__globals__[name], PKG_LOG_SCOPE)
-        # The guards want the list empty, as it was while tracing.
-        log = PKG_LOG_SCOPE["log"]
+        # The guards want the list as it was while tracing; the save appended.
         log.clear()
         x = torch.randn(4)
         with torch.compiler.set_stance("fail_on_recompile"):
@@ -1006,6 +1019,27 @@ print(eval(f"bbmod.{name}.{path}") is code)
         PKG_FACTOR_SCOPE["factor"] = 5
         self.addCleanup(PKG_FACTOR_SCOPE.__setitem__, "factor", 3)
         self.assertEqual(compiled_fn(x), x.sin() * 5)
+
+    @parametrize("handlers", ["emptied", "rebound"])
+    def test_install_leaves_unbound_an_unnamed_scope_whose_source_raises(
+        self, handlers
+    ):
+        # The namespace's source is G['PKG_HANDLERS'][0].__globals__. Against an
+        # emptied or rebound list it raises IndexError or TypeError, and
+        # install() must skip the key rather than fail partway through, leaving
+        # a call that misses.
+        def fn(x):
+            return PKG_HANDLERS[0](x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        stale = [] if handlers == "emptied" else None
+        with patch.object(sys.modules[fn.__module__], "PKG_HANDLERS", stale):
+            _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(names & fn.__globals__.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(torch.randn(4))
 
     def test_install_leaves_unbound_an_unnamed_scope_reached_through_a_local(self):
         # The namespace is found through the frame's argument, which install()
