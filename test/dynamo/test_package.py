@@ -851,6 +851,39 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles + 1)
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_a_compile_after_load_outranks_the_loaded_variant_it_covers(self):
+        # torch.compile serves a frame's newest entry first. A variant compiled
+        # after a package was loaded is newer than every installed one, so it
+        # serves the calls both admit.
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        x = torch.randn(3, 2)
+        torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        compiled = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(len(_debug_get_precompile_entries(fn.__code__)), 1)
+        wider = torch.randn(5, 2)
+        torch._dynamo.mark_dynamic(wider, 0)
+        compiled(wider)
+        (entry,) = _debug_get_cache_entry_list(fn)
+        (name,) = [n for n in entry.code.co_names if n.startswith("__compiled_fn")]
+        calls = []
+        compiled_fn = fn.__globals__[name]
+
+        def record(*args, **kwargs):
+            calls.append(name)
+            return compiled_fn(*args, **kwargs)
+
+        with patch.dict(fn.__globals__, {name: record}):
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(calls, [name])
+
     @torch._dynamo.config.patch(
         caching_precompile=True, strict_precompile=False, prepare_freezing=True
     )
