@@ -29,6 +29,13 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+    skipCPUIf,
+    skipGPUIf,
+)
+from torch.testing._internal.common_dtype import integral_types_and
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -62,6 +69,57 @@ REDUCTION_INVARIANT_X_LOAD = r"tl\.load\([^\n]*\[XBLOCK, 1\]"
 REDUCTION_INVARIANT_YX_LOAD = r"tl\.load\([^\n]*\[YBLOCK, 1, 1\]"
 DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOCK\]\)"
 REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
+
+
+class TestTake(InductorTestCase):
+    @skipCPUIf(not HAS_CPU, "requires CPU compiler")
+    @skipGPUIf(not HAS_GPU, "requires GPU and Triton")
+    @parametrize(
+        "index_dtype", integral_types_and(torch.uint16, torch.uint32, torch.uint64)
+    )
+    def test_integer_indices(self, device, index_dtype):
+        def fn(source, index):
+            return torch.take(source, index)
+
+        source = torch.arange(24.0, device=device).reshape(4, 6).t()
+        values = [-24, -1, 0, 12] if index_dtype.is_signed else [0, 5, 12, 23]
+        index = torch.tensor(values, device=device, dtype=index_dtype).reshape(2, 2).t()
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        self.assertEqual(compiled(source, index), fn(source, index))
+
+    @onlyCPU
+    @skipCPUIf(not HAS_CPU, "requires CPU compiler")
+    @config.patch({"cpp.threads": 1})
+    @parametrize(
+        "index_dtype,invalid_index",
+        (
+            (torch.int8, -25),
+            (torch.int64, -25),
+            (torch.uint8, 24),
+            (torch.uint64, 24),
+            (torch.uint64, 2**63),
+            (torch.uint64, 2**64 - 24),
+            (torch.uint64, 2**64 - 1),
+        ),
+    )
+    def test_out_of_bounds(self, device, index_dtype, invalid_index):
+        def fn(source, index):
+            return torch.take(source, index)
+
+        source = torch.arange(24.0, device=device)
+        index = torch.tensor([0, 12, 23], device=device, dtype=index_dtype)
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(compiled(source, index), fn(source, index))
+
+        index = torch.tensor([0, invalid_index, 23], device=device, dtype=index_dtype)
+        with self.assertRaisesRegex(IndexError, "out of range"):
+            fn(source, index)
+        with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+            compiled(source, index)
+
+
+instantiate_device_type_tests(TestTake, globals(), only_for=("cpu", "cuda"))
 
 
 class TestIndexingSimplification(InductorTestCase):
