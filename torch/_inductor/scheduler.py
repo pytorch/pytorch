@@ -12014,13 +12014,45 @@ class Scheduler:
 
             return False
 
-        for partition, skip_cudagraph in zip(
-            reversed(partitions), reversed(skip_cudagraphs)
+        def non_owning_base(buf_name: str) -> str | None:
+            buf = self.name_to_buf.get(buf_name, None)
+            if buf is None or not isinstance(buf.node.layout, ir.NonOwningLayout):
+                return None
+            return buf.node.layout.view.data.get_name()
+
+        # A buffer with NonOwningLayout (e.g., a ConcatKernel input) is a view into
+        # a base buffer that is allocated where the first view is codegened. If
+        # views of one base span multiple partitions, the first such partition
+        # allocates and returns the base and later partitions take it as an input,
+        # instead of each partition allocating its own copy.
+        base_to_first_partition: dict[str, int] = {}
+        for idx, partition in enumerate(partitions):
+            for node in partition:
+                for name in node.outputs_by_name:
+                    if base := non_owning_base(name):
+                        base_to_first_partition.setdefault(base, idx)
+
+        for idx, partition, skip_cudagraph in zip(
+            reversed(range(len(partitions))),
+            reversed(partitions),
+            reversed(skip_cudagraphs),
         ):
             output_names: OrderedSet[str] = OrderedSet()
 
             for node in partition:
                 output_names.update(node.outputs_by_name.keys())
+
+            allocated_base_names: OrderedSet[str] = OrderedSet()
+            inherited_base_names: OrderedSet[str] = OrderedSet()
+            for name in list(output_names):
+                base = non_owning_base(name) or name
+                first = base_to_first_partition.get(base, None)
+                if first == idx:
+                    allocated_base_names.add(base)
+                elif first is not None and first < idx:
+                    inherited_base_names.add(base)
+            output_names.update(allocated_base_names)
+            output_names = output_names - inherited_base_names
 
             returned_output_names = output_names.intersection(unmet_output_names)
 
@@ -12040,6 +12072,7 @@ class Scheduler:
                 self.mutation_real_name.get(name, name)
                 for name in partition_input_names
             )
+            partition_input_names.update(inherited_base_names)
 
             buffer_names_to_free: OrderedSet[str] = OrderedSet()
             for node in partition:
