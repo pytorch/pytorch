@@ -1192,6 +1192,8 @@ print("RECOVERED")
                     archs.append("gfx950")
                 if ROCM_VERSION >= (7, 13):
                     archs.extend(["gfx1100", "gfx1101", "gfx1151"])
+                if ROCM_VERSION >= (10, 2):
+                    archs.extend(["gfx1170", "gfx1171"])
                 archs.append("gfx1250")
                 # blasDefaultBackend() only prefers hipblaslt when every visible
                 # device matches, so device 0 alone is not enough.
