@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
+    from .codegen.multi_kernel import MultiKernel
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
@@ -5928,7 +5929,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
-        self.previous_node: BaseSchedulerNode | None = None
+        self.previous_nodes: list[BaseSchedulerNode] | None = None
         self.current_node: BaseSchedulerNode | None = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -12600,10 +12601,10 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
-        if self.previous_node is not None:
-            raise AssertionError("expected previous_node to be None")
+        if self.previous_nodes is not None:
+            raise AssertionError("expected previous_nodes to be None")
         previous_nodes_by_stream: dict[
-            tuple[torch.device | None, int], BaseSchedulerNode
+            tuple[torch.device | None, int], list[BaseSchedulerNode]
         ] = {}
 
         # pyrefly: ignore [unbound-name]
@@ -12633,7 +12634,7 @@ class Scheduler:
 
         for node in nodes:
             stream_key = (node.get_device(), self.get_node_stream(node))
-            self.previous_node = previous_nodes_by_stream.get(stream_key)
+            self.previous_nodes = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12728,6 +12729,7 @@ class Scheduler:
             self.current_node = node
             self.buffer_names_to_free.update(node.last_usage)
 
+            kernel = None
             if node.is_template():
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
@@ -12762,7 +12764,7 @@ class Scheduler:
                 self.get_backend(device).codegen_mix_order_reduction(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore [unbound-name]
-                self.get_backend(device).codegen_node(node)
+                kernel = self.get_backend(device).codegen_node(node)
             else:
                 if not isinstance(node, NopKernelSchedulerNode):
                     raise AssertionError("expected node to be a NopKernelSchedulerNode")
@@ -12794,7 +12796,12 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                previous_nodes_by_stream[stream_key] = node
+                from .codegen.triton import TritonKernel
+
+                waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
+                if self.previous_nodes is None or waited:
+                    previous_nodes_by_stream[stream_key] = []
+                previous_nodes_by_stream[stream_key].append(node)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
 
@@ -12809,7 +12816,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
-        self.previous_node = None
+        self.previous_nodes = None
         self.flush()
 
     def benchmark_combo_kernel(
@@ -13157,7 +13164,9 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """

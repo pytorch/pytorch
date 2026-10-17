@@ -307,7 +307,7 @@ class TestNVUniversalGemmPDLMetadata(TestCase):
         kernel.mix_order_reduction = False
         kernel.args = SimpleNamespace(workspace_args=())
         graph = MagicMock()
-        graph.scheduler.previous_node = previous_node
+        graph.scheduler.previous_nodes = [previous_node]
         graph.get_current_device_or_throw.return_value = torch.device("cuda")
         return kernel, graph, previous_node, current_node, current_read
 
