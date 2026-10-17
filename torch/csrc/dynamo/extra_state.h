@@ -218,6 +218,7 @@ void _load_precompile_entry(
     py::object guard_manager,
     py::object dynamo_code);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
+bool _get_lru_cache();
 bool _set_lru_cache(py::object boolean);
 
 #endif
