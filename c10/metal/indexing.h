@@ -314,7 +314,10 @@ kernel void unary_inner_contiguous_castout(
     template <typename T>                                                       \
     inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> operator()( \
         const T x) {                                                            \
-      return T(NAME(static_cast<::c10::metal::opmath_t<T>>(x)));                \
+      /* Compute half and bfloat in float, complex types as is */              \
+      using om_t =                                                              \
+          ::metal::conditional_t<::c10::metal::is_complex_v<T>, T, float>;      \
+      return T(NAME(static_cast<om_t>(x)));                                     \
     }                                                                           \
     template <typename T>                                                       \
     inline ::metal::enable_if_t<::metal::is_integral_v<T>, float> operator()(   \
