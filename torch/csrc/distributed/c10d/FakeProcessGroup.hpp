@@ -1,11 +1,8 @@
 #pragma once
 
 #include <algorithm>
-#include <exception>
 #include <iterator>
 
-#include <ATen/DeviceAccelerator.h>
-#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -21,26 +18,10 @@ class FakeWork : public Work {
   // their future to those tensors; callers using async_op=True read them via
   // get_future().value().
   explicit FakeWork(std::vector<at::Tensor> result = {})
-      : result_(std::move(result)), future_(createResultFuture(result_)) {}
+      : result_(std::move(result)) {}
 
-  bool wait(std::chrono::milliseconds /* timeout */ = kNoTimeout) override {
-    synchronize();
+  bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
     return true;
-  }
-
-  void synchronize() override {
-    if (future_) {
-      future_->waitAndThrow();
-    }
-    Work::synchronize();
-  }
-
-  void blockCurrentStream() override {
-    if (future_) {
-      future_->waitAndThrow();
-      return;
-    }
-    Work::blockCurrentStream();
   }
 
   // A fake collective is done the moment it is "issued". Work's default reads
@@ -57,62 +38,19 @@ class FakeWork : public Work {
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
-    if (future_) {
-      return future_;
+    if (result_.empty()) {
+      auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
+      fut->markCompleted();
+      return fut;
     }
-    auto fut = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
-    fut->markCompleted();
+    auto fut = c10::make_intrusive<c10::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()));
+    fut->markCompleted(result_);
     return fut;
   }
 
  private:
-  static c10::intrusive_ptr<c10::ivalue::Future> createResultFuture(
-      const std::vector<at::Tensor>& result) {
-    if (result.empty()) {
-      return nullptr;
-    }
-    std::vector<c10::Device> devices;
-    std::vector<c10::ivalue::Future::WeakStorage> storages;
-    devices.reserve(result.size());
-    storages.reserve(3 * result.size());
-    for (const auto& tensor : result) {
-      if (!tensor.defined()) {
-        continue;
-      }
-      const auto device = tensor.device();
-      // Future requires one device type; results on another accelerator type
-      // are left unordered, as CPU and meta results are.
-      if (!at::accelerator::isAccelerator(device.type()) ||
-          (!devices.empty() && device.type() != devices.front().type())) {
-        continue;
-      }
-      devices.push_back(device);
-      std::vector<at::Tensor> parts;
-      if (tensor.is_sparse()) {
-        parts = {tensor._indices(), tensor._values()};
-      } else if (tensor.unsafeGetTensorImpl()->is_sparse_compressed()) {
-        const auto* impl = static_cast<const at::SparseCsrTensorImpl*>(
-            tensor.unsafeGetTensorImpl());
-        parts = {
-            impl->compressed_indices(), impl->plain_indices(), impl->values()};
-      } else if (tensor.has_storage()) {
-        parts = {tensor};
-      }
-      for (const auto& part : parts) {
-        storages.emplace_back(part.storage().getWeakStorageImpl());
-      }
-    }
-    auto future = c10::make_intrusive<c10::ivalue::Future>(
-        c10::ListType::create(c10::TensorType::get()), std::move(devices));
-    future->markCompleted(result, std::move(storages));
-    if (future->hasError()) {
-      std::rethrow_exception(future->exception_ptr());
-    }
-    return future;
-  }
-
   std::vector<at::Tensor> result_;
-  c10::intrusive_ptr<c10::ivalue::Future> future_;
 };
 
 class FakeProcessGroup : public Backend {
