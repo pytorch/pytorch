@@ -60,6 +60,7 @@ from trymerge import (
     DRCI_CHECKRUN_NAME,
     ensure_mergeable_labels,
     find_matching_merge_rule,
+    format_failure_comment,
     get_classifications,
     get_docker_build_checks,
     get_drci_classifications,
@@ -412,6 +413,94 @@ class TestGetPRInfoForbiddenHeadRepository(TestCase):
         ):
             with self.assertRaises(GHGraphQLError):
                 gh_get_pr_info("pytorch", "pytorch", 123)
+
+
+class TestFailureComment(TestCase):
+    run_url = "https://github.com/pytorch/pytorch/actions/runs/1"  # @lint-ignore
+    errors = [
+        {
+            "message": "Something went wrong while executing your query. "
+            "Please include `83C2:1E16` when reporting this issue."
+        }
+    ]
+    query = (
+        "query ($number: Int!) {\n"
+        "  repository { pullRequest(number: $number) { id } }\n"
+        "}\n"
+    )
+
+    def graphql_error(self) -> GHGraphQLError:
+        with mock.patch(
+            "github_utils.gh_fetch_url", return_value={"errors": self.errors}
+        ):
+            try:
+                gh_graphql(self.query, number=200980, cursor="Y3Vyc29y")
+            except GHGraphQLError as e:
+                return e
+        raise AssertionError("gh_graphql did not raise")
+
+    def test_graphql_error_reason_is_short(self) -> None:
+        e = self.graphql_error()
+        self.assertEqual(
+            str(e), f"GitHub GraphQL query failed: {self.errors[0]['message']}"
+        )
+        self.assertEqual(e.variables, {"number": 200980, "cursor": "Y3Vyc29y"})
+
+    def test_graphql_details_reach_the_log(self) -> None:
+        with mock.patch("builtins.print") as mock_print:
+            e = self.graphql_error()
+        logged = mock_print.call_args.args[0]
+        self.assertIn(str(e), logged)
+        self.assertIn("```graphql\nquery ($number: Int!)", logged)
+        self.assertIn('"cursor": "Y3Vyc29y"', logged)
+        if hasattr(e, "add_note"):  # Python 3.11+
+            self.assertEqual(e.__notes__, [e.details_markdown()])
+
+    def test_graphql_empty_errors(self) -> None:
+        self.errors = []
+        e = self.graphql_error()
+        self.assertEqual(str(e), "GitHub GraphQL query failed: (no error message)")
+
+    def test_graphql_details_are_collapsed(self) -> None:
+        msg = format_failure_comment(self.graphql_error(), "Merge failed", self.run_url)
+        reason, details = msg.split("<details>", 1)
+        self.assertIn("**Reason**: GitHub GraphQL query failed: Something went", reason)
+        self.assertNotIn("pullRequest", reason)
+        self.assertNotIn("Y3Vyc29y", reason)
+        self.assertIn(f'<a href="{self.run_url}">workflow job</a>', details)
+        self.assertIn("```graphql\nquery ($number: Int!)", details)
+        self.assertIn('"cursor": "Y3Vyc29y"', details)
+        self.assertTrue(msg.endswith("</details>\n"))
+
+    def test_graphql_error_is_bounded(self) -> None:
+        self.errors = [{"message": "line one\n```\n" + "x" * 40000}]
+        e = self.graphql_error()
+        self.assertNotIn("\n", str(e))
+        self.assertLess(len(str(e)), 2100)
+        msg = format_failure_comment(e, "Merge failed", self.run_url)
+        self.assertLess(len(msg), 40000)
+        self.assertTrue(msg.endswith("</details>\n"))
+
+    def test_merge_rule_failure(self) -> None:
+        rule = MergeRule(
+            name="superuser",
+            patterns=["*"],
+            approved_by=["pytorch/metamates"],
+            mandatory_checks_name=None,
+        )
+        msg = format_failure_comment(
+            MergeRuleFailedError("Approvers missing", rule), "Merge failed", None
+        )
+        self.assertEqual(
+            msg,
+            "## Merge failed\n**Reason**: Approvers missing\n\n"
+            "<details><summary>Details for Dev Infra team</summary>\n\n"
+            "Failing merge rule: superuser\n</details>\n",
+        )
+
+    def test_no_details(self) -> None:
+        msg = format_failure_comment(RuntimeError("boom"), "Merge failed", None)
+        self.assertEqual(msg, "## Merge failed\n**Reason**: boom\n")
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -3069,6 +3158,7 @@ def stacked_pr(number: int) -> Any:
     pr.base_ref.return_value = f"user/{number - 1}"
     pr.default_branch.return_value = "main"
     pr.is_ghstack_pr.return_value = False
+    pr.is_cross_repo.return_value = False
     pr.is_closed.return_value = False
     pr.is_docker_affecting.return_value = False
     pr.is_dependabot_pr.return_value = False
@@ -3431,6 +3521,12 @@ class TestNativeStackMain(NoNetworkTestCase):
         self.get_stack.assert_not_called()
         self.assertRefused()
 
+    def test_fork_pr_does_not_read_the_stack(self) -> None:
+        self.info.return_value = {**stacked_pr_info(), "isCrossRepository": True}
+        trymerge_main()
+        self.get_stack.assert_not_called()
+        self.assertRefused()
+
     def test_bottom_and_ghstack_prs_do_not_read_a_stack(self) -> None:
         for info in (
             stacked_pr_info(base="main"),
@@ -3624,6 +3720,15 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.revert()
         self.assertEqual(self.refresh_comments(), [])
 
+    def test_fork_pr_revert_skips_the_refresh(self) -> None:
+        self.bottom.is_cross_repo.return_value = True
+        self.get_stack.side_effect = NativeStackError("GraphQL errors: Timeout")
+        self.revert()
+        self.get_stack.assert_not_called()
+        reverts = self.reverts("sha-1002", "sha-1001", "sha-1000")
+        self.assertEqual(self.git_calls(), reverts)
+        self.assertEqual(self.refresh_comments(), [])
+
     def test_failed_refresh_is_commented_and_never_fails_the_revert(self) -> None:
         stack = make_stack(*(stack_entry(position) for position in (1, 2, 3)))
         self.get_stack.return_value = stack
@@ -3642,7 +3747,7 @@ class TestNativeStackRevert(NoNetworkTestCase):
         self.calls.gh_post_pr_comment.side_effect = [None] * 3 + [RuntimeError("down")]
         self.revert()
 
-    def test_failed_lookup_falls_back_to_a_single_revert(self) -> None:
+    def test_failed_lookup_reverts_nothing(self) -> None:
         for failing, error in (
             (self.dependents, RuntimeError("git log failed")),
             (self.pr_cls, RuntimeError("Could not fetch PR #1002")),
@@ -3650,9 +3755,11 @@ class TestNativeStackRevert(NoNetworkTestCase):
             with self.subTest(error=error):
                 failing.side_effect = error
                 self.calls.reset_mock()
-                self.revert()
-                self.assertEqual(self.git_calls(), self.reverts("sha-1000"))
-                self.assertEqual(self.calls_to("reopen"), self.reopened(1000))
+                with self.assertRaises(RuntimeError) as raised:
+                    self.revert()
+                self.assertIs(raised.exception.__cause__, error)
+                self.assertIn("nothing was reverted", str(raised.exception))
+                self.assertEqual(self.calls.mock_calls, [])
                 failing.side_effect = None
 
 

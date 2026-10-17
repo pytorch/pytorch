@@ -26,8 +26,10 @@ jobs:
       model: ${{ ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'fable')) || (github.event_name == 'issues' && contains(github.event.issue.body, 'fable'))) && 'global.anthropic.claude-fable-5' || 'global.anthropic.claude-opus-5-5' }}
       # Keep the comment text out of claude_args: only these hardcoded effort
       # values can reach the CLI. "effort=max" wins if multiple values appear.
+      # Read-only gh subcommands let Claude read linked issues and PRs. Not
+      # `gh api`, which can also write.
       additional_claude_args: >-
-        --allowedTools Skill --effort
+        --allowedTools "Skill,Bash(gh issue view:*),Bash(gh pr view:*)" --effort
         ${{
           ((github.event_name == 'issue_comment' && contains(github.event.comment.body, 'effort=max')) ||
            (github.event_name == 'issues' && contains(github.event.issue.body, 'effort=max'))) && 'max' ||
@@ -107,6 +109,13 @@ jobs:
         It contains PyTorch-specific review guidelines, output format, and critical checks.
         Always put the details of the PR review inside a GitHub collapsible section and
         a one sentence summary outside.
+
+        ## Reading other issues and PRs
+        To read an issue or PR other than the one you were invoked on (for example one
+        linked from the description), use `gh issue view <number-or-url>` or
+        `gh pr view <number-or-url>`, adding `--json title,body,comments` to include its
+        conversation comments. These are the only GitHub CLI commands allowed; `gh api`,
+        curl and WebFetch are blocked.
 
         ## Time budget
         This job has a hard time limit. A hook sends "Time check" notes: one when you
