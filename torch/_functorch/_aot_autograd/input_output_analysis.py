@@ -20,7 +20,11 @@ from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._guards import StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import (
+    guard_or_false,
+    guard_or_true,
+    is_concrete_int,
+)
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
@@ -333,6 +337,33 @@ def create_synthetic_base_metadata(
     )
 
 
+def _overlapping_across_itemsizes(tensors: list[Tensor]) -> set[int]:
+    # compute_overlapping_tensors compares storage offsets and extents in elements,
+    # which is meaningless for two tensors with different itemsizes (e.g. views of one
+    # buffer with different dtypes). Returns the pairs of those whose byte ranges may
+    # overlap, to add to its result.
+    def byte_range(t: Tensor) -> tuple[Any, Any]:
+        last = t.storage_offset() + sum(
+            (size - 1) * stride for size, stride in zip(t.shape, t.stride())
+        )
+        return t.storage_offset() * t.dtype.itemsize, (last + 1) * t.dtype.itemsize
+
+    overlapping = set()
+    for i, j in itertools.combinations(range(len(tensors)), 2):
+        x, y = tensors[i], tensors[j]
+        if (
+            x.dtype.itemsize == y.dtype.itemsize
+            or guard_or_false(x.numel() == 0)
+            or guard_or_false(y.numel() == 0)
+        ):
+            continue
+        x_start, x_end = byte_range(x)
+        y_start, y_end = byte_range(y)
+        if guard_or_true(x_start < y_end) and guard_or_true(y_start < x_end):
+            overlapping.update((i, j))
+    return overlapping
+
+
 def compute_overlapping_inputs(
     aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
 ) -> set[int]:
@@ -382,10 +413,11 @@ def compute_overlapping_inputs(
 
     with maybe_suppress_guards():
         aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
-        actual_aliased_indices = {
-            aliased_input_indices[i]
-            for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
-        }
+        overlapping = set(
+            compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
+        )
+        overlapping |= _overlapping_across_itemsizes(aliased_fwd_inputs)
+        actual_aliased_indices = {aliased_input_indices[i] for i in overlapping}
 
     # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
     # dynamo sources inside AOTAutograd.
