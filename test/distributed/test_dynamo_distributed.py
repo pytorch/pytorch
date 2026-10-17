@@ -92,6 +92,28 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 
+def _precompiled_guard_collective_entry(x):
+    return x.sin()
+
+
+def _load_as_precompile_entries(fn, example):
+    """Move ``fn``'s compiled entries into precompile entries, as loading an
+    artifact in a fresh process would install them."""
+    from torch._C._dynamo.eval_frame import _load_precompile_entry
+    from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+    torch.compile(fn, backend="eager", dynamic=False)(example)
+    entries = [
+        (entry.guard_manager, entry.code)
+        for entry in _debug_get_cache_entry_list(fn.__code__)
+    ]
+    torch._dynamo.reset_code(fn.__code__)
+    for guard_manager, code in entries:
+        _load_precompile_entry(fn.__code__, guard_manager, code)
+    counter = CompileCounter()
+    return torch.compile(fn, backend=counter, dynamic=False), counter
+
+
 @contextmanager
 def enable_guard_collectives():
     old = set_enable_guard_collectives(True)
@@ -1574,6 +1596,25 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             torch.distributed.all_gather_object(res, len(metrics))
             for r in res[1:]:
                 self.assertEqual(res[0], r)
+
+    @skip_if_lt_x_gpu(2)
+    @enable_guard_collectives()
+    def test_guard_collective_precompile_entries_propagate_miss(self):
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+            x = torch.randn(4, device=self.rank)
+            compiled, counter = _load_as_precompile_entries(
+                _precompiled_guard_collective_entry, x
+            )
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 0)
+
+            # Only rank 1 misses the precompile entry; every rank recompiles.
+            if self.rank == 1:
+                x = torch.randn(5, device=self.rank)
+            self.assertEqual(compiled(x), x.sin())
+            self.assertEqual(counter.frame_count, 1)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
