@@ -616,6 +616,38 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
   return res;
 }
 
+// gesvda (like rocSOLVER gesvdj) comes from eig(A^H A), which squares the
+// condition number. Batches whose smallest singular value is far below
+// sqrt(eps) * S_max are treated as ill-conditioned and recomputed with gesvd.
+// Tolerances match svd_rocsolver_ill_conditioned.
+#ifndef USE_ROCM
+static std::vector<int64_t> _batches_ill_conditioned_for_gesvda(const Tensor& S) {
+  const auto k = S.size(-1);
+  if (k == 0) {
+    return {};
+  }
+  const auto S_flat = S.reshape({-1, k});
+  const bool is_single =
+      S.scalar_type() == at::kFloat || S.scalar_type() == at::kComplexFloat;
+  const double eps = is_single ? static_cast<double>(std::numeric_limits<float>::epsilon())
+                               : std::numeric_limits<double>::epsilon();
+  const double tol = (is_single ? 2.0 : 32.0) * std::sqrt(eps);
+  // Singular values are sorted descending: S[..., 0] = S_max, S[..., -1] = S_min.
+  const Tensor idx =
+      S_flat.select(-1, k - 1).lt(S_flat.select(-1, 0).mul(tol)).nonzero().squeeze(-1);
+  if (idx.numel() == 0) {
+    return {};
+  }
+  const auto idx_cpu = idx.to(at::kCPU, /*non_blocking=*/false).contiguous();
+  std::vector<int64_t> batches(static_cast<size_t>(idx_cpu.numel()));
+  const auto* data = idx_cpu.const_data_ptr<int64_t>();
+  for (const auto i : c10::irange(idx_cpu.numel())) {
+    batches[static_cast<size_t>(i)] = data[i];
+  }
+  return batches;
+}
+#endif // !USE_ROCM
+
 // Depending on the number of non-converging batches,
 // format the non-converging batches string as either (no leading or trailing whitespaces)
 // batches 2, 3, 5  // or
@@ -750,11 +782,29 @@ void svd_cusolver(const Tensor& A,
 
   static constexpr const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
-  // The default heuristic is to use gesvdj driver
+  // Default heuristic (driver=None). Explicit driver= still wins.
+  // - m,n <= 32: gesvdjBatched is fastest (PR #88502)
+  // - batched with m or n > 32: per-matrix gesvdj loops and cliffs at n=32->33;
+  //   prefer gesvdaStridedBatched (see #200486, #175585)
+  // - except full_matrices && compute_uv && m != n: gesvda only writes the
+  //   rank leading singular vectors, so the remaining columns of the full
+  //   U/V would be left uninitialized; keep gesvdj there
+  // - single matrix with m or n > 32: keep gesvdj
+  // Convergence check + gesvd fallback below still apply when driver=None.
 #ifdef USE_ROCM
   const auto driver_v = std::string_view("gesvdj");
 #else
-  const auto driver_v = driver.value_or("gesvdj");
+  std::string_view driver_v;
+  const bool gesvda_leaves_full_basis_uninit =
+      full_matrices && compute_uv && (m != n);
+  if (driver.has_value()) {
+    driver_v = *driver;
+  } else if (
+      (m > 32 || n > 32) && batchCount(A) > 1 && !gesvda_leaves_full_basis_uninit) {
+    driver_v = "gesvda";
+  } else {
+    driver_v = "gesvdj";
+  }
 #endif
 
   if (driver_v == "gesvd") {
@@ -802,6 +852,18 @@ void svd_cusolver(const Tensor& A,
       }
     }
   }
+
+#ifndef USE_ROCM
+  // Default gesvda can converge to inaccurate S on ill-conditioned batches
+  // (eig of A^H A). Recompute those with gesvd, same idea as the ROCm path.
+  if (driver_v == "gesvda" && !driver.has_value()) {
+    const auto ill_conditioned_batches = _batches_ill_conditioned_for_gesvda(S);
+    if (!ill_conditioned_batches.empty()) {
+      svd_cusolver_gesvd(
+          A, U, S, V, info, full_matrices, compute_uv, false, ill_conditioned_batches);
+    }
+  }
+#endif
 
   // `info` will be checked later at `TORCH_IMPL_FUNC(_linalg_svd_out)` function.
 }
