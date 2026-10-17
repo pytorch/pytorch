@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import itertools
 import sys
 import types
@@ -1618,6 +1619,65 @@ class TestGeneratorClose(GeneratorTestsBase):
         ref = torch.cond(t.sum() > 0, lambda x: x + 1, lambda x: x - 1, (t,))
         self.assertEqual(y, t.sin() + ref)
         self.assertEqual(z, 1)
+
+    def test_close_open_generator_in_hop_body(self):
+        # A generator created inside a HOP body and left open is local to the
+        # body, so it must be closed there. Closing it at compile_subgraph time
+        # instead emitted its finally block into the outer graph, referencing a
+        # node from the subgraph.
+        def whoo(t):
+            u = t * 2
+            try:
+                yield u
+            finally:
+                u.sum()
+
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                gen = whoo(x)
+                return next(gen) + 1  # gen left open
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        t = torch.randn(4, requires_grad=True)
+        self.assertEqual(Fn.apply(t), self._compile_check(Fn.apply, args=(t,)))
+
+    def test_generator_in_discarded_hop_speculation(self):
+        # The backward is first speculated in strict mode, where the stride
+        # query raises and the speculation is discarded while the context
+        # manager's generator is suspended. That generator belongs to the
+        # discarded subgraph and must not be closed later. The stride value is
+        # not used, since eager and compile disagree on the grad's strides.
+        @contextlib.contextmanager
+        def ctx(t):
+            u = t * 2
+            try:
+                yield
+            finally:
+                u.sum()
+
+        class Fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx_, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx_, grad):
+                with ctx(grad):
+                    grad.stride(0)
+                    return grad * 2
+
+        def fn(x):
+            Fn.apply(x).sum().backward()
+            return x.grad
+
+        x = torch.randn(4, 8, requires_grad=True)
+        ref = fn(x).clone()
+        x.grad = None
+        self.assertEqual(ref, torch.compile(fn, backend="eager")(x))
 
     def test_close_open_generator_fast_path(self):
         # An open generator whose only pending work is a finally block must be
