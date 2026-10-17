@@ -1429,8 +1429,8 @@ class CompilePackage:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
-        CleanupHook.disown(module.__dict__, name)
-        record = not (record_only_if_new and name in module.__dict__)
+        owned = CleanupHook.disown(module.__dict__, name)
+        record = owned or not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
         if record:
             self._installed_globals.setdefault(module, []).append(name)
@@ -1474,8 +1474,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases are the only names install() records that are ever
-                # seeded that way.
+                # aliases and the ___unnamed_scope keys below are the only names
+                # install() records that are ever seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1564,6 +1564,42 @@ class CompilePackage:
                                 )
                         else:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
+                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
+                    # in the tracing process, so a fresh process has no binding
+                    # for it. Bind it (after the builtins dict above, which a
+                    # recorded source can be rooted at) to the live namespace,
+                    # found again through the inlined function's source, so
+                    # the guards and the bytecode see what they saw while
+                    # tracing; the artifact's copy of the dict is frozen and
+                    # has its tensors faked. A
+                    # key whose source does not resolve here (one rooted at a
+                    # frame local, or a chain through user objects that raises
+                    # against this process's state) stays unbound and misses as
+                    # before. A binding already here is kept; a live compile's
+                    # is taken over from its CleanupHook, so uninstall() drops
+                    # it, and anyone else's is left alone.
+                    sources = guards_state.output_graph.unnamed_scope_sources
+                    closure_vars = torch._dynamo.guards._get_closure_vars()
+                    for name, source in sources.items():
+                        try:
+                            namespace = source.get_value(
+                                {"G": runtime_global_scope}, closure_vars, {}
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                "leaving %s unbound, %s raised: %r",
+                                name,
+                                source.name,
+                                e,
+                            )
+                            continue
+                        if isinstance(namespace, dict):
+                            self._install_global(
+                                module,
+                                name,
+                                runtime_global_scope.get(name, namespace),
+                                record_only_if_new=True,
+                            )
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
