@@ -136,9 +136,9 @@ from .resume_execution import (
 from .source import (
     AttrSource,
     DictGetItemSource,
+    get_global_source_name,
     GlobalSource,
     GlobalWeakRefSource,
-    is_from_global_source,
     LocalCellSource,
     LocalSource,
     SkipGuardSource,
@@ -6645,9 +6645,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 UNNAMED_SCOPE_PREFIX, self.f_globals
             )
             source = self.funcvar.source
-            if source is not None and is_from_global_source(source):
-                # How a loading process finds the live namespace again: the key
-                # embeds this process's id() of it.
+            root = get_global_source_name(source)
+            # How a loading process finds the live namespace again: the key
+            # embeds this process's id() of it. A source rooted at an unnamed
+            # scope key needs that key bound first, so it cannot.
+            if root is not None and not root.startswith(UNNAMED_SCOPE_PREFIX):
                 self.output.unnamed_scope_sources.setdefault(
                     globals_name, AttrSource(source, "__globals__")
                 )
