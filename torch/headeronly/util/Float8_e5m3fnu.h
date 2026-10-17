@@ -78,8 +78,9 @@ inline C10_HOST_DEVICE float fp8e5m3fnu_to_fp32_value(uint8_t input) {
  * 8-bit floating-point number in fp8 e5m3fnu format, in bit representation.
  */
 inline C10_HOST_DEVICE uint8_t fp8e5m3fnu_from_fp32_value(float f) {
-  // 114688 = 1.75 * 2^16, the largest finite fp8e5m3fnu value
-  constexpr uint32_t fp8_max = (UINT32_C(127 + 16) << 23) | (UINT32_C(3) << 21);
+  // 114688 = 1.75 * 2^16, the largest finite fp8e5m3fnu value:
+  // biased fp32 exponent 127 + 16, mantissa 0b11
+  constexpr uint32_t fp8_max = (UINT32_C(143) << 23) | (UINT32_C(3) << 21);
 
   // A mask for converting fp32 numbers lower than fp8e5m3fnu normal range
   // into denorm representation
@@ -97,7 +98,7 @@ inline C10_HOST_DEVICE uint8_t fp8e5m3fnu_from_fp32_value(float f) {
     // finite overflow or inf -> saturate to the max finite value
     return 0xFE;
   }
-  if (f_bits < (UINT32_C(127 - 14) << 23)) {
+  if (f_bits < (UINT32_C(113) << 23)) {
     // Input number is smaller than 2^(-14), which is the smallest
     // fp8e5m3fnu normal number
     f_bits = fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
