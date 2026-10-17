@@ -58,10 +58,12 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     get_eval_frame_isolate_recompiles_id,
+    get_eval_frame_isolate_recompiles_strict,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
     set_eval_frame_isolate_recompiles_id,
+    set_eval_frame_isolate_recompiles_strict,
     set_fullgraph_compiled_frame_count,
     set_fullgraph_error_on_nested_compile,
     set_guard_complete_hook,
@@ -500,8 +502,8 @@ def _get_cache_entries_for_region(
 
     Returns only entries owned by the requested bucket. During an actual
     lookup, isolated regions also fall back read-only to the default
-    bucket for BC-friendly reuse — this helper does not include those
-    fallback entries.
+    bucket for BC-friendly reuse, except strict ones that record into a
+    package — this helper does not include those fallback entries.
     """
     if callable(code):
         code = code.__code__
@@ -975,6 +977,9 @@ class _TorchDynamoContext:
         self._isolate_recompiles_id = (
             next(_next_isolate_recompiles_id) if isolate_recompiles else -1
         )
+        # A region that records into a package must not serve a call from the
+        # default region's cache: that entry would be missing from the package.
+        self._isolate_recompiles_strict = isolate_recompiles and package is not None
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -1299,6 +1304,11 @@ class _TorchDynamoContext:
                 prior_isolate_recompiles_id = set_eval_frame_isolate_recompiles_id(
                     self._isolate_recompiles_id
                 )
+                prior_isolate_recompiles_strict = (
+                    set_eval_frame_isolate_recompiles_strict(
+                        self._isolate_recompiles_strict
+                    )
+                )
                 prior_error_on_graph_break = None
                 if not self.fullgraph and self.error_on_graph_break is not None:
                     current_error_on_graph_break = _get_error_on_graph_break()
@@ -1381,6 +1391,9 @@ class _TorchDynamoContext:
                         set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                         set_eval_frame_isolate_recompiles_id(
                             prior_isolate_recompiles_id
+                        )
+                        set_eval_frame_isolate_recompiles_strict(
+                            prior_isolate_recompiles_strict
                         )
                         for cleanup in cleanups:
                             cleanup()

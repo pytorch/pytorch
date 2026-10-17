@@ -5783,6 +5783,32 @@ class TestPrecompileDynamoCapture(TestCase):
         with self.assertRaisesRegex(PrecompileError, "no captured variant"):
             f(self.model, self.x3)
 
+    def test_a_function_compiled_before_capture_is_still_captured(self):
+        from torch._C._dynamo.eval_frame import get_eval_frame_isolate_recompiles_strict
+
+        single = self.mod.single
+        # The same backend the capture compiles with, so this default-region
+        # entry admits the capture's call.
+        torch._dynamo.optimize("eager")(single)(self.model, self.x2)
+        with self._capture(single, backend="eager") as cap:
+            y = cap(self.model, self.x2)
+            summary = cap.summary()
+        self.assertFalse(get_eval_frame_isolate_recompiles_strict())
+        self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(load(self.artifact, self.cache)(self.model, self.x2), y)
+
+    @skipIfCrossRef
+    def test_a_resume_frame_compiled_before_capture_is_still_captured(self):
+        step = self.mod.step
+        torch._dynamo.optimize("eager")(step)(self.model, self.x2)
+        # Only the continuation after step's graph break keeps its entry.
+        torch._dynamo.reset_code(step.__code__)
+        with self._capture(step, backend="eager") as cap:
+            y = cap(self.model, self.x2)
+            summary = cap.summary()
+        self.assertEqual(summary.guarded_codes, 2)
+        self._serve_in_fresh_process([((self.x2,), {}, y)])
+
     @skipIfCrossRef
     @parametrize("backend", ["inductor", "eager"])
     def test_training_step_grads_match_eager_in_a_fresh_process(self, backend):

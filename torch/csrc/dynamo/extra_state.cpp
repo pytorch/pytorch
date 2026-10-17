@@ -59,14 +59,24 @@ ExtraState* get_or_init_extra_state(PyCodeObject* code) {
   return extra_state;
 }
 
-// The region's own bucket, then the default bucket, matching lookup order.
+// Isolated regions fall back to the default bucket (-1), so they reuse
+// compilations from non-isolated torch.compile() calls (BC friendly). A strict
+// region, one that records into a package, does not: the package would not
+// contain an entry it reused, and could not serve that call once loaded.
+bool searches_default_bucket(int64_t isolate_recompiles_id, bool strict) {
+  return isolate_recompiles_id >= 0 && !strict;
+}
+
+// The region's own bucket, then the default bucket if searches_default_bucket,
+// matching lookup order.
 template <typename Fn>
 void for_each_bucket(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id,
+    bool strict,
     Fn&& fn) {
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  int num_ids = searches_default_bucket(isolate_recompiles_id, strict) ? 2 : 1;
   for (int i = 0; i < num_ids; i++) {
     auto it = extra_state->cache_entry_map.find(ids_to_search[i]);
     if (it != extra_state->cache_entry_map.end()) {
@@ -317,6 +327,7 @@ bool try_lookup_without_guard_eval(
     PyCodeObject* code,
     PyObject* backend,
     int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict,
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result) {
   ExtraState* extra_state = get_extra_state(code);
@@ -350,7 +361,10 @@ bool try_lookup_without_guard_eval(
   }
 
   int64_t ids_to_search[] = {isolate_recompiles_id, -1};
-  int num_ids = (isolate_recompiles_id >= 0) ? 2 : 1;
+  int num_ids =
+      searches_default_bucket(isolate_recompiles_id, isolate_recompiles_strict)
+      ? 2
+      : 1;
   std::list<CacheEntry>* found_list = nullptr;
   CacheEntry* found = nullptr;
 
@@ -385,6 +399,7 @@ void lookup(
     FrameLocalsMapping* f_locals,
     PyObject* backend,
     int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict,
     bool is_skip_guard_eval_unsafe,
     CacheLookupResult* result) {
   ExtraState* extra_state = get_extra_state(code);
@@ -445,10 +460,10 @@ void lookup(
     ++index;
   }
 
-  // Isolated compiles then fall back to the default bucket (-1). This lets
-  // them reuse compilations from non-isolated torch.compile() calls (BC
-  // friendly). New entries are still written to the isolated bucket.
-  if (isolate_recompiles_id >= 0) {
+  // Then the default bucket (see searches_default_bucket). New entries are
+  // still written to the isolated bucket.
+  if (searches_default_bucket(
+          isolate_recompiles_id, isolate_recompiles_strict)) {
     auto it = extra_state->cache_entry_map.find(-1);
     if (it != extra_state->cache_entry_map.end()) {
       CacheEntry* found = lookup_in_list(
@@ -476,7 +491,8 @@ void lookup(
 
 bool has_relevant_cache_entries(
     PyCodeObject* code,
-    int64_t isolate_recompiles_id) {
+    int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict) {
   ExtraState* extra_state = get_extra_state(code);
   if (extra_state == nullptr) {
     return false;
@@ -486,9 +502,11 @@ bool has_relevant_cache_entries(
     return true;
   }
   bool found = false;
-  for_each_bucket(extra_state, isolate_recompiles_id, [&](int64_t, auto&) {
-    found = true;
-  });
+  for_each_bucket(
+      extra_state,
+      isolate_recompiles_id,
+      isolate_recompiles_strict,
+      [&](int64_t, auto&) { found = true; });
   return found;
 }
 
@@ -499,15 +517,17 @@ bool is_precompile_skip(PyCodeObject* code) {
 
 CompileInputs get_compile_inputs(
     PyCodeObject* code,
-    int64_t isolate_recompiles_id) {
+    int64_t isolate_recompiles_id,
+    bool isolate_recompiles_strict) {
   ExtraState* extra_state = get_or_init_extra_state(code);
   CompileInputs inputs;
   inputs.frame_state = extra_state->frame_state;
-  // Search own bucket first, then fall back to default bucket (-1),
-  // matching lookup() behavior.
+  // The region's own bucket first, then the default bucket (-1) unless the
+  // region is strict, matching lookup() behavior.
   for_each_bucket(
       extra_state,
       isolate_recompiles_id,
+      isolate_recompiles_strict,
       [&](int64_t, std::list<CacheEntry>& entries) {
         if (inputs.cache_entry == nullptr && !entries.empty()) {
           inputs.cache_entry = &entries.front();
