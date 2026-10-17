@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import inspect
+import os
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -167,6 +168,22 @@ def may_ban_benchmarking() -> None:
         """)
 
 
+@functools.cache
+def _triton_benchmarking_context() -> Callable[
+    [], contextlib.AbstractContextManager[Any]
+]:
+    # fbtriton's compile_iq collector skips launches inside this context, so it only collects
+    # the autotune winner. Only looked up when collection is enabled.
+    if os.environ.get("TRITON_COMPILE_IQ_COLLECT"):
+        try:
+            from triton.magnon.collector import benchmarking
+
+            return benchmarking
+        except ImportError:
+            pass
+    return contextlib.nullcontext
+
+
 def time_and_count(
     fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
@@ -183,7 +200,8 @@ def time_and_count(
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        return fn(self, *args, **kwargs)
+        with _triton_benchmarking_context()():
+            return fn(self, *args, **kwargs)
 
     return wrapper
 
