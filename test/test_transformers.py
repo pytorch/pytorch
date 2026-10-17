@@ -1140,6 +1140,38 @@ class TestTransformersAccelerator(NNTestCase):
 
         self.assertEqual(eager_out, compiled_out)
 
+    @tf32_off()
+    def test_transformer_encoder_layer_fwd_non_contiguous_input(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/196251:
+        # the fake kernel used to propagate the input's strides, but the real
+        # kernel always returns a contiguous tensor.
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=128,
+                nhead=4,
+                dim_feedforward=256,
+                dropout=0.0,
+                batch_first=True,
+            ),
+            num_layers=1,
+        ).to(device).eval()
+
+        x = torch.rand(1, 128, 16, device=device).permute(0, 2, 1)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+
+            # The fake kernel must report the same strides as the real kernel.
+            with FakeTensorMode(allow_non_fake_inputs=True) as fake_mode:
+                fake_out = model(fake_mode.from_tensor(x))
+            self.assertEqual(eager_out.stride(), fake_out.stride())
+
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out.stride(), compiled_out.stride())
+
     def test_transformer_encoder_layer_fwd_unbacked(self, device):
         # Regression for a data-dependent error in the meta rule for
         # _transformer_encoder_layer_fwd. The rule used to test
