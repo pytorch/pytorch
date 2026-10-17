@@ -5,6 +5,8 @@ import functools
 import itertools
 import sys
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import torch
 from torch import distributed as dist
@@ -14,7 +16,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.sharded_grad_scaler import (
+    _infer_default_device,
+    _is_supported_device,
+    ShardedGradScaler,
+)
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -160,6 +166,155 @@ class TestShardGradScaler(TestCase):
         scaler.scale(loss)
         ret_val = scaler.step(opt)
         self.assertTrue(ret_val is None)
+
+    def test_infer_default_device_fallbacks(self):
+        # Test the inference helper directly so the check is deterministic on
+        # any machine and independent of any out-of-tree replacement of the
+        # ShardedGradScaler class itself.
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=SimpleNamespace(type="xpu"),
+        ):
+            self.assertEqual(_infer_default_device(), "xpu")
+
+        # With no accelerator available, fall back to the historical "cuda"
+        # default to keep CPU-only / CUDA-unavailable behavior unchanged.
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=None,
+        ):
+            self.assertEqual(_infer_default_device(), "cuda")
+
+        # A half-registered backend (accelerator hooks registered without a
+        # matching Python device module) makes the probe raise; fall back to
+        # the historical default instead of failing construction.
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            side_effect=RuntimeError,
+        ):
+            self.assertEqual(_infer_default_device(), "cuda")
+
+    @unittest.skipIf(
+        ShardedGradScaler.__module__ != "torch.distributed.fsdp.sharded_grad_scaler",
+        "ShardedGradScaler has been replaced by an out-of-tree integration, so "
+        "the core __init__ device resolution cannot be exercised here.",
+    )
+    def test_device_default_resolution(self):
+        pg = DummyProcessGroup(0, 1)
+        with mock.patch.object(
+            torch.accelerator,
+            "current_accelerator",
+            return_value=SimpleNamespace(type="xpu"),
+        ):
+            # No device= passed: the inferred default must reach self._device
+            # through __init__. The base class stores _device before any
+            # availability check and only "cuda" has a disable branch, so the
+            # assert holds even where "xpu" itself is not available.
+            scaler = ShardedGradScaler(process_group=pg)
+            self.assertEqual(scaler._device, "xpu")
+
+            # An explicitly passed device wins over the inferred default
+            # (which the no-device= construction above shows is running).
+            scaler = ShardedGradScaler(device="cpu", process_group=pg)
+            self.assertEqual(scaler._device, "cpu")
+
+    @unittest.skipIf(
+        ShardedGradScaler.__module__ != "torch.distributed.fsdp.sharded_grad_scaler",
+        "ShardedGradScaler has been replaced by an out-of-tree integration, so "
+        "the core __init__ device resolution cannot be exercised here.",
+    )
+    def test_disabled_scaler_does_not_probe_accelerator(self):
+        pg = DummyProcessGroup(0, 1)
+        probe = mock.Mock(return_value=SimpleNamespace(type="xpu"))
+        with mock.patch.object(torch.accelerator, "current_accelerator", probe):
+            # A disabled scaler never initializes device state, so it must
+            # not touch the accelerator availability check at all (e.g. the
+            # CUDA availability check poisons fork).
+            scaler = ShardedGradScaler(process_group=pg, enabled=False)
+        probe.assert_not_called()
+        self.assertEqual(scaler._device, "cuda")
+
+    def test_is_supported_device_mps(self):
+        # "mps" must stay in the allowlist: it is the inferred default on
+        # macOS and its AMP kernels exist in-tree. A plain namespace mimics
+        # the tensor attributes the helper reads.
+        mps_like = SimpleNamespace(
+            is_cuda=False, device=SimpleNamespace(type="mps")
+        )
+        self.assertTrue(_is_supported_device(mps_like))
+
+    @unittest.skipIf(
+        amp_definitely_not_available() and not TEST_XPU,
+        "no supported device (cuda, xla, xpu) found",
+    )
+    @unittest.skipIf(
+        ShardedGradScaler.__module__ != "torch.distributed.fsdp.sharded_grad_scaler",
+        "ShardedGradScaler has been replaced by an out-of-tree integration, so "
+        "the core update() flow cannot be exercised here.",
+    )
+    def test_update_growth_and_backoff(self):
+        pg = DummyProcessGroup(0, 1)
+        scaler = ShardedGradScaler(
+            device=device_type,
+            init_scale=2.0,
+            growth_factor=2.0,
+            backoff_factor=0.5,
+            growth_interval=2,
+            process_group=pg,
+            enabled=True,
+        )
+        param = torch.full(
+            (1,), 4.0, dtype=torch.float32, device=device_type, requires_grad=True
+        )
+        opt = torch.optim.SGD([param], lr=1.0)
+
+        # Two consecutive unskipped iterations should grow the scale by
+        # growth_factor (growth_interval=2: 2.0 -> 4.0).
+        for _ in range(2):
+            opt.zero_grad()
+            scaler.scale(param.sum()).backward()
+            scaler.step(opt)
+            scaler.update()
+        self.assertEqual(scaler.get_scale(), 4.0)
+
+        # An iteration with an inf gradient should back the scale off by
+        # backoff_factor (4.0 -> 2.0).
+        opt.zero_grad()
+        scaler.scale(param.sum()).backward()
+        param.grad.fill_(float("inf"))
+        scaler.step(opt)
+        scaler.update()
+        self.assertEqual(scaler.get_scale(), 2.0)
+
+        # update() feeds [1]-views into torch._amp_update_scale_; the in-place
+        # writes must land on the user-visible 0-dim scale/tracker tensors.
+        self.assertEqual(scaler._scale.shape, torch.Size(()))
+        self.assertEqual(scaler._growth_tracker.shape, torch.Size(()))
+
+    @unittest.skipIf(
+        amp_definitely_not_available() and not TEST_XPU,
+        "no supported device (cuda, xla, xpu) found",
+    )
+    @unittest.skipIf(
+        ShardedGradScaler.__module__ != "torch.distributed.fsdp.sharded_grad_scaler",
+        "ShardedGradScaler has been replaced by an out-of-tree integration, so "
+        "the core update() error contract cannot be exercised here.",
+    )
+    def test_update_new_scale_rejects_requires_grad_tensor(self):
+        pg = DummyProcessGroup(0, 1)
+        scaler = ShardedGradScaler(device=device_type, process_group=pg)
+        # Force lazy init: update() requires _scale/_growth_tracker to exist.
+        scaler.scale(torch.full((), 1.0, dtype=torch.float32, device=device_type))
+        bad = torch.full(
+            (), 2.0, dtype=torch.float32, device=device_type, requires_grad=True
+        )
+        with self.assertRaisesRegex(
+            AssertionError, rf"torch\.{device_type}\.FloatTensor"
+        ):
+            scaler.update(new_scale=bad)
 
 
 class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
