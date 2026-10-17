@@ -103,7 +103,7 @@ def _capture_config() -> Iterator[None]:
     first compiled call, but eager lowering compiles the forward and the
     backward in one context before either runs, so on a miss the backward
     fails opening its own. Every eager backward lowering can hit this, not only
-    capture's; an installed artifact's load does too (_build_installed_forward).
+    capture's; CompilePackage.install() turns it off for the same reason.
     ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
     guards reach the artifact; it also extends the lifetime of objects the frame
     holds -- with it on, a weakref callback on a value the frame captured does
