@@ -885,6 +885,10 @@ def load_state_dict_from_url(
     if file_name is not None:
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
+    if not os.path.abspath(cached_file).startswith(os.path.abspath(model_dir) + os.sep):
+        raise ValueError(
+            f"file_name must resolve to a path inside model_dir, got: {filename!r}"
+        )
     if not os.path.exists(cached_file):
         sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
