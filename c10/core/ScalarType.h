@@ -125,9 +125,8 @@ constexpr bool isSubByteIntType(ScalarType t) {
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
       t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
       t == ScalarType::UInt7 || t == ScalarType::Int1 ||
-      t == ScalarType::Int2 || t == ScalarType::Int3 ||
-      t == ScalarType::Int4 || t == ScalarType::Int5 ||
-      t == ScalarType::Int6 || t == ScalarType::Int7;
+      t == ScalarType::Int2 || t == ScalarType::Int3 || t == ScalarType::Int4 ||
+      t == ScalarType::Int5 || t == ScalarType::Int6 || t == ScalarType::Int7;
 }
 
 constexpr bool isBarebonesUnsignedType(ScalarType t) {
