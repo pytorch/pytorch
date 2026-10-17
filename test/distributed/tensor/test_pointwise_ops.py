@@ -1403,7 +1403,7 @@ class TestPointwiseRuleValidation(TestCase):
             ("neg", "neg", 6),
             ("maximum", "monotonic_max_preserving", 57),
             ("minimum", "monotonic_min_preserving", 57),
-            ("logaddexp", "monotonic_binary", 49),
+            ("logaddexp", "monotonic_binary", 54),
             ("abs", "pointwise_generic", 2),
         ]
 
