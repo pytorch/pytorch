@@ -213,7 +213,7 @@
   "test_run2run_determinism_model_name_GoogleFnet_training_or_inference_training_precision_float16 (__main__.DeterministicTest)": 118.3158327738444,
   "test_run2run_determinism_model_name_GoogleFnet_training_or_inference_training_precision_float32 (__main__.DeterministicTest)": 119.6198336283366,
   "test_runtime_checks_large_cpu (__main__.AOTInductorTestABICompatibleCpu)": 70.40016682942708,
-  "test_runtime_checks_large_cpu_with_stack_allocation (__main__.AOTInductorTestABICompatibleCpuWithStackAllocation)": 70.30955590142145,
+  "test_runtime_checks_large_cpu (__main__.AOTInductorTestABICompatibleCpuWithStackAllocationCPU)": 70.30955590142145,
   "test_runtime_checks_large_cuda (__main__.AOTInductorTestABICompatibleGpu)": 171.0409952799479,
   "test_sdpa_kernel_ctx_manager2_dynamic_shapes (__main__.DynamicShapesCtxManagerTests)": 106.9195556640625,
   "test_searchsorted_cuda (__main__.GPUTests)": 82.54333392779033,
