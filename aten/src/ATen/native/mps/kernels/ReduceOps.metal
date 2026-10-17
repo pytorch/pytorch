@@ -40,7 +40,7 @@ static uint32_t get_input_offset(
 
 #include <c10/metal/reduction_utils.h>
 
-// Load modes for SumOp: identity (sum), nan-to-zero (nansum),
+// Load modes for SumReductionOp: identity (sum), nan-to-zero (nansum),
 // nonzero-as-one (count_nonzero), abs (L1 norm), or square (L2 norm).
 enum LoadMode : uint {
   LOAD_IDENTITY = 0,
@@ -146,18 +146,18 @@ template <
     typename TO,
     LoadMode MODE = LOAD_IDENTITY,
     FinalizeOp FINAL = FINAL_NONE>
-struct SumOp {
+struct SumReductionOp {
   using acc_t =
       ::metal::conditional_t<MODE == LOAD_NONZERO, uint, opmath_t<TO>>;
   static inline acc_t identity() {
-    return acc_t(0);
+    return c10::metal::SumOp<acc_t>::identity();
   }
   template <typename TI>
   static inline acc_t load(TI v) {
     return static_cast<acc_t>(load_val<MODE>(v));
   }
   static inline acc_t combine(acc_t a, acc_t b) {
-    return a + b;
+    return c10::metal::SumOp<acc_t>::combine(a, b);
   }
   static inline acc_t simd_reduce(acc_t v) {
     return c10::metal::simd_sum(v);
@@ -175,7 +175,7 @@ struct SumOp {
 };
 
 template <typename TO>
-struct ProdOp {
+struct ProdReductionOp {
   using acc_t = opmath_t<TO>;
   static inline acc_t identity() {
     return cast_to<acc_t>(1);
@@ -682,34 +682,6 @@ inline T chunk_shuffle_down(T val, ushort delta) {
       ::metal::simd_shuffle_down(static_cast<float>(val), delta));
 }
 
-template <LoadMode MODE, typename TA>
-struct SumChunkOps {
-  static inline TA identity() {
-    return SumOp<TA>::identity();
-  }
-  template <typename TI>
-  static inline TA load(TI v) {
-    return static_cast<TA>(load_val<MODE>(v));
-  }
-  static inline TA combine(TA a, TA b) {
-    return SumOp<TA>::combine(a, b);
-  }
-};
-
-template <template <typename> class OpFn, typename Load, typename TA>
-struct ValueChunkOps {
-  static inline TA identity() {
-    return OpFn<TA>::identity();
-  }
-  template <typename TI>
-  static inline TA load(TI v) {
-    return Load::template load<TA>(v);
-  }
-  static inline TA combine(TA a, TA b) {
-    return OpFn<TA>::combine(a, b);
-  }
-};
-
 // Consume the vec4-loadable prefix of a lane's segment: lane row_lane reads
 // quads row_lane, row_lane + lanes_per_row, ... of [seg_begin, seg_end) and
 // returns where its scalar loop should resume. The caller's `ok` must be
@@ -1024,7 +996,7 @@ kernel void reduction_flat_strided(
       TO)
 
 #define REGISTER_SUM_IMPL(TI, TO, PREFIX, MODE) \
-  REGISTER_REDUCTION(PREFIX, TI, TO, SumOp<TO, MODE>)
+  REGISTER_REDUCTION(PREFIX, TI, TO, SumReductionOp<TO, MODE>)
 
 #define REGISTER_SUM(TI, TO) REGISTER_SUM_IMPL(TI, TO, "sum_", LOAD_IDENTITY)
 #define REGISTER_NANSUM(TI, TO) \
@@ -1034,10 +1006,14 @@ kernel void reduction_flat_strided(
 #define REGISTER_NORM(TI, TO)                          \
   REGISTER_SUM_IMPL(TI, TO, "norm_l0_", LOAD_NONZERO); \
   REGISTER_SUM_IMPL(TI, TO, "norm_l1_", LOAD_ABS);     \
-  REGISTER_REDUCTION("norm_l2_", TI, TO, SumOp<TO, LOAD_SQUARE, FINAL_SQRT>)
+  REGISTER_REDUCTION(                                  \
+      "norm_l2_", TI, TO, SumReductionOp<TO, LOAD_SQUARE, FINAL_SQRT>)
 #define REGISTER_NORM_L2_COMBINE(TO) \
   REGISTER_REDUCTION(                \
-      "norm_l2_combine_", float, TO, SumOp<TO, LOAD_IDENTITY, FINAL_SQRT>)
+      "norm_l2_combine_",            \
+      float,                         \
+      TO,                            \
+      SumReductionOp<TO, LOAD_IDENTITY, FINAL_SQRT>)
 
 REGISTER_SUM(float, float);
 REGISTER_SUM(float, half);
@@ -1092,7 +1068,8 @@ REGISTER_NORM_L2_COMBINE(float);
 REGISTER_NORM_L2_COMBINE(half);
 REGISTER_NORM_L2_COMBINE(bfloat);
 
-#define REGISTER_PROD(TI, TO) REGISTER_REDUCTION("prod_", TI, TO, ProdOp<TO>)
+#define REGISTER_PROD(TI, TO) \
+  REGISTER_REDUCTION("prod_", TI, TO, ProdReductionOp<TO>)
 
 REGISTER_PROD(float, float);
 REGISTER_PROD(float, half);
