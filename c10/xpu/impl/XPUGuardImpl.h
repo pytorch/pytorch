@@ -53,8 +53,9 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool) |
         (1ULL << kIndex_Float8_e5m2) | (1ULL << kIndex_Float8_e4m3fn) |
         (1ULL << kIndex_Float8_e5m2fnuz) | (1ULL << kIndex_Float8_e4m3fnuz) |
-        (1ULL << kIndex_Float8_e8m0fnu) | (1ULL << kIndex_UInt16) |
-        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt64);
+        (1ULL << kIndex_Float8_e8m0fnu) | (1ULL << kIndex_Float8_e5m3fnu) |
+        (1ULL << kIndex_UInt16) | (1ULL << kIndex_UInt32) |
+        (1ULL << kIndex_UInt64);
     // BFloat16 may be emulated. We always assume BFloat16 is available;
     // users can call is_bf16_supported() to check for native hardware support.
     cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);

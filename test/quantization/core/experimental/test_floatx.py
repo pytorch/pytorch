@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import copy
+import math
 import struct
 import unittest
 
@@ -29,12 +30,14 @@ FLOAT8_DTYPES = [
     torch.float8_e4m3fn,
     torch.float8_e4m3fnuz,
     torch.float8_e8m0fnu,
+    torch.float8_e5m3fnu,
 ]
 
 CUDA_FLOAT8_DTYPES = [
     torch.float8_e5m2,
     torch.float8_e4m3fn,
     torch.float8_e8m0fnu,
+    torch.float8_e5m3fnu,
 ]
 MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
 
@@ -46,6 +49,7 @@ MANTISSA_BITS = {
     torch.float8_e4m3fn: 3,
     torch.float8_e4m3fnuz: 3,
     torch.float8_e8m0fnu: 0,
+    torch.float8_e5m3fnu: 3,
 }
 
 # As in np.finfo(dtype).minexp
@@ -55,6 +59,7 @@ MINEXP = {
     torch.float8_e4m3fn: -6,
     torch.float8_e4m3fnuz: -7,
     torch.float8_e8m0fnu: -127,
+    torch.float8_e5m3fnu: -14,
 }
 
 SPECIAL_NUMBERS = {
@@ -124,6 +129,16 @@ SPECIAL_NUMBERS = {
         ("01111110", 0.5, "zero_point_five"),
         ("01111111", 1.0, "one"),
         ("10000000", 2.0, "two"),
+        ("11111111", float("nan"), "nan"),
+    ],
+    torch.float8_e5m3fnu: [
+        ("00000000", 0.0, "zero"),
+        ("00000001", 2**-17, "min_subnorm"),
+        ("00000111", 0.875 * (2**-14), "max_subnorm"),
+        ("00001000", 2**-14, "min_normal"),
+        ("01111000", 1.0, "one"),
+        ("11111000", 65536.0, "min_exponent_31"),
+        ("11111110", 114688.0, "max_normal"),
         ("11111111", float("nan"), "nan"),
     ],
 }
@@ -270,8 +285,8 @@ class TestFloat8Dtype(TestCase):
         """Numerical test of float8 conversion, by performing a round-trip cast
         to the float8 dtype and back to float32, comparing against simulated
         lower precision."""
-        if dtype is torch.float8_e8m0fnu:
-            return unittest.skip("numerics for e8m0fnu are tested elsewhere")
+        if dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):
+            return unittest.skip(f"numerics for {dtype} are tested elsewhere")
 
         x = get_input(dtype, device)
         x = torch.cat((x, -x))
@@ -457,9 +472,163 @@ class TestFloat4Dtype(TestCase):
             )
 
 
+def _e5m3fnu_decode_lut():
+    """float64 values of all 256 e5m3fnu codes, from the format definition."""
+    values = []
+    for code in range(256):
+        exponent, mantissa = code >> 3, code & 0b111
+        if code == 0xFF:
+            values.append(float("nan"))
+        elif exponent == 0:
+            values.append(math.ldexp(mantissa / 8, -14))
+        else:
+            values.append(math.ldexp(1 + mantissa / 8, exponent - 15))
+    return torch.tensor(values, dtype=torch.float64)
+
+
+def _e5m3fnu_encode_reference(x):
+    """Round-to-nearest-even encode of float64 `|x|` by searching the decode LUT:
+    the sign is ignored, NaN maps to NaN, values above the max saturate."""
+    x = x.abs()
+    lut = _e5m3fnu_decode_lut()[:255]
+    dist = (x.unsqueeze(-1) - lut).abs()
+    min_dist = dist.min(dim=-1, keepdim=True).values
+    candidates = (dist == min_dist).nonzero()
+    codes = torch.full(x.shape, -1, dtype=torch.int64)
+    for row, code in candidates.tolist():
+        # ties go to the even code, i.e. the even mantissa
+        if codes[row] == -1 or code % 2 == 0:
+            codes[row] = code
+    codes[x > lut[-1]] = 0xFE
+    codes[x.isnan()] = 0xFF
+    return codes.to(torch.uint8)
+
+
+class TestFloat8E5M3FNU(TestCase):
+    dtype = torch.float8_e5m3fnu
+
+    def test_decode_all_codes(self, device):
+        codes = torch.arange(256, dtype=torch.uint8, device=device)
+        actual = codes.view(self.dtype).to(torch.float64)
+        self.assertEqual(actual.cpu(), _e5m3fnu_decode_lut(), atol=0, rtol=0)
+        self.assertTrue(codes.view(self.dtype).isnan()[0xFF])
+        self.assertEqual(codes.view(self.dtype).isnan().sum().item(), 1)
+
+    @parametrize("src_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_encode(self, device, src_dtype):
+        lut = _e5m3fnu_decode_lut()
+        finite = lut[:255]
+        mids = (finite[:-1] + finite[1:]) / 2
+        x = torch.cat(
+            (
+                finite,
+                mids,
+                torch.tensor(
+                    [
+                        2**-18,  # tie between zero and the min subnormal
+                        2**-19,
+                        2**-30,
+                        2**-130,  # float32 subnormal
+                        118784.0,  # tie between max (even) and the next code
+                        114689.0,
+                        118785.0,
+                        2.0**100,
+                        float("inf"),
+                        -0.0,
+                        -(2**-17),
+                        -1.0,
+                        -(2.0**100),
+                        float("-inf"),
+                        float("nan"),
+                    ],
+                    dtype=torch.float64,
+                ),
+            )
+        ).to(torch.float32)
+        # also cover the float32 neighbors of every code and tie
+        x = torch.cat(
+            (
+                x,
+                x.nextafter(torch.tensor(-math.inf)),
+                x.nextafter(torch.tensor(math.inf)),
+            )
+        )
+        x = x.to(src_dtype)
+        expected = _e5m3fnu_encode_reference(x.to(torch.float64))
+        actual = x.to(device).to(self.dtype).view(torch.uint8).cpu()
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    def test_shell_ops(self, device):
+        codes = torch.arange(256, dtype=torch.uint8, device=device)
+        x = codes.view(self.dtype)
+        self.assertEqual(x.dtype, self.dtype)
+        self.assertEqual(x.view(torch.uint8), codes, atol=0, rtol=0)
+
+        def bits(t):
+            return t.view(torch.uint8).cpu()
+
+        # copies across devices and layouts preserve the bits
+        self.assertEqual(bits(x.cpu().to(device)), codes.cpu(), atol=0, rtol=0)
+        self.assertEqual(bits(x.clone()), codes.cpu(), atol=0, rtol=0)
+        self.assertEqual(
+            bits(x.view(16, 16).t().contiguous()),
+            codes.cpu().view(16, 16).t(),
+            atol=0,
+            rtol=0,
+        )
+        y = torch.empty(256, dtype=self.dtype, device=device)
+        y.copy_(x)
+        self.assertEqual(bits(y), codes.cpu(), atol=0, rtol=0)
+
+        # indexing
+        idx = torch.tensor([0x78, 0x00, 0xFE, 0xFF], device=device)
+        self.assertEqual(bits(x[idx]), idx.cpu().to(torch.uint8), atol=0, rtol=0)
+        self.assertEqual(bits(x[1:4]), codes.cpu()[1:4], atol=0, rtol=0)
+        self.assertEqual(
+            bits(x.index_select(0, idx)), idx.cpu().to(torch.uint8), atol=0, rtol=0
+        )
+
+        # creation and fill
+        self.assertEqual(bits(torch.zeros(3, dtype=self.dtype, device=device)).sum(), 0)
+        full = torch.full((3,), 1.0, dtype=self.dtype, device=device)
+        self.assertEqual(bits(full), torch.full((3,), 0x78, dtype=torch.uint8))
+        full.fill_(114688.0)
+        self.assertEqual(bits(full), torch.full((3,), 0xFE, dtype=torch.uint8))
+        t = torch.tensor([0.5, 2.0], dtype=self.dtype, device=device)
+        self.assertEqual(bits(t), torch.tensor([0x70, 0x80], dtype=torch.uint8))
+        self.assertEqual(t.tolist(), [0.5, 2.0])
+        self.assertEqual(t[1].item(), 2.0)
+
+        # equality comparison and printing
+        self.assertEqual(x, x.clone(), atol=0, rtol=0)
+        self.assertIn("dtype=torch.float8_e5m3fnu", str(t))
+        self.assertIn("0.5000", str(t))
+
+    def test_finfo(self, device):
+        finfo = torch.finfo(self.dtype)
+        self.assertEqual(finfo.bits, 8)
+        self.assertEqual(finfo.max, 114688.0)
+        self.assertEqual(finfo.min, 0.0)
+        self.assertEqual(finfo.smallest_normal, 2**-14)
+        self.assertEqual(finfo.eps, 2**-3)
+        self.assertFalse(self.dtype.is_signed)
+        self.assertTrue(self.dtype.is_floating_point)
+        self.assertEqual(self.dtype.itemsize, 1)
+
+    def test_promotion_and_dlpack_fail(self, device):
+        x = torch.ones(2, dtype=self.dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Promotion for Float8 Types is not supported"
+        ):
+            torch.promote_types(self.dtype, torch.float32)
+        with self.assertRaisesRegex(BufferError, "not supported by dlpack"):
+            torch.utils.dlpack.to_dlpack(x)
+
+
 instantiate_device_type_tests(
     TestFloat8Dtype, globals(), allow_mps=True, allow_xpu=True
 )
+instantiate_device_type_tests(TestFloat8E5M3FNU, globals(), except_for="mps")
 instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
 
 
@@ -475,8 +644,8 @@ class TestFloat8DtypeCPUOnly(TestCase):
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_mul(self, dtype):
         # TODO(#113663): remove arithmetic support from all float8 dtypes
-        if dtype is torch.float8_e8m0fnu:
-            return unittest.skip("arithmetic not supported for torch.float8_e8m0fnu")
+        if dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):
+            return unittest.skip(f"arithmetic not supported for {dtype}")
         shape = (10, 10)
         a = torch.randn(shape)
         a8_simulated = simulate_fp8_precision(a, dtype)
@@ -491,10 +660,8 @@ class TestFloat8DtypeCPUOnly(TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on Windows yet")
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
-        if dtype is torch.float8_e8m0fnu:
-            return unittest.skip(
-                "PT2 support for torch.float8_e8m0fnu is not implemented yet"
-            )
+        if dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):
+            return unittest.skip(f"PT2 support for {dtype} is not implemented yet")
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
