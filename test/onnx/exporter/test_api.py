@@ -7,6 +7,7 @@ import io
 import logging
 import os
 
+import onnx
 from onnxscript import FLOAT, opset18 as op
 
 import torch
@@ -79,6 +80,50 @@ class TestExportAPIDynamo(common_utils.TestCase):
             SampleModelTwoInputs(),
             (torch.randn(1, 1, 2), torch.randn(1, 1, 2)),
         )
+
+    def test_semantic_node_names_include_module_scope(self):
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.proj = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return torch.relu(self.proj(x))
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleList([Block(), Block()])
+
+            def forward(self, x):
+                for block in self.blocks:
+                    x = block(x)
+                return x
+
+        onnx_program = self.assert_export(Model(), (torch.randn(2, 4),))
+        nodes = list(onnx_program.model.graph)
+        node_names = [node.name for node in nodes]
+
+        self.assertIn("/blocks/0/proj/linear__node_linear", node_names)
+        self.assertIn("/blocks/1/proj/linear_1__node_linear_1", node_names)
+        self.assertEqual(len(node_names), len(set(node_names)))
+
+        first_linear = next(
+            node for node in nodes if node.name.endswith("__node_linear")
+        )
+        self.assertEqual(
+            first_linear.metadata_props["pkg.torch.onnx.name_scopes"],
+            "['', 'blocks.0', 'blocks.0.proj', 'linear']",
+        )
+
+        with common_utils.TemporaryFileName(suffix=".onnx") as path:
+            onnx_program.save(path)
+            serialized_model = onnx.load(path, load_external_data=False)
+
+        serialized_names = [node.name for node in serialized_model.graph.node]
+        self.assertIn("/blocks/0/proj/linear__node_linear", serialized_names)
+        self.assertIn("/blocks/1/proj/linear_1__node_linear_1", serialized_names)
+        self.assertEqual(len(serialized_names), len(set(serialized_names)))
 
     def test_lower_opset_support(self):
         # First test that opset 18 (torchlib opset works)
