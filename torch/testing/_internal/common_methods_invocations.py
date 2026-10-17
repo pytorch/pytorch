@@ -21458,6 +21458,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                    decorators=(precisionOverride({torch.float16: 7e-1}),
                                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=4e-6)}),
                                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                                            'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
                                ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -24360,7 +24362,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
-        decorators=(precisionOverride({torch.float16: 7e-1}),),
+        decorators=(
+            precisionOverride({torch.float16: 7e-1}),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
+        ),
         skips=(
             # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
