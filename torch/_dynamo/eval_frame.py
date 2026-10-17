@@ -298,7 +298,7 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
-        if trace_rules.check(frame.f_code):
+        if trace_rules.check(frame.f_code, frame=frame):
             return ConvertFrameReturn()
         if not convert_frame.has_tensor_in_frame(frame):
             return ConvertFrameReturn()
@@ -742,17 +742,24 @@ def remove_from_cache(f: Any) -> None:
     """
     Make sure f.__code__ is not cached to force a recompile
     """
+    from .decorators import _nonrecursive_disable_wrapper_code
+
     if isinstance(f, types.CodeType):
-        reset_code(f)
+        code = f
     elif hasattr(f, "__code__"):
-        reset_code(f.__code__)
+        code = f.__code__
     elif hasattr(getattr(f, "forward", None), "__code__"):
-        reset_code(f.forward.__code__)
+        code = f.forward.__code__
     else:
         from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
+        return
+    # Every disable(recursive=False) wrapper shares this code; resetting it
+    # would drop its import-time skip for all of them.
+    if code is not _nonrecursive_disable_wrapper_code:
+        reset_code(code)
 
 
 def nothing() -> None:

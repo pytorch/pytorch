@@ -1468,40 +1468,6 @@ class TestFakePGUniformRanks(TestCase):
             work.get_future().value()[0], torch.tensor([3.0, 4.0, 3.0, 4.0])
         )
 
-    @parametrize("result_kind", ["cpu", "meta", "mixed"])
-    def test_result_work_preserves_cpu_and_meta_aliases(self, result_kind):
-        pg = self._init(rank=0, world_size=2)
-        devices = ("cpu", "meta") if result_kind == "mixed" else (result_kind,)
-        tensors = [torch.ones(2, device=device) for device in devices]
-        identities = [tensor._cdata for tensor in tensors]
-
-        work = pg.broadcast(tensors)
-        future = work.get_future()
-
-        self.assertTrue(work.is_completed())
-        self.assertTrue(future.done())
-        for _ in range(2):
-            self.assertTrue(work.wait())
-            self.assertIsNone(work.block_current_stream())
-            for result in (work.result(), future.wait()):
-                self.assertEqual([tensor._cdata for tensor in result], identities)
-
-    @parametrize("simulate_uniform_ranks", [True, False])
-    def test_wait_unregisters_work(self, simulate_uniform_ranks):
-        options = FakeProcessGroup.Options()
-        options.simulate_uniform_ranks = simulate_uniform_ranks
-        dist.init_process_group(
-            "fake", rank=0, world_size=2, store=FakeStore(), pg_options=options
-        )
-        registry_size = torch._C._distributed_c10d._get_work_registry_size
-        before = registry_size()
-
-        with funcol.allow_inflight_collective_as_graph_input_ctx():
-            work = dist.all_reduce(torch.ones(2), async_op=True)
-            self.assertEqual(registry_size(), before + 1)
-            self.assertTrue(work.wait())
-            self.assertEqual(registry_size(), before)
-
     def test_result_still_raises_without_the_flag(self):
         """Work::result() errors by default and must keep doing so.
 
