@@ -3148,6 +3148,7 @@ class TestFP8Matmul(TestCase):
             )
 
     @onlyCUDA
+    @skipIfRocm  # SWIZZLE_32_4_4 scales and the MSLK MXFP4 kernel are NVIDIA-only
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
