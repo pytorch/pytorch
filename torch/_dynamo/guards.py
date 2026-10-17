@@ -25,6 +25,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import io
@@ -111,6 +112,7 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
+from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
@@ -1010,6 +1012,44 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
     return f"{code_part:<60}{extra}"
 
 
+_LIVE_SAVED_TENSORS_HOOKS = object()
+
+
+def _saved_tensors_hooks_fingerprint(hooks: Any) -> tuple[str | None, ...] | None:
+    """
+    What AUTOGRAD_SAVED_TENSORS_HOOKS compares, named by content rather than id.
+
+    A hook graph whose code does not pin down what it computes gets a None part,
+    which a serialized guard never accepts.
+    """
+    from torch._functorch._aot_autograd.autograd_cache import check_node_safe
+
+    if not torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable(
+        hooks
+    ):
+        return None
+    parts: list[str | None] = []
+    for gm in hooks:
+        h = hashlib.sha256(gm.code.encode())
+        try:
+            for node in gm.graph.nodes:
+                # gm.code names a call_function target only by name; the
+                # AOTAutograd cache's safety rule says which names that is
+                # enough for, and an fx.wrap user_cache_hash names the body.
+                # A call_method's name and receiver are both in gm.code.
+                if node.op == "call_function":
+                    check_node_safe(node)
+                if (user_hash := node.meta.get("user_cache_hash")) is not None:
+                    h.update(str(user_hash).encode())
+        except Exception:
+            # Anything check_node_safe cannot vouch for, including targets it
+            # fails to introspect, is a cache bypass there and unverifiable here.
+            parts.append(None)
+            continue
+        parts.append(h.hexdigest())
+    return tuple(parts)
+
+
 def get_verbose_code_parts(
     code_parts: str | list[str],
     guard: Guard | None,
@@ -1528,6 +1568,7 @@ class GuardBuilder(GuardBuilderBase):
         # the value so the id stays live; see Note [Reconstructing a function a
         # guard is rooted at] in GuardsStatePickler. Save-path only.
         self.value_guarded_containers: dict[int, Any] = {}
+        self.saved_tensors_hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
         self.save_guards = save_guards
         self.guard_filter_fn = guard_filter_fn
 
@@ -2914,11 +2955,19 @@ class GuardBuilder(GuardBuilderBase):
 
     # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
-    def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard) -> None:
+    def AUTOGRAD_SAVED_TENSORS_HOOKS(
+        self, guard: Guard, hooks_fingerprint: object = _LIVE_SAVED_TENSORS_HOOKS
+    ) -> None:
         get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
         are_inline_hooks = (
             torch._functorch._aot_autograd.utils.saved_tensors_hooks_are_inlineable
         )
+
+        if hooks_fingerprint is not _LIVE_SAVED_TENSORS_HOOKS:
+            self._portable_saved_tensors_hooks_guard(
+                guard, hooks_fingerprint, get_hooks, are_inline_hooks
+            )
+            return
 
         def hooks_ids_fn(
             hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
@@ -2929,14 +2978,49 @@ class GuardBuilder(GuardBuilderBase):
             return tuple(map(id, hooks))
 
         guard_hooks_ids = hooks_ids_fn(get_hooks())
+        if self.save_guards:
+            self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
+                get_hooks()
+            )
 
         code = [
             f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks ids == {guard_hooks_ids}"
         ]
         self._set_guard_export_info(guard, code)
+        self.guard_manager.root.add_autograd_saved_tensors_hooks_guard(
+            torch.fx.GraphModule, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    def _portable_saved_tensors_hooks_guard(
+        self,
+        guard: Guard,
+        hooks_fingerprint: object,
+        get_hooks: Callable[[], Any],
+        are_inline_hooks: Callable[[Any], bool],
+    ) -> None:
+        # The capturing process's hook ids mean nothing here, and the hooks
+        # active while loading need not be the ones active while serving, so
+        # the hooks are compared by content against the capture's.
+        code = [
+            f"torch._functorch.aot_autograd.utils.top_saved_tensors_hooks fingerprint == {hooks_fingerprint}"
+        ]
+        self._set_guard_export_info(guard, code)
+        last: list[tuple[tuple[weakref.ref[Any], ...], bool]] = []
 
         def fn(x: object) -> bool:
-            return guard_hooks_ids == hooks_ids_fn(get_hooks())
+            hooks = get_hooks()
+            if not are_inline_hooks(hooks):
+                return hooks_fingerprint is None
+            if last and all(r() is h for r, h in zip(last[0][0], hooks)):
+                return last[0][1]
+            fingerprint = _saved_tensors_hooks_fingerprint(hooks)
+            result = (
+                fingerprint is not None
+                and None not in fingerprint
+                and fingerprint == hooks_fingerprint
+            )
+            last[:] = [(tuple(weakref.ref(h) for h in hooks), result)]
+            return result
 
         self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard), guard.user_stack
@@ -3612,6 +3696,37 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_mapping_keys_guard(
             value, code, guard.user_stack
         )
+
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ],
+        eval_fn=lambda value, metadata: [
+            id(key) for key in collections.OrderedDict.keys(value)
+        ]
+        == metadata,
+    )
+    def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
+        key_ids = [
+            self.id_ref(key, guard.name)
+            for key in collections.OrderedDict.keys(self.get(guard))
+        ]
+
+        def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
+            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
+                id(current) == expected
+                for current, expected in zip(
+                    collections.OrderedDict.keys(value), key_ids
+                )
+            )
+
+        code = [f"___check_order({self.arg_ref(guard)})"]
+        self.add_python_lambda_leaf_guard_to_root(
+            code,
+            get_verbose_code_parts(code, guard),
+            _get_closure_vars() | {"___check_order": guard_fn},
+        )
+        self._set_guard_export_info(guard, code)
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
@@ -4776,6 +4891,16 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
         return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
 
+    @classmethod
+    def _unpickle_custom_op_def(cls, qualname: str) -> Any:
+        try:
+            return OPDEFS[qualname]
+        except KeyError:
+            raise RuntimeError(
+                f"Custom op {qualname} is not registered; import the module that "
+                "defines it before loading"
+            ) from None
+
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
@@ -5226,6 +5351,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 obj._overloadname,
             )
 
+        elif _is_registered_custom_op_def(obj):
+            # Its Library holds a _DispatchModule, which cannot be pickled.
+            return type(self)._unpickle_custom_op_def, (obj._qualname,)
+
         elif (
             obj.__class__.__module__ == "builtins"
             and obj.__class__.__name__ == "PyCapsule"
@@ -5448,6 +5577,10 @@ def _is_nested_named_tuple_type(obj: object) -> bool:
     )
 
 
+def _is_registered_custom_op_def(value: object) -> bool:
+    return isinstance(value, CustomOpDef) and OPDEFS.get(value._qualname) is value
+
+
 def _resolves_by_reference(value: object) -> bool:
     """Whether unpickling ``value`` in another process yields that process's
     canonical object, so an identity guard rebuilt at load checks the right id.
@@ -5472,7 +5605,7 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return False
+    return _is_registered_custom_op_def(value)
 
 
 def is_portable_identity_guard(
@@ -5496,7 +5629,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
     try:
         return builder.get(guard)
     except Exception:
-        # Not a module, enum member, class or function: never portable.
+        # A value the guard cannot read is never portable.
         return None
 
 
@@ -6000,6 +6133,16 @@ class CheckFunctionManager:
 
             return x
 
+        def portable_create_fn(x: Callable[..., None]) -> Callable[..., None]:
+            if x is GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS:
+                fingerprint = builder.saved_tensors_hooks_fingerprint
+                if fingerprint is _LIVE_SAVED_TENSORS_HOOKS:
+                    raise AssertionError(
+                        "AUTOGRAD_SAVED_TENSORS_HOOKS was serialized without being built"
+                    )
+                return functools.partial(x, hooks_fingerprint=fingerprint)
+            return normalize_create_fn(x)
+
         global_scope_state = {
             k: v
             for k, v in output_graph_guards_state.global_scope.items()
@@ -6027,7 +6170,7 @@ class CheckFunctionManager:
                         guard,
                         obj_weakref=None,
                         guarded_class_weakref=None,
-                        create_fn=normalize_create_fn(guard.create_fn),
+                        create_fn=portable_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
                 )
