@@ -1106,10 +1106,6 @@ class LSTM(RNNBase):
                     device=input.device,
                 )
                 hx = (h_zeros, c_zeros)
-            else:
-                # Each batch of the hidden state should match the input sequence that
-                # the user believes he/she is passing in.
-                hx = self.permute_hidden(hx, sorted_indices)
         else:
             if input.dim() not in (2, 3):
                 raise ValueError(
@@ -1138,7 +1134,6 @@ class LSTM(RNNBase):
                     device=input.device,
                 )
                 hx = (h_zeros, c_zeros)
-                self.check_forward_args(input, hx, batch_sizes)
             else:
                 if is_batched:
                     if hx[0].dim() != 3 or hx[1].dim() != 3:
@@ -1155,10 +1150,13 @@ class LSTM(RNNBase):
                         )
                         raise RuntimeError(msg)
                     hx = (hx[0].unsqueeze(1), hx[1].unsqueeze(1))
-                # Each batch of the hidden state should match the input sequence that
-                # the user believes he/she is passing in.
-                self.check_forward_args(input, hx, batch_sizes)
-                hx = self.permute_hidden(hx, sorted_indices)
+
+        # Each batch of the hidden state should match the input sequence that
+        # the user believes he/she is passing in.
+        if hx is None:
+            raise AssertionError("hx must not be None")
+        self.check_forward_args(input, hx, batch_sizes)
+        hx = self.permute_hidden(hx, sorted_indices)
 
         if batch_sizes is None:
             # pyrefly: ignore [no-matching-overload]
