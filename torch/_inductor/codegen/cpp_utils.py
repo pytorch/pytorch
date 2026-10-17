@@ -236,6 +236,18 @@ class CppCSEVariable(CSEVariable):
 
 
 class CppPrinter(_CppPrinter):
+    def _print_Relational(self, expr):
+        for symbol, bound in (expr.args, expr.args[::-1]):
+            if (
+                isinstance(symbol, sympy.Symbol)
+                and symbol.is_integer is True
+                and symbol_is_type(symbol, (SymT.SIZE, SymT.UNBACKED_INT))
+                and isinstance(bound, sympy.Integer)
+                and not -(1 << 63) <= int(bound) < (1 << 63)
+            ):
+                return "true" if bool(expr.subs(symbol, 0)) else "false"
+        return super()._print_Relational(expr)
+
     def doprint(self, expr, *, simplify: bool = True, p=True):
         # TODO: why are people passing strings to the printer here :think:
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
