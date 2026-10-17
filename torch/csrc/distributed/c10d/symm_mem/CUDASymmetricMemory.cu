@@ -415,6 +415,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
       "Allocation maps the block, zeroes the signal pad and synchronizes the "
       "stream. Allocate the buffer with "
       "torch.distributed._symmetric_memory.empty() before starting capture.");
+  void* alloc_base = nullptr;
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -452,6 +453,31 @@ void* CUDASymmetricMemoryAllocator::alloc(
   HandleType handle;
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
+  auto rollback = c10::make_scope_exit([&]() noexcept {
+    CUresult unmap_result = CUDA_SUCCESS;
+    CUresult free_result = CUDA_SUCCESS;
+    // map_block publishes alloc_base only after the mapping is complete.
+    if (alloc_base != nullptr) {
+      auto address = reinterpret_cast<CUdeviceptr>(alloc_base);
+      unmap_result = driver_api->cuMemUnmap_(address, block_size);
+      if (unmap_result == CUDA_SUCCESS) {
+        free_result = driver_api->cuMemAddressFree_(address, block_size);
+      }
+    }
+    auto release_result = driver_api->cuMemRelease_(handle);
+    try {
+      C10_CUDA_DRIVER_CHECK_WARN(
+          unmap_result, "SymmetricMemory: failed to undo local mapping");
+      C10_CUDA_DRIVER_CHECK_WARN(
+          free_result, "SymmetricMemory: failed to undo local reservation");
+      C10_CUDA_DRIVER_CHECK_WARN(
+          release_result,
+          "SymmetricMemory: failed to release incomplete allocation");
+    // NOLINTNEXTLINE(bugprone-empty-catch)
+    } catch (...) {
+      // Cleanup attempts precede diagnostics, which must not escape this guard.
+    }
+  });
 
 #elif defined(USE_ROCM)
   handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
@@ -478,8 +504,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-  void* alloc_base = nullptr;
   map_block(&alloc_base, handle, block_size, device_idx);
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto alloc_ref = c10::make_intrusive<AllocationRef>(
+      alloc_base, handle, block_size, device_idx);
+  rollback.release();
+#endif
 
   // Zero the signal pad and the barrier state ([0, buffer_offset)): both
   // barrier() protocols start from zero. The data buffer that follows does not
@@ -497,8 +527,10 @@ void* CUDASymmetricMemoryAllocator::alloc(
   // block (and thus alloc_base) is released internally by ~AllocationRef.
   void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
 
+#if defined(USE_ROCM) || !defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto alloc_ref = c10::make_intrusive<AllocationRef>(
       alloc_base, handle, block_size, device_idx);
+#endif
   auto block = c10::make_intrusive<Block>(
       std::move(alloc_ref),
       device_idx,
@@ -740,8 +772,8 @@ class MulticastSetup {
       return false;
     }
     bound_ = true;
-    // map_block throws, and addr_ holds whatever VA it reserved before it did,
-    // which release() still has to undo.
+    // A failed map_block leaves addr_ null. Convert its error to false so this
+    // rank still participates in the post-map success exchange.
     try {
       map_block(
           &addr_, imported_handle_, block_->block_size, block_->device_idx);
