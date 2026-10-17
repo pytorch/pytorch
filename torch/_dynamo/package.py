@@ -1590,16 +1590,17 @@ class CompilePackage:
                     # the inlined function's source, so the guards and the
                     # bytecode see what they saw while tracing; the artifact's
                     # copy of the dict is frozen and has its tensors faked. A
-                    # key whose source does not resolve here (e.g. one rooted at
-                    # a frame local) stays unbound and misses as before. A
-                    # binding already here is kept; a live compile's is taken
-                    # over from its CleanupHook, so uninstall() drops it, and
-                    # anyone else's is left alone.
+                    # key whose source does not resolve here (one rooted at a
+                    # frame local, or a chain through user objects that raises
+                    # against this process's state) stays unbound and misses as
+                    # before. A binding already here is kept; a live compile's
+                    # is taken over from its CleanupHook, so uninstall() drops
+                    # it, and anyone else's is left alone.
                     sources = guards_state.output_graph.unnamed_scope_sources
                     for name, source in sources.items():
                         try:
                             namespace = eval(source.name, {"G": runtime_global_scope})
-                        except (AttributeError, KeyError, NameError):
+                        except Exception:
                             continue
                         if isinstance(namespace, dict):
                             self._install_global(
