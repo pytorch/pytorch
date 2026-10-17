@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     skipMPS,
 )
@@ -40,6 +41,8 @@ CUDA_FLOAT8_DTYPES = [
     torch.float8_e5m3fnu,
 ]
 MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
+# torch-xpu-ops has no copy kernel for float8_e5m3fnu yet
+XPU_FLOAT8_DTYPES = [d for d in FLOAT8_DTYPES if d is not torch.float8_e5m3fnu]
 
 # The following information are not yet provided by torch.finfo.
 
@@ -263,6 +266,7 @@ ROUND_TRIP_TEST_CASES = (
 
 class TestFloat8Dtype(TestCase):
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
@@ -278,6 +282,7 @@ class TestFloat8Dtype(TestCase):
             self.assertEqual(x, x8.float(), atol=0, rtol=0)
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     @parametrize("get_input", ROUND_TRIP_TEST_CASES)
@@ -352,6 +357,7 @@ class TestFloat8Dtype(TestCase):
                 )
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_special_numbers(self, dtype, device):
@@ -377,6 +383,7 @@ class TestFloat8Dtype(TestCase):
             compare_binary_with_decimal(*number, dtype, device)
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_type_promotion_fails(self, dtype, device):
@@ -397,6 +404,7 @@ class TestFloat8Dtype(TestCase):
                 x + y
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_empty(self, dtype, device):
@@ -406,6 +414,7 @@ class TestFloat8Dtype(TestCase):
                 torch.empty(4, 4, device=device, dtype=dtype)
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_to_string(self, dtype, device):
@@ -413,11 +422,13 @@ class TestFloat8Dtype(TestCase):
         str(x)
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_finfo(self, dtype, device):
         torch.finfo(dtype)
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_cat(self, dtype, device):
@@ -426,6 +437,7 @@ class TestFloat8Dtype(TestCase):
         torch.cat([x1, x2])
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
     @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_save_load(self, dtype, device):
