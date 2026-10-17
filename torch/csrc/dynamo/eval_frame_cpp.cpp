@@ -571,9 +571,11 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // NB: We only do guard collectives when there are compiled code entries
-  // for the current region (or the default region); this reduces
-  // overtriggering and we don't need to do guard collectives the very first
-  // time we've seen a frame in this region.
+  // for the current region (or the default region) or precompile entries
+  // loaded from an artifact; this reduces overtriggering and we don't need to
+  // do guard collectives the very first time we've seen a frame in this
+  // region. Counting precompile entries assumes every rank installed the same
+  // artifact; a rank without them skips the collective the others wait in.
   bool has_relevant_entries =
       has_relevant_cache_entries(code, isolate_recompiles_id);
   if (guard_complete_hook != nullptr && has_relevant_entries) {

@@ -10830,6 +10830,54 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @torch._dynamo.config.patch(
         debug_force_nested_calls=False, nested_graph_breaks=False
     )
+    @parametrize("peer_missed", [False, True])
+    def test_precompile_entry_guard_complete_hook(self, peer_missed):
+        from torch._C._dynamo.eval_frame import (
+            _load_precompile_entry,
+            _reset_precompile_entries,
+            set_guard_complete_hook,
+        )
+        from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3)
+        torch.compile(fn, backend="eager", dynamic=False)(x)
+        entries = [
+            (e.guard_manager, e.code) for e in _debug_get_cache_entry_list(fn.__code__)
+        ]
+        torch._dynamo.reset_code(fn.__code__)
+        for guard_manager, code in entries:
+            _load_precompile_entry(fn.__code__, guard_manager, code)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnt, dynamic=False)
+        guard_results = []
+
+        # Returning False is what the guard collective does when a peer missed.
+        def hook(hit):
+            guard_results.append(hit)
+            return hit and not peer_missed
+
+        old_hook = set_guard_complete_hook(hook)
+        try:
+            self.assertEqual(compiled_fn(x), fn(x))
+            self.assertEqual(guard_results, [True])
+            self.assertEqual(cnt.frame_count, int(peer_missed))
+            if not peer_missed:
+                y = torch.randn(4)
+                self.assertEqual(compiled_fn(y), fn(y))
+                self.assertEqual(guard_results, [True, False])
+                self.assertEqual(cnt.frame_count, 1)
+        finally:
+            set_guard_complete_hook(old_hook)
+            _reset_precompile_entries(fn.__code__)
+            torch._dynamo.reset_code(fn.__code__)
+
+    # Relies on fn's own frame being the compiled one; a forced nested call moves it.
+    @torch._dynamo.config.patch(
+        debug_force_nested_calls=False, nested_graph_breaks=False
+    )
     @torch._dynamo.testing.lru_cache_reordering(False)
     def test_precompile_entry_without_lru_follows_an_older_cache_entry(self):
         from torch._C._dynamo.eval_frame import (
