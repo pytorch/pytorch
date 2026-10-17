@@ -304,6 +304,11 @@ if RUN_CPU:
         BaseTest(
             "test_transpose", code_string_count={".reset();": 2}
         ),  # multiple outputs, buffer clear
+        BaseTest(
+            "test_unbacked_float_kernel_arg_keeps_fp64",
+            "",
+            test_cpu_repro.CPUReproTests(),
+        ),
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
     ]:
