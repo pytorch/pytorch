@@ -22,6 +22,7 @@ from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -662,6 +664,47 @@ class TestDecomp(TestCase):
         torch.manual_seed(123)
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
+
+    @parametrize("inplace", [False, True])
+    @parametrize("shape", [(4, 6), (0,)])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @dtypes(torch.float32, torch.complex64)
+    def test_uniform_reversed_bounds(self, device, dtype, inplace, shape, backend):
+        def fn(x):
+            if inplace:
+                return x.uniform_(5.0, 3.0)
+            return aten.uniform.default(x, 5.0, 3.0)
+
+        x = torch.empty(shape, device=device, dtype=dtype)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        if x.is_complex() and x.numel() == 0:
+            self.assertEqual(compiled(x), fn(x))
+            return
+        msg = r"uniform_ expects to return a \[from, to\) range, but found from=5(\.0)? > to=3(\.0)?"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            fn(x)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled(x)
+
+    @parametrize("inplace", [False, True])
+    @parametrize("low,high", [(0.0, 1.0), (3.0, 3.0)])
+    def test_uniform_valid_bounds(self, device, inplace, low, high):
+        def fn(x):
+            if inplace:
+                return x.uniform_(low, high)
+            return aten.uniform.default(x, low, high)
+
+        x = torch.empty(4, 6, device=device)
+        result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(result.shape, x.shape)
+        self.assertEqual(result.dtype, x.dtype)
+        self.assertEqual(result.device, x.device)
+        if low == high:
+            self.assertEqual(result, torch.full_like(x, low))
+        else:
+            self.assertTrue(((result >= low) & (result < high)).all().item())
+        if inplace:
+            self.assertIs(result, x)
 
     def test_bernoulli_default(self, device):
         p = 0.3
