@@ -78,6 +78,58 @@ For debugging you can run just a single benchmark by adding the `--only=<NAME>` 
 
 A complete list of options can be seen by running each of the runners with the `--help` flag.
 
+### Decoder-only generation, prefill, and decode
+
+Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
+by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
+`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
+unpadded prompts:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=prefill --prompt-length=1000 \
+  --batch-size=1 --only=Qwen/Qwen3-0.6B --output=prefill_performance.csv
+```
+
+Prefill measures one forward over the prompt, returning last-position logits and
+populating a reusable static cache. The cache holds `prompt_length + 1999`
+positions, the capacity `generate` allocates for its first forward, so attention
+spans the same KV length as in generation; `prompt_length + 2000` must fit the
+model's context length. Cache allocation and reset occur outside the compiled
+and timed forward. Use `--accuracy` to check correctness or
+`--disable-cudagraphs` to measure without CUDA graphs. Prefill requires inference
+and a backend; autocast, dynamic shapes, distributed execution, and export modes
+are unsupported. `--prompt-length` (default 1000) and `--batch-size` configure
+the prefill workload; generation retains its existing `1 x 1000` inputs and
+rejects `--prompt-length`.
+
+CSV `abs_latency` and `eager_latency` are milliseconds for all
+`--iterations-per-run` requests; `input_tokens_per_second` includes all batch
+elements. Default output and profiler trace names get a `_prefill` suffix; use
+separate files for different input dimensions.
+
+Decode is opt-in and supports `meta-llama/Llama-3.2-1B`, `Qwen/Qwen3-0.6B`, and
+`Qwen/Qwen3.5-0.8B`:
+
+```
+./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
+  --backend=inductor --hf-inference-mode=decode --prompt-length=1000 \
+  --decode-length=128 --batch-size=1 --only=Qwen/Qwen3-0.6B \
+  --output=decode_performance.csv
+```
+
+Each decode request prefills the prompt eagerly into the static cache outside
+the timed region, then times `--decode-length` (default 128, at most 1999)
+single-token compiled forwards. Decode feeds fixed random tokens rather than
+sampled ones and returns the last step's logits. It shares prefill's cache
+capacity and flag restrictions. `gemma-2-2b` is excluded because its
+sliding-window cache recompiles on every step.
+
+CSV `abs_latency` and `eager_latency` are milliseconds for all
+`--iterations-per-run` requests; `output_tokens_per_second` counts every decode
+step across batch elements. Default output and profiler trace names get a
+`_decode` suffix.
+
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```
 ./benchmarks/dynamo/torchbench.py --performance --training --amp --backend=inductor --output=torchbench_training.csv
