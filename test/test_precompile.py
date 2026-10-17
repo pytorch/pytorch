@@ -30,6 +30,7 @@ from unittest import mock
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
+from torch._dynamo.symbolic_convert import UNNAMED_SCOPE_PREFIX
 from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler.precompile import (
@@ -4962,7 +4963,7 @@ class TestPrecompileDynamoCapture(TestCase):
             # The capture's compile guarded through a minted key, or there is
             # nothing for the install to seed.
             self.assertTrue(
-                any(name.startswith("___unnamed_scope") for name in vars(self.mod))
+                any(name.startswith(UNNAMED_SCOPE_PREFIX) for name in vars(self.mod))
             )
         with open(self.artifact) as f:
             self.assertIn('SERVING_MODE = "installed"', f.read())
