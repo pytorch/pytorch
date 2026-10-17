@@ -8,17 +8,20 @@ reduction dataflow and kernel scheduling remain with their respective owners.
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FlexGemmOutputContraction,
+    FlexGemmOutputExpansion,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
     FlexGemmStructuralInt,
+    is_pointwise_node,
     tensor_meta_shape,
+    view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmReductionGeometry,
@@ -32,6 +35,7 @@ from torch._inductor.kernel.gemm_epilogue_utils import (
     statically_known_equal,
     statically_known_shape_equal,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -257,24 +261,33 @@ def match_output_contraction_use(
     source = split_normalized.source
     split_size = FlexGemmStructuralInt.from_value(split_normalized.split_size)
     shape = tensor_meta_shape(source)
+    physical_n = (
+        FlexGemmStructuralInt.from_value(shape[-1])
+        if shape is not None and len(shape) == 2
+        else None
+    )
     if (
         index is None
         or shape is None
         or len(shape) != 2
-        or not isinstance(shape[-1], int)
+        or physical_n is None
         or split_size is None
         or split_size.value <= 0
-        or shape[-1] % split_size.value
+        or physical_n.value % split_size.value
         or split_normalized.dim not in (-1, 1)
         or source in local_reduce.lane_domains
         or not local_reduce.graph.depends_on(source, gemm)
     ):
         return None
-    group = shape[-1] // split_size.value
+    group = physical_n.value // split_size.value
     if group <= 1:
         return None
     return OutputContractionUse(
-        FlexGemmLaneDomain(group, True), group, index.value, split, (index, split_size)
+        FlexGemmLaneDomain(group, True),
+        group,
+        index.value,
+        split,
+        (index, split_size, physical_n),
     )
 
 
@@ -295,7 +308,13 @@ def build_output_contraction_plan(
     ):
         return None
     expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // domain.physical_span)
-    if not statically_known_shape_equal(output_meta.shape, expected_shape):
+    if not statically_known_shape_equal(output_meta.shape, expected_shape) and not (
+        len(output_meta.shape) == 2
+        and statically_known_shape_equal(
+            (output_meta.shape[0], output_meta.shape[1] * domain.physical_span),
+            gemm_meta.shape,
+        )
+    ):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
     lanes = [
         (node, use)
@@ -307,4 +326,122 @@ def build_output_contraction_plan(
         {node: use.index % use.group for node, use in lanes},
         {use.layout_node: GemmReductionGeometry(use.group, 1) for _, use in lanes},
         tuple(value for _, use in lanes for value in use.structural_values),
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class OutputExpansionPlan:
+    """Two GEMM-shaped lanes packed along N, interleaved or chunked.
+
+    ``pack`` is the stack/cat; ``alias_nodes`` are structural views of the lanes.
+    """
+
+    transform: FlexGemmOutputExpansion
+    pack: torch.fx.Node
+    lanes: tuple[torch.fx.Node, torch.fx.Node]
+    alias_nodes: frozenset[torch.fx.Node]
+
+
+def unary_pointwise_source(node: torch.fx.Node) -> torch.fx.Node | None:
+    """Return the tensor input of a shape-preserving pointwise node whose other
+    operands are literals or a dtype (``x + 1``, ``x.to(dtype)``, not broadcasts)."""
+    operands = (*node.args, *node.kwargs.values())
+    inputs = OrderedSet(arg for arg in operands if isinstance(arg, torch.fx.Node))
+    literals = (torch.fx.Node, bool, int, float, torch.dtype, type(None))
+    if (
+        not is_pointwise_node(node)
+        or len(inputs) != 1
+        or not all(isinstance(arg, literals) for arg in operands)
+    ):
+        return None
+    source = next(iter(inputs))
+    shape, source_shape = tensor_meta_shape(node) or (), tensor_meta_shape(source)
+    if source_shape is None or not statically_known_shape_equal(shape, source_shape):
+        return None
+    return source
+
+
+def match_output_expansion(
+    outputs: GemmOutputPlan, gemm: torch.fx.Node
+) -> OutputExpansionPlan | None:
+    """Match two GEMM-shaped lanes as ``stack(...).view(..., 2N)`` or ``cat(..., -1)``.
+
+    ``torch.stack`` reaches the body decomposed as ``cat([a.unsqueeze(-1),
+    b.unsqueeze(-1)], -1)``; literal pointwise suffixes lower on both lanes.
+    Shape-preserving views are aliases, not evidence of interleaved packing.
+    """
+    aten = torch.ops.aten
+    value = outputs.output
+    aliases: list[torch.fx.Node] = []
+    while True:
+        if (source := unary_pointwise_source(value)) is not None:
+            value = source
+            continue
+        view_args = view_or_reshape_args(value)
+        if view_args is None or not isinstance(view_args[0], torch.fx.Node):
+            break
+        source = view_args[0]
+        shape, source_shape = tensor_meta_shape(value), tensor_meta_shape(source)
+        if (
+            shape is None
+            or source_shape is None
+            or not statically_known_shape_equal(shape, source_shape)
+        ):
+            break
+        aliases.append(value)
+        value = source
+    view_args = view_or_reshape_args(value)
+    chunked = view_args is None
+    pack = value if chunked else view_args[0]
+    gemm_shape = tensor_meta_shape(gemm)
+    if (
+        gemm_shape is None
+        or not isinstance(pack, torch.fx.Node)
+        or pack.target not in (aten.stack.default, aten.cat.default)
+    ):
+        return None
+    lane_dims = (-1, len(gemm_shape) - int(chunked))
+    packed = pack.args[0]
+    if not isinstance(packed, (tuple, list)) or len(packed) != 2:
+        return None
+    if chunked:
+        if pack.target is not aten.cat.default:
+            return None
+        lanes = list(packed)
+    elif pack.target is aten.stack.default:
+        lanes = list(packed)
+        aliases.append(value)
+    elif pack.target is aten.cat.default and all(
+        isinstance(lane, torch.fx.Node)
+        and lane.target is aten.unsqueeze.default
+        and lane.args[1] in lane_dims
+        for lane in packed
+    ):
+        unsqueezes = cast("list[torch.fx.Node]", list(packed))
+        lanes = [node.args[0] for node in unsqueezes]
+        aliases.extend((value, *unsqueezes))
+    else:
+        return None
+    if not all(isinstance(node, torch.fx.Node) for node in lanes):
+        return None
+    lane_nodes = cast("tuple[torch.fx.Node, torch.fx.Node]", tuple(lanes))
+    dim = pack.args[1] if len(pack.args) > 1 else pack.kwargs.get("dim", 0)
+    metas = [lane.meta.get("val") for lane in lane_nodes]
+    value_shape = tensor_meta_shape(value)
+    if (
+        dim not in lane_dims
+        or value_shape is None
+        or not all(
+            isinstance(meta, torch.Tensor)
+            and statically_known_shape_equal(meta.shape, gemm_shape)
+            and meta.dtype is getattr(metas[0], "dtype", None)
+            for meta in metas
+        )
+        or not statically_known_shape_equal(
+            value_shape, (*gemm_shape[:-1], 2 * gemm_shape[-1])
+        )
+    ):
+        return None
+    return OutputExpansionPlan(
+        FlexGemmOutputExpansion(chunked=chunked), pack, lane_nodes, frozenset(aliases)
     )
