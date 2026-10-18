@@ -487,7 +487,7 @@ class TestComplexTensor(TestCase):
         self.assertEqual(res, expected)
 
 
-instantiate_device_type_tests(TestComplexTensor, globals(), allow_mps=True)
+instantiate_device_type_tests(TestComplexTensor, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
