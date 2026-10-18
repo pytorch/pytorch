@@ -5267,7 +5267,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
             if is_ddp:
-                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
+                # Not DDP.__getstate__: it refuses a non-default process group,
+                # which only DDP.__setstate__ needs, to rebind it.
+                state = {
+                    k: v
+                    for k, v in obj.__dict__.items()
+                    if k not in ("process_group", "reducer", "logger")
+                }
+                return type(self)._unpickle_ddp_module, (state,)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented

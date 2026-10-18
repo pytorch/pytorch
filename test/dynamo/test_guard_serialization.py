@@ -5347,7 +5347,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
         try:
-            ddp_model = DDP(GlobalNestedModule())
 
             def foo(ddp, x):
                 return ddp(x)
@@ -5355,18 +5354,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
             unsupported = frozenset(
                 torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
             )
-            x = torch.randn(10)
-            package = CompilePackage(foo)
-            torch._dynamo.optimize(
-                package=package,
-                guard_filter_fn=lambda gs: [
-                    x.guard_type not in unsupported for x in gs
-                ],
-            )(foo)(ddp_model, x)
-            self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
-            torch._dynamo.package.load_guards_state(
-                package._codes[foo.__code__].guarded_codes[0].guards_state
-            )
+            # DDP itself pickles only on the default process group.
+            for process_group in (None, dist.new_group([0])):
+                with self.subTest(default_group=process_group is None):
+                    torch._dynamo.reset()
+                    ddp_model = DDP(GlobalNestedModule(), process_group=process_group)
+                    x = torch.randn(10)
+                    package = CompilePackage(foo)
+                    torch._dynamo.optimize(
+                        package=package,
+                        guard_filter_fn=lambda gs: [
+                            x.guard_type not in unsupported for x in gs
+                        ],
+                    )(foo)(ddp_model, x)
+                    self.assertEqual(
+                        len(package._codes[foo.__code__].guarded_codes), 1
+                    )
+                    torch._dynamo.package.load_guards_state(
+                        package._codes[foo.__code__].guarded_codes[0].guards_state
+                    )
         finally:
             dist.destroy_process_group()
             tmpfile.close()
