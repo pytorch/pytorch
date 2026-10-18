@@ -590,8 +590,6 @@ def _build_multigraph_forward():
         # from f_locals and every guard on it misses.
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
-        # Capture ran a call its variants missed eagerly (see _multigraph_frames).
-        eager_fallback = frame.get("eager_fallback", False)
 
         def _function(code, closure):
             f = types.FunctionType(code, scope, target.co_name, defaults, closure)
@@ -651,8 +649,6 @@ def _build_multigraph_forward():
                 for manager, variant in bound:
                     if manager.check(f_locals):
                         return variant(*args, **kwargs)
-            if eager_fallback:
-                return _function(target, closure)(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
                 f"call ({len(variants)} captured). Either a guard on the call's "
