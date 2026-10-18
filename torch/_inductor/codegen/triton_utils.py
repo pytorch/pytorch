@@ -293,7 +293,9 @@ def signature_to_meta(
 
 
 def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
-    """Get a buffer's layout, including constants not tracked by the scheduler."""
+    """Get layouts from graph inputs, constants, or scheduler buffers."""
+    if buf_name in V.graph.graph_inputs:
+        return V.graph.graph_inputs[buf_name].get_layout()
     if buf_name in V.graph.constants:
         return V.graph.get_buffer(buf_name).get_layout()
     if V.graph.scheduler:
@@ -367,16 +369,7 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     """
     MAX_BYTES = 2**31 - 1
     try:
-        # Graph inputs aren't tracked by the scheduler; get their layout
-        # from the graph_inputs dict to avoid KeyError in get_buffer_layout.
-        if arg.buffer in V.graph.graph_inputs:
-            inp = V.graph.graph_inputs[arg.buffer]
-            if hasattr(inp, "get_layout"):
-                layout = inp.get_layout()
-            else:
-                return False
-        else:
-            layout = _get_buffer_layout(arg.buffer)
+        layout = _get_buffer_layout(arg.buffer)
         storage_bytes = layout.storage_size() * arg.dtype.itemsize
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
