@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/InnerProduct.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <torch/library.h>
@@ -54,28 +55,28 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
   switch (data_type) {
     case ScalarType::Float:
       pub_tensor = stensor.to_public(
-          cpu_tensor.template data_ptr<float>(), ideep::tensor::data_type::f32);
+          cpu_tensor.template data_ptr<float>(), dnnl::memory::data_type::f32);
       break;
     case ScalarType::BFloat16:
       pub_tensor = stensor.to_public(
-          cpu_tensor.template data_ptr<BFloat16>(), ideep::tensor::data_type::bf16);
+          cpu_tensor.template data_ptr<BFloat16>(), dnnl::memory::data_type::bf16);
       break;
     case ScalarType::Half:
       pub_tensor = stensor.to_public(
-          cpu_tensor.template data_ptr<Half>(), ideep::tensor::data_type::f16);
+          cpu_tensor.template data_ptr<Half>(), dnnl::memory::data_type::f16);
       break;
     case ScalarType::Byte:
       pub_tensor = stensor.to_public(
-          cpu_tensor.template data_ptr<uint8_t>(), ideep::tensor::data_type::u8);
+          cpu_tensor.template data_ptr<uint8_t>(), dnnl::memory::data_type::u8);
       break;
     case ScalarType::Char:
       pub_tensor = stensor.to_public(
-          cpu_tensor.template data_ptr<int8_t>(), ideep::tensor::data_type::s8);
+          cpu_tensor.template data_ptr<int8_t>(), dnnl::memory::data_type::s8);
       break;
     case ScalarType::Float8_e4m3fn:
       pub_tensor = stensor.to_public(
           cpu_tensor.template data_ptr<Float8_e4m3fn>(),
-          ideep::tensor::data_type::f8_e4m3);
+          dnnl::memory::data_type::f8_e4m3);
       break;
     default: TORCH_INTERNAL_ASSERT(false, "Unsupported dtype for ideep public tensor: ", data_type);
   }
@@ -117,25 +118,25 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
   ideep::tensor& dtensor = itensor_from_mkldnn(mkldnn_tensor);
   if (cpu_tensor.scalar_type() == ScalarType::Float) {
     dtensor.feed_from(dtensor.get_dims(),
-                      ideep::tensor::data_type::f32,
+                      dnnl::memory::data_type::f32,
                       (cpu_tensor_cont.template data_ptr<float>()));
   } else if (cpu_tensor.scalar_type() == ScalarType::BFloat16) {
     dtensor.feed_from(dtensor.get_dims(),
-                      ideep::tensor::data_type::bf16,
+                      dnnl::memory::data_type::bf16,
                       cpu_tensor_cont.template data_ptr<BFloat16>());
   } else if (cpu_tensor.scalar_type() == ScalarType::Half) {
     dtensor.feed_from(dtensor.get_dims(),
-                      ideep::tensor::data_type::f16,
+                      dnnl::memory::data_type::f16,
                       cpu_tensor_cont.template data_ptr<Half>());
   } else if (cpu_tensor.scalar_type() == ScalarType::Byte) {
     dtensor.feed_from(dtensor.get_dims(),
-                      ideep::tensor::data_type::u8,
+                      dnnl::memory::data_type::u8,
                       cpu_tensor_cont.template data_ptr<uint8_t>());
   } else {
     TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Char,
             "Expect int8 input of cpu_tensor");
     dtensor.feed_from(dtensor.get_dims(),
-                      ideep::tensor::data_type::s8,
+                      dnnl::memory::data_type::s8,
                       cpu_tensor_cont.template data_ptr<int8_t>());
   }
   return mkldnn_tensor;
@@ -159,7 +160,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
 
-  ideep::dims src_dims = ideep::dims();
+  dnnl::memory::dims src_dims = dnnl::memory::dims();
   bool is_channels_last = false;
   auto memory_format = at::MemoryFormat::Contiguous;
   if (input_size.has_value()) {
@@ -190,8 +191,8 @@ Tensor mkldnn_reorder_conv2d_weight(
       padding_expanded,
       dilation_expanded,
       groups,
-      ideep::algorithm::convolution_direct,
-      ideep::prop_kind::forward_inference,
+      dnnl::algorithm::convolution_direct,
+      dnnl::prop_kind::forward_inference,
       w.get_data_type(),
       src_dims,
       ideep::attr_t(),
@@ -216,7 +217,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 3);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 3);
 
-  ideep::dims src_dims = ideep::dims();
+  dnnl::memory::dims src_dims = dnnl::memory::dims();
   bool is_channels_last = false;
   auto memory_format = at::MemoryFormat::Contiguous;
   if (input_size.has_value()) {
@@ -237,8 +238,8 @@ Tensor mkldnn_reorder_conv3d_weight(
       padding_expanded,
       dilation_expanded,
       groups,
-      ideep::algorithm::convolution_direct,
-      ideep::prop_kind::forward_inference,
+      dnnl::algorithm::convolution_direct,
+      dnnl::prop_kind::forward_inference,
       w.get_data_type(),
       src_dims,
       ideep::attr_t(),
@@ -273,17 +274,17 @@ static Tensor mkldnn_reorder_linear_weight(
   auto in_features = self.size(1);
   auto self_ = self.contiguous();
   auto w = itensor_from_tensor(self_);
-  ideep::dims input_size;
+  dnnl::memory::dims input_size;
   auto dtype = w.get_data_type();
   if (batch_size_opt.has_value()) {
     input_size = {batch_size_opt.value(), in_features};
   }
-  auto packed_desc = ideep::inner_product_forward::expected_weights_desc(
+  auto packed_desc = mkldnn::inner_product_forward_expected_weights_desc(
       {out_features, in_features},
       input_size,
       /* weight dtype */ dtype,
       /* src dtype */ dtype,
-      ideep::prop_kind::forward_inference);
+      dnnl::prop_kind::forward_inference);
   ideep::tensor result;
   result.init(packed_desc);
   result.feed_from(w);
@@ -291,17 +292,17 @@ static Tensor mkldnn_reorder_linear_weight(
 }
 
 static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
-    const ideep::tensor::dims& weights_dims,
-    ideep::tensor::data_type w_dtype,
-    const ideep::tensor::dims& strides,
-    const ideep::tensor::dims& padding_l,
-    const ideep::tensor::dims& padding_r,
-    const ideep::tensor::dims& dilates,
+    const dnnl::memory::dims& weights_dims,
+    dnnl::memory::data_type w_dtype,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    const dnnl::memory::dims& dilates,
     int groups,
     bool channels_last,
-    ideep::algorithm aalgorithm,
-    ideep::data_type x_dtype,
-    const ideep::dims& src_dims) {
+    dnnl::algorithm aalgorithm,
+    dnnl::memory::data_type x_dtype,
+    const dnnl::memory::dims& src_dims) {
   if (channels_last) {
     return ideep::convolution_transpose_forward::expected_weights_desc<true>(
         weights_dims,
@@ -312,7 +313,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
         dilates,
         groups,
         aalgorithm,
-        ideep::prop_kind::forward,
+        dnnl::prop_kind::forward,
         src_dims);
   } else {
     return ideep::convolution_transpose_forward::expected_weights_desc<false>(
@@ -324,7 +325,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
         dilates,
         groups,
         aalgorithm,
-        ideep::prop_kind::forward,
+        dnnl::prop_kind::forward,
         src_dims);
   }
 }
@@ -352,7 +353,7 @@ static Tensor mkldnn_reorder_conv_transpose_weight(
   const auto output_padding_expanded =
       expand_param_if_needed(output_padding, "output_padding", pdim);
 
-  ideep::dims src_dims = ideep::dims();
+  dnnl::memory::dims src_dims = dnnl::memory::dims();
   bool is_channels_last = false;
   auto memory_format = at::MemoryFormat::Contiguous;
   if (input_size.has_value()) {
@@ -375,7 +376,7 @@ static Tensor mkldnn_reorder_conv_transpose_weight(
       dilation_expanded,
       groups,
       is_channels_last,
-      ideep::algorithm::deconvolution_direct,
+      dnnl::algorithm::deconvolution_direct,
       w.get_data_type(),
       src_dims);
 
@@ -415,14 +416,14 @@ static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
   std::vector<int64_t> output_sizes = {time_step, batch_size, hidden_size};
 
   auto dtype = get_mkldnn_dtype(weight_ih.scalar_type());
-  ideep::tensor::desc src_layer_desc({time_step, batch_size, layer_feature_size}, dtype, ideep::format_tag::tnc);
-  ideep::tensor::desc src_iter_desc({1, 1, batch_size, hidden_size}, dtype, ideep::format_tag::ldnc);
-  ideep::tensor::desc src_iter_c_desc({1, 1, batch_size, hidden_size}, dtype, ideep::format_tag::ldnc);
-  ideep::tensor::desc bias_desc({1, 1, num_bias_gates, hidden_size}, dtype, ideep::format_tag::ldgo);
+  ideep::tensor::desc src_layer_desc({time_step, batch_size, layer_feature_size}, dtype, dnnl::memory::format_tag::tnc);
+  ideep::tensor::desc src_iter_desc({1, 1, batch_size, hidden_size}, dtype, dnnl::memory::format_tag::ldnc);
+  ideep::tensor::desc src_iter_c_desc({1, 1, batch_size, hidden_size}, dtype, dnnl::memory::format_tag::ldnc);
+  ideep::tensor::desc bias_desc({1, 1, num_bias_gates, hidden_size}, dtype, dnnl::memory::format_tag::ldgo);
 
-  ideep::tensor::desc dst_layer_desc({time_step, batch_size, hidden_size}, dtype, ideep::format_tag::tnc);
-  ideep::tensor::desc dst_iter_desc({1, 1, batch_size, hidden_size}, dtype, ideep::format_tag::ldnc);
-  ideep::tensor::desc dst_iter_c_desc({1, 1, batch_size, hidden_size}, dtype, ideep::format_tag::ldnc);
+  ideep::tensor::desc dst_layer_desc({time_step, batch_size, hidden_size}, dtype, dnnl::memory::format_tag::tnc);
+  ideep::tensor::desc dst_iter_desc({1, 1, batch_size, hidden_size}, dtype, dnnl::memory::format_tag::ldnc);
+  ideep::tensor::desc dst_iter_c_desc({1, 1, batch_size, hidden_size}, dtype, dnnl::memory::format_tag::ldnc);
 
   ideep::tensor src_layer(src_layer_desc);
   ideep::tensor src_iter(src_iter_desc);
@@ -433,13 +434,13 @@ static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
       weight_ih,
       {{1, 1, layer_feature_size, num_gates, hidden_size},
         get_mkldnn_dtype(weight_ih.scalar_type()),
-        ideep::format_tag::ldgoi});
+        dnnl::memory::format_tag::ldgoi});
 
   auto w2 = itensor_view_from_dense(
       weight_hh,
       {{1, 1, hidden_size, num_gates, hidden_size},
         get_mkldnn_dtype(weight_hh.scalar_type()),
-        ideep::format_tag::ldgoi});
+        dnnl::memory::format_tag::ldgoi});
 
   auto [packed_desc_ih, packed_desc_hh] =
       ideep::lstm_forward_inference::expected_weights_desc(
