@@ -3597,12 +3597,15 @@ def sample_inputs_adaptive_avg_pool1d(op_info, device, dtype, requires_grad, **k
 def error_inputs_adaptive_avg_pool1d(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
+    # error inputs for incorrect input dimension
+    yield ErrorInput(SampleInput(make_arg((2,)), output_size=(1,)),
+                     error_type=ValueError, error_regex="Expected 2D or 3D tensor")
+
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3)), output_size=()),
-                     error_regex="'output_size' should contain one int")
+                     error_type=ValueError, error_regex="'output_size' should contain one int")
 
     # error inputs for output_size lesser than 0
-    # adaptive_avg_pool1d forwards to adaptive_avg_pool2d, which raises ValueError
     yield ErrorInput(SampleInput(make_arg((1, 1, 1)), output_size=(-1,)),
                      error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
@@ -3673,10 +3676,11 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
 
     # error inputs for empty output
     yield ErrorInput(SampleInput(make_arg((1, 2, 3, 4)), output_size=()),
-                     error_regex="output_size must be 3")
+                     error_type=ValueError, error_regex="output_size must be 3")
 
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
+                     error_type=ValueError,
                      error_regex="elements of output_size must be greater than or equal to 0")
 
 

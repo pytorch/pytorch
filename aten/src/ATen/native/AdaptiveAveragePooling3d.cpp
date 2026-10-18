@@ -87,10 +87,10 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
     IntArrayRef output_size) {
-  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
+  TORCH_CHECK_VALUE(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
 
   for (const auto i : c10::irange(1, input.ndimension())) {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         input.size(i) > 0,
         "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ",
@@ -101,11 +101,11 @@ void adaptive_avg_pool3d_out_cpu_template(
         "empty");
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       (input.ndimension() == 4 || input.ndimension() == 5),
       "adaptive_avg_pool3d(): Expected 4D or 5D tensor, but got ",
       input.sizes());
-  TORCH_CHECK(input.dtype() == output.dtype(),
+  TORCH_CHECK_VALUE(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
   /* sizes */
@@ -235,7 +235,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   auto gradOutput = gradOutput_.contiguous();
 
   adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
-  TORCH_CHECK(input.dim() == gradOutput_.dim(),
+  TORCH_CHECK_VALUE(input.dim() == gradOutput_.dim(),
     __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
 
   /* sizes */
@@ -309,8 +309,8 @@ Tensor adaptive_avg_pool3d_cpu(Tensor const& input, IntArrayRef output_size) {
 }
 
 Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_size) {
-  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
+  TORCH_CHECK_VALUE(
         (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
         "adaptive_avg_pool3d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
