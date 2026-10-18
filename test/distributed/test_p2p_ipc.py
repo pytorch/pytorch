@@ -9,8 +9,10 @@ from contextlib import contextmanager
 
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     requires_cuda_p2p_access,
     run_tests,
     TEST_WITH_ROCM,
@@ -38,6 +40,8 @@ def _scoped_env(key: str, value: str):
 
 @requires_cuda_p2p_access()
 class P2PIpcTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     @classmethod
     def backend_str(cls):
         return "gloo"
@@ -191,6 +195,12 @@ class P2PIpcTest(MultiProcContinuousTest):
         torch.cuda.memory._set_allocator_settings("expandable_segments:False")
         super().tearDownClass()
 
+
+instantiate_device_type_tests(
+    P2PIpcTest,
+    globals(),
+    only_for=("cuda",),
+)
 
 if __name__ == "__main__":
     run_tests()
