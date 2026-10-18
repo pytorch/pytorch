@@ -168,11 +168,17 @@ class ItertoolsVariable(VariableTracker):
                 r = kwargs["repeat"].as_python_constant()
             else:
                 r = 1
-            seqs = [unpack_iterable(tx, arg) for arg in args]
-            items = [
-                variables.TupleVariable(list(item))
-                for item in itertools.product(*seqs, repeat=r)
-            ]
+            if r == 0:
+                # With repeat=0 there are no pools, so CPython yields a single
+                # empty tuple without ever iterating the inputs. Unpacking the
+                # args here would wrongly consume the input iterators.
+                items = [variables.TupleVariable([])]
+            else:
+                seqs = [unpack_iterable(tx, arg) for arg in args]
+                items = [
+                    variables.TupleVariable(list(item))
+                    for item in itertools.product(*seqs, repeat=r)
+                ]
             return variables.ListIteratorVariable(
                 items,  # type: ignore[arg-type]
                 mutation_type=ValueMutationNew(),

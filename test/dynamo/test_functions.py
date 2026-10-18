@@ -479,6 +479,20 @@ partial_fn = functools.partial(fn, scale=2)
         )
         return a
 
+    def test_itertools_product_repeat_zero(self):
+        # product(..., repeat=0) yields a single empty tuple and must not
+        # consume the input iterator (matches CPython semantics).
+        def fn(x):
+            values = iter([7, 8])
+            list(itertools.product(values, repeat=0))
+            return x + next(values, -1)
+
+        x = torch.tensor(0)
+        expected = fn(x)
+        for backend in ("eager", "aot_eager"):
+            actual = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            self.assertEqual(actual, expected)
+
     def test_itertools_permutations_basic(self):
         def fn():
             return torch.tensor(list(itertools.permutations([1, 2, 3], 2)))
