@@ -1042,7 +1042,6 @@ def forward(self, scores_1, mask_1, value_1):
             ),
         )
 
-    @onlyCPU
     @skipIfCrossRef
     def test_decomp_crossref_mode_skips_overloaded_inplace(self, device):
         x = torch.tensor(2.0, device=device)
@@ -1055,7 +1054,6 @@ def forward(self, scores_1, mask_1, value_1):
         self.assertIn(aten.pow_.Scalar, mode.called)
         self.assertNotIn(aten.pow_.Scalar, mode.decomposed)
 
-    @onlyCPU
     @skipIfCrossRef
     def test_decomp_crossref_mode_decomposes_mutable_functional_ops(self, device):
         x = torch.randn(2, 3, 4, 4, device=device)
@@ -1548,7 +1546,6 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res, ref)
 
-    @onlyCPU
     @skipIfCrossRef
     def test_addmv_decomp_rejects_mixed_dtype(self, device):
         addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
