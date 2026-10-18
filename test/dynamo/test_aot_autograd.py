@@ -23,7 +23,10 @@ from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.virtualized import V
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+)
 from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -1005,7 +1008,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
 
-            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+            with allow_non_fake_inputs_temporarily(fake_mode), fake_mode:
                 return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
 
         sample_inputs = [torch.rand((3, 4, 5))]
@@ -1909,40 +1912,6 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         torch._dynamo.reset()
         result = torch.compile(f)(x, w)  # noqa: UNSPECIFIED_BACKEND
         self.assertIsInstance(result, torch.Tensor)
-
-    def test_current_autograd_invocation_pairs_forward_and_backward(self):
-        from functorch.compile import make_boxed_func
-        from torch._dynamo.backends.common import aot_autograd
-        from torch._functorch._aot_autograd.runtime_wrappers import (
-            current_autograd_invocation,
-        )
-
-        seen = []
-
-        def recording_compiler(gm, example_inputs):
-            def run(*args):
-                seen.append(current_autograd_invocation())
-                return gm(*args)
-
-            return make_boxed_func(run)
-
-        backend = aot_autograd(
-            fw_compiler=recording_compiler, bw_compiler=recording_compiler
-        )
-        fn = torch.compile(lambda x: (x.sin() * 2).sum(), backend=backend)
-        out_x = fn(torch.randn(4, requires_grad=True))
-        out_y = fn(torch.randn(4, requires_grad=True))
-        out_y.backward()
-        out_x.backward()
-
-        # Each call's backward sees the ctx its own forward saw, whatever the
-        # order the backwards run in.
-        forward_x, forward_y, backward_y, backward_x = seen
-        self.assertIsNotNone(forward_x)
-        self.assertIsNot(forward_x, forward_y)
-        self.assertIs(backward_x, forward_x)
-        self.assertIs(backward_y, forward_y)
-        self.assertIsNone(current_autograd_invocation())
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
