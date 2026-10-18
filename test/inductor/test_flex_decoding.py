@@ -2253,6 +2253,25 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
+    @common_utils.parametrize("q_seq_len", [17, 32, 64, 127])
+    def test_gqa_default_block_m_fits_sparse_q_block(self, q_seq_len, device):
+        # The default BLOCK_M tiles GQA-folded rows (q_seq_len * 8 > 128 here), but
+        # each tile covers only BLOCK_M // 8 query positions, which fit in one
+        # 128-row sparse Q block.
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        num_q_heads, num_kv_heads, head_dim = 32, 4, 64
+        mask = create_block_mask(mask_mod, 1, None, q_seq_len, q_seq_len, device=device)
+        q = torch.randn(1, num_q_heads, q_seq_len, head_dim, device=device)
+        k = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
+        v = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
+        kwargs = dict(block_mask=mask, enable_gqa=True)
+        eager = flex_attention(q, k, v, **kwargs)
+        out = torch.compile(flex_attention)(q, k, v, **kwargs)
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
+
+    @supported_platform
     @parametrize_device_dtype("dtypes_fast")
     def test_larger_block_mask_bug(self, device, dtype):
         def mask_mod(b, h, q_idx, kv_idx):

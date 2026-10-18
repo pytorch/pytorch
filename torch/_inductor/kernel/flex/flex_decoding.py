@@ -47,11 +47,13 @@ def raise_flex_decoding_kernel_options_error(
     sparse_kv_block_size: int,
 ) -> None:
     formated_kernel_options = ", ".join(
-        f"{name}={kernel_options[name]}" for name in ("BLOCK_M", "BLOCK_N")
+        f"{name}={kernel_options[name]}"
+        for name in ("BLOCK_M", "BLOCK_N", "GQA_SHARED_HEADS")
     )
     raise ValueError(
-        "Invalid FlexAttention decode kernel options: Q and KV block sizes must "
-        "be divisible by the selected tile sizes. Got "
+        "Invalid FlexAttention decode kernel options: BLOCK_M must be a multiple "
+        "of GQA_SHARED_HEADS, SPARSE_Q_BLOCK_SIZE a multiple of BLOCK_M // "
+        "GQA_SHARED_HEADS, and SPARSE_KV_BLOCK_SIZE a multiple of BLOCK_N. Got "
         f"SPARSE_Q_BLOCK_SIZE={sparse_q_block_size}, "
         f"SPARSE_KV_BLOCK_SIZE={sparse_kv_block_size}, and "
         f"{formated_kernel_options}. "
@@ -313,11 +315,16 @@ def create_flex_decoding_kernel(*args, **kwargs):
             # m
             # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
             # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
-            max(
-                next_power_of_2(
-                    V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
+            # Cap at 128 folded rows (or GQA_SHARED_HEADS if larger) and use more M blocks:
+            # bigger tiles overflow shared memory in fp32 and run 5-8x slower in bf16.
+            min(
+                max(
+                    next_power_of_2(
+                        V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
+                    ),
+                    1 if torch.xpu.is_available() else 16,
                 ),
-                1 if torch.xpu.is_available() else 16,
+                max(128, V.graph.sizevars.optimization_hint(gqa_shared_heads)),
             )
         ),
     )
@@ -372,9 +379,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
 
+        # BLOCK_M tiles GQA-folded rows: each tile covers BLOCK_M // GQA_SHARED_HEADS
+        # query positions, and those must fit inside one sparse Q block.
+        block_m = cur_kernel_options["BLOCK_M"]
+        gqa_heads = cur_kernel_options["GQA_SHARED_HEADS"]
         if (
-            cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
-            != 0
+            block_m % gqa_heads != 0
+            or cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % (block_m // gqa_heads) != 0
             or cur_kernel_options["SPARSE_KV_BLOCK_SIZE"]
             % cur_kernel_options["BLOCK_N"]
             != 0
