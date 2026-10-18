@@ -580,14 +580,16 @@ class TestReportEnablement(TestCase):
         run_test_module = importlib.import_module("run_test")
         default = run_test_module._torchci_reports_default
         ci_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
-        for is_ci, xpu, expected in (
-            (False, None, None),
-            (True, None, ci_dir),
-            # XPU builds write none in CI.
-            (True, "20250101", None),
+        for repo, xpu, expected in (
+            ("", None, None),
+            # Other repos' CI, such as forks' and out-of-tree backends', writes none.
+            ("someone/pytorch", None, None),
+            ("pytorch/pytorch", None, ci_dir),
+            # XPU builds write none.
+            ("pytorch/pytorch", "20250101", None),
         ):
             with (
-                unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
+                unittest.mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repo}),
                 unittest.mock.patch.object(torch.version, "xpu", xpu),
             ):
                 self.assertEqual(default(), expected)

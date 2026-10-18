@@ -542,10 +542,10 @@ def _torchci_report_args(
 
 
 def _torchci_reports_default() -> str | None:
-    # Every CI job writes reports by default; upload-test-artifacts uploads this
-    # folder. Not XPU builds yet: their test jobs fall back to GitHub artifacts,
-    # which upload-test-stats doesn't backfill for XPU, so reports can't reach S3.
-    if not IS_CI or torch.version.xpu:
+    # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
+    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
+    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    if os.environ.get("GITHUB_REPOSITORY") != "pytorch/pytorch" or torch.version.xpu:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
@@ -1730,7 +1730,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in CI, except on XPU builds: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",

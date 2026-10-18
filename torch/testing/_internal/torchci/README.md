@@ -120,11 +120,11 @@ given `--save-torchci-reports DIR`. A test file's reports are
 replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
 
-In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
-described below, in every job except on XPU builds, which write none for now:
-XPU test jobs fall back to the GitHub artifact, which `upload-test-stats` doesn't
-backfill for XPU. `run_tests` has no default, so a test file run some other way
-writes no report.
+In pytorch/pytorch's CI (`GITHUB_REPOSITORY`), `run_test.py` defaults to
+`test/torchci-reports`, which is uploaded as described below, in every job except
+on XPU builds, which write none until the XPU CI image has `pyzes`: with it, the
+writer counts XPU devices with Level Zero Sysman instead of the XPU runtime.
+`run_tests` has no default, so a test file run some other way writes no report.
 
 ## Upload
 
