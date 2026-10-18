@@ -40,7 +40,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Generator, Sized
+from collections.abc import Generator, Mapping, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -304,14 +304,16 @@ class _FailOnRecompileCallback:
     )
     _error: type[RuntimeError] = RuntimeError
 
+    # Frames whose miss runs eagerly instead of raising, keyed by id since code
+    # objects compare by value. Only _RefuseRecompileCallback sets it (this one is
+    # built per call under the fail_on_recompile stance); it is checked in
+    # __call__ here because an overriding __call__ would shift the
+    # sys._getframe(1) below off the missed frame's caller.
+    _eager_codes: Mapping[int, types.CodeType] = {}
+
     def __init__(self, callback: DynamoCallback) -> None:
         # to prevent cache miss due to different backend
         self._torchdynamo_orig_backend = callback
-        # Frames whose miss runs eagerly instead of raising, keyed by id since
-        # code objects compare by value. Only _RefuseRecompileCallback fills it;
-        # it is checked in __call__ here because an overriding __call__ would
-        # shift the sys._getframe(1) below off the missed frame's caller.
-        self._eager_codes: dict[int, types.CodeType] = {}
 
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
