@@ -35,7 +35,8 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
-    // precision compared to computing the division.
+    // precision compared to computing the division. If 1/b overflows or is
+    // subnormal in opmath (tiny or huge b), divide by b instead.
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         kHalf, kBFloat16, common_dtype, "div_true_cuda", [&]() {
           using opmath_t = at::opmath_type<scalar_t>;
@@ -43,12 +44,20 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
               c10::is_complex<scalar_t>::value,
               c10::complex<double>,
               double>;
-          auto inv_b = static_cast<opmath_t>(high_prec_t(1.0) / iter.scalar_value<high_prec_t>(2));
+          const auto b = iter.scalar_value<high_prec_t>(2);
+          const auto inv_b = static_cast<opmath_t>(high_prec_t(1.0) / b);
           iter.remove_operand(2);
-          gpu_kernel(
-              iter,
-              BUnaryFunctor<scalar_t, scalar_t, scalar_t, MulFunctor<opmath_t>>(
-                  MulFunctor<opmath_t>(), inv_b));
+          if (is_usable_reciprocal(inv_b)) {
+            gpu_kernel(
+                iter,
+                BUnaryFunctor<scalar_t, scalar_t, scalar_t, MulFunctor<opmath_t>>(
+                    MulFunctor<opmath_t>(), inv_b));
+          } else {
+            gpu_kernel(
+                iter,
+                BUnaryFunctor<scalar_t, scalar_t, scalar_t, DivFunctor<opmath_t>>(
+                    DivFunctor<opmath_t>(), static_cast<opmath_t>(b)));
+          }
         });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
