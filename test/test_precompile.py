@@ -4831,6 +4831,8 @@ else:
         f(model, miss)
     except torch.compiler.PrecompileError as e:
         assert "no captured variant" in str(e), e
+        refused = saved.get("refused_frame")
+        assert refused is None or repr(refused) in str(e), e
     else:
         raise AssertionError("an uncovered call was served")
 print("served", mod.STANCES)
@@ -4866,16 +4868,18 @@ class TestPrecompileDynamoCapture(TestCase):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
     def _serve_in_fresh_process(
-        self, calls, grads=None, mode="standalone", eager_miss=None
+        self, calls, grads=None, mode="standalone", eager_miss=None, refused_frame=None
     ):
         # eager_miss: the result of an uncovered call that the entry runs
-        # eagerly; by default the loader expects that call refused.
+        # eagerly; by default the loader expects that call refused, by
+        # refused_frame if given.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "state_dict": self.model.state_dict(),
             "calls": calls,
             "grads": grads or {},
             "eager_miss": eager_miss,
+            "refused_frame": refused_frame,
         }
         torch.save(saved, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state, mode]
@@ -5068,7 +5072,9 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn('SERVING_MODE = "installed"', code)
         self.assertIn("('falls_back_around_a_helper', 1),  # eager fallback", code)
         calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
-        self._serve_in_fresh_process(calls + calls[:1], mode="installed")
+        self._serve_in_fresh_process(
+            calls + calls[:1], mode="installed", refused_frame="tagged_helper"
+        )
 
     @skipIfCrossRef
     def test_a_standalone_artifact_runs_a_continuations_eager_fallback_eagerly(self):
