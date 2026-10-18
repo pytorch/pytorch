@@ -836,7 +836,7 @@ class TestPoolingNNDevice(NNTestCase):
 
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 3, 3, 3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
+        with self.assertRaisesRegex(ValueError, "Expected dimensions"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
 
     def test_adaptive_max_pooling_backward_fails(self, device):
