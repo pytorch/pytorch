@@ -6945,6 +6945,97 @@ for dtype in (torch.int32, torch.int64):
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    @parametrize(
+        "input_size,output_size,expected_kernels",
+        [
+            ((1, 1, 7, 9), (3, 4), 1),
+            ((3, 7, 9), (3, 4), 1),
+            ((1, 1, 8, 10), (4, 5), 1),
+            ((1, 1, 8, 9), (4, 4), 1),
+            # Fallbacks emit no kernel for the dynamic codegen suite to inspect.
+            subtest(
+                ((1, 1, 1, 1), (1, 26), 0), decorators=[expectedFailureCodegenDynamic]
+            ),
+            subtest(
+                ((1, 1, 1, 1), (26, 1), 0), decorators=[expectedFailureCodegenDynamic]
+            ),
+            subtest(
+                ((1, 1, 1, 1), (16, 16), 0), decorators=[expectedFailureCodegenDynamic]
+            ),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward(
+        self, input_size, output_size, expected_kernels
+    ):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn(*input_size[:-2], *output_size),
+                torch.randn(input_size),
+            ],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, expected_kernels)
+
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
+    @parametrize(
+        "input_size,output_size,dtype,layout",
+        [
+            ((7, 9), (3, 4), torch.float32, "channels_last"),
+            ((7, 9), (3, 4), torch.float32, "strided"),
+            ((7, 9), (3, 4), torch.bfloat16, "strided"),
+            ((2, 3), (16, 16), torch.float32, "strided"),
+        ],
+    )
+    def test_adaptive_avg_pool2d_backward_layouts(
+        self, input_size, output_size, dtype, layout
+    ):
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        height, width = input_size
+        if layout == "channels_last":
+            x = torch.randn(2, 3, height, width, device=self.device, dtype=dtype)
+            x = x.contiguous(memory_format=torch.channels_last)
+        else:
+            x = torch.randn(2, 3, height, width * 2, device=self.device, dtype=dtype)
+            x = x[..., ::2]
+        grad_output = torch.randn(
+            2, 3, output_size[1], output_size[0], device=self.device, dtype=dtype
+        ).transpose(-1, -2)
+
+        self.common(
+            fn,
+            (grad_output, x),
+            check_lowp=False,
+            exact_stride=True,
+        )
+
+    @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
+    def test_adaptive_avg_pool2d_backward_training(self):
+        def fn(x):
+            return F.adaptive_avg_pool2d(x, (3, 4)).sum()
+
+        x = torch.randn(2, 3, 7, 9, device=self.device, requires_grad=True)
+        self.common(fn, (x,), check_gradient=True, check_lowp=False)
+
+    @expectedFailureCodegenDynamic  # Empty outputs emit no kernel.
+    @parametrize("input_size", [(1, 2, 0, 4), (1, 2, 3, 0), (0, 2, 3, 4)])
+    def test_adaptive_avg_pool2d_backward_empty_input(self, input_size):
+        if self.device != "cuda":
+            self.skipTest("CUDA eager supports empty spatial dimensions")
+
+        def fn(grad_output, x):
+            return aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        x = torch.empty(input_size, device=self.device)
+        grad_output = torch.empty(input_size[0], 2, 2, 3, device=self.device)
+        self.common(fn, (grad_output, x), check_lowp=False)
+
     @requires_gpu()
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
