@@ -85,8 +85,10 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
 
   const bool maybe_support_half = (
     // CUDA and XPU support half precision, but since meta tensors don't have a
-    // device we err on the side of accepting it
-    device.is_cuda() || device.is_meta() || device.is_xpu()
+    // device we err on the side of accepting it. MTIA uses CPU fallback for FFT,
+    // so we accept half/bfloat16 and promote to float32 (CPU MKL handles float32).
+    device.is_cuda() || device.is_meta() || device.is_xpu() ||
+    device.type() == c10::DeviceType::MTIA
   );
   if (maybe_support_half) {
     // XPU has no native bfloat16 FFT kernel; promote to float32.
@@ -98,6 +100,11 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
     }
     // ROCm/hipFFT does not support bfloat16; promote to float32
     if (type == kBFloat16 && device.is_cuda() && at::globalContext().hasROCM()) {
+      type = kFloat;
+    }
+    // MTIA uses CPU MKL for FFT (no native half FFT kernel); promote to float32
+    if ((type == kHalf || type == kBFloat16) &&
+        device.type() == c10::DeviceType::MTIA) {
       type = kFloat;
     }
     TORCH_CHECK_NOT_IMPLEMENTED(type == kHalf || type == kBFloat16 || type == kFloat || type == kDouble,
@@ -126,7 +133,14 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
 Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
   auto cur_type = t.scalar_type();
   auto new_type = promote_type_fft(cur_type, require_complex, t.device());
-  return (cur_type == new_type) ? t : t.to(new_type);
+  if (cur_type == new_type) {
+    return t;
+  }
+  // MTIA: cast on CPU to avoid MTIA dtype cast kernel issues for half/bfloat16
+  if (t.device().type() == c10::DeviceType::MTIA) {
+    return t.cpu().to(new_type).to(t.device());
+  }
+  return t.to(new_type);
 }
 
 // Convert NumPy compatible normalization mode string to enum values
