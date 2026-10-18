@@ -1665,6 +1665,13 @@ def _summarize(
             and not c.guarded_codes
             and not c.bypassed
             and _frame_key(c.python_code) not in served_eagerly
+            and not c.eager_fallback
+        ),
+        eager_fallbacks=tuple(
+            f"{c.python_code.co_name} "
+            f"({c.python_code.co_filename}:{c.python_code.co_firstlineno})"
+            for c in entry.codes
+            if c.eager_fallback and not c.bypassed
         ),
         wont_generalize=_wont_generalize(kept, guard_sets),
         dropped_guards=tuple(sorted(dropped)),
