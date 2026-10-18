@@ -3527,16 +3527,15 @@ def load(
 
     Either kind of artifact runs a call eagerly instead of refusing it when the
     missed frame is one Dynamo gave up on during the capture (listed in
-    ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in
-    the artifact's ``FRAMES``), since the capture ran that frame eagerly too.
-    A frame that kept variants logs a warning the first time a call misses
-    them; one that compiled none is served as plain Python from the start, as
-    a trivial frame is, with no warning, since there is no compiled code to
-    lose. Under an
-    installed artifact only that frame runs eagerly: the frames it calls still
-    dispatch to their own variants. A standalone artifact runs the whole call
-    as plain Python, since the frame's original bytecode never reaches its
-    continuations.
+    ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in the
+    artifact's ``FRAMES``), since the capture ran that frame eagerly too. A
+    frame that kept variants logs a warning the first time a call misses them;
+    one that compiled none is served as plain Python from the start, as a
+    trivial frame is, with no warning, since there is no compiled code to lose.
+    Under an installed artifact only that frame runs eagerly: the frames it
+    calls still dispatch to their own variants. A standalone artifact runs the
+    whole call as plain Python, since the frame's original bytecode never
+    reaches its continuations.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve
