@@ -5124,15 +5124,17 @@ class TestPrecompileDynamoCapture(TestCase):
                 x = opaque(x)
             return model(x)
 
-        # require_complete refuses it, naming the cause, before the build would.
+        # The capture refuses it, naming the cause, before the build would.
         with self.assertRaisesRegex(
             PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
         ):
             with self._capture(entry, backend="eager") as cap:
                 cap(self.model, self.x2)
-        # Past that gate, the build refuses it for the flag the capture recorded.
+        # require_complete=False does not get past it.
         tracer = DynamoTracer(require_complete=False)
-        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+        with self.assertRaisesRegex(
+            PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
+        ):
             with self._capture(entry, tracer=tracer, backend="eager") as cap:
                 cap(self.model, self.x2)
 
@@ -5159,10 +5161,14 @@ class TestPrecompileDynamoCapture(TestCase):
         ):
             with self._capture(lone, backend="eager") as cap:
                 cap(self.x2)
-                with self.assertRaises(ValueError):
+                with self.assertRaisesRegex(ValueError, "boom"):
                     cap(self.x2, fail=True)
                 self.assertTrue(cap.summary().capture_errors)
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "a 3.10 generator frame first runs at next(), outside the capture",
+    )
     def test_a_generator_entry_is_refused_naming_the_cause(self):
         # Dynamo refuses to trace a generator frame and suppresses that, so the
         # entry is flagged rather than left a plain uncovered frame.

@@ -573,7 +573,8 @@ print(eval(f"bbmod.{name}.{path}") is code)
                 self.assertEqual(compiled_fn(x, 0), x.sin())
                 self.assertEqual(len(runs), 2)
             else:
-                with self.assertRaises(_RecompileRefusedError):
+                msg = "Detected recompile of a frame whose callable refuses"
+                with self.assertRaisesRegex(_RecompileRefusedError, msg):
                     compiled_fn(x, 1)
             package.uninstall()
 
