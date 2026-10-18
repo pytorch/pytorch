@@ -68,8 +68,9 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 #if __linux__
   // KINETO_USE_DAEMON selects the OSS IPC loader only when the platform has
   // not already registered its own loader.
-  const bool registerOssDaemon = libkineto::isDaemonEnvVarSet() &&
-      !ConfigLoader::hasDaemonConfigLoaderFactory();
+  const bool initAsyncProfiler = libkineto::isDaemonEnvVarSet();
+  const bool registerOssDaemon =
+      initAsyncProfiler && !ConfigLoader::hasDaemonConfigLoaderFactory();
   if (registerOssDaemon) {
     LOG(INFO) << "Registering daemon config loader, cpuOnly = " << cpuOnly;
     DaemonConfigLoader::registerFactory();
@@ -90,6 +91,9 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 
   auto& api = libkineto::api();
   ConfigLoader& config_loader = api.configLoader();
+  if (api.isProfilerInitialized()) {
+    return;
+  }
   api.registerProfiler(
       std::make_unique<ActivityProfilerProxy>(cpuOnly, config_loader));
 
@@ -115,7 +119,7 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 #endif // HAS_XPUPTI
 
 #if __linux__
-  if (registerOssDaemon) {
+  if (initAsyncProfiler) {
     api.initProfilerIfRegistered();
     VLOG(0) << "libkineto profilers activated";
   }
