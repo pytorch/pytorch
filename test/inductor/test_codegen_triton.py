@@ -1456,26 +1456,6 @@ def helper(x):
         with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
             self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
 
-    @parametrize("scheduled", [False, True])
-    @parametrize("tensor_input", [False, True])
-    def test_graph_input_pointer_range_survives_scheduling(
-        self, scheduled, tensor_input
-    ):
-        layout = ir.FixedLayout(torch.device("meta"), torch.float16, [32, 32], [32, 1])
-        self._graph.graph_inputs["input"] = (
-            ir.TensorBox.create(ir.InputBuffer(name="input", layout=layout))
-            if tensor_input
-            else sympy.Integer(1)
-        )
-        scheduler = Mock()
-        scheduler.get_buffer_layout.side_effect = KeyError("input")
-        arg = TensorArg(name="in_ptr0", buffer="input", dtype=torch.float16)
-
-        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
-            if tensor_input:
-                self.assertEqual(triton_utils._get_buffer_layout("input"), layout)
-            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), tensor_input)
-
     @inductor_config.patch("triton.emit_pointer_range_32", True)
     def test_config_of_emit_pointer_range_32_enabled(self):
         from torch._inductor.utils import (

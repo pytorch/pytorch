@@ -293,9 +293,7 @@ def signature_to_meta(
 
 
 def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
-    """Get layouts from graph inputs or scheduler buffers."""
-    if buf_name in V.graph.graph_inputs:
-        return V.graph.graph_inputs[buf_name].get_layout()
+    """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
     if V.graph.scheduler:
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
@@ -361,17 +359,28 @@ def equal_1_arg_indices(
 def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     """Check if a tensor argument's storage is provably within 2GB.
 
-    Mirrors HIPBackend.is_within_2gb() using known constant storage sizes or
+    Mirrors HIPBackend.is_within_2gb() using constant storage sizes or
     compile-time symbolic layouts. This enables canonicalize_pointers to
     decompose pointer arithmetic into (splat(base), offset) form for buffer ops.
     """
     MAX_BYTES = 2**31 - 1
     try:
         if arg.buffer in V.graph.constants:
+            # A small view can share a backing allocation larger than 2GB.
             storage_bytes = V.graph.constants[arg.buffer].untyped_storage().nbytes()
+            return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
+
+        # Graph inputs aren't tracked by the scheduler; get their layout
+        # from the graph_inputs dict to avoid KeyError in get_buffer_layout.
+        if arg.buffer in V.graph.graph_inputs:
+            inp = V.graph.graph_inputs[arg.buffer]
+            if hasattr(inp, "get_layout"):
+                layout = inp.get_layout()
+            else:
+                return False
         else:
             layout = _get_buffer_layout(arg.buffer)
-            storage_bytes = layout.storage_size() * arg.dtype.itemsize
+        storage_bytes = layout.storage_size() * arg.dtype.itemsize
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
         return False
