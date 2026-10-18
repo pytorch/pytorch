@@ -5268,10 +5268,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
             if is_ddp:
-                # Not DDP.__getstate__: it refuses a non-default process group,
-                # which only DDP.__setstate__ needs, to rebind it. Drops the
-                # keys DDP.__getstate__ drops, so keep the two in sync; the
-                # broadcast_buffers it also adds is a property.
+                # Not DDP.__getstate__: its default-process-group check only
+                # protects DDP.__setstate__, which _unpickle_ddp_module never
+                # calls. Keep the dropped keys in sync with DDP.__getstate__
+                # (broadcast_buffers, which it also adds, is a property).
                 state = {
                     k: v
                     for k, v in obj.__dict__.items()
@@ -5627,6 +5627,10 @@ def _pickles_as_its_own_global(value: object) -> bool:
         return False
     try:
         cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class.
+            return False
         reduce = copyreg.dispatch_table.get(cls)
         if (
             reduce is None

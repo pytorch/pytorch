@@ -255,7 +255,7 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
-_ALIAS = list
+_ALIAS = typing.List  # noqa: UP006
 
 
 class _ReducesToAnotherGlobal:
@@ -301,6 +301,15 @@ class _ReduceExByValue:
 
 
 _REDUCE_EX_BY_VALUE = _ReduceExByValue()
+
+
+class _SentinelOwner:
+    class Sentinel:
+        def __reduce__(self):
+            return "_NESTED_SENTINEL"
+
+
+_NESTED_SENTINEL = _SentinelOwner.Sentinel()
 _MODULE_RAISES = _ModuleRaises()
 _UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
@@ -3913,7 +3922,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_id_match_on_a_typing_alias(self):
         def fn(x):
-            if _ALIAS is list:
+            if _ALIAS is typing.List:  # noqa: UP006
                 return x + 1
             return x - 1
 
@@ -3923,7 +3932,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # guard survives serialization instead of being dropped.
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
-        with mock.patch.dict(globals(), {"_ALIAS": dict}):
+        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):  # noqa: UP006
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_id_match_on_a_member_of_a_nested_enum(self):
@@ -3987,10 +3996,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
             # Its __reduce__ names the typing global it is.
-            (list, True),
+            (typing.List, True),  # noqa: UP006
             (typing.Optional, True),
             # A subscripted alias reduces to a constructor call, not a name.
-            (list[int], False),
+            (typing.List[int], False),  # noqa: UP006
             # Each __reduce__ names something other than the object itself.
             (_ReducesToAnotherGlobal(), False),
             (_ReducesToAMissingName(), False),
@@ -3998,6 +4007,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_MODULE_RAISES, False),
             (_UNHASHABLE_MODULE, False),
             (_REDUCE_EX_BY_VALUE, False),
+            # The guard-state pickler refuses an instance of a nested class.
+            (_NESTED_SENTINEL, False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
