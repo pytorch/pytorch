@@ -5389,24 +5389,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def bar(ddp, x):
                 return ddp.module(x)
 
-            torch._dynamo.reset()
-            module = torch.nn.Sequential(torch.nn.Linear(10, 10))
-            module[0].bias.requires_grad_(False)
-            ddp_model = DDP(
-                module,
-                delay_all_reduce_named_params=[("0.weight", module[0].weight)],
-                param_to_hook_all_reduce=module[0].weight,
-            )
-            self.assertFalse(hasattr(ddp_model, "reducer"))
-            # DDP's own pickling still refuses it, at dump rather than at load.
-            with self.assertRaisesRegex(RuntimeError, "every parameter is delayed"):
-                pickle.dumps(ddp_model)
-            x = torch.randn(4, 10)
-            state = guards_state(ddp_model, x, bar)
-            loaded = torch._dynamo.package.load_guard_manager(
-                state, bar.__code__, bar.__globals__
-            )
-            self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
+            for pg in (None, dist.new_group([0])):
+                with self.subTest(all_delayed=True, default_group=pg is None):
+                    torch._dynamo.reset()
+                    module = torch.nn.Sequential(torch.nn.Linear(10, 10))
+                    module[0].bias.requires_grad_(False)
+                    ddp_model = DDP(
+                        module,
+                        process_group=pg,
+                        delay_all_reduce_named_params=[("0.weight", module[0].weight)],
+                        param_to_hook_all_reduce=module[0].weight,
+                    )
+                    self.assertFalse(hasattr(ddp_model, "reducer"))
+                    # DDP's own pickling still refuses it, at dump not at load.
+                    with self.assertRaisesRegex(RuntimeError, "parameter is delayed"):
+                        pickle.dumps(ddp_model)
+                    x = torch.randn(4, 10)
+                    state = guards_state(ddp_model, x, bar)
+                    loaded = torch._dynamo.package.load_guard_manager(
+                        state, bar.__code__, bar.__globals__
+                    )
+                    self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
         finally:
             dist.destroy_process_group()
             tmpfile.close()
