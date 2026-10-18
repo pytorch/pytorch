@@ -261,11 +261,12 @@ def random_nt_from_dims(
 # Helper function to get a reasonable string representation of an NJT for use in
 # SampleInput names.
 def _describe_njt(njt) -> str:
-    contig_type = "_contig" if njt.is_contiguous() else "_noncontig"
+    is_contig = njt.is_contiguous()
+    contig_type = "_contig" if is_contig else "_noncontig"
     if njt._lengths is not None and njt._offsets is not None:
         contig_type += "_holes"
     elif njt._ragged_idx != 1:
-        contig_type += "_transposed"
+        contig_type += "_non_leading_ragged" if is_contig else "_transposed"
 
     cached_data = "_without_seqlen_cache"
     if njt._max_seqlen_tensor is not None:
@@ -830,6 +831,23 @@ def sample_inputs_unary_dimwise(
                 name=f"{_describe_njt(njt)}: {_describe_dim(njt, dim)}",
             )
 
+    if op_info.full_name in {"chunk", "narrow", "split", "split_with_sizes"}:
+        # Contiguous NJT with a non-leading ragged dimension (gh-153238).
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(9, length, 9, device=device, dtype=dtype)
+                for length in (3, 4)
+            ],
+            layout=torch.jagged,
+            requires_grad=requires_grad,
+        )
+        for dim in (0, 1, 2, -1):
+            yield SampleInput(
+                _clone(nt),
+                kwargs={single_dim_argname: dim, **op_kwargs},
+                name=f"{_describe_njt(nt)}: {_describe_dim(nt, dim)}, dim={dim}",
+            )
+
 
 def batchwise_reference_chunk(op, sample):
     # reference for chunk() over dim=0
@@ -998,19 +1016,6 @@ def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
             D = sample_input.input.size(sample_input.kwargs["dim"])
             for chunks in [1, D // 2, D - 1, D]:
                 yield _update_sample(sample_input, {"chunks": chunks})
-
-    # Contiguous NJT with a non-leading ragged dimension (gh-153238).
-    nt = torch.nested.nested_tensor(
-        [torch.randn(9, length, 9, device=device, dtype=dtype) for length in (3, 4)],
-        layout=torch.jagged,
-        requires_grad=requires_grad,
-    )
-    for dim in (1, -1):
-        yield SampleInput(
-            _clone(nt),
-            kwargs={"chunks": 3, "dim": dim},
-            name=f"{_describe_njt(nt)}: normal_dim, dim={dim}, chunks=3",
-        )
 
 
 def sample_inputs_matmul(
