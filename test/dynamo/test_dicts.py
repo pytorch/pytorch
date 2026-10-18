@@ -3769,6 +3769,10 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(p.keys()), list("bc"))
 
 
+class _OrderedDictAttrPayload:
+    pass
+
+
 class OrderedDictAttributeTests(torch._dynamo.test_case.TestCase):
     """Attribute semantics of exact collections.OrderedDict (tp_dictoffset)."""
 
@@ -3917,6 +3921,77 @@ class OrderedDictAttributeTests(torch._dynamo.test_case.TestCase):
         # The successful-delete path is guarded too: an object without the
         # attribute must recompile into the AttributeError path.
         self.assertEqual(compiled(OrderedDict(), x), x + 100)
+        self.assertEqual(counts.frame_count, 2)
+
+    def test_input_contents_and_attrs_same_frame(self):
+        def f(d, x):
+            d.a = 1
+            d["k"] = 2
+            return x + len(d) + d.a
+
+        x = torch.ones(2)
+        d = OrderedDict()
+        res = torch.compile(f, backend="eager", fullgraph=True, dynamic=False)(d, x)
+        self.assertEqual(res, x + 2)
+        self.assertEqual(d.a, 1)
+        self.assertEqual(d["k"], 2)
+
+    def test_delete_with_pending_store_replays(self):
+        def f(d, x):
+            d.tmp = 1
+            del d.tmp
+            return x
+
+        x = torch.ones(2)
+        compiled = torch.compile(f, backend="eager", fullgraph=True, dynamic=False)
+        compiled(OrderedDict(), x)
+
+        d = OrderedDict()
+        d.tmp = 5
+        compiled(d, x)
+        self.assertNotIn("tmp", d.__dict__)
+
+    def test_attr_mutation_in_hop_body(self):
+        def f(x):
+            d = OrderedDict()
+
+            def body(y):
+                d.attr = 1
+                return y * 2
+
+            return torch.utils.checkpoint.checkpoint(body, x, use_reentrant=False)
+
+        with self.assertRaisesRegex(Unsupported, "HOP: Unsafe side effect"):
+            torch.compile(f, backend="eager", fullgraph=True)(torch.ones(2))
+
+    def test_escaped_fresh_dict_with_new_object(self):
+        def f(x):
+            d = OrderedDict()
+            d._m = 1
+            d["o"] = _OrderedDictAttrPayload()
+            return d
+
+        out = torch.compile(f, backend="eager", fullgraph=True, dynamic=False)(
+            torch.ones(2)
+        )
+        self.assertIs(type(out), OrderedDict)
+        self.assertEqual(out._m, 1)
+        self.assertIs(type(out["o"]), _OrderedDictAttrPayload)
+
+    def test_attr_guard_on_empty_iterated_dict(self):
+        def f(d, x):
+            for _ in d:
+                pass
+            return x + d.base
+
+        x = torch.ones(2)
+        d = OrderedDict()
+        d.base = 3
+        counts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(f, backend=counts, dynamic=False)
+        self.assertEqual(compiled(d, x), x + 3)
+        d.base = 4
+        self.assertEqual(compiled(d, x), x + 4)
         self.assertEqual(counts.frame_count, 2)
 
     def test_state_dict_fullgraph(self):

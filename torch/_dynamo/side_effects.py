@@ -793,14 +793,19 @@ class SideEffects:
         )
 
     def track_attribute_mutation_new(self, variable: VariableTracker) -> None:
-        """Register a sourceless VT (e.g. a synthetic exception) as a new
-        attribute-mutation object so its attribute mutations are codegen'd.
-        Keyed by the VT's id since there is no backing Python object."""
+        """Register a sourceless VT as a new attribute-mutation object so its
+        attribute mutations are codegen'd. Keyed by the VT's id since there is
+        no backing Python object."""
         if id(variable) in self.id_to_variable:
             return
         if isinstance(variable.mutation_type, ValueMutationNew):
-            # The value itself is still mutable (e.g. a dict's contents).
+            # The value itself is still mutable (e.g. a dict's contents). Keep
+            # the creation scope: re-scoping to the current HigherOrderOp would
+            # let mutations of an outer object bypass the unsafe-side-effect
+            # check.
+            scope = variable.mutation_type.scope
             variable.mutation_type = ValueAndAttributeMutationNew()
+            variable.mutation_type.scope = scope
         else:
             variable.mutation_type = AttributeMutationNew()
         self.id_to_variable[id(variable)] = variable
@@ -1267,11 +1272,13 @@ class SideEffects:
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
             elif istype(var, variables.OrderedDictVariable):
-                # OrderedDictVariable is reconstructed as `OrderedDict(...)`,
-                # not object.__new__. Cache the instance so the attribute
-                # stores replayed in codegen_update_mutated land on the object
-                # that escapes the compiled region.
-                var.reconstruct(cg)
+                # Emit an empty instance and replay the contents in
+                # codegen_update_mutated: the items may be new objects whose
+                # tempvars are assigned later in this loop.
+                cg.add_push_null(
+                    lambda: cg.load_import_from("collections", "OrderedDict")
+                )
+                cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
             else:
@@ -1684,6 +1691,9 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
             # defaultdict has a settable member (default_factory) alongside its
             # contents, so it needs the composite handler.
             variables.DefaultDictVariable,
+            # exact OrderedDict has an instance __dict__ compartment alongside
+            # its contents, replayed by the composite attribute handler.
+            variables.OrderedDictVariable,
         ),
     ),
     priority=70,
@@ -1733,22 +1743,6 @@ def _codegen_const_dict_or_set_mutation(ctx: SideEffectReplayContext) -> None:
                 ]
             )
         ctx.log(var)
-
-
-@register_side_effect_replay_handler(
-    name="ordered_dict_mutation",
-    # Exact OrderedDict has both a content compartment (self.items) and an
-    # instance __dict__ compartment; replay item mutations first, then the
-    # pending attribute stores.
-    matcher=lambda ctx: istype(ctx.var, variables.OrderedDictVariable),
-    priority=80,
-)
-def _codegen_ordered_dict_mutation(ctx: SideEffectReplayContext) -> None:
-    # A new OrderedDict's contents are already emitted by the reconstruction
-    # in codegen_save_tempvars, so only existing objects replay item mutations.
-    if not isinstance(ctx.var.mutation_type, AttributeMutationNew):
-        _codegen_const_dict_or_set_mutation(ctx)
-    _codegen_attribute_mutation(ctx)
 
 
 @register_side_effect_replay_handler(
@@ -1980,9 +1974,11 @@ def _codegen_user_defined_deque_mutation(ctx: SideEffectReplayContext) -> None:
 
 def _live_object_has_attr(cg: PyCodegen, var: VariableTracker, name: str) -> bool:
     """Whether a pending attribute deletion has a target on the live object."""
-    if istype(var, variables.OrderedDictVariable) and var.source is not None:
-        # OrderedDictVariable does not carry the live object; resolve its source.
-        return hasattr(cg.tx.output.resolve_source_value(var.source), name)
+    if istype(var, variables.OrderedDictVariable):
+        # OrderedDictVariable does not carry the live object; resolve its
+        # source, sharing the best-effort handling with live_instance().
+        instance = var.live_instance(cg.tx)
+        return instance is not None and hasattr(instance, name)
     return hasattr(getattr(var, "value", None), name)
 
 
@@ -2033,6 +2029,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     elif isinstance(var, variables.UserDefinedSetVariable) and var.has_new_items():
         _codegen_user_defined_set_mutation(ctx)
     elif isinstance(var, variables.DefaultDictVariable) and var.has_new_items():
+        _codegen_const_dict_or_set_mutation(ctx)
+    elif istype(var, variables.OrderedDictVariable) and var.has_new_items():
         _codegen_const_dict_or_set_mutation(ctx)
     else:
         mt = var.mutation_type

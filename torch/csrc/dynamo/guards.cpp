@@ -4883,23 +4883,18 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    // Early return
-    if (_size == 0) {
-      return true;
-    }
-
-    // Invokes the base class's check_nopybind method. We permit a limited set
-    // of leaf guards and accessors within the DictGuardManager framework.
-    // Integrating certain guards or accessors directly within the
-    // DictGuardManager can be challenging. For instance, `type(dict_object)` as
-    // an accessor is permissible, which otherwise would be hard to integrate
-    // directly into DictGuardManager.  Similarly, incorporating guards such as
-    // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
-    // than embedding these functionalities within the DictGuardManager itself.
+    // Run the base class's leaf guards and accessors before the empty-dict
+    // fast path: guards such as HASATTR on an OrderedDict's attributes live
+    // here and do not depend on the dict's keys.
     if (!GuardManager::check_nopybind(obj)) {
       _fail_count += 1;
       // No need to shuffle the child guards, just return.
       return false;
+    }
+
+    // Early return
+    if (_size == 0) {
+      return true;
     }
 
     PyObject *key = nullptr, *value = nullptr;
@@ -4941,22 +4936,16 @@ class DictGuardManager : public GuardManager {
           false, "len(" + get_source() + ") != " + std::to_string(_size), 0);
     }
 
-    // Early return
-    if (_size == 0) {
-      return GuardDebugInfo(true, 0);
-    }
-
-    // Invokes the base class's check_nopybind method. We permit a limited set
-    // of leaf guards and accessors within the DictGuardManager framework.
-    // Integrating certain guards or accessors directly within the
-    // DictGuardManager can be challenging. For instance, `type(dict_object)` as
-    // an accessor is permissible, which otherwise would be hard to integrate
-    // directly into DictGuardManager.  Similarly, incorporating guards such as
-    // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
-    // than embedding these functionalities within the DictGuardManager itself.
+    // Run leaf guards and accessors before the empty-dict fast path; see
+    // check_nopybind above.
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(obj);
     if (!debug_info.result) {
       return debug_info;
+    }
+
+    // Early return
+    if (_size == 0) {
+      return GuardDebugInfo(true, debug_info.num_guards_executed);
     }
 
     PyObject *key = nullptr, *value = nullptr;

@@ -1013,11 +1013,12 @@ class OrderedDictVariable(ConstDictVariable):
             se.track_attribute_mutation_new(self)
 
         if name == "__delattr__":
+            # The pending (in-frame) store decides whether the delete raises,
+            # but replay deletes based on the live __dict__, so guard that
+            # separately: a cached frame must not be reused with an object whose
+            # attribute presence differs.
             present = self._instance_attr_exists(tx, attr)
-            # The existence test reads the live instance dict, which is not
-            # replayed: pin it so a later change recompiles instead of reusing
-            # a frame that took the other branch.
-            self._guard_attr_presence(tx, attr, present)
+            self._guard_attr_presence(tx, attr, self._live_attr_present(tx, attr))
             if not present:
                 raise_observed_exception(
                     AttributeError,
@@ -1032,24 +1033,31 @@ class OrderedDictVariable(ConstDictVariable):
         se.store_attr(self, attr, value)
         return ConstantVariable.create(None)
 
-    def _live_instance(self, tx: "InstructionTranslatorBase") -> object | None:
-        # The Python object behind this VT's source. Sources that do not
-        # resolve right now (e.g. locals of an inlined frame) decline.
+    def live_instance(self, tx: "InstructionTranslatorBase") -> object | None:
+        # Best-effort peek at the Python object behind the source. Resolving a
+        # source evals its name template, so an unresolvable source (inlined
+        # frame locals, TempLocalSource, user __getattr__) can raise anything;
+        # declining is correct because callers graph-break when the object is
+        # not observable.
         if self.source is None:
             return None
         try:
             return tx.output.resolve_source_value(self.source)
-        except (AttributeError, KeyError, IndexError, TypeError):
+        except Exception:
             return None
 
     def _live_instance_dict(
         self, tx: "InstructionTranslatorBase"
     ) -> dict[str, Any] | None:
         # OrderedDict has tp_dictoffset: attributes live in the instance dict.
-        instance = self._live_instance(tx)
+        instance = self.live_instance(tx)
         if instance is None:
             return None
         return getattr(instance, "__dict__", None)
+
+    def _live_attr_present(self, tx: "InstructionTranslatorBase", name: str) -> bool:
+        instance_dict = self._live_instance_dict(tx)
+        return instance_dict is not None and name in instance_dict
 
     def _instance_attr_exists(self, tx: "InstructionTranslatorBase", name: str) -> bool:
         se = tx.output.side_effects
@@ -1057,21 +1065,18 @@ class OrderedDictVariable(ConstDictVariable):
             return not isinstance(
                 se.load_attr(self, name, deleted_ok=True), variables.DeletedVariable
             )
-        instance_dict = self._live_instance_dict(tx)
-        return instance_dict is not None and name in instance_dict
+        return self._live_attr_present(tx, name)
 
     def _guard_attr_presence(
         self, tx: "InstructionTranslatorBase", name: str, present: bool
     ) -> None:
-        se = tx.output.side_effects
         source = self.source
-        if source is None or se.has_pending_mutation_of_attr(self, name):
-            # A fresh object is fully modeled in-graph, and a pending mutation
-            # is replayed on this frame, so neither needs a guard.
+        if source is None:
+            # A fresh object has no runtime counterpart to guard.
             return
-        if not present and self._live_instance_dict(tx) is None:
-            # Absence came from a source that does not resolve; do not bake the
-            # AttributeError into the frame without being able to guard it.
+        if self._live_instance_dict(tx) is None:
+            # Presence came from a source that does not resolve; do not bake the
+            # decision into the frame without being able to guard it.
             unimplemented(
                 gb_type="Attribute deletion on an unresolvable OrderedDict",
                 context=f"object={self}, name={name}",
@@ -1115,7 +1120,7 @@ class OrderedDictVariable(ConstDictVariable):
         source = self.source
         if source is None:
             return ConstantVariable.create(False)
-        instance = self._live_instance(tx)
+        instance = self.live_instance(tx)
         if instance is None:
             # Attribute presence is unknown without the live object.
             return super().call_obj_hasattr(tx, name)
