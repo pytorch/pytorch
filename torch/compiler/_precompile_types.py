@@ -129,23 +129,26 @@ class PrecompileSummary:
         uncovered_frames: The ``co_name`` of each frame the capture ran that
             ended with no guarded code and was not bypassed, so the artifact
             cannot serve it: a thin wrapper whose graphs all landed in an inner
-            frame, or a frame whose compile raised
-            (its message is in ``capture_errors``, so one failure shows in both
-            digest clauses). A different cause from ``bypassed``,
-            never the same frame; a frame that hit the recompile limit before it
-            recorded a guarded code is in ``truncated`` too. Not a remainder:
-            which frames count as a gap is the producer's decision, and a frame
-            the package holds an entry for but never ran is not one, so this is
-            not ``frames`` minus ``bypassed`` minus the frames that hold guarded
-            code.
+            frame, a frame whose compile raised (its message is in
+            ``capture_errors``, so one failure shows in both digest clauses), a
+            frame whose compile error ``suppress_errors=True`` swallowed, or an
+            entry frame Dynamo gave up on at its first call. A different cause
+            from ``bypassed``, never the same frame; a frame that hit the
+            recompile limit before it recorded a guarded code is in
+            ``truncated`` too. Not a remainder: which frames count as a gap is
+            the producer's decision, and a frame the package holds an entry for
+            but never ran is not one, so this is not ``frames`` minus
+            ``bypassed`` minus the frames that hold guarded code.
         eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame
             Dynamo gave up on during the capture and ran eagerly from then on: a
             graph break it could not resume from (such as one inside a loop),
             or a backend that declined the graph by raising ``SkipFrame``.
             Not a gap, and not in ``uncovered_frames``: a load serves the
             variants its earlier calls compiled, if any, and runs any call they
-            miss eagerly (the capture skipped every later call, even one a
-            variant matches).
+            miss eagerly, logging a warning once per frame (the capture skipped
+            every later call, even one a variant matches). The exception is an
+            entry frame that fell back on its first call: it has no variant to
+            dispatch to, so it is in ``uncovered_frames`` instead.
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
             guard on a bare argument name pins in some variant (``self.eps`` is
             not a bare name) while no other variant of the same frame guards the
@@ -226,7 +229,8 @@ class PrecompileSummary:
         limit (``truncated``) or ended with no guarded code
         (``uncovered_frames``), if a capture call raised (``capture_errors``),
         or if nothing was compiled. ``eager_fallbacks`` never makes a capture
-        incomplete: a load runs those frames eagerly, as Dynamo chose to. Both
+        incomplete: a load runs those frames eagerly, as Dynamo chose to (an
+        entry frame with no variant is not one, see ``uncovered_frames``). Both
         ``guarded_codes`` and ``backend_graphs`` must be non-zero for the last
         check, because a frame that compiled nothing can still count as one
         guarded code, so ``guarded_codes`` alone cannot tell a real capture

@@ -5027,6 +5027,24 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(calls + calls[:1], eager_miss=miss)
 
     @skipIfCrossRef
+    def test_an_entry_dynamo_gave_up_on_at_its_first_call_is_uncovered(self):
+        # Unlike a callee, it has no variant to dispatch to, so it is a coverage
+        # gap: the capture is not complete. Its callee, model.forward, compiles.
+        opaque = torch._dynamo.disable(lambda y: y + 0)
+
+        def entry(model, x):
+            for _ in range(1):
+                x = opaque(x)
+            return model(x)
+
+        # require_complete refuses it, before the build's own refusal would.
+        with self.assertRaisesRegex(
+            torch.compiler.PrecompileError, r"NO guarded code at all: \['entry'\]"
+        ):
+            with self._capture(entry, backend="eager") as cap:
+                cap(self.model, self.x2)
+
+    @skipIfCrossRef
     def test_a_frame_dynamo_gave_up_on_is_not_a_coverage_gap(self):
         # dispatch falls back to eager on its first call and never compiles, so
         # it holds no variant. It ran eager during capture and a load runs it
