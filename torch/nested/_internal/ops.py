@@ -1018,7 +1018,7 @@ def prod_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.split.Tensor, "self: jt, split_size: any, dim: any?"
+    torch.ops.aten.split.Tensor, "self: jt_all, split_size: any, dim: any?"
 )
 def split_tensor(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1038,7 +1038,7 @@ def split_tensor(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any?"
+    torch.ops.aten.split_with_sizes.default, "self: jt_all, split_sizes: any, dim: any?"
 )
 def split_with_sizes_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1058,7 +1058,7 @@ def split_with_sizes_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.narrow.default, "self: jt, dim: any, start: any, length: any"
+    torch.ops.aten.narrow.default, "self: jt_all, dim: any, start: any, length: any"
 )
 def narrow(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1091,7 +1091,10 @@ def chunk_default(func, *args, **kwargs):
     )
 
     if operating_on_batch:
-        check_schema("self: jt", chunk_default, inp)
+        if inp._lengths is not None:
+            raise ValueError(
+                "chunk(): not supported on dim=0 for nested tensors with holes"
+            )
         chunks = new_kwargs["chunks"]
 
         # get _offsets of the chunks
@@ -1106,7 +1109,7 @@ def chunk_default(func, *args, **kwargs):
 
         # get _values of the chunks
         split_sizes = [x.sum().item() for x in chunked_lengths]
-        chunk_values = inp._values.split(split_sizes)
+        chunk_values = inp._values.split(split_sizes, dim=inp._ragged_idx - 1)
 
         # Note that the actual number of chunks returned is not necessarily the same as
         # the input number; it can be counter-intuitive, but it matches dense behavior.

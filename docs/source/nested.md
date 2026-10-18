@@ -317,8 +317,10 @@ torch.Size([2, j1, 2, 6])
 torch.Size([2, 6, j1])
 ```
 
-``torch.chunk()`` can split a non-batch, non-ragged dimension regardless of where the
-ragged dimension appears in the shape. Chunking along the ragged dimension is not supported.
+``torch.chunk()``, ``torch.split()``, ``torch.split_with_sizes()``, and ``torch.narrow()``
+support non-batch, non-ragged dimensions regardless of where the ragged dimension
+appears in the shape. Of these operations, only ``torch.chunk()`` supports the batch
+dimension, and only for NJTs without holes. None support the ragged dimension.
 
 ### Attention mechanisms
 

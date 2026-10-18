@@ -8634,13 +8634,12 @@ FORWARD_SKIPS_AND_XFAILS = [
     ),
     XFailRule(
         error_type=ValueError,
-        error_msg="expected self to be a contiguous jagged layout NestedTensor",
+        error_msg="not supported on dim=0 for nested tensors with holes",
         op_match_fn=lambda device, op: op.full_name == "chunk",
         sample_match_fn=lambda device, sample: (
-            "batch_dim" in sample.name
-            and (sample.input._lengths is not None or sample.input._ragged_idx != 1)
+            "batch_dim" in sample.name and sample.input._lengths is not None
         ),
-        name="chunk_batch_dim_requires_contiguous",
+        name="chunk_batch_dim_with_holes",
     ),
     # these don't work on non-contiguous NJTs yet
     XFailRule(
@@ -8650,9 +8649,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             op.full_name
             in {
                 "masked_select",
-                "narrow",
-                "split",
-                "split_with_sizes",
                 "squeeze",
             }
         ),
