@@ -32,6 +32,7 @@ import io
 import itertools
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import traceback
@@ -5615,7 +5616,46 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return _is_registered_custom_op_def(value)
+    return _is_registered_custom_op_def(value) or _pickles_as_its_own_global(value)
+
+
+def _pickles_as_its_own_global(value: object) -> bool:
+    """Whether ``value``, one of its ``__module__``'s globals, is saved by
+    pickle's default lookup (``copyreg.dispatch_table``, then ``__reduce_ex__``)
+    as a reference to the module global that is ``value`` itself, as for
+    ``typing.List``, which reduces to ``"List"``. Any other value is refused
+    without running its reduction. User objects can raise anywhere in here,
+    which just means no."""
+    if isinstance(value, (torch.Tensor, torch.nn.Module)):
+        return False
+    try:
+        cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class unless it is a
+            # tuple; this refuses those tuples too, which only drops a guard.
+            return False
+        reduce = copyreg.dispatch_table.get(cls)
+        if (
+            reduce is None
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+        ):
+            return False
+        module_name = getattr(value, "__module__", None)
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
+        # The reduction is user code, possibly O(size), and this runs per guard:
+        # only reduce a value that is one of its module's own globals. list()
+        # snapshots the dict, which another thread may grow mid-scan.
+        if module is None or not any(v is value for v in list(vars(module).values())):
+            return False
+        name = reduce(value) if reduce else value.__reduce_ex__(_GUARDS_PROTOCOL)
+        return (
+            isinstance(name, str)
+            and FunctionPicklerBase._lookup(module_name, name) is value
+        )
+    except Exception:
+        return False
 
 
 def is_portable_identity_guard(
@@ -5714,6 +5754,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+# _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
+# protocol and the global copyreg.dispatch_table (the pickler sets none).
+_GUARDS_PROTOCOL = pickle.DEFAULT_PROTOCOL
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5750,6 +5795,7 @@ def pickle_guards_state(
             missing_values,
             builder.value_guarded_containers,
             buf,
+            protocol=_GUARDS_PROTOCOL,
         )
 
         if all(
