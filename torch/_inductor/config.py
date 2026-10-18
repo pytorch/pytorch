@@ -712,6 +712,10 @@ bmm_shared_a: bool = Config(
     env_name_force="TORCHINDUCTOR_BMM_SHARED_A_TEMPLATE_ENABLED",
 )
 
+# Avoid materializing padded matrix batches when every consumer is bmm.
+# Opt in while validating the effects on GEMM selection and numerical results.
+bmm_elide_padded_input_clones: bool = False
+
 
 # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM)
 # heuristic-ranked configs to profile per kernel family in max_autotune.

@@ -1527,6 +1527,44 @@ def _collect_output_storage(
     )
 
 
+def _is_padded_bmm_input_clone(node: torch.fx.Node, src: torch.fx.Node) -> bool:
+    if (
+        not config.bmm_elide_padded_input_clones
+        or node.target is not aten.clone.default
+        or not node.users
+        or any(user.target is not aten.bmm.default for user in node.users)
+        or not same_tensor_meta(node, src, skip_strides=True, skip_storage_offset=True)
+    ):
+        return False
+
+    value = src.meta.get("val")
+    if (
+        not isinstance(value, torch.Tensor)
+        or value.device.type != "cuda"
+        or value.layout != torch.strided
+        or value.dtype not in (torch.float16, torch.bfloat16)
+        or value.ndim != 3
+    ):
+        return False
+
+    # bmm reads its inputs without changing their storage. Each matrix must
+    # have contiguous columns and distinct rows; padding between batches is
+    # permitted. A zero batch stride is also safe for a read-only operand.
+    batch_stride, row_stride, column_stride = value.stride()
+    _, rows, columns = value.shape
+    span = (rows - 1) * row_stride + columns
+    return all(
+        statically_known_true(condition)
+        for condition in (
+            rows > 0,
+            columns > 0,
+            column_stride == 1,
+            row_stride >= columns,
+            (batch_stride == 0) | (batch_stride >= span),
+        )
+    )
+
+
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
@@ -1622,10 +1660,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_tensor_meta(
-                node,
-                src,
-                skip_storage_offset=True,
+            if (
+                same_tensor_meta(node, src, skip_storage_offset=True)
+                or _is_padded_bmm_input_clone(node, src)
             ) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
