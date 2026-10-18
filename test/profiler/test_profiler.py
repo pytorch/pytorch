@@ -686,6 +686,16 @@ class TestProfiler(TestCase):
                 self.assertFalse(t.is_alive())
 
         roots = prof.profiler.kineto_results.experimental_event_tree()
+
+        def from_this_file(root):
+            return any(
+                isinstance(node.extra_fields, _ExtraFields_PyCall)
+                and os.path.basename(node.extra_fields.callsite.file_name)
+                == os.path.basename(__file__)
+                for node in _utils.traverse_dfs([root])
+            )
+
+        roots = [root for root in roots if from_this_file(root)]
         nodes = [
             node
             for node in _utils.traverse_dfs(roots)
