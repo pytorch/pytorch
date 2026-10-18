@@ -1294,10 +1294,14 @@ class CrossEntropyLoss(_WeightedLoss):
             of smoothing when computing the loss, where 0.0 means no smoothing. The targets
             become a mixture of the original ground truth and a uniform distribution as described in
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+        dim (int, optional): The dimension of the input that holds the classes. For example,
+            ``dim=-1`` takes logits of shape :math:`(N, d_1, d_2, ..., d_K, C)`, as produced by a
+            linear layer applied to a sequence. Default: ``None``, which means dimension 1, or 0
+            for unbatched input.
 
     Shape:
         - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
-          in the case of `K`-dimensional loss.
+          in the case of `K`-dimensional loss. If :attr:`dim` is given, :math:`C` is at that dimension instead.
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`. The
           target data type is required to be long when using class indices. If containing class probabilities, the
@@ -1378,9 +1382,10 @@ class CrossEntropyLoss(_WeightedLoss):
         2.55349063873291
     """
 
-    __constants__ = ["ignore_index", "reduction", "label_smoothing"]
+    __constants__ = ["ignore_index", "reduction", "label_smoothing", "dim"]
     ignore_index: int
     label_smoothing: float
+    dim: int | None
 
     def __init__(
         self,
@@ -1390,10 +1395,17 @@ class CrossEntropyLoss(_WeightedLoss):
         reduce=None,
         reduction: str = "mean",
         label_smoothing: float = 0.0,
+        dim: int | None = None,
     ) -> None:
         super().__init__(weight, size_average, reduce, reduction)
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
+        self.dim = dim
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        if not hasattr(self, "dim"):
+            self.dim = None
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1404,6 +1416,7 @@ class CrossEntropyLoss(_WeightedLoss):
             ignore_index=self.ignore_index,
             reduction=self.reduction,
             label_smoothing=self.label_smoothing,
+            dim=self.dim,
         )
 
 
