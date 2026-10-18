@@ -252,6 +252,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
     ) -> None:
         """FXIR does not emit deferred alignment copies."""
 
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
+        return False
+
     @classmethod
     def create(
         cls: type["WrapperFxCodegen"],
@@ -1321,6 +1325,10 @@ class FxConverter:
             k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
             for k, v in kernel.kwargs.items()
         }
+        # Symbolic scalar args, e.g. a SymInt output_size, must be FX nodes.
+        args, kwargs = pytree.tree_map_only(
+            sympy.Expr, self._generate_sym_node, (args, kwargs)
+        )
 
         result_buffer: str | None = None
         if isinstance(kernel, ir.ExternKernelOut):

@@ -1635,35 +1635,14 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
     var = ctx.var
     if not isinstance(var, variables.lists.DequeVariable):
         raise AssertionError(type(var))
-    # For limited maxlen, the order of operations matter for side effect, but we
-    # currently don't track the order, so no support.
-    if not var.maxlen.is_constant_none():
-        unimplemented(
-            gb_type="Side effect on existing deque with limited maxlen",
-            context="",
-            explanation="This is not supported.",
-            hints=[
-                "Don't use a deque with `maxlen` specified.",
-            ],
-        )
-
-    # old.extend(new), this runs last
+    # Replay the final contents and maxlen, including changes from `deque.__init__`.
     cg(var.source)
-    cg.load_method("extend")
+    cg.load_method("__init__")
     cg(var, allow_cache=False)  # Don't codegen via source
+    cg(var.maxlen)
     ctx.suffixes.append(
         [
-            *create_call_method(1),
-            create_instruction("POP_TOP"),
-        ]
-    )
-
-    # old.clear(), this runs first
-    cg(var.source)
-    cg.load_method("clear")
-    ctx.suffixes.append(
-        [
-            *create_call_method(0),
+            *create_call_method(2),
             create_instruction("POP_TOP"),
         ]
     )
