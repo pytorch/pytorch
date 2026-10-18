@@ -978,6 +978,18 @@ class WrapperLine:
 
 
 @dataclasses.dataclass
+class ProfilerMarkerLine(WrapperLine):
+    marker: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.writeline("if torch.autograd.profiler._is_profiler_enabled:")
+        with code.indent():
+            code.writeline(
+                f"with torch._C._profiler._RecordFunctionFast({self.marker!r}): pass"
+            )
+
+
+@dataclasses.dataclass
 class EnterSubgraphLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     graph: GraphLowering
@@ -5691,6 +5703,12 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(
                 f"{self.comment} [Provenance debug handles] {kernel_name}:{debug_handle}"
             )
+            if config.provenance_profiler_markers and not V.graph.cpp_wrapper:
+                self.writeline(
+                    ProfilerMarkerLine(
+                        f"inductor_provenance:{kernel_name}:{debug_handle}"
+                    )
+                )
 
     def make_buffer_reuse(self, old: BufferLike, new: BufferLike, delete_old: bool):
         if old.get_dtype() != new.get_dtype():
