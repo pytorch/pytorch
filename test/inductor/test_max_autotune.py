@@ -5881,6 +5881,30 @@ class TestPrologueFusion(TestCase):
                 f = FileCheck().check("k_idx").check("a =").check_not("tl.where")
             f.check("tl.dot").run(code[0])
 
+    def test_preserves_zero_analysis_lowp_rounding_cast(self):
+        from torch._inductor.analyze_preserves_zero_mask import PreservesZeros
+        from torch._inductor.index_propagation import TypedExpr
+
+        for dtype in (torch.float16, torch.bfloat16):
+            analysis = PreservesZeros()
+            zero = TypedExpr(sympy.Float(0), torch.float32)
+            # SymPyOps does not fold a rounding cast, so the result may not be zero.
+            rounded = analysis.to_dtype(zero, dtype, use_compute_types=False)
+            upcast = analysis.to_dtype(rounded, torch.float32)
+            analysis.store("buf", sympy.Integer(0), upcast)
+            self.assertFalse(analysis.store_preserves_zeros)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_upcast_lowp_prologue_with_rounding_cast(self):
+        def foo(x, y):
+            return x.relu().float() @ y
+
+        x = torch.rand([64, 127], dtype=torch.bfloat16, device=GPU_TYPE)
+        y = torch.rand([127, 64], dtype=torch.float, device=GPU_TYPE)
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
     @parametrize("use_async_compile", (True, False))
