@@ -473,7 +473,7 @@ def _step_logger() -> Callable[..., None]:
 
 @functools.cache
 def _warn_tf32_disabled() -> None:
-    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
+    if torch.cuda.is_available() and torch.cuda.is_tf32_supported():
         perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
@@ -1081,6 +1081,9 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    # AOTAutograd cache hits only: the backward's box (see
+    # CompilerConfigExtra.backward_cudagraphs).
+    backward_cudagraphs: BoxedBool | None
     cudagraphs_region_aware: bool
     cudagraphs_top_level: bool
     cudagraph_partition_only_regions: bool
@@ -2527,7 +2530,10 @@ def cudagraphify_impl(
     torch.cuda.synchronize()
 
     # record
-    graph = torch.cuda.CUDAGraph()
+    num_rng_states = max(
+        8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
+    )
+    graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
     with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
@@ -2921,6 +2927,11 @@ class CompilerConfigExtra:
     top_level_cudagraphs: bool
     backward_top_level_cudagraphs: bool
     forward_cudagraphs_requested: bool
+    # Whether the backward may request capture, judged from the pre-AOT graph
+    # since an AOTAutograd cache hit never sees the backward graph. It can
+    # overestimate (a region whose inputs don't need grad has no backward); a
+    # cached backward compiled without capture refuses it in post_compile.
+    backward_may_request_cudagraphs: bool
     has_regional_cudagraphs: bool
     forward_has_regional_cudagraphs: bool
     enable_forward_region_graph_partition: bool
@@ -2928,6 +2939,18 @@ class CompilerConfigExtra:
     forward_device_index: BoxedDeviceIndex
     forward_is_cudagraph_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
+
+    def backward_cudagraphs(self, requested: bool) -> BoxedBool:
+        """The backward's cudagraphs box; requested is its own request."""
+        if not self.has_regional_cudagraphs:
+            if self.cudagraphs_bwd_override is not None:
+                return BoxedBool(self.cudagraphs_bwd_override)
+            return self.cudagraphs
+        # Sharing the forward's box keeps a backward from bringing back capture
+        # that its forward requested and lost.
+        if requested and self.forward_cudagraphs_requested:
+            return self.cudagraphs
+        return BoxedBool(requested)
 
 
 def create_compiler_config_extra(
@@ -3006,6 +3029,10 @@ def create_compiler_config_extra(
         pre_aot_graph is not None and _any_subgraph_enables_cudagraphs(pre_aot_graph)
     )
     cudagraphs = BoxedBool(forward_cudagraphs_requested)
+    backward_may_request_cudagraphs = backward_top_level_cudagraphs or bool(
+        pre_aot_graph is not None
+        and any(_iter_subgraph_cudagraph_overrides(pre_aot_graph, backward=True))
+    )
 
     enable_forward_region_graph_partition = (
         not config.graph_partition and forward_has_regional_cudagraphs
@@ -3030,6 +3057,7 @@ def create_compiler_config_extra(
         top_level_cudagraphs=top_level_cudagraphs,
         backward_top_level_cudagraphs=backward_top_level_cudagraphs,
         forward_cudagraphs_requested=forward_cudagraphs_requested,
+        backward_may_request_cudagraphs=backward_may_request_cudagraphs,
         has_regional_cudagraphs=has_regional_cudagraphs,
         forward_has_regional_cudagraphs=forward_has_regional_cudagraphs,
         enable_forward_region_graph_partition=enable_forward_region_graph_partition,
@@ -3239,20 +3267,9 @@ def compile_fx_backward(
                 gm, backward_top_level_cudagraphs
             )
         )
-        if not compiler_config_extra.has_regional_cudagraphs:
-            cudagraphs = compiler_config_extra.cudagraphs
-            if compiler_config_extra.cudagraphs_bwd_override is not None:
-                cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
-        else:
-            backward_cudagraphs_requested = (
-                backward_top_level_cudagraphs or _any_subgraph_enables_cudagraphs(gm)
-            )
-            if (
-                compiler_config_extra.forward_cudagraphs_requested
-                and not compiler_config_extra.cudagraphs
-            ):
-                backward_cudagraphs_requested = False
-            cudagraphs = BoxedBool(backward_cudagraphs_requested)
+        cudagraphs = compiler_config_extra.backward_cudagraphs(
+            backward_top_level_cudagraphs or _any_subgraph_enables_cudagraphs(gm)
+        )
 
         enable_backward_region_graph_partition = (
             not config.graph_partition and backward_region_preference_differs
@@ -3282,6 +3299,11 @@ def compile_fx_backward(
             for i in candidate_idxs
             if placeholders[i].meta.get("is_static_input", True)
         ]
+
+        # Record AOT output strides before fake_tensor_prop in compile_fx_inner,
+        # which can already be channels-last for convolution_backward (#197514).
+        _recursive_record_original_output_strides(gm)
+
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -3403,6 +3425,10 @@ def compile_fx(
         )
     else:
         get_decomp_fn = select_decomp_table
+
+    from torch.compiler._no_compile import check_compilation_allowed
+
+    check_compilation_allowed("Inductor graph compilation")
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
