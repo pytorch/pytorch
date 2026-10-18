@@ -633,12 +633,12 @@ class _DynamoCodeCacheEntry:
          uninstall(). Set on a frame a precompile capture serves as plain
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
-      12. Whether Dynamo gave up on the frame during capture and ran it
-         eagerly from then on (a graph break it could not resume from, such as
-         one inside a loop). A load runs it eagerly too: a frame with no
-         variants is skipped like a trivial one, and a frame whose earlier calls
-         recorded variants serves them and runs any call they miss eagerly
-         instead of refusing it.
+      12. Whether Dynamo gave up on the frame during capture and skipped it
+         from then on (a graph break it could not resume from, such as one
+         inside a loop). A frame with no variants is skipped at install like a
+         trivial one; for a frame with variants, an installed precompile
+         artifact serves them and runs a call they miss eagerly instead of
+         refusing it.
     """
 
     python_code: SerializedCode
@@ -1109,36 +1109,29 @@ def _compile_frame_context(
     return _ctx()
 
 
-# The holds installed packages keep on each code object, one per package: True
-# for a skip of everything the code calls, False for a skip of the code alone,
-# None for RUN_ONLY. A strategy is process-global, so a code keeps the widest
-# hold still held (any skip over RUN_ONLY) and goes back to the default only
-# when the last holder uninstalls. A strategy set before install() (e.g. by
+# The skips installed packages hold on each code object, one per package, True
+# for a skip of everything the code calls. A strategy is process-global, so a
+# code keeps the widest skip still held and goes back to the default only when
+# the last holder uninstalls. A strategy set before install() (e.g. by
 # torch._dynamo.skip) is not restored: there is no getter for it.
-_EXEC_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+_SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
-def _update_exec_hold(code: types.CodeType, recursive: bool | None, hold: bool) -> None:
-    """Take or release one package's hold on ``code``: a skip, recursive or
-    not, or ``None`` for RUN_ONLY (serve its entries, run a miss eagerly). A
-    skip any package holds wins over RUN_ONLY."""
+def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None:
     from torch._C._dynamo.eval_frame import set_code_exec_strategy
 
     from .types import FrameAction, FrameExecStrategy
 
-    holds = _EXEC_HOLDS.setdefault(code, [])
+    holds = _SKIP_HOLDS.setdefault(code, [])
     if hold:
         holds.append(recursive)
     else:
         holds.remove(recursive)
-    skips = [h for h in holds if h is not None]
     if not holds:
-        del _EXEC_HOLDS[code]
+        del _SKIP_HOLDS[code]
         strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
-    elif not skips:
-        strategy = FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
     else:
-        callees = FrameAction.SKIP if any(skips) else FrameAction.DEFAULT
+        callees = FrameAction.SKIP if any(holds) else FrameAction.DEFAULT
         strategy = FrameExecStrategy(FrameAction.SKIP, callees)
     set_code_exec_strategy(code, strategy)
 
@@ -1171,9 +1164,9 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # The holds install() keeps in _EXEC_HOLDS, which uninstall() releases:
-        # (code, whether its callees are skipped too, or None for RUN_ONLY).
-        self._held_codes: list[tuple[types.CodeType, bool | None]] = []
+        # The skips install() holds in _SKIP_HOLDS, which uninstall() releases:
+        # (code, whether its callees are skipped too).
+        self._skipped_codes: list[tuple[types.CodeType, bool]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1385,8 +1378,8 @@ class CompilePackage:
             self._add_backend_id(backend_id)
 
     def record_eager_fallback(self, code: types.CodeType) -> None:
-        """Note that Dynamo gave up on ``code`` and runs it eagerly from now on,
-        so a load runs it eagerly too (see ``_DynamoCodeCacheEntry``)."""
+        """Note that Dynamo gave up on ``code`` and skips it from now on (see
+        ``_DynamoCodeCacheEntry``)."""
         entry = self._codes.get(code)
         if entry is not None:
             entry.eager_fallback = True
@@ -1504,9 +1497,9 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
-        for code, recursive in self._held_codes:
-            _update_exec_hold(code, recursive, hold=False)
-        self._held_codes = []
+        for code, recursive in self._skipped_codes:
+            _update_skip_hold(code, recursive, hold=False)
+        self._skipped_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1610,13 +1603,8 @@ class CompilePackage:
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
                 if entry.skip_recursive or len(entry.guarded_codes) == 0:
-                    _update_exec_hold(target_code, entry.skip_recursive, hold=True)
-                    self._held_codes.append((target_code, entry.skip_recursive))
-                elif entry.eager_fallback:
-                    # Serve the variants, and run any call they miss eagerly,
-                    # as the capturing process did after its eager fallback.
-                    _update_exec_hold(target_code, None, hold=True)
-                    self._held_codes.append((target_code, None))
+                    _update_skip_hold(target_code, entry.skip_recursive, hold=True)
+                    self._skipped_codes.append((target_code, entry.skip_recursive))
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):

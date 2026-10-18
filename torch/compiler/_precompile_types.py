@@ -93,9 +93,9 @@ class PrecompileSummary:
     ``uncovered_frames`` hold one bare ``co_name`` per frame, read off the
     package's entries, so a name can repeat (every ``nn.Module`` has a
     ``forward``: ``['forward', 'forward']`` is two frames, not a repeat) and
-    their lengths count frames. ``truncated`` holds ``co_name
-    (filename:firstlineno)``, recorded once per code object that hit the limit,
-    so its entries do identify a frame. A bare name identifies none, so the two
+    their lengths count frames. ``truncated`` and ``eager_fallbacks`` hold
+    ``co_name (filename:firstlineno)``, once per code object, so their entries
+    do identify a frame. A bare name identifies none, so the two
     bare lists cannot be checked disjoint.
 
     Attributes:
@@ -141,9 +141,10 @@ class PrecompileSummary:
         eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame
             Dynamo gave up on during the capture and ran eagerly from then on (a
             graph break it could not resume from, such as one inside a loop).
-            Not a gap, and not in ``uncovered_frames``: a load runs the frame
-            eagerly as the capturing process did, serving only the variants its
-            earlier calls compiled, if any.
+            Not a gap, and not in ``uncovered_frames``: a load serves the
+            variants its earlier calls compiled, if any, and runs any call they
+            miss eagerly (the capture skipped every later call, even one a
+            variant matches).
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
             guard on a bare argument name pins in some variant (``self.eps`` is
             not a bare name) while no other variant of the same frame guards the
@@ -223,7 +224,8 @@ class PrecompileSummary:
         Coverage only: False if a frame was ``bypassed``, hit the recompile
         limit (``truncated``) or ended with no guarded code
         (``uncovered_frames``), if a capture call raised (``capture_errors``),
-        or if nothing was compiled. Both ``guarded_codes`` and ``backend_graphs``
+        or if nothing was compiled. ``eager_fallbacks`` never makes a capture
+        incomplete: a load runs those frames eagerly, as Dynamo chose to. Both ``guarded_codes`` and ``backend_graphs``
         must be non-zero for the last check, because a frame that compiled
         nothing can still count as one guarded code, so ``guarded_codes`` alone
         cannot tell a real capture from an empty one.
