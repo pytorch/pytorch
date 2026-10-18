@@ -1629,6 +1629,20 @@ def _is_variantless_entry_fallback(entry: _DynamoCacheEntry) -> bool:
     return first.eager_fallback and not first.bypassed and not first.guarded_codes
 
 
+def _variantless_entry_fallback_message(fn_name: str) -> str:
+    return (
+        f"precompile captured no dispatchable graph for {fn_name!r}: Dynamo gave up "
+        f"on the entry frame at its first call, so it holds no variant to serve. "
+        f"Dynamo gives up on, and skips for the rest of the process, a frame with a "
+        f"graph break it cannot resume from (such as one inside a loop; check "
+        f"TORCH_LOGS=graph_breaks), a frame that calls torch._dynamo.skip_frame(), "
+        f"a frame it refuses to trace such as a generator, a frame that raised a UserError it "
+        f"suppressed, or one whose graph the backend declined by raising SkipFrame "
+        f"(check the backend's log). Fix that, or capture the functions the entry "
+        f"calls instead."
+    )
+
+
 def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
     return (
         code.eager_fallback
@@ -1969,7 +1983,11 @@ class PrecompileSession(Generic[_P, _R]):
 
     def summary(self) -> PrecompileSummary:
         """Coverage and guard information for everything captured so far."""
-        entry, eager = self._served_entry()
+        return self._summary_of(*self._served_entry())
+
+    def _summary_of(
+        self, entry: _DynamoCacheEntry, eager: frozenset[tuple[str, str, int]]
+    ) -> PrecompileSummary:
         # A frame served eagerly checks no guard, so neither its guards nor
         # its drops describe what the artifact serves.
         guard_sets = {k: v for k, v in self._guard_sets.items() if k not in eager}
@@ -2014,7 +2032,8 @@ class PrecompileSession(Generic[_P, _R]):
         require_no_risky_drops: bool,
     ) -> PrecompileSummary:
         """Run the coverage and guard gates, or raise saying which one failed."""
-        summary = self.summary()
+        entry, eager = self._served_entry()
+        summary = self._summary_of(entry, eager)
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped guard(s) that can affect dispatch on "
@@ -2028,22 +2047,15 @@ class PrecompileSession(Generic[_P, _R]):
                 f"risk explicitly."
             )
         if require_complete:
-            entry = self._package.cache_entry()
             if _is_variantless_entry_fallback(entry):
                 # The artifact build refuses this too, so require_complete=False
                 # is no way out; say so rather than suggest it. Checked first:
                 # the entry did run, and the later gates either suggest
                 # require_complete=False or say it never ran.
+                name = entry.codes[0].python_code.co_name
                 raise PackageError(
-                    f"Precompilation has no variant of the entry frame "
-                    f"{entry.codes[0].python_code.co_name!r}: Dynamo gave up on it "
-                    f"at its first call, because of a graph break it cannot resume "
-                    f"from (such as one inside a loop; check TORCH_LOGS=graph_breaks), "
-                    f"because it is a generator, because it raised a UserError "
-                    f"Dynamo suppressed, or because the backend raised SkipFrame. "
-                    f"The artifact build refuses that whatever "
-                    f"require_complete says: fix that, or capture the functions the "
-                    f"entry calls instead."
+                    f"{_variantless_entry_fallback_message(name)} The artifact build "
+                    f"refuses this whatever require_complete says."
                 )
             if summary.capture_errors:
                 raise PackageError(

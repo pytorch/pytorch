@@ -2209,6 +2209,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
     no guarded code (a thin wrapper).
     """
     from torch._dynamo.package import SerializedCode
+    from torch._dynamo.precompile_package import _variantless_entry_fallback_message
 
     entry_frame = next((f for f in frames if f["is_entry"]), None)
     if entry_frame is None:
@@ -2227,17 +2228,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"restructuring the captured callable."
         )
     if entry_frame["eager_fallback"] and not entry_frame["variants"]:
-        raise PrecompileError(
-            f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
-            f"Dynamo gave up on the entry frame on its first call, so it holds no "
-            f"variant to serve. Either it hit a graph break it cannot resume from, "
-            f"such as one inside a loop (check TORCH_LOGS=graph_breaks; remove that "
-            f"graph break), or Dynamo refused to trace it at all, as for a "
-            f"generator, or Dynamo suppressed a UserError it raised, or the "
-            f"backend declined the graph by raising SkipFrame "
-            f"(check the backend's log). Fix that, or capture the functions the "
-            f"entry calls instead."
-        )
+        raise PrecompileError(_variantless_entry_fallback_message(entry.fn_name))
     if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
@@ -3537,8 +3528,11 @@ def load(
     Either kind of artifact runs a call eagerly instead of refusing it when the
     missed frame is one Dynamo gave up on during the capture (listed in
     ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in
-    the artifact's ``FRAMES``), since the capture ran that frame eagerly too;
-    it logs a warning the first time each such frame misses. Under an
+    the artifact's ``FRAMES``), since the capture ran that frame eagerly too.
+    A frame that kept variants logs a warning the first time a call misses
+    them; one that compiled none is served as plain Python from the start, as
+    a trivial frame is, with no warning, since there is no compiled code to
+    lose. Under an
     installed artifact only that frame runs eagerly: the frames it calls still
     dispatch to their own variants. A standalone artifact runs the whole call
     as plain Python, since the frame's original bytecode never reaches its
