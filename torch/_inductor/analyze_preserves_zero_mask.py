@@ -60,10 +60,13 @@ class PreservesZeros(SymPyOps, DefaultHandler):
         use_compute_types: bool = True,
     ) -> TypedExpr:
         result = SymPyOps.to_dtype(value, dtype, src_dtype, use_compute_types)
-        if result is NotImplemented:
-            # SymPyOps does not fold a rounding cast; stay conservative.
-            return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
-        return result
+        if result is not NotImplemented:
+            return result
+        # SymPyOps keeps a rounding cast to float16 or bfloat16 unfolded. Rounding
+        # leaves a zero exact; anything else becomes unknown.
+        if value.is_constant() and value.expr == 0:
+            return TypedExpr(value.expr, dtype)
+        return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
 
     def _default(
         self, name: str, args: tuple[object, ...], kwargs: dict[str, object]

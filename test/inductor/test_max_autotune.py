@@ -5886,10 +5886,18 @@ class TestPrologueFusion(TestCase):
         from torch._inductor.index_propagation import TypedExpr
 
         for dtype in (torch.float16, torch.bfloat16):
+            # Rounding keeps a zero exact.
             analysis = PreservesZeros()
             zero = TypedExpr(sympy.Float(0), torch.float32)
-            # SymPyOps does not fold a rounding cast, so the result may not be zero.
             rounded = analysis.to_dtype(zero, dtype, use_compute_types=False)
+            upcast = analysis.to_dtype(rounded, torch.float32)
+            analysis.store("buf", sympy.Integer(0), upcast)
+            self.assertTrue(analysis.store_preserves_zeros)
+
+            # Rounding a nonzero value cannot be folded, so it is unknown.
+            analysis = PreservesZeros()
+            one = TypedExpr(sympy.Float(1), torch.float32)
+            rounded = analysis.to_dtype(one, dtype, use_compute_types=False)
             upcast = analysis.to_dtype(rounded, torch.float32)
             analysis.store("buf", sympy.Integer(0), upcast)
             self.assertFalse(analysis.store_preserves_zeros)
@@ -5904,6 +5912,12 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+        if config.triton.native_matmul:
+            # native matmul preserves zero mask - need to optimize; see codegen/triton.py
+            FileCheck().check("a =").check("tl.where").check("tl.dot").run(code[0])
+        else:
+            # relu and the rounding cast both keep masked zeros, so no mask is added
+            FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
