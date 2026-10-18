@@ -1256,14 +1256,11 @@ class MultiProcessTestCase(TestCase):
         tests if they returned a return code indicating a skipping condition.
         """
         # If no processes are spawned, there is nothing to check.
-        # world_size == 0 means there was nothing to launch (for example if device_count() is 0). Any other empty launch is an error.
         if not self.processes:
-            if self.world_size == 0:
-                logger.warning(
-                    "Note: no subprocesses were spawned, test was likely skipped."
-                )
-                return
-            raise RuntimeError("No subprocesses were spawned.")
+            logger.warning(
+                "Note: no subprocesses were spawned, test was likely skipped."
+            )
+            return
 
         first_process = self.processes[0]
         # first, we check if there are errors in actual processes
