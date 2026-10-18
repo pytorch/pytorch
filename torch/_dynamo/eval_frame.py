@@ -281,12 +281,14 @@ class _RecompileRefusedError(RuntimeError):
 
 
 def _warn_eager_fallback_miss(code: types.CodeType) -> None:
-    # Once per frame: every miss of it runs eagerly, including call shapes the
-    # capture never ran, so a serving process can tell it lost compiled code.
+    # Once per frame: every miss of it runs the frame eagerly, including call
+    # shapes the capture never ran, so a serving process can tell it lost
+    # compiled code. Only the frame itself: under an installed artifact its
+    # callees still dispatch to their own variants, and refuse a miss.
     torch._logging._internal.warning_once(
         log,
         "precompile: no captured variant of %s (%s:%s) matches this call; running "
-        "it eagerly, as the capture did after Dynamo gave up on the frame",
+        "this frame eagerly, as the capture did after Dynamo gave up on it",
         code.co_name,
         code.co_filename,
         code.co_firstlineno,
