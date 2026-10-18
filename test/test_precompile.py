@@ -523,7 +523,7 @@ class TestPrecompile(TestCase):
         def helper(x):
             return x
 
-        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False, **kw):
             return _DynamoCodeCacheEntry(
                 python_code=SerializedCode.from_code_object(fn.__code__),
                 python_module=__name__,
@@ -534,18 +534,20 @@ class TestPrecompile(TestCase):
                 code_source=None,
                 install_to_global=resume_name is not None,
                 bypassed=bypassed,
+                **kw,
             )
 
         variant = _GuardedCodeCacheEntry(
             guards_state=b"",
             dynamo_code=SerializedCode.from_code_object(helper.__code__),
         )
+        fallback = {"variants": [variant], "eager_fallback": True}
         entry = _DynamoCacheEntry(
             codes=[
                 code_entry(forward, variants=[variant], bypassed=True),
                 code_entry(forward),  # a submodule's forward: same co_name
-                code_entry(helper, "__resume_at_12_3", [variant]),
-                code_entry(helper, "__resume_at_40_7", [variant], bypassed=True),
+                code_entry(helper, "__resume_at_12_3", **fallback),
+                code_entry(helper, "__resume_at_40_7", bypassed=True, **fallback),
             ],
             source_info=SourceInfo(inlined_sources=set()),
             device_type="cpu",
@@ -554,6 +556,10 @@ class TestPrecompile(TestCase):
         frames = _multigraph_frames(entry)
         self.assertEqual([f["is_entry"] for f in frames], [True, False, False, False])
         self.assertEqual([f["bypassed"] for f in frames], [True, False, False, True])
+        # A bypassed code serves nothing, so it is never an eager fallback.
+        self.assertEqual(
+            [f["eager_fallback"] for f in frames], [False, False, True, False]
+        )
         self.assertEqual(
             [f["resume_names"] for f in frames],
             [[], [], ["__resume_at_12_3"], ["__resume_at_40_7"]],
