@@ -63,7 +63,6 @@ from torch._dynamo.graph_bytecode_inputs import (
 )
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
-from torch._functorch._aot_autograd.runtime_wrappers import current_autograd_invocation
 from torch._higher_order_ops.cudagraph_conditional_nodes import (
     ControlFlowOpWarmupDispatchMode,
     CUDAGraphCaptureControlFlowOpDispatchMode,
@@ -1192,8 +1191,13 @@ class CUDAGraphNode:
         inputs.clear()
         del inputs
 
+        num_rng_states = max(
+            8, 1 + sum(isinstance(x, torch.Generator) for x in recording_inputs)
+        )
         self.graph: torch.cuda.CUDAGraph | None = (
-            None if wrapped_function.kernel_free_cudagraph else torch.cuda.CUDAGraph()
+            None
+            if wrapped_function.kernel_free_cudagraph
+            else torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
         )
 
         # we allocate non-static inputs within the same memory pool as the CUDAGraph
@@ -2536,19 +2540,6 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
-        # Autograd invocations whose forward call set holds_tree_memory. An
-        # uncaptured backward only transitions the generation if its own
-        # invocation is here (see maybe_handle_backward_generation); a fallback
-        # that ran while the generation was already pending leaves that to the
-        # call that made it pending. Held weakly, because a call whose backward
-        # is captured, or never runs, is never removed.
-        self.pending_invocations: weakref.WeakSet[Any] = weakref.WeakSet()
-        # Whether the current run() holds memory the tree owns that its backward
-        # may still read: it ran in the tree (warmup, recording or replay), or it
-        # fell back to the eager model with inputs the tree owns, which it may
-        # have saved for its backward. A fallback is only checked while no other
-        # forward keeps the generation pending.
-        self.holds_tree_memory = False
         self.has_live_user_visible_output_cloning = False
 
         # Note: [Backward Generation Handling]
@@ -2581,15 +2572,11 @@ class CUDAGraphTreeManager:
             raise AssertionError("Running CUDAGraph after shutdown")
         self.mode = self.id_to_mode[function_id]
         self.compile_id = self.id_to_compile_id[function_id]
-        self.holds_tree_memory = False
         out = self._run(new_inputs, function_id)
 
-        # The forwards are only pending following invocation, not before, and
-        # only if they hold tree memory: a forward that ran eagerly on inputs the
-        # tree doesn't own left nothing here for a new generation to overwrite.
+        # The forwards are only pending following invocation, not before
         if self.mode == CompilationMode.FORWARD:
-            if self.holds_tree_memory:
-                self.running_forwards_with_pending_backwards = True
+            self.running_forwards_with_pending_backwards = True
         elif self.mode == CompilationMode.BACKWARD:
             self.running_forwards_with_pending_backwards = False
 
@@ -2730,7 +2717,7 @@ class CUDAGraphTreeManager:
         if self.skip_cudagraph[node_id][function_id] or self.exceed_rerecord_limit(
             node_id, function_id
         ):
-            return self._run_fallback(new_inputs, function_id)
+            return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
@@ -2809,7 +2796,7 @@ class CUDAGraphTreeManager:
             if len(self.ids_to_funcs[function_id].mutated_input_idxs) > 0:
                 self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
                 if self.skip_cudagraph[self._get_node_id()][function_id]:
-                    return self._run_fallback(new_inputs, function_id)
+                    return self.ids_to_funcs[function_id].model(new_inputs)
 
             demotable_cudagraph_managed_idxs: OrderedSet[int] = OrderedSet()
             if children := child_nodes[function_id]:
@@ -2845,7 +2832,7 @@ class CUDAGraphTreeManager:
                         f"on cudagraph node {_id} for input indices "
                         f"{list(skip_cudagraph_managed_input_idxs)}."
                     )
-                    return self._run_fallback(new_inputs, function_id)
+                    return self.ids_to_funcs[function_id].model(new_inputs)
 
                 if self.exceed_rerecord_limit(curr_node_id, function_id):
                     _id = curr_node_id.id if curr_node_id else None
@@ -2866,7 +2853,7 @@ class CUDAGraphTreeManager:
                         f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
                         f"on cudagraph node {_id} due to {reason}."
                     )
-                    return self._run_fallback(new_inputs, function_id)
+                    return self.ids_to_funcs[function_id].model(new_inputs)
 
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
@@ -2900,40 +2887,11 @@ class CUDAGraphTreeManager:
         self.roots = None  # type: ignore[assignment]
         self.current_node = None
 
-    def _note_holds_tree_memory(self) -> None:
-        self.holds_tree_memory = True
-        invocation = current_autograd_invocation()
-        if self.mode == CompilationMode.FORWARD and invocation is not None:
-            self.pending_invocations.add(invocation)
-
-    def _run_fallback(
-        self, new_inputs: list[InputType], function_id: FunctionID
-    ) -> OutputType:
-        # The call runs eagerly, but a forward can still save inputs the tree owns
-        # for its backward, which a new generation must not overwrite first. Each
-        # lookup scans the tree path, so skip the check when another forward
-        # already keeps the generation pending, and skip static inputs
-        # (parameters and buffers), which are never tree outputs.
-        if (
-            self.mode == CompilationMode.FORWARD
-            and not self.running_forwards_with_pending_backwards
-        ):
-            is_tree_owned = self._get_cuda_graph_recorded_tensor_checker()
-            static_idxs = OrderedSet(self.ids_to_funcs[function_id].static_input_idxs)
-            if any(
-                isinstance(t, torch.Tensor) and is_tree_owned(t)
-                for i, t in enumerate(new_inputs)
-                if i not in static_idxs
-            ):
-                self._note_holds_tree_memory()
-        return self.ids_to_funcs[function_id].model(new_inputs)
-
     def record_function(
         self, new_inputs: list[InputType], function_id: FunctionID
     ) -> OutputType:
         if isinstance(self.current_node, CUDAWarmupNode):
             raise AssertionError("expected current_node to not be a CUDAWarmupNode")
-        self._note_holds_tree_memory()
         with torch._dynamo.callback_handler.install_callbacks(
             CallbackTrigger.CUDAGRAPH_RECORDING, str(self.compile_id)
         ):
@@ -2974,7 +2932,6 @@ class CUDAGraphTreeManager:
     def execute_node(
         self, node: CUDAGraphNode, new_inputs: list[InputType]
     ) -> OutputType:
-        self._note_holds_tree_memory()
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
@@ -2985,7 +2942,6 @@ class CUDAGraphTreeManager:
     ) -> OutputType:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
-        self._note_holds_tree_memory()
         already_warm = function_id in self.warmed_up_functions
         func_name = self.get_func_name(function_id)
         if not already_warm:
