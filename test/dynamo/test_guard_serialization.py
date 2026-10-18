@@ -5412,16 +5412,15 @@ class TestGuardSerialization(TestGuardSerializationBase):
             backend="gloo", rank=0, world_size=1, init_method=f"file://{tmpfile.name}"
         )
         try:
+            unsupported = frozenset(
+                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            )
 
             def foo(ddp, x):
                 return ddp(x)
 
             def bar(ddp, x):
                 return ddp.module(x)
-
-            unsupported = frozenset(
-                torch._dynamo.guards.CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-            )
 
             def guards_state(fn, ddp_model, x):
                 package = CompilePackage(fn)
