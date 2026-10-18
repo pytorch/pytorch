@@ -30,7 +30,7 @@ namespace mps {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
-#include <ATen/native/mps/LayerNorm_metallib.h>
+#include <ATen/native/mps/Normalization_metallib.h>
 #endif
 
 static void get_shapes(MPSShape* input_shape_readonly,
