@@ -57,6 +57,7 @@ const ActivityTypeMap kXpuTypes{
     // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
     {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
     {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
+    {libkineto::ActivityType::XPU_SYNC,              "XPU_SYNC"},
     {libkineto::ActivityType::OVERHEAD,              "OVERHEAD"},
 };
 
@@ -557,6 +558,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_RUNTIME:
     case libkineto::ActivityType::XPU_RUNTIME:
     case libkineto::ActivityType::XPU_DRIVER:
+    case libkineto::ActivityType::XPU_SYNC:
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::MTIA_RUNTIME:
