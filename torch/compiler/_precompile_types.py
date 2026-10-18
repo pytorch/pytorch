@@ -141,12 +141,12 @@ class PrecompileSummary:
             ``bypassed`` minus the frames that hold guarded code.
         eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame
             Dynamo gave up on during the capture and ran eagerly from then on: a
-            graph break it could not resume from (such as one inside a loop), or
-            a backend that declined the graph by raising ``SkipFrame``. A
-            ``UserError`` (a misused Dynamo API) Dynamo suppressed, or a compile
-            error ``suppress_errors=True`` swallows, is not one: Dynamo skips
-            that frame too, but it stays in ``uncovered_frames`` so the failure
-            is seen.
+            graph break it could not resume from (such as one inside a loop), a
+            ``UserError`` Dynamo suppressed by skipping the frame, as it does an
+            unresumable graph break, or a backend that declined the graph by
+            raising ``SkipFrame``. A compile error ``suppress_errors=True``
+            swallows is not one: Dynamo skips that frame too, but it stays in
+            ``uncovered_frames`` so the failure is seen.
             Not a gap, and not in ``uncovered_frames``: a load serves the
             variants its earlier calls compiled, if any, and runs any call they
             miss eagerly, logging a warning once per frame (the capture skipped

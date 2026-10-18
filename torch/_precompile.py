@@ -245,8 +245,10 @@ it.
 # installed (see load()); either way it is locked to the producing Python version and
 # torch build, since it inlines serialized bytecode and pickled guard state. Invariants 1, 2, 3 and 6 above
 # are the make_fx contract; under Dynamo a call outside the captured variants is
-# REFUSED by the guards rather than silently served, and the guards that could not be
-# serialized are reported (PrecompileSummary.dropped_guards) rather than checked.
+# REFUSED by the guards rather than silently served, except in a frame Dynamo gave up
+# on during the capture (PrecompileSummary.eager_fallbacks), which runs that call
+# eagerly as the capture did; and the guards that could not be serialized are
+# reported (PrecompileSummary.dropped_guards) rather than checked.
 
 from __future__ import annotations
 
@@ -2231,7 +2233,8 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"variant to serve. Either it hit a graph break it cannot resume from, "
             f"such as one inside a loop (check TORCH_LOGS=graph_breaks; remove that "
             f"graph break), or Dynamo refused to trace it at all, as for a "
-            f"generator, or the backend declined the graph by raising SkipFrame "
+            f"generator, or Dynamo suppressed a UserError it raised, or the "
+            f"backend declined the graph by raising SkipFrame "
             f"(check the backend's log). Fix that, or capture the functions the "
             f"entry calls instead."
         )
@@ -3379,7 +3382,9 @@ def capture(
     exercise, takes as many calls as you make (keyword arguments included), and
     the artifact dispatches among the captured variants by their guards -- a call
     no variant covers RAISES rather than silently serving, since there is no
-    compiler behind a source artifact. :class:`MakeFxTracer` is one non-strict
+    compiler behind a source artifact, unless Dynamo gave up on that frame
+    during the capture (``PrecompileSummary.eager_fallbacks``): the capture ran
+    that frame eagerly, so the call runs eagerly too. :class:`MakeFxTracer` is one non-strict
     ATen trace: the capture takes exactly ONE positional call, refuses a second,
     and specializes control flow and shapes to that call, with the contract of
     Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
@@ -3527,6 +3532,13 @@ def load(
     load it in a fresh process. That check runs only at load: compiling those
     frames after load adds live entries that serve the calls the installed
     ones miss.
+
+    Either kind of artifact runs a call eagerly instead of refusing it when the
+    missed frame is one Dynamo gave up on during the capture (listed in
+    ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in
+    the artifact's ``FRAMES``), since the capture ran that frame eagerly too;
+    it logs a warning the first time each such frame misses. Only that frame
+    runs eagerly: the frames it calls still dispatch to their own variants.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve

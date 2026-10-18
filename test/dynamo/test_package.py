@@ -570,12 +570,11 @@ print(eval(f"bbmod.{name}.{path}") is code)
                     compiled_fn(x, 1)
             package.uninstall()
 
-    def test_a_suppressed_user_error_is_not_an_eager_fallback(self):
+    def test_a_suppressed_user_error_is_an_eager_fallback(self):
         def fn(x, branch):
             if branch:
                 # Tracing this raises a UserError, which Dynamo suppresses and
-                # skips the frame for, but it is a misused Dynamo API, so it stays
-                # a coverage gap; eager raises TypeError.
+                # skips the frame for, as for Unsupported; eager raises TypeError.
                 try:
                     torch._dynamo.decorators.override_optimization_hint(x, 1)
                 except TypeError:
@@ -588,7 +587,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         compiled_fn(x, False)
         self.assertEqual(compiled_fn(x, True), x.sin())
         entry = package._codes[fn.__code__]
-        self.assertFalse(entry.eager_fallback)
+        self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
 
     def test_a_backend_skip_is_an_eager_fallback(self):

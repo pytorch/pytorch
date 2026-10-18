@@ -421,7 +421,9 @@ def _build_multigraph_forward():
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
     calls it captured, and anything else is a coverage gap the caller has to
-    hear about.
+    hear about. The exception is a frame Dynamo gave up on during the capture
+    (eager_fallback): the capture ran its other calls eagerly, so a miss of it
+    runs eagerly here too, with a warning once per frame.
     """
     import base64
     import hashlib
