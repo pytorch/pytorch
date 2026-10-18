@@ -590,6 +590,8 @@ def _build_multigraph_forward():
         # from f_locals and every guard on it misses.
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
+        # Capture ran a call its variants missed eagerly (see _multigraph_frames).
+        eager_fallback = frame.get("eager_fallback", False)
 
         def _function(code, closure):
             f = types.FunctionType(code, scope, target.co_name, defaults, closure)
@@ -659,9 +661,6 @@ def _build_multigraph_forward():
                 f"captured: the artifact serves only what capture exercised, so add "
                 f"an example covering it and recapture."
             )
-
-        # Capture ran a call its variants missed eagerly (see _multigraph_frames).
-        eager_fallback = frame.get("eager_fallback", False)
 
         def _bind(closure):
             return [(manager, _function(body, closure)) for manager, body in variants]
