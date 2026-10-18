@@ -407,17 +407,14 @@ def _tensorify_impl(
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
-    # This cleanup bypasses Graph.eliminate_dead_code, so it must also keep
-    # the producers needed by deferred assertions.
-    assertion_bindings = shape_env._get_deferred_assertion_bindings(graph)
+    graph.eliminate_dead_code(is_impure_node=lambda node: node.is_impure())
+    specialized_nodes = False
     for node in reversed(graph.nodes):
         if node.op == "output" or node.op == "placeholder":
             continue
 
         with graph.inserting_before(node):
             if len(node.users) == 0 and not node.is_impure():
-                if node not in assertion_bindings:
-                    graph.erase_node(node)
                 continue
 
             if isinstance(
@@ -446,6 +443,10 @@ def _tensorify_impl(
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
+                    specialized_nodes = True
+
+    if specialized_nodes:
+        graph.eliminate_dead_code(is_impure_node=lambda node: node.is_impure())
 
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,

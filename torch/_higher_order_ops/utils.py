@@ -233,7 +233,10 @@ def reenter_make_fx(fn, subgraph_decomp_table=None):
                 "Cannot reenter make_fx when we're not under a make_fx tracing session"
             )
         mode = detect_fake_mode(args)
-        with mode.isolate_symbolic_memos() if mode is not None else nullcontext():
+        # A subgraph must not reuse an unbacked memo from its parent or siblings.
+        if mode is not None:
+            mode.epoch += 1
+        try:
             if subgraph_decomp_table is None:
                 gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
                     _maybe_run_with_interpreter(fn), *args
@@ -242,6 +245,9 @@ def reenter_make_fx(fn, subgraph_decomp_table=None):
                 gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph_custom_decomp(
                     _maybe_run_with_interpreter(fn), subgraph_decomp_table, *args
                 )
+        finally:
+            if mode is not None:
+                mode.epoch += 1
 
         return gm
 

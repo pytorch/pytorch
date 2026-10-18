@@ -1407,31 +1407,11 @@ def _is_unbacked_symbol_memo(memo: object) -> bool:
 def _bind_fresh_equal_to_memo(
     fake_mode: FakeTensorMode, fresh: object, memo: object
 ) -> None:
-    # Why a memo hit does not just return the memoized symbol:
-    #
-    # If item()/nonzero()/unique() is called twice on the same fake tensor, the
-    # second call hits the memo. Returning the memoized symbol would make both
-    # calls share one symbol, which breaks retracing. For example:
-    #
-    #   original graph: two item() calls       -> u0, u1
-    #   after CSE both calls read the same tensor, so on retrace the second
-    #   call hits the memo: both item() calls  -> u6
-    #
-    # Retracing maps each new symbol back to the original one, call site by
-    # call site (u6 -> u0, then u6 -> u1), and assumes this is one-to-one. With
-    # one shared u6, either u0 or u1 is left with no call site producing it,
-    # and any code that still refers to it breaks (#187415).
-    #
-    # So every call gets its own fresh symbol (u6, u7), and the memo is only
-    # used to record that they are equal (u7 == u6). The memo tells us the two
-    # values are equal; it should not merge their symbols. The equality is
-    # recorded as a replacement with no runtime assert, since it holds by
-    # construction.
+    # Retracing needs a fresh symbol per call site, even when CSE merges their
+    # inputs. Record the memo equality without merging their binding identities
+    # or adding a runtime assertion: the values are equal by construction.
     fake_mode.shape_env._eliminate_unbacked(fresh.node._expr, memo.node.expr)  # type: ignore[union-attr]
-    # The fresh symbol may not show up in the op's output: x.repeat(d) calls
-    # item() on d internally, and the output size simplifies to the memoized
-    # symbol. That is fine, so do not raise PendingUnbackedSymbolNotFound for
-    # it. If it does show up (e.g. the item() node itself), it is still bound.
+    # Internal item() calls may not expose the fresh symbol in the op's output.
     fake_mode.shape_env.ignorable_fresh_unbacked_symbols.append(fresh.node._expr)  # type: ignore[union-attr]
 
 

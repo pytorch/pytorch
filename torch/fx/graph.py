@@ -2751,7 +2751,7 @@ class Graph:
         # Checks waiting in ShapeEnv still need their input producers, even
         # though those uses are not represented in node.users yet.
         shape_env = None
-        assertion_bindings: dict[Node, OrderedSet[sympy.Symbol]] = {}
+        assertion_nodes: OrderedSet[Node] = OrderedSet()
         if any(node.meta.get("unbacked_bindings") for node in self.nodes):
             values = [
                 node.meta.get("val", node.meta.get("example_value"))
@@ -2760,7 +2760,7 @@ class Graph:
             fake_mode = torch._guards.detect_fake_mode(values)
             if fake_mode is not None and fake_mode.shape_env is not None:
                 shape_env = fake_mode.shape_env
-                assertion_bindings = shape_env._get_deferred_assertion_bindings(self)
+                assertion_nodes = shape_env._get_deferred_assertion_nodes(self)
 
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
@@ -2770,7 +2770,7 @@ class Graph:
             if (
                 not has_side_effect(node)
                 and len(node.users) == 0
-                and node not in assertion_bindings
+                and node not in assertion_nodes
             ):
                 self.erase_node(node)
                 removed_nodes.add(node.name)
@@ -2779,10 +2779,9 @@ class Graph:
         if changed:
             log.info("The following nodes were dead code eliminated: %s", removed_nodes)
 
-        # A deleted memo producer can still be a replacement's terminal.
-        # Bind that symbol at a surviving equal producer after DCE.
+        # Earlier tracing passes may also have discarded a memo producer.
         if shape_env is not None:
-            shape_env._repair_unbacked_bindings(self)
+            changed |= shape_env._repair_unbacked_bindings(self)
 
         # Call DCE on the subgraphs
         if self.owning_module is not None:

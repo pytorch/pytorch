@@ -464,24 +464,11 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
         x = torch.randn(3, 4, 4, device=device, requires_grad=True)
         y = torch.randn(3, 4, 4, device=device, requires_grad=True)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x, y), f(x, y))
-
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_repeated_bool_mask_unbacked_binding(self, device):
-        def f(mask, x, y, z):
-            return (
-                x[:, mask & mask].sum()
-                + y[:, mask & mask].sum()
-                + z[:, mask & mask].sum()
-            )
-
-        mask = torch.eye(4, dtype=torch.bool, device=device)
-        tensors = [
-            torch.randn(3, 4, 4, device=device, requires_grad=True) for _ in range(3)
-        ]
-        self.assertEqual(
-            torch.compile(f, fullgraph=True)(mask, *tensors), f(mask, *tensors)
-        )
+        actual = torch.compile(f, fullgraph=True)(x, y)
+        expected = f(x, y)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected, (x, y))
+        self.assertEqual(torch.autograd.grad(actual, (x, y)), expected_grads)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_independent_bool_mask_unbacked_bindings(self, device):
@@ -514,6 +501,20 @@ class TestInductorDynamic(DynamicShapesTestCase):
         y = torch.randn(8, device=device, requires_grad=True)
         z = torch.tensor([0.5, 0.7, 1.7, 3.2, 3.9, 0.1], device=device)
         self.assertEqual(torch.compile(f, fullgraph=True)(x, y, z), f(x, y, z))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_dce_memoized_item(self, device):
+        def f(n, x):
+            n.item()
+            return x * n.item()
+
+        n = torch.tensor(3, device=device)
+        x = torch.randn(5, device=device, requires_grad=True)
+        actual = torch.compile(f, fullgraph=True)(n, x)
+        expected = f(n, x)
+        self.assertEqual(actual, expected)
+        expected_grads = torch.autograd.grad(expected.sum(), x)
+        self.assertEqual(torch.autograd.grad(actual.sum(), x), expected_grads)
 
     def test_adaptive_max_pool3d_with_indices(self, device):
         x = 5

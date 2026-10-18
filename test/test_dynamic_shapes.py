@@ -4251,6 +4251,101 @@ def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
 class TestUnbacked(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("op", ["item", "nonzero"])
+    @parametrize("deleted_count", [1, 2])
+    @parametrize("cleanup", ["dce", "tensorify", "prior_erase"])
+    def test_dce_rewrites_memo_symbol_uses(self, op, deleted_count, cleanup):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
+
+        def fn(x):
+            for _ in range(deleted_count):
+                getattr(x, op)()
+            result = getattr(x, op)()
+            return result + 1 if op == "item" else torch.cat((result, result))
+
+        with fake_mode:
+            x = torch.empty((), dtype=torch.int64) if op == "item" else torch.empty(4)
+            gm = make_fx(fn, tracing_mode="fake")(x)
+        producers = [n for n in gm.graph.nodes if n.meta.get("unbacked_bindings")]
+        old = next(iter(producers[0].meta["unbacked_bindings"]))
+        survivor = producers[-1]
+        bindings = survivor.meta["unbacked_bindings"].copy()
+        new = next(iter(bindings))
+        output = gm.graph.output_node().args[0]
+        value = output.meta["val"]
+        sym_value = value if op == "item" else value.shape[0]
+        self.assertIn(old, sym_value.node._expr.free_symbols)
+        self.assertEqual(shape_env._find(new), old)
+        self.assertIn(old, sym_value.node.expr.free_symbols)
+
+        if cleanup == "prior_erase":
+            for producer in producers[:-1]:
+                gm.graph.erase_node(producer)
+        if cleanup == "tensorify":
+            from torch.fx.passes._tensorify_python_scalars import _tensorify_impl
+
+            _tensorify_impl(gm, shape_env, fake_mode)
+            self.assertFalse(gm.graph.eliminate_dead_code())
+        else:
+            self.assertTrue(gm.graph.eliminate_dead_code())
+        gm.graph.lint()
+        self.assertEqual(survivor.meta["unbacked_bindings"], bindings)
+        self.assertNotIn(old, sym_value.node._expr.free_symbols)
+        self.assertIn(new, sym_value.node._expr.free_symbols)
+        self.assertEqual(shape_env._find(old), new)
+        self.assertEqual(shape_env._find(new), new)
+        self.assertIn(new, sym_value.node.expr.free_symbols)
+        self.assertFalse(gm.graph.eliminate_dead_code())
+
+    def test_dce_preserves_raw_placeholder_symbol(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
+        values = [shape_env.create_unbacked_symint() for _ in range(4)]
+        original, renamed, terminal, survivor = values
+        old, alias, root, new = [v.node._expr for v in values]
+        shape_env._rename_unbacked_to(old, alias)
+        shape_env._eliminate_unbacked(alias, root)
+        shape_env._eliminate_unbacked(new, root)
+        with fake_mode:
+            x = torch.empty((), dtype=torch.int64)
+
+        graph = torch.fx.Graph()
+        tensor_input = graph.placeholder("x")
+        tensor_input.meta["val"] = x
+        placeholder = graph.placeholder("shape")
+        placeholder.meta["val"] = {"tensor": x, "symbol": original}
+        producer = graph.call_function(
+            aten._local_scalar_dense.default, (tensor_input,)
+        )
+        producer.meta = {"val": survivor, "unbacked_bindings": {new: ()}}
+        graph.output((placeholder, producer))
+        self.assertTrue(graph.eliminate_dead_code())
+        self.assertEqual(original.node._expr, old)
+        self.assertEqual(producer.meta["unbacked_bindings"], {new: ()})
+        self.assertFalse(graph.eliminate_dead_code())
+
+    def test_dce_keeps_deferred_assertion_inputs(self):
+        shape_env = ShapeEnv()
+        fake_mode = torch._subclasses.FakeTensorMode(shape_env=shape_env)
+
+        def fn(x, y):
+            a, b = x.item(), y.item()
+            torch._check(a == b)
+            return x + y
+
+        with fake_mode:
+            args = [torch.empty((), dtype=torch.int64) for _ in range(2)]
+            gm = make_fx(fn, tracing_mode="fake")(*args)
+        gm.graph.eliminate_dead_code()
+        from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+        insert_deferred_runtime_asserts(gm, shape_env, "test_dce")
+        gm.recompile()
+        gm(torch.tensor(2), torch.tensor(2))
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            gm(torch.tensor(2), torch.tensor(3))
+
     def test_rebind_unbacked_to_symbolic_expression(self):
         shape_env = ShapeEnv()
         fake_mode = torch._subclasses.FakeTensorMode(
