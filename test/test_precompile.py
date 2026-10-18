@@ -5039,7 +5039,8 @@ class TestPrecompileDynamoCapture(TestCase):
 
         # require_complete refuses it, before the build's own refusal would.
         with self.assertRaisesRegex(
-            torch.compiler.PrecompileError, r"NO guarded code at all: \['entry'\]"
+            torch.compiler.PrecompileError,
+            r"NO guarded code at all: \['entry'\](?s:.*)given up on it at its first call",
         ):
             with self._capture(entry, backend="eager") as cap:
                 cap(self.model, self.x2)
