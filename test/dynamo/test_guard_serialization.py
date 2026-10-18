@@ -297,7 +297,8 @@ class _ReducesFromAMissingModule:
         return "_ReducesFromAMissingModule"
 
 
-# Module globals, so the identity check gets as far as reducing them.
+# Module globals, so the identity check gets past its module-globals scan; the
+# last one is refused there anyway, since its __module__ is not imported.
 _REDUCES_TO_ANOTHER_GLOBAL = _ReducesToAnotherGlobal()
 _REDUCES_TO_A_MISSING_NAME = _ReducesToAMissingName()
 _REDUCES_FROM_A_MISSING_MODULE = _ReducesFromAMissingModule()
@@ -5540,6 +5541,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 param_to_hook_all_reduce=module[0].weight,
             )
             self.assertFalse(hasattr(ddp_model, "reducer"))
+            # DDP's own pickling still refuses it, at dump rather than at load.
+            with self.assertRaisesRegex(RuntimeError, "every parameter is delayed"):
+                pickle.dumps(ddp_model)
             x = torch.randn(4, 10)
             state = guards_state(ddp_model, x, bar)
             loaded = torch._dynamo.package.load_guard_manager(

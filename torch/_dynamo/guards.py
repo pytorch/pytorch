@@ -5645,8 +5645,9 @@ def _pickles_as_its_own_global(value: object) -> bool:
         module_name = getattr(value, "__module__", None)
         module = sys.modules.get(module_name) if isinstance(module_name, str) else None
         # The reduction is user code, possibly O(size), and this runs per guard:
-        # only reduce a value that is one of its module's own globals.
-        if module is None or not any(v is value for v in vars(module).values()):
+        # only reduce a value that is one of its module's own globals. list()
+        # snapshots the dict, which another thread may grow mid-scan.
+        if module is None or not any(v is value for v in list(vars(module).values())):
             return False
         name = reduce(value) if reduce else value.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
         if not isinstance(name, str):

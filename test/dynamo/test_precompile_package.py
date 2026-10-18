@@ -378,11 +378,18 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ("CLOSURE_MATCH", _Doubling.apply, True),
             ("ID_MATCH", LocalFn.apply, False),
             ("CLOSURE_MATCH", LocalFn.apply, False),
-            ("ID_MATCH", typing.List, True),  # noqa: UP006
         ]
         entries = [_entry(GlobalSource("apply"), v, t) for t, v, _ in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(keep), [k for _, _, k in rows])
+
+    def test_default_guard_filter_keeps_a_typing_alias(self):
+        # typing.List pickles as the global typing.List; typing.List[int] does
+        # not, it reduces to a constructor call.
+        rows = [(typing.List, True), (typing.List[int], False)]  # noqa: UP006
+        entries = [_entry(GlobalSource("_ALIAS"), v, "ID_MATCH") for v, _ in rows]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(list(keep), [k for _, k in rows])
 
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):

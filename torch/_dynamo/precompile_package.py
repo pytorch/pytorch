@@ -236,12 +236,14 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     its object unpickles by reference to the loading process's own: a module
     that is its ``sys.modules`` entry, a class or function that its
     ``__module__`` and ``__qualname__`` lead back to, a member of such an
-    enum, or an object whose reduction (its ``copyreg.dispatch_table`` entry,
-    else ``__reduce_ex__``) names the module global that is the object itself,
-    such as ``typing.List``. A ``<locals>`` class, a module missing from
-    ``sys.modules``, a ``functools.wraps`` wrapper and a NamedTuple class
-    nested in a class (the guard-state pickler rebuilds it as a fresh class)
-    are still dropped, and so is a class whose metaclass is nested or local. An object defined in
+    enum, or a top-level global of its ``__module__`` whose class is neither
+    nested nor local and whose reduction (its ``copyreg.dispatch_table``
+    entry, else ``__reduce_ex__``) names that global, such as
+    ``typing.List``. A ``<locals>`` class, a module missing from
+    ``sys.modules``, a ``functools.wraps`` wrapper, a NamedTuple class nested
+    in a class (the guard-state pickler rebuilds it as a fresh class) and a
+    singleton stored as a class attribute are still dropped, and so is a class
+    whose metaclass is nested or local. An object defined in
     ``__main__`` is kept like any other and resolves against the loading
     process's ``__main__``: a serving script that does not define it fails the
     load with an ``AttributeError`` rather than serving without the guard.
