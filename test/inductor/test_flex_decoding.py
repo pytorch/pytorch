@@ -2276,7 +2276,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options={"fwd_BLOCK_M": 128},
             **kwargs,
         )
-        # Ensure the decode kernel ran: only it reads SAFE_M_BOUNDARY.
+        # Ensure the decode kernel ran: only it tiles GQA-folded rows.
         FileCheck().check("BLOCK_M_PER_HQ").run(code[0])
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
