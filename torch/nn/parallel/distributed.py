@@ -1496,12 +1496,18 @@ class DistributedDataParallel(Module, Joinable):
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
 
+    # The process group and the C++ reducer and logger, which do not pickle.
+    _unpicklable_attrs = ("process_group", "reducer", "logger")
+
+    def _picklable_state(self):
+        attrs = copy.copy(self.__dict__)
+        for name in self._unpicklable_attrs:
+            del attrs[name]
+        return attrs
+
     def __getstate__(self):
         self._check_default_group()
-        attrs = copy.copy(self.__dict__)
-        del attrs["process_group"]
-        del attrs["reducer"]
-        del attrs["logger"]
+        attrs = self._picklable_state()
         # broadcast_buffers is a property; include it for backward compat.
         attrs["broadcast_buffers"] = self.forward_sync_buffers
         return attrs

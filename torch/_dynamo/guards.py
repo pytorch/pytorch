@@ -5268,7 +5268,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
             if is_ddp:
-                return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
+                # Not DDP.__getstate__: its default-process-group check only
+                # protects DDP.__setstate__, which _unpickle_ddp_module never
+                # calls. A guard on a dropped attribute could not be rebuilt
+                # at load, so refuse here, a bypass, rather than save it.
+                for name in obj._unpicklable_attrs:
+                    attr = obj.__dict__.get(name)
+                    if attr is not None and id(attr) in self.guard_tree_values:
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads DistributedDataParallel.{name}, which does not pickle"
+                        )
+                return type(self)._unpickle_ddp_module, (obj._picklable_state(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
@@ -5620,7 +5630,8 @@ def _pickles_as_its_own_global(value: object) -> bool:
         cls = type(value)
         if cls.__qualname__ != cls.__name__:
             # GuardsStatePickler.reducer_override, which pickle tries first,
-            # refuses an instance of a nested or local class.
+            # refuses an instance of a nested or local class unless it is a
+            # tuple; this refuses those tuples too, which only drops a guard.
             return False
         reduce = copyreg.dispatch_table.get(cls)
         if (
