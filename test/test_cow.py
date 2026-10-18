@@ -4,10 +4,14 @@ import contextlib
 import unittest
 
 import torch
+from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_runtime
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     parametrize,
+    requires_cuda_python_bindings,
     run_tests,
+    skipIfRocm,
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TestCase,
@@ -20,8 +24,33 @@ TEST_CUDAMALLOCASYNC = TEST_CUDA and (
 )
 
 
+def _capture_ancestors(stream):
+    info = _check_cuda_bindings(
+        _cuda_bindings_runtime.cudaStreamGetCaptureInfo(stream.cuda_stream)
+    )
+    pending = [int(node) for node in info[3]]
+    ancestors = set()
+    while pending:
+        node = pending.pop()
+        if node in ancestors:
+            continue
+        ancestors.add(node)
+        count = _check_cuda_bindings(
+            _cuda_bindings_runtime.cudaGraphNodeGetDependencies(node)
+        )[-1]
+        if count:
+            parents = _check_cuda_bindings(
+                _cuda_bindings_runtime.cudaGraphNodeGetDependencies(node, count)
+            )[0]
+            pending.extend(int(parent) for parent in parents)
+    return ancestors
+
+
+@unittest.skipUnless(TEST_CUDA_GRAPH, "requires CUDA graph support")
 @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires native allocator stream metadata")
 class TestCOW(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @parametrize("captured", [False, True])
     def test_readonly_sharing(self, device, captured):
         a = torch.cuda.Stream(device=device)
@@ -47,7 +76,7 @@ class TestCOW(TestCase):
 
     @parametrize("captured", [False, True])
     @parametrize("pointer", [False, True])
-    def test_materialize_on_current_stream(self, device, captured, pointer):
+    def test_materialize_on_another_stream(self, device, captured, pointer):
         a = torch.cuda.Stream(device=device)
         b = torch.cuda.Stream(device=device)
         graph = torch.cuda.CUDAGraph()
@@ -80,6 +109,62 @@ class TestCOW(TestCase):
                 self.assertEqual(y, inp + (0 if pointer else 1))
                 self.assertEqual(out, (inp + (0 if pointer else 1)) * 2)
         torch.cuda.current_stream(device).wait_stream(a)
+
+    @skipIfRocm
+    @requires_cuda_python_bindings
+    def test_materialization_does_not_wait_for_operation_stream(self, device):
+        a = torch.cuda.Stream(device=device)
+        b = torch.cuda.Stream(device=device)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(a):
+            with torch.cuda.graph(graph, stream=a):
+                x = torch.ones(1024, device=device)
+                y = x._lazy_clone()
+                b.wait_stream(a)
+                with torch.cuda.stream(b):
+                    before = _capture_ancestors(b)
+                    late = x + 2
+                    late_nodes = _capture_ancestors(b) - before
+                    y.data_ptr()
+                self.assertTrue(late_nodes)
+                self.assertTrue(_capture_ancestors(a).isdisjoint(late_nodes))
+                a.wait_stream(b)
+            graph.replay()
+            self.assertEqual(x, torch.ones_like(x))
+            self.assertEqual(y, x)
+            self.assertEqual(late, torch.full_like(late, 3))
+        torch.cuda.current_stream(device).wait_stream(a)
+
+    @parametrize("resize_to_zero", [False, True])
+    def test_resize_cow_storage(self, device, resize_to_zero):
+        x = torch.ones(8, device=device)
+        y = x._lazy_clone()
+        storage = y.untyped_storage()
+        if resize_to_zero:
+            storage.resize_(0)
+        storage.resize_(64)
+        if resize_to_zero:
+            y.fill_(1)
+        self.assertFalse(torch._C._is_cow_tensor(y))
+        self.assertNotEqual(y.const_data_ptr(), x.const_data_ptr())
+        self.assertEqual(y.sum(), 8)
+        storage.resize_(128)
+        z = y._lazy_clone()
+        y.add_(1)
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(z, x)
+        self.assertEqual(y, torch.full_like(y, 2))
+
+    def test_is_cow_tensor_during_capture(self, device):
+        x = torch.ones(8, device=device)
+        y = x._lazy_clone()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            self.assertTrue(torch._C._is_cow_tensor(x))
+            self.assertTrue(torch._C._is_cow_tensor(y))
+            out = torch.ones(8, device=device)
+        graph.replay()
+        self.assertEqual(out, x)
 
     @parametrize("captured", [False, True])
     @parametrize("lazy_read", [False, True])
@@ -310,36 +395,37 @@ class TestCOW(TestCase):
                 self.assertEqual(y, inp + 1 if steal else torch.full_like(inp, 99))
         torch.cuda.current_stream(device).wait_stream(a)
 
-    def test_completion_does_not_wait_for_later_work(self, device):
+    @skipIfRocm
+    @requires_cuda_python_bindings
+    @parametrize("materialize", [False, True])
+    def test_completion_does_not_wait_for_later_work(self, device, materialize):
         a, b, c = [torch.cuda.Stream(device=device) for _ in range(3)]
-        late = torch.cuda.Event()
+        graph = torch.cuda.CUDAGraph()
         with torch.cuda.stream(a):
-            x = torch.ones(1024, device=device)
-            y = x._lazy_clone()
-            ptr = y.const_data_ptr()
-            b.wait_stream(a)
-            c.wait_stream(a)
-            with torch.cuda.stream(b):
-                x.add_(2)
-                torch._C._cow_record_done(x)
-            # Warm up before queuing the work whose dependency we test.
-            with torch.cuda.stream(c):
-                warmup = torch.ones_like(y)
-                warmup.add_(1)
-            c.synchronize()
-            torch.cuda._sleep(1_000_000_000)
-            late.record(a)
-            try:
+            with torch.cuda.graph(graph, stream=a):
+                x = torch.ones(1024, device=device)
+                y = x._lazy_clone()
+                ptr = y.const_data_ptr()
+                b.wait_stream(a)
+                c.wait_stream(a)
+                with torch.cuda.stream(b):
+                    out = x.add_(2) if materialize else x * 3
+                    torch._C._cow_record_done(x)
+                    self.assertEqual(torch._C._is_cow_tensor(x), not materialize)
+                del x
+                before = _capture_ancestors(a)
+                late = torch.ones(1024, device=device)
+                late_nodes = _capture_ancestors(a) - before
                 with torch.cuda.stream(c):
                     y.add_(1)
-                c.synchronize()
-                self.assertFalse(late.query())
+                self.assertTrue(late_nodes)
+                self.assertTrue(_capture_ancestors(c).isdisjoint(late_nodes))
                 self.assertEqual(y.const_data_ptr(), ptr)
-            finally:
                 a.wait_stream(c)
-                a.synchronize()
-            self.assertEqual(x, torch.full_like(x, 3))
+            graph.replay()
+            self.assertEqual(out, torch.full_like(out, 3))
             self.assertEqual(y, torch.full_like(y, 2))
+            self.assertEqual(late, torch.ones_like(late))
         torch.cuda.current_stream(device).wait_stream(a)
 
     @parametrize("captured", [False, True])
@@ -588,6 +674,17 @@ class TestCOW(TestCase):
 
 
 class TestCOWFallback(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize("name", ["_is_cow_tensor", "_cow_record_done"])
+    def test_fake_tensor_unsupported(self, device, name):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            x = torch.ones(8, device=device)
+            with self.assertRaisesRegex(RuntimeError, "FakeTensors"):
+                getattr(torch._C, name)(x)
+
     def test_clone_on_another_stream(self, device):
         a = torch.cuda.current_stream(device)
         b = torch.cuda.Stream(device=device)
@@ -611,9 +708,7 @@ class TestCOWFallback(TestCase):
         self.assertEqual(y, torch.ones_like(y))
 
 
-instantiate_device_type_tests(
-    TestCOW, globals(), only_for="cuda" if TEST_CUDA_GRAPH else []
-)
+instantiate_device_type_tests(TestCOW, globals(), only_for="cuda")
 instantiate_device_type_tests(TestCOWFallback, globals(), only_for="cuda")
 
 if __name__ == "__main__":

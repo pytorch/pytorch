@@ -11,8 +11,8 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstddef>
+#include <optional>
 #include <utility>
-#include <vector>
 
 namespace c10 {
 
@@ -20,13 +20,12 @@ namespace c10 {
 C10_API void warnDeprecatedDataPtr();
 
 // Used in StorageImpl to store extra metadata.
-// Currently used only for storing a custom error message
-// used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
   // Pointer extraction may materialize without ordering previous readers.
-  // Keep their CUDA backing allocations until the logical storage is released.
-  std::vector<DataPtr> cow_retired_data;
+  // Retain their allocation until completion or storage release. Lazy cloning
+  // falls back to an eager copy while this reference is present.
+  std::optional<DataPtr> cow_retired_data;
 };
 
 namespace impl::cow {
@@ -105,8 +104,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void reset() {
     data_ptr_.clear();
+    clear_materializer();
     if (extra_meta_) {
-      extra_meta_->cow_retired_data.clear();
+      extra_meta_->cow_retired_data.reset();
     }
     size_bytes_ = 0;
     size_bytes_is_heap_allocated_ = false;
@@ -116,8 +116,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
+    clear_materializer();
     if (extra_meta_) {
-      extra_meta_->cow_retired_data.clear();
+      extra_meta_->cow_retired_data.reset();
     }
   }
 
@@ -155,10 +156,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const at::DataPtr& data_ptr() const {
-    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
-      throw_data_ptr_access_error();
-    }
-    if (C10_UNLIKELY(materialize_fn_ == &impl::cow::materialize_cow)) {
+    if (C10_UNLIKELY(has_immutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
       impl::cow::check_cow_read(this);
     }
     return data_ptr_;
@@ -195,7 +196,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
-    refresh_has_data_ptr_check();
+    // The materializer belongs to the old allocation.
+    clear_materializer();
   }
 
   void swap_data_ptr(StorageImpl& other) {
@@ -217,10 +219,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const void* data() const {
-    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
-      throw_data_ptr_access_error();
-    }
-    if (C10_UNLIKELY(materialize_fn_ == &impl::cow::materialize_cow)) {
+    if (C10_UNLIKELY(has_immutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
       impl::cow::check_cow_read(this);
     }
     return data_ptr_.get();
@@ -292,6 +294,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
+    clear_materializer();
     size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
@@ -399,6 +402,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   void refresh_has_data_ptr_check() {
+    has_immutable_data_ptr_check_ = throw_on_immutable_data_ptr_ ||
+        materialize_fn_ == &impl::cow::materialize_cow;
     has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
         throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
         throw_on_immutable_data_ptr_;
@@ -418,9 +423,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
-  // All special checks in data/data_ptr calls are guarded behind this single
-  // boolean. This is for performance: .data/.data_ptr calls are commonly in the
-  // hot-path.
+  // Keep the common data access paths behind one branch each.
+  bool has_immutable_data_ptr_check_ = false;
   bool has_mutable_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
   bool throw_on_mutable_data_ptr_ = false;

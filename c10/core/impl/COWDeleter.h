@@ -51,7 +51,7 @@ class C10_API COWDeleterContext {
   // Increments the current refcount.
   void increment_refcount();
 
-  // See README.md in this directory to understand the locking
+  // See README-cow.md in this directory to understand the locking
   // strategy.
 
   // Represents a reference to the context.
@@ -72,15 +72,14 @@ class C10_API COWDeleterContext {
       std::unique_ptr<COWCompletion> completion = nullptr);
 
  private:
-  // The destructor is hidden, this should only ever be used within
-  // UniqueVoidPtr using cow::delete_context as the deleter.
+  // Destroyed by decrement_refcount() when the last reference is released.
   ~COWDeleterContext();
 
   std::shared_mutex mutex_;
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
-  // Immutable: moving the synchronization stream would change the lifetime
-  // contract of references which have already escaped to callers.
+  // CUDA allocation/reuse stream; nullopt for CPU and other synchronous
+  // allocators. Immutable because callers rely on it for allocation lifetime.
   std::optional<Stream> stream_;
   uint64_t capture_id_;
   std::unique_ptr<COWCompletion> completions_;

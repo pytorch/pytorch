@@ -400,6 +400,32 @@ TEST(materialize_test, swap_data_ptr_materializes_both) {
   ASSERT_FALSE(clone_b->has_materializer());
 }
 
+TEST(materialize_test, replacing_data_ptr_clears_materializer) {
+  StorageImpl source(
+      {}, /*size_bytes=*/4, GetDefaultCPUAllocator(), /*resizable=*/false);
+  std::memcpy(source.mutable_data(), "abcd", 4);
+  auto clone = cow::lazy_clone_storage(source);
+  auto replacement = GetDefaultCPUAllocator()->clone("wxyz", 4);
+  const auto* ptr = replacement.get();
+  clone->set_data_ptr_noswap(std::move(replacement));
+  EXPECT_FALSE(clone->has_materializer());
+  EXPECT_EQ(clone->data(), ptr);
+  EXPECT_EQ(clone->mutable_data(), ptr);
+  EXPECT_TRUE(buffers_are_equal(clone->data(), "wxyz", 4));
+  EXPECT_TRUE(buffers_are_equal(source.data(), "abcd", 4));
+  EXPECT_NE(cow::lazy_clone_storage(*clone), nullptr);
+}
+
+TEST(materialize_test, reset_clears_materializer) {
+  StorageImpl source(
+      {}, /*size_bytes=*/4, GetDefaultCPUAllocator(), /*resizable=*/false);
+  auto clone = cow::lazy_clone_storage(source);
+  clone->reset();
+  EXPECT_FALSE(clone->has_materializer());
+  EXPECT_EQ(clone->data(), nullptr);
+  EXPECT_EQ(clone->mutable_data(), nullptr);
+}
+
 } // namespace
 } // namespace c10::impl
 // NOLINTEND(clang-analyzer-cplusplus*)

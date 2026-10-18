@@ -3578,7 +3578,9 @@ Call this whenever a new thread is created in order to propagate values from
             !tensor.is_fake() &&
                 !tensor.key_set().has(c10::DispatchKey::Python),
             "_is_cow_tensor is not defined for Python tensor subclasses or FakeTensors");
-        return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
+        auto* storage = tensor.storage().unsafeGetStorageImpl();
+        return c10::impl::cow::is_cow_data_ptr(
+            storage->_mutable_data_ptr_no_checks());
       },
       "Checks if a tensor's data pointer is COW");
 
@@ -3586,17 +3588,47 @@ Call this whenever a new thread is created in order to propagate values from
       "_cow_record_done",
       [](const at::Tensor& tensor) {
         TORCH_CHECK(
-            !tensor.key_set().has(c10::DispatchKey::Python),
-            "_cow_record_done is not defined for Python tensor subclasses");
+            !tensor.is_fake() &&
+                !tensor.key_set().has(c10::DispatchKey::Python),
+            "_cow_record_done is not defined for Python tensor subclasses or FakeTensors");
         c10::impl::cow::record_done(*tensor.storage().unsafeGetStorageImpl());
       },
       py::arg("tensor"),
-      "Record completion of this storage's CUDA COW uses on the current stream. "
-      "Join all earlier uses, including uses through aliases and saved pointers, "
-      "onto this stream first. Retired backing allocations are released; an "
-      "active COW reference remains until materialization or destruction. "
-      "Later data access cancels its completion. Saved pointers covered by this "
-      "call must not be used again. CPU and ordinary storage are unchanged.");
+      R"doc(
+Record an asynchronous completion boundary for this storage's CUDA COW uses.
+
+First make the current stream wait for all earlier uses through this tensor,
+its storage aliases (including views), and saved pointers. Include uses before
+the first lazy clone and copies made during materialization. Serialize this
+call with all other host accesses to the storage and its aliases; GPU stream
+waits do not provide host-thread exclusion.
+
+The call records completion events and releases the old COW allocation retained
+after materialization. It does not change the tensor's values or current pointer,
+and it does not block the CPU. Independent lazy clones have their own completion
+state: completing ``x`` does not complete ``x._lazy_clone()``.
+
+For a current COW reference, later data access, including ``const_data_ptr()``,
+invalidates the completion marker. Do not reuse saved pointers covered by this
+call; obtain a fresh pointer first. After new uses, complete again or join them
+back onto the allocation stream before releasing the storage.
+
+Completion must occur in the same capture as the COW context, or outside capture
+if the context was created outside capture. It has no effect on CPU storage or
+storage without a current or retained COW reference.
+
+Args:
+    tensor (Tensor): Tensor whose storage's earlier COW uses are complete on
+      the current stream.
+
+Example::
+
+    >>> x = torch.ones(1024, device="cuda")
+    >>> y = x._lazy_clone()
+    >>> x.add_(1)  # Materializes x; its storage retains the old allocation.
+    >>> torch._C._cow_record_done(x)
+    >>> y.add_(2)  # Can now steal the original allocation without copying.
+)doc");
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",

@@ -78,10 +78,10 @@ void record_done(StorageImpl& storage) {
   }
   if (storage.extra_meta_) {
     auto& retired = storage.extra_meta_->cow_retired_data;
-    for (auto& data_ptr : retired) {
-      data_ptr.cast_context<COWReference>(cow_deleter)->record_done();
+    if (retired) {
+      retired->cast_context<COWReference>(cow_deleter)->record_done();
+      retired.reset();
     }
-    retired.clear();
   }
 }
 
@@ -101,7 +101,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
         "Cannot copy CUDA COW storage without an allocator");
     device_guard.reset_device(data_ptr.device());
     // Do not accumulate an allocation history on a long-lived storage.
-    if (storage.extra_meta_ && !storage.extra_meta_->cow_retired_data.empty()) {
+    if (storage.extra_meta_ && storage.extra_meta_->cow_retired_data) {
       return eager_clone(storage);
     }
     const auto* impl = getDeviceGuardImpl(data_ptr.device().type());
@@ -184,18 +184,13 @@ void materialize_cow(StorageImpl* storage) {
           "Cannot materialize shared COW storage across CUDA graph capture "
           "boundaries; resolve the lazy clone before capture ends");
       auto& retired = storage->get_extra_meta().cow_retired_data;
-      retired.reserve(retired.size() + 1);
+      TORCH_INTERNAL_ASSERT(!retired);
       {
         c10::StreamGuard allocation_guard(*ctx->stream());
-        copy = storage->allocator()->allocate(storage->nbytes());
+        copy = storage->allocator()->clone(data_ptr.get(), storage->nbytes());
       }
-      // Preserve the allocation stream while copying on the operation's
-      // current stream. Both directions are graph edges during capture.
       impl->waitStream(stream, *ctx->stream());
-      storage->allocator()->copy_data(
-          copy->get(), data_ptr.get(), storage->nbytes());
-      impl->waitStream(*ctx->stream(), stream);
-      retired.push_back(storage->set_data_ptr_no_materialize(std::move(*copy)));
+      retired = storage->set_data_ptr_no_materialize(std::move(*copy));
       return;
     }
   } else if (!ctx->is_unique()) {
