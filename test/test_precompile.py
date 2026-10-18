@@ -4742,6 +4742,18 @@ def falls_back_after_a_break(model, x, opaque_layers=0):
     for _ in range(opaque_layers):
         y = opaque(y)
     return y.sin() + int(torch.compiler.is_compiling())
+
+
+def falls_back_in_the_entry(model, x, opaque_layers=0, scale=1):
+    # The graph break gives the entry a continuation, so the artifact is
+    # standalone; the entry's recompile for opaque_layers=1 falls back before
+    # reaching it. model is unused: its forward would be a frame of its own
+    # once the entry runs eagerly. scale is a default only the eager run reads.
+    y = x * 2
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    torch._dynamo.graph_break()
+    return y.sin() * scale + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -4760,12 +4772,16 @@ for args, kwargs, expected in saved["calls"]:
     torch.testing.assert_close(f(model, *args, **kwargs), expected)
 for name, grad in saved["grads"].items():
     torch.testing.assert_close(model.get_parameter(name).grad, grad)
-try:
-    f(model, saved["calls"][0][0][0].double())
-except torch.compiler.PrecompileError as e:
-    assert "no captured variant" in str(e), e
+miss = saved["calls"][0][0][0].double()
+if saved["eager_miss"] is not None:
+    torch.testing.assert_close(f(model, miss), saved["eager_miss"])
 else:
-    raise AssertionError("an uncovered call was served")
+    try:
+        f(model, miss)
+    except torch.compiler.PrecompileError as e:
+        assert "no captured variant" in str(e), e
+    else:
+        raise AssertionError("an uncovered call was served")
 print("served", mod.STANCES)
 """
 
@@ -4798,12 +4814,17 @@ class TestPrecompileDynamoCapture(TestCase):
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
-    def _serve_in_fresh_process(self, calls, grads=None, mode="standalone"):
+    def _serve_in_fresh_process(
+        self, calls, grads=None, mode="standalone", eager_miss=None
+    ):
+        # eager_miss: the result of an uncovered call that the entry runs
+        # eagerly; by default the loader expects that call refused.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "state_dict": self.model.state_dict(),
             "calls": calls,
             "grads": grads or {},
+            "eager_miss": eager_miss,
         }
         torch.save(saved, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state, mode]
@@ -4982,6 +5003,28 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(
             [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
         )
+
+    @skipIfCrossRef
+    def test_a_standalone_artifact_runs_an_entrys_eager_fallback_eagerly(self):
+        # The driver rebuilds the entry with its recorded defaults to run a miss
+        # eagerly, so the missed call that leaves scale to its default works.
+        fn = self.mod.falls_back_in_the_entry
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = (self.x2 * 2).sin()
+        self.assertEqual(compiled, base + 1)
+        self.assertEqual(eager, base)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(
+            summary.eager_fallbacks[0].startswith("falls_back_in_the_entry ("), summary
+        )
+        self.assertTrue(summary.complete, summary)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        # A dtype miss of the entry runs eagerly too, with both defaults.
+        miss = (self.x2.double() * 2).sin()
+        self._serve_in_fresh_process(calls + calls[:1], eager_miss=miss)
 
     @skipIfCrossRef
     def test_a_frame_dynamo_gave_up_on_is_not_a_coverage_gap(self):

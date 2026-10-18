@@ -101,9 +101,8 @@ class PrecompileSummary:
     Attributes:
         frames: Captured frames: every frame the package holds an entry for, the
             ``bypassed``, ``truncated``, ``uncovered_frames`` and
-            ``eager_fallbacks`` ones included,
-            so the digest's frame clauses cut into this count rather than add
-            to it. Also included are the frames the artifact deliberately runs
+            ``eager_fallbacks`` ones included, so the digest's frame clauses
+            cut into this count rather than add to it. Also included are the frames the artifact deliberately runs
             as plain Python: a frame other than the entry that compiled no
             graph or graph-break continuation and either lost a guard to the
             filter or was bypassed. Running its original bytecode gives up no
@@ -139,8 +138,9 @@ class PrecompileSummary:
             not ``frames`` minus ``bypassed`` minus the frames that hold guarded
             code.
         eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame
-            Dynamo gave up on during the capture and ran eagerly from then on (a
-            graph break it could not resume from, such as one inside a loop).
+            Dynamo gave up on during the capture and ran eagerly from then on: a
+            graph break it could not resume from (such as one inside a loop),
+            or a backend that declined the graph by raising ``SkipFrame``.
             Not a gap, and not in ``uncovered_frames``: a load serves the
             variants its earlier calls compiled, if any, and runs any call they
             miss eagerly (the capture skipped every later call, even one a
@@ -225,10 +225,11 @@ class PrecompileSummary:
         limit (``truncated``) or ended with no guarded code
         (``uncovered_frames``), if a capture call raised (``capture_errors``),
         or if nothing was compiled. ``eager_fallbacks`` never makes a capture
-        incomplete: a load runs those frames eagerly, as Dynamo chose to. Both ``guarded_codes`` and ``backend_graphs``
-        must be non-zero for the last check, because a frame that compiled
-        nothing can still count as one guarded code, so ``guarded_codes`` alone
-        cannot tell a real capture from an empty one.
+        incomplete: a load runs those frames eagerly, as Dynamo chose to. Both
+        ``guarded_codes`` and ``backend_graphs`` must be non-zero for the last
+        check, because a frame that compiled nothing can still count as one
+        guarded code, so ``guarded_codes`` alone cannot tell a real capture
+        from an empty one.
         The guard fields never enter: ``risky_dropped_guards`` is a lint
         finding, not a proof, and ``wont_generalize`` follows from any value the
         capture pinned, so both describe how far a complete capture generalizes
