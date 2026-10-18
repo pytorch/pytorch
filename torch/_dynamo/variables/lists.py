@@ -2437,6 +2437,30 @@ class ByteArrayVariable(VariableTracker):
             raise_observed_exception(type(e), tx, args=list(e.args))
         return ConstantVariable.create(result)
 
+    def bytearray_splitlines(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "splitlines")
+
+    def bytearray_partition(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "partition")
+
+    def bytearray_rpartition(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_split(tx, args, kwargs, "rpartition")
+
     def bytearray_append(
         self,
         tx: "InstructionTranslatorBase",
@@ -2526,6 +2550,9 @@ class ByteArrayVariable(VariableTracker):
         "rsplit": Method(bytearray_rsplit),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
+        "splitlines": Method(bytearray_splitlines),
+        "partition": Method(bytearray_partition),
+        "rpartition": Method(bytearray_rpartition),
         "append": Method(bytearray_append),
         "extend": Method(bytearray_extend),
     }

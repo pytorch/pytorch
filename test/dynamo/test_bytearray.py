@@ -391,6 +391,61 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         invalid = self.type2test(b"\xffabc")
         self.assertEqual(invalid.decode(errors="replace"), "\ufffdabc")
 
+    @make_dynamo_test
+    def test_splitlines(self):
+        b = self.type2test(b"a\r\nb\nc\rd")
+        self.assertEqual(
+            b.splitlines(),
+            [
+                self.type2test(b"a"),
+                self.type2test(b"b"),
+                self.type2test(b"c"),
+                self.type2test(b"d"),
+            ],
+        )
+        lines = b.splitlines(keepends=True)
+        self.assertEqual(
+            lines,
+            [
+                self.type2test(b"a\r\n"),
+                self.type2test(b"b\n"),
+                self.type2test(b"c\r"),
+                self.type2test(b"d"),
+            ],
+        )
+        self.assertTrue(all(type(line) is self.type2test for line in lines))
+
+    @make_dynamo_test
+    def test_partition_and_rpartition(self):
+        b = self.type2test(b"a-b-c")
+        self.assertEqual(
+            b.partition(b"-"),
+            (self.type2test(b"a"), self.type2test(b"-"), self.type2test(b"b-c")),
+        )
+        result = b.rpartition(b"-")
+        self.assertEqual(
+            result,
+            (self.type2test(b"a-b"), self.type2test(b"-"), self.type2test(b"c")),
+        )
+        self.assertTrue(all(type(part) is self.type2test for part in result))
+        self.assertEqual(
+            self.type2test(b"abc").partition(b"-"),
+            (self.type2test(b"abc"), self.type2test(), self.type2test()),
+        )
+        self.assertEqual(
+            self.type2test(b"abc").rpartition(b"-"),
+            (self.type2test(), self.type2test(), self.type2test(b"abc")),
+        )
+
+    @make_dynamo_test
+    def test_partition_empty_separator_and_keyword(self):
+        b = self.type2test(b"abc")
+        for method in (b.partition, b.rpartition):
+            with self.assertRaisesRegex(ValueError, "empty separator"):
+                method(b"")
+            with self.assertRaisesRegex(TypeError, "takes no keyword arguments"):
+                method(sep=b"-")
+
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -404,6 +459,69 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"\xff\x00")),
             ("ff00", "\xff\x00"),
         )
+
+    def test_input_bytearray_splitlines_partition_rpartition(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.splitlines(keepends=True), ba.partition(b"-"), ba.rpartition(b"-")
+
+        result = fn(bytearray(b"a-b\nc-d"))
+        self.assertEqual(
+            result,
+            (
+                [bytearray(b"a-b\n"), bytearray(b"c-d")],
+                (bytearray(b"a"), bytearray(b"-"), bytearray(b"b\nc-d")),
+                (bytearray(b"a-b\nc"), bytearray(b"-"), bytearray(b"d")),
+            ),
+        )
+        self.assertTrue(all(type(line) is bytearray for line in result[0]))
+        self.assertTrue(
+            all(
+                type(part) is bytearray
+                for partition in result[1:]
+                for part in partition
+            )
+        )
+
+    def test_input_bytearray_splitlines_partition_rpartition_nonconstant_args(self):
+        def splitlines(x, ba, keepends):
+            return x + 1, ba.splitlines(keepends=keepends)
+
+        def partition(x, ba, sep):
+            return x + 1, ba.partition(sep)
+
+        def rpartition(x, ba, sep):
+            return x + 1, ba.rpartition(sep)
+
+        x = torch.ones(1)
+        ba = bytearray(b"a-b\nc-d")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Dynamo does not know how to trace method `splitlines` of class `bytearray`",
+        ):
+            torch.compile(splitlines, backend="eager", fullgraph=True)(
+                x, ba, torch.tensor(True)
+            )
+        self.assertEqual(
+            torch.compile(splitlines, backend="eager")(x, ba, torch.tensor(True)),
+            (torch.tensor([2.0]), [bytearray(b"a-b\n"), bytearray(b"c-d")]),
+        )
+
+        for method, expected in (
+            (partition, (bytearray(b"a"), bytearray(b"-"), bytearray(b"b\nc-d"))),
+            (rpartition, (bytearray(b"a-b\nc"), bytearray(b"-"), bytearray(b"d"))),
+        ):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                f"Dynamo does not know how to trace method `{method.__name__}` of class `bytearray`",
+            ):
+                torch.compile(method, backend="eager", fullgraph=True)(
+                    x, ba, memoryview(b"-")
+                )
+            self.assertEqual(
+                torch.compile(method, backend="eager")(x, ba, memoryview(b"-")),
+                (torch.tensor([2.0]), expected),
+            )
 
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding
