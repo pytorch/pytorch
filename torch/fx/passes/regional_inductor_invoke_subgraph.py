@@ -1,10 +1,7 @@
 import copy
 import logging
-import threading
-import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import torch
 from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_inductor_compile
@@ -19,33 +16,14 @@ from torch.fx.passes.regional_inductor import (
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    from torch._inductor.cudagraph_utils import BoxedDeviceIndex
-
 __all__ = ["regional_inductor_invoke_subgraph"]
-
-
-class _RegionalCudagraphState:
-    def __init__(self) -> None:
-        # Forward regions that can be CUDA Graph captured (each box also records
-        # the autograd invocations in which that region's call was), and the
-        # devices whose backward region is captured too.
-        self.forward_device_indices: list[BoxedDeviceIndex] = []
-        self.backward_device_indices: set[int] = set()
 
 
 # Identity shared by one graph's forward and backward compile: the compile id
 # (the lazy backward re-enters the forward's CompileContext, so this pairs them
 # even without a TracingContext) plus the AOT graph scope (which keeps graphs a
-# single compile splits, e.g. DDPOptimizer, apart). Values are weak: the strong
-# reference is _RegionCompileContext, pinned on the compiled forward callable
-# below, so an entry lives exactly as long as the forward it belongs to.
+# single compile splits, e.g. DDPOptimizer, apart).
 _RegionalScopeKey = tuple[object, tuple[str, ...] | None]
-
-_regional_cudagraph_states: weakref.WeakValueDictionary[
-    _RegionalScopeKey, _RegionalCudagraphState
-] = weakref.WeakValueDictionary()
-_regional_cudagraph_states_lock = threading.Lock()
 
 
 _AOT_GRAPH_DIRECTIONS = ("forward", "backward", "inference")
@@ -55,10 +33,8 @@ _AOT_GRAPH_DIRECTIONS = ("forward", "backward", "inference")
 class _RegionCompileContext:
     """Everything the regions of one graph compile against."""
 
-    # Forward/backward CUDA Graph handoff, shared by both directions.
-    cudagraph_state: _RegionalCudagraphState
     # None when this compile cannot be paired with its other direction, in which
-    # case the state is private and must not be published to the registry.
+    # case each region keeps its CUDA Graph state private.
     scope_key: _RegionalScopeKey | None
     # None means the direction is unknown; fall back to the node's own tag.
     is_inference: bool | None
@@ -100,17 +76,19 @@ def _get_regional_scope_key() -> _RegionalScopeKey | None:
     return (compile_id, scope)
 
 
-def _get_regional_cudagraph_state(
-    key: _RegionalScopeKey | None,
-) -> _RegionalCudagraphState:
-    if key is None:
-        return _RegionalCudagraphState()
-    with _regional_cudagraph_states_lock:
-        state = _regional_cudagraph_states.get(key)
-        if state is None:
-            state = _RegionalCudagraphState()
-            _regional_cudagraph_states[key] = state
-        return state
+def _get_cudagraph_pairing_name(identifier: str, is_backward: bool) -> str:
+    """Name shared by a region's forward and backward invoke_subgraph calls."""
+    # A first-level region is partitioned into partitioned_fw<X> and
+    # partitioned_bw<X>. A region nested in an uncompiled one is not partitioned
+    # and keeps InvokeSubgraphAutogradOp's identifiers, fw_<id> and bw_<id>_<n>,
+    # where <n> numbers the backward variants of one forward.
+    if is_backward:
+        if identifier.startswith("partitioned_bw"):
+            return identifier.removeprefix("partitioned_bw")
+        return identifier.removeprefix("bw_").rpartition("_")[0]
+    if identifier.startswith("partitioned_fw"):
+        return identifier.removeprefix("partitioned_fw")
+    return identifier.removeprefix("fw_")
 
 
 def _compile_submod(
@@ -135,20 +113,16 @@ def _compile_submod(
         raise AssertionError("sub_node does not need inductor compile")
     compile_config = sub_node.meta["custom"]["nested_region_config"]
     partitioner_tag = sub_node.meta.get("partitioner_tag")
-    # The partitioner names a region's two halves partitioned_fw_X/partitioned_bw_X,
-    # so stripping the prefix is what pairs them.
-    cudagraph_state_subgraph = subgraph
-    if partitioner_tag == "is_backward":
-        compile_fn = compile_config.bw_compiler
-        cudagraph_state_subgraph = subgraph.removeprefix("partitioned_bw")
-    else:
-        compile_fn = compile_config.fw_compiler
-        if partitioner_tag == "is_forward":
-            cudagraph_state_subgraph = subgraph.removeprefix("partitioned_fw")
+    is_backward = partitioner_tag == "is_backward"
+    compile_fn = (
+        compile_config.bw_compiler if is_backward else compile_config.fw_compiler
+    )
+    identifier = sub_node.args[1]
+    if not isinstance(identifier, str):
+        raise AssertionError(f"Expected str identifier, got {type(identifier)}")
+    pairing_name = _get_cudagraph_pairing_name(identifier, is_backward)
     cudagraph_state_key = (
-        None
-        if region_ctx.scope_key is None
-        else (*region_ctx.scope_key, cudagraph_state_subgraph)
+        None if region_ctx.scope_key is None else (*region_ctx.scope_key, pairing_name)
     )
     # Only the built-in region compiler takes the regional CUDA Graph context; a
     # custom compiler keeps its (gm, example_inputs) call.
@@ -161,7 +135,6 @@ def _compile_submod(
                 else region_ctx.is_inference
             ),
             "cudagraph_state_key": cudagraph_state_key,
-            "regional_cudagraph_state": region_ctx.cudagraph_state,
         }
 
     for inp_node in sub_node.all_input_nodes[
@@ -298,7 +271,6 @@ def regional_inductor_invoke_subgraph(
     Compile invoke_subgraph nodes if they have custom compiler specified
     in node.meta["nested_region_config"].bw_compiler or fw_compiler
     """
-    from torch._functorch._aot_autograd.utils import simple_wraps
     from torch._inductor import config
     from torch._inductor.compile_fx import _validate_nested_region_cudagraphs
 
@@ -320,79 +292,16 @@ def regional_inductor_invoke_subgraph(
         validate_forward=not is_backward,
         validate_backward=is_backward,
     )
-    scope_key = _get_regional_scope_key()
     region_ctx = _RegionCompileContext(
-        cudagraph_state=_get_regional_cudagraph_state(scope_key),
-        scope_key=scope_key,
-        is_inference=is_inference,
+        scope_key=_get_regional_scope_key(), is_inference=is_inference
     )
-    regional_cudagraph_state = region_ctx.cudagraph_state
 
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
     with torch.fx.traceback.preserve_node_meta(enable=False):
         compiled_gm = _recursive_compile_invoke_subgraph_nodes(gm, region_ctx)
         # TODO: might not need this boxed_nop after we switch to _RegionCompiler
-        compiled_fn = torch._dynamo.backends.debugging.boxed_nop(
+        # pyrefly: ignore [bad-return]
+        return torch._dynamo.backends.debugging.boxed_nop(
             compiled_gm, example_inputs=[]
         )
-        if not is_backward:
-            # Strong reference that keeps this compile's entry in the weak
-            # registry alive until the matching backward compiles.
-            compiled_fn._regional_cudagraph_state = (  # pyrefly: ignore [missing-attribute]
-                region_ctx
-            )
-            # pyrefly: ignore [bad-return]
-            return compiled_fn
-
-        forward_regions = regional_cudagraph_state.forward_device_indices
-        captured_backward_devices = regional_cudagraph_state.backward_device_indices
-        if not forward_regions or not config.triton.cudagraph_trees:
-            # pyrefly: ignore [bad-return]
-            return compiled_fn
-
-        @simple_wraps(compiled_fn)
-        def backward(args: list[object]) -> object:
-            from torch._functorch._aot_autograd.runtime_wrappers import (
-                current_autograd_invocation,
-            )
-            from torch._inductor.cudagraph_trees import (
-                CUDAGraphTreeManager,
-                get_manager,
-            )
-
-            def transition(manager: CUDAGraphTreeManager) -> None:
-                if manager.running_forwards_with_pending_backwards:
-                    manager.set_to_running_backward()
-
-            # Only a device where this invocation's forward call left the
-            # generation pending has one to transition, and only once: a size
-            # outside triton.cudagraph_capture_sizes runs uncaptured, and a
-            # retained graph can run this backward again after another forward
-            # is pending. Consuming the call here also keeps the uncaptured
-            # backward regions' own wrappers from repeating the transition.
-            invocation = current_autograd_invocation()
-            pending: dict[int | None, CUDAGraphTreeManager] = {}
-            for device_index in {box.value for box in forward_regions}:
-                manager = get_manager(device_index, create_if_none_exists=False)
-                if manager is not None and invocation in manager.pending_invocations:
-                    manager.pending_invocations.discard(invocation)
-                    pending[device_index] = manager
-            # A captured backward region transitions from inside its own node.
-            # Transitioning its device before that node runs would let it start a
-            # new generation and free the forward pool holding the activations it
-            # reads, so such a device waits until the backward is done, and only
-            # transitions if the region ran uncaptured after all, e.g. at a size
-            # outside triton.cudagraph_capture_sizes.
-            for device_index, manager in pending.items():
-                if device_index not in captured_backward_devices:
-                    transition(manager)
-            out = compiled_fn(args)
-            for device_index, manager in pending.items():
-                if device_index in captured_backward_devices:
-                    transition(manager)
-            return out
-
-        backward._boxed_call = True  # pyrefly: ignore [missing-attribute]
-        # pyrefly: ignore [bad-return]
-        return backward

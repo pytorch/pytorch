@@ -15,7 +15,6 @@ from torch._higher_order_ops.invoke_subgraph import (
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1046,8 +1045,11 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         }
     )
     @skip_if_caches_force_disabled
-    def test_backward_opt_out_reuses_aot_autograd_cache(self):
-        """A warm start reuses the forward's box; the backward opted out of it."""
+    @parametrize("backward_cudagraphs", (False, True))
+    def test_backward_setting_survives_aot_autograd_cache_hit(
+        self, backward_cudagraphs
+    ):
+        """A warm start captures the same graphs as the cold compile."""
         from torch._dynamo.utils import counters
         from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
         from torch._inductor import cudagraph_trees
@@ -1059,8 +1061,8 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
 
         options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": False},
+            fw_inductor_config_patches={"triton.cudagraphs": not backward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
         )
 
         @torch.compiler.nested_compile_region(options=options)
@@ -1070,6 +1072,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         def fn(x):
             return (torch.cos(x) + region(x)).sum()
 
+        captured = []
         with mock.patch(
             "torch._inductor.compile_fx.cudagraphify", wraps=cudagraphify
         ) as cudagraphify_mock:
@@ -1079,13 +1082,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 torch._dynamo.reset()
                 x = torch.randn(16, 16, device="cuda", requires_grad=True)
                 torch.compile(fn, backend="inductor", fullgraph=True)(x).backward()
+                calls = cudagraphify_mock.call_args_list
+                captured.append({call.kwargs["is_backward"] for call in calls})
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
-        self.assertEqual(
-            {call.kwargs["is_backward"] for call in cudagraphify_mock.call_args_list},
-            {False},
-        )
+        self.assertEqual(captured, [{backward_cudagraphs}] * 2)
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
@@ -1183,6 +1185,47 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
 
         self.assertTrue(captured_kwargs["cudagraphs"])
         self.assertIsNone(captured_kwargs["boxed_forward_device_index"].value)
+
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": False,
+            # Too small to capture, so post-compile drops the backward's capture.
+            "triton.cudagraph_min_partition_size": 1000,
+        }
+    )
+    def test_backward_only_regional_cudagraph_survives_dropped_capture(self):
+        from torch._inductor import cudagraph_trees
+
+        cudagraph_trees.reset_cudagraph_trees()
+        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False},
+            bw_inductor_config_patches={"triton.cudagraphs": True},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x) * 2.0
+
+        def fn(x):
+            return (torch.cos(x) + region(x)).sum()
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        compiled_fn(x).backward()
+
+        expected_x = x.detach().clone().requires_grad_()
+        fn(expected_x).backward()
+        self.assertEqual(x.grad, expected_x.grad)
+        if x.device.index is None:
+            raise AssertionError("expected a CUDA device index")
+        self.assertIsNone(cudagraph_trees.get_container(x.device.index).tree_manager)
 
     def test_backward_config_specialization_reaches_child_graph_modules(self):
         from torch._higher_order_ops.invoke_subgraph import (
@@ -1709,80 +1752,8 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 manager.new_graph_id().id,
                 int(forward_cudagraphs) + int(backward_cudagraphs),
             )
-            self.assertFalse(manager.running_forwards_with_pending_backwards)
         else:
             self.assertIsNone(manager)
-
-    @requires_cuda_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(
-        {
-            "fx_graph_cache": False,
-            "fx_graph_remote_cache": False,
-            "triton.cudagraphs": False,
-        }
-    )
-    @parametrize("backward_cudagraphs", (False, True))
-    def test_regional_inductor_backend_backward_generation_transition(
-        self, backward_cudagraphs
-    ):
-        """A captured backward region transitions the tree from its own node.
-
-        Forcing the manager into BACKWARD mode before it runs would let that
-        node start a new generation and free the forward pool it reads from.
-        """
-        from torch._dynamo.backends.common import aot_autograd
-        from torch._inductor import cudagraph_trees
-        from torch._inductor.cudagraph_trees import CUDAGraphTreeManager
-        from torch.fx.passes.regional_inductor_invoke_subgraph import (
-            regional_inductor_invoke_subgraph,
-        )
-
-        cudagraph_trees.reset_cudagraph_trees()
-        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
-
-        nested_config = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
-        )
-
-        @torch.compiler.nested_compile_region(options=nested_config)
-        def region(x):
-            # exp saves its output, so the backward reads from the forward pool.
-            return torch.exp(x) * 2.0
-
-        def fn(x):
-            return region(x).sum()
-
-        def backend(gm, example_inputs):
-            return regional_inductor_invoke_subgraph(gm, *example_inputs)
-
-        compiled_fn = torch.compile(
-            fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
-            fullgraph=True,
-        )
-        with mock.patch.object(
-            CUDAGraphTreeManager,
-            "set_to_running_backward",
-            side_effect=CUDAGraphTreeManager.set_to_running_backward,
-            autospec=True,
-        ) as set_to_running_backward:
-            for _ in range(3):
-                x = torch.randn(16, 16, device="cuda", requires_grad=True)
-                torch.compiler.cudagraph_mark_step_begin()
-                compiled_fn(x).backward()
-                expected_x = x.detach().clone().requires_grad_()
-                fn(expected_x).backward()
-                self.assertEqual(x.grad, expected_x.grad)
-
-        # With the backward region captured nobody may get ahead of its own
-        # transition. Otherwise each backward transitions once: the enclosing
-        # eager backward does it and consumes the forward call, so the uncaptured
-        # backward region's own post_compile wrapper does not repeat it.
-        self.assertEqual(
-            set_to_running_backward.call_count, 0 if backward_cudagraphs else 3
-        )
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
@@ -1854,116 +1825,6 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             self.assertGreater(manager.new_graph_id().id, 0)
         else:
             self.assertIsNone(manager)
-
-    @requires_cuda_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(
-        {
-            "fx_graph_cache": False,
-            "fx_graph_remote_cache": False,
-            "triton.cudagraphs": False,
-        }
-    )
-    def test_regional_inductor_backend_unpaired_forward_cudagraph(self):
-        from torch._dynamo.backends.common import aot_autograd
-        from torch._inductor import cudagraph_trees
-        from torch.fx.passes.regional_inductor_invoke_subgraph import (
-            regional_inductor_invoke_subgraph,
-        )
-
-        cudagraph_trees.reset_cudagraph_trees()
-        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
-
-        forward_options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": False},
-        )
-
-        @torch.compiler.nested_compile_region(options=forward_options)
-        def forward_only_region(x):
-            return torch.sin(x)
-
-        def fn(x):
-            forward_only = forward_only_region(x).detach()
-            return torch.cos(x).sum() + forward_only.sum()
-
-        def backend(gm, example_inputs):
-            return regional_inductor_invoke_subgraph(gm, *example_inputs)
-
-        compiled_fn = torch.compile(
-            fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
-            fullgraph=True,
-        )
-        for _ in range(3):
-            x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
-            torch.compiler.cudagraph_mark_step_begin()
-            result = compiled_fn(x)
-            result.backward()
-
-        expected_x = x.detach().clone().requires_grad_()
-        expected = fn(expected_x)
-        expected.backward()
-        self.assertEqual(result, expected)
-        self.assertEqual(x.grad, expected_x.grad)
-        if x.device.index is None:
-            raise AssertionError("expected a CUDA device index")
-        manager = cudagraph_trees.get_container(x.device.index).tree_manager
-        if manager is None:
-            self.fail("expected CUDA Graph recording for the forward-only region")
-        self.assertFalse(manager.running_forwards_with_pending_backwards)
-
-    @requires_cuda_and_triton
-    @unittest.skipUnless(TEST_MULTIGPU, "requires multiple cuda devices")
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(
-        {
-            "fx_graph_cache": False,
-            "fx_graph_remote_cache": False,
-            "triton.cudagraphs": False,
-        }
-    )
-    def test_regional_inductor_backend_unpaired_forward_on_another_device(self):
-        from torch._dynamo.backends.common import aot_autograd
-        from torch._inductor import cudagraph_trees
-        from torch.fx.passes.regional_inductor_invoke_subgraph import (
-            regional_inductor_invoke_subgraph,
-        )
-
-        cudagraph_trees.reset_cudagraph_trees()
-        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
-
-        options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": False},
-        )
-
-        @torch.compiler.nested_compile_region(options=options)
-        def forward_only_region(x):
-            return torch.sin(x)
-
-        def fn(x0, x1):
-            return forward_only_region(x0).detach(), torch.cos(x1)
-
-        def backend(gm, example_inputs):
-            return regional_inductor_invoke_subgraph(gm, *example_inputs)
-
-        compiled_fn = torch.compile(
-            fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
-            fullgraph=True,
-        )
-        for _ in range(3):
-            x0 = torch.randn(16, 16, device="cuda:0", requires_grad=True)
-            x1 = torch.randn(16, 16, device="cuda:1", requires_grad=True)
-            torch.compiler.cudagraph_mark_step_begin()
-            _, differentiable = compiled_fn(x0, x1)
-            differentiable.sum().backward()
-
-        manager = cudagraph_trees.get_container(0).tree_manager
-        if manager is None:
-            self.fail("expected CUDA Graph recording on cuda:0")
-        self.assertFalse(manager.running_forwards_with_pending_backwards)
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch("triton.cudagraphs", False)
@@ -2059,17 +1920,18 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         {
             "fx_graph_cache": False,
             "fx_graph_remote_cache": False,
-            "triton.cudagraphs": False,
+            "triton.cudagraphs": True,
+            "graph_partition": True,
+            # Drops the one-matmul forward's capture but not the backward's.
+            "triton.cudagraph_min_partition_size": 2,
         }
     )
-    def test_regional_inductor_backend_uncaptured_forward_skips_transition(self):
-        """A region forward that ran uncaptured leaves nothing to transition.
-
-        Transitioning anyway would clear another model's pending backward and let
-        it start a new generation over its live outputs.
-        """
+    def test_regional_inductor_backend_pairs_region_in_uncompiled_region(self):
+        """A region nested in an uncompiled region still pairs with its backward."""
         from torch._dynamo.backends.common import aot_autograd
         from torch._inductor import cudagraph_trees
+        from torch._inductor.compile_fx import cudagraphify
+        from torch._inductor.decomposition import select_decomp_table
         from torch.fx.passes.regional_inductor_invoke_subgraph import (
             regional_inductor_invoke_subgraph,
         )
@@ -2077,170 +1939,40 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         cudagraph_trees.reset_cudagraph_trees()
         self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
 
-        mod = torch.nn.Sequential(torch.nn.Linear(16, 16), torch.nn.ReLU()).cuda()
-        compiled = torch.compile(mod, backend="inductor", mode="reduce-overhead")
-        for _ in range(3):
-            mod.zero_grad(set_to_none=True)
-            x = torch.randn(8, 16, device="cuda", requires_grad=True)
-            compiled(x).sum().backward()
-
+        decompositions = select_decomp_table()
         options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": False},
+            {"triton.cudagraphs": True}, decompositions=decompositions
         )
 
         @torch.compiler.nested_compile_region(options=options)
-        def region(y):
-            return torch.sin(y)
+        def inner_region(x, y):
+            return x @ y
 
-        def fn(y):
-            return region(y).sum()
-
-        def backend(gm, example_inputs):
-            return regional_inductor_invoke_subgraph(gm, *example_inputs)
-
-        compiled_fn = torch.compile(
-            fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
-            fullgraph=True,
-        )
-        y = torch.randn(8, 16, device="cuda", requires_grad=True)
-        torch._dynamo.mark_dynamic(y, 0)
-
-        x = torch.randn(8, 16, device="cuda", requires_grad=True)
-        out = compiled(x)
-        with torch._inductor.config.patch("triton.cudagraph_capture_sizes", (4,)):
-            compiled_fn(y).backward()
-        manager = cudagraph_trees.get_container(x.device.index).tree_manager
-        if manager is None:
-            self.fail("expected the captured model's CUDA Graph Trees manager")
-        self.assertTrue(manager.running_forwards_with_pending_backwards)
-        compiled(torch.randn(8, 16, device="cuda", requires_grad=True))
-        self.assertEqual(out, mod(x))
-
-    @requires_cuda_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(
-        {
-            "fx_graph_cache": False,
-            "fx_graph_remote_cache": False,
-            "triton.cudagraphs": False,
-        }
-    )
-    def test_regional_inductor_backend_uncaptured_backward_call_transitions(self):
-        """A backward region compiled for capture can still run uncaptured.
-
-        That call never enters CUDA Graph Trees, so the enclosing backward has to
-        transition the captured forward's generation instead.
-        """
-        from torch._dynamo.backends.common import aot_autograd
-        from torch._inductor import cudagraph_trees
-        from torch.fx.passes.regional_inductor_invoke_subgraph import (
-            regional_inductor_invoke_subgraph,
-        )
-
-        cudagraph_trees.reset_cudagraph_trees()
-        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
-
-        options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": True},
-        )
-
-        @torch.compiler.nested_compile_region(options=options)
-        def region(x):
-            return torch.exp(x) * 2.0
-
-        def fn(x):
-            return region(x).sum()
+        @torch.compiler.nested_compile_region
+        def outer_region(x, y):
+            return torch.sin(inner_region(x, y))
 
         def backend(gm, example_inputs):
             return regional_inductor_invoke_subgraph(gm, *example_inputs)
 
         compiled_fn = torch.compile(
-            fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
+            outer_region,
+            backend=aot_autograd(
+                fw_compiler=backend,
+                bw_compiler=backend,
+                decompositions=decompositions,
+            ),
             fullgraph=True,
         )
-        x = torch.randn(16, 16, device="cuda", requires_grad=True)
-        out = compiled_fn(x)
-        manager = cudagraph_trees.get_container(x.device.index).tree_manager
-        if manager is None:
-            self.fail("expected the captured forward's CUDA Graph Trees manager")
-        self.assertTrue(manager.running_forwards_with_pending_backwards)
-        # With capture sizes set, a graph without symints is not captured.
-        with torch._inductor.config.patch("triton.cudagraph_capture_sizes", (4,)):
-            out.backward()
-        self.assertFalse(manager.running_forwards_with_pending_backwards)
-        expected_x = x.detach().clone().requires_grad_()
-        fn(expected_x).backward()
-        self.assertEqual(x.grad, expected_x.grad)
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        y = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        with mock.patch(
+            "torch._inductor.compile_fx.cudagraphify", wraps=cudagraphify
+        ) as cudagraphify_mock:
+            compiled_fn(x, y).sum().backward()
 
-    @requires_cuda_and_triton
-    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
-    @torch._inductor.config.patch(
-        {
-            "fx_graph_cache": False,
-            "fx_graph_remote_cache": False,
-            "triton.cudagraphs": False,
-        }
-    )
-    def test_regional_inductor_backend_uncaptured_backward_region_waits(self):
-        """An uncaptured backward region must not transition ahead of a captured
-        backward region on the same device, which transitions from its own node.
-        """
-        from torch._dynamo.backends.common import aot_autograd
-        from torch._inductor import cudagraph_trees
-        from torch._inductor.cudagraph_trees import CUDAGraphTreeManager
-        from torch.fx.passes.regional_inductor_invoke_subgraph import (
-            regional_inductor_invoke_subgraph,
-        )
-
-        cudagraph_trees.reset_cudagraph_trees()
-        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
-
-        def options(backward_cudagraphs):
-            return get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.cudagraphs": True},
-                bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
-            )
-
-        @torch.compiler.nested_compile_region(options=options(False))
-        def uncaptured_backward(x):
-            return x * 3.0
-
-        @torch.compiler.nested_compile_region(options=options(True))
-        def captured_backward(x):
-            # exp saves its output, so this backward reads from the forward pool.
-            return torch.exp(x) * 2.0
-
-        def fn(x):
-            # The backward runs uncaptured_backward's backward region first.
-            return uncaptured_backward(captured_backward(x)).sum()
-
-        def backend(gm, example_inputs):
-            return regional_inductor_invoke_subgraph(gm, *example_inputs)
-
-        compiled_fn = torch.compile(
-            fn,
-            backend=aot_autograd(fw_compiler=backend, bw_compiler=backend),
-            fullgraph=True,
-        )
-        with mock.patch.object(
-            CUDAGraphTreeManager,
-            "set_to_running_backward",
-            side_effect=CUDAGraphTreeManager.set_to_running_backward,
-            autospec=True,
-        ) as set_to_running_backward:
-            for _ in range(3):
-                x = torch.randn(16, 16, device="cuda", requires_grad=True)
-                torch.compiler.cudagraph_mark_step_begin()
-                compiled_fn(x).backward()
-                expected_x = x.detach().clone().requires_grad_()
-                fn(expected_x).backward()
-                self.assertEqual(x.grad, expected_x.grad)
-
-        self.assertEqual(set_to_running_backward.call_count, 0)
+        # The backward cannot bring back the capture its forward lost.
+        cudagraphify_mock.assert_not_called()
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     @torch._inductor.config.patch(

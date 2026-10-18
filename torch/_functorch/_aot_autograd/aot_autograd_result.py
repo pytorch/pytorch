@@ -484,6 +484,9 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
             }
             bw_fx_config: _CompileFxKwargs = {
                 **fx_config,
+                "cudagraphs": fx_config.get(
+                    "backward_cudagraphs", fx_config.get("cudagraphs")
+                ),
                 "is_backward": True,
             }
             compiled_fw_func = self.compiled_fw.post_compile(
