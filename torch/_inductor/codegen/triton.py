@@ -2263,6 +2263,15 @@ class TritonOverrides(OpOverrides):
     def rsqrt(x):
         if torch.version.hip:
             return f"tl.rsqrt({x})"
+        elif V.graph.get_current_device_or_throw().type == "xpu":
+            # libdevice.rsqrt lowers to a fast, hardware-approximate
+            # instruction that is not precise enough for some
+            # AMP-fp16 training workloads; use the same correctly-rounded
+            # tl.sqrt_rn primitive as TritonOverrides.sqrt (above), plus a
+            # reciprocal, instead of relying on libdevice.sqrt (which is
+            # not guaranteed to be correctly-rounded on this backend).
+            # fixes: https://github.com/intel/torch-xpu-ops/issues/5060
+            return f"(1 / tl.sqrt_rn({x}))"
         else:
             return f"libdevice.rsqrt({x})"
 
