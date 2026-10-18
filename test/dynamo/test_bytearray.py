@@ -299,7 +299,7 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
-    
+
     @make_dynamo_test
     def test_rindex(self):
         b = self.type2test(b"abcabc")
