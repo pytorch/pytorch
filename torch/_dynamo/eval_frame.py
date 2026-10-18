@@ -280,6 +280,19 @@ class _RecompileRefusedError(RuntimeError):
     """Raised by a ``_RefuseRecompileCallback`` instead of compiling."""
 
 
+def _warn_eager_fallback_miss(code: types.CodeType) -> None:
+    # Once per frame: every miss of it runs eagerly, including call shapes the
+    # capture never ran, so a serving process can tell it lost compiled code.
+    torch._logging._internal.warning_once(
+        log,
+        "precompile: no captured variant of %s (%s:%s) matches this call; running "
+        "it eagerly, as the capture did after Dynamo gave up on the frame",
+        code.co_name,
+        code.co_filename,
+        code.co_firstlineno,
+    )
+
+
 class _FailOnRecompileCallback:
     """Serves cached entries but raises instead of compiling.
 
@@ -316,6 +329,7 @@ class _FailOnRecompileCallback:
         ) is not None:
             return disabled
         if id(frame.f_code) in self._eager_codes:
+            _warn_eager_fallback_miss(frame.f_code)
             return ConvertFrameReturn(
                 apply_to_code=False,
                 skip_reason="Dynamo gave up on this frame during capture",
