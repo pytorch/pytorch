@@ -1182,6 +1182,47 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         self.assertTrue(captured_kwargs["cudagraphs"])
         self.assertIsNone(captured_kwargs["boxed_forward_device_index"].value)
 
+    @requires_cuda_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(
+        {
+            "fx_graph_cache": False,
+            "fx_graph_remote_cache": False,
+            "graph_partition": False,
+            "triton.cudagraphs": False,
+            # Too small to capture, so post-compile drops the backward's capture.
+            "triton.cudagraph_min_partition_size": 1000,
+        }
+    )
+    def test_backward_only_regional_cudagraph_survives_dropped_capture(self):
+        from torch._inductor import cudagraph_trees
+
+        cudagraph_trees.reset_cudagraph_trees()
+        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
+
+        nested_config = get_invoke_subgraph_compile_options(
+            fw_inductor_config_patches={"triton.cudagraphs": False},
+            bw_inductor_config_patches={"triton.cudagraphs": True},
+        )
+
+        @torch.compiler.nested_compile_region(options=nested_config)
+        def region(x):
+            return torch.sin(x) * 2.0
+
+        def fn(x):
+            return (torch.cos(x) + region(x)).sum()
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(16, 16, device=GPU_TYPE, requires_grad=True)
+        compiled_fn(x).backward()
+
+        expected_x = x.detach().clone().requires_grad_()
+        fn(expected_x).backward()
+        self.assertEqual(x.grad, expected_x.grad)
+        if x.device.index is None:
+            raise AssertionError("expected a CUDA device index")
+        self.assertIsNone(cudagraph_trees.get_container(x.device.index).tree_manager)
+
     def test_backward_config_specialization_reaches_child_graph_modules(self):
         from torch._higher_order_ops.invoke_subgraph import (
             _specialize_nested_region_configs_for_backward,

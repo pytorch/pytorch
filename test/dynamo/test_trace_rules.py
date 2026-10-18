@@ -437,6 +437,23 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
             self.assertEqual(ref, res)
 
+    def test_consume_prefix_in_state_dict_if_present(self):
+        def fn(state_dict):
+            torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+                state_dict, "module."
+            )
+            return state_dict["weight"] + 1
+
+        weight = torch.randn(2)
+        state_dict = {"module.weight": weight, "other": torch.randn(2)}
+        cnt = CompileCounter()
+        result = torch.compile(fn, backend=cnt, fullgraph=True)(state_dict)
+
+        self.assertEqual(result, weight + 1)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(list(state_dict), ["other", "weight"])
+        self.assertIs(state_dict["weight"], weight)
+
     @parametrize("device", ("cuda", torch.device("cuda")))
     def test_is_compile_supported_constant(self, device):
         def fn(x, device):
