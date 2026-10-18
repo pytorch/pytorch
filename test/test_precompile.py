@@ -5090,9 +5090,11 @@ class TestPrecompileDynamoCapture(TestCase):
         # than "the callable must actually be run".
         opaque = torch._dynamo.disable(lambda y: y + 0)
 
-        def lone(x):
+        def lone(x, fail=False):
             for _ in range(1):
                 x = opaque(x)
+            if fail:
+                raise ValueError("boom")
             return x.sin()
 
         with self.assertRaisesRegex(
@@ -5100,6 +5102,15 @@ class TestPrecompileDynamoCapture(TestCase):
         ):
             with self._capture(lone, backend="eager") as cap:
                 cap(self.x2)
+        # Ahead of a raised call too, whose message suggests require_complete=False.
+        with self.assertRaisesRegex(
+            PrecompileError, r"no variant of the entry frame 'lone': Dynamo gave up"
+        ):
+            with self._capture(lone, backend="eager") as cap:
+                cap(self.x2)
+                with self.assertRaises(ValueError):
+                    cap(self.x2, fail=True)
+                self.assertTrue(cap.summary().capture_errors)
 
     def test_a_generator_entry_is_refused_naming_the_cause(self):
         # Dynamo refuses to trace a generator frame and suppresses that, so the

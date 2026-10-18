@@ -1660,14 +1660,15 @@ def _summarize(
     eagerly; those are ``eager_fallbacks``). ``install()`` ``skip_code()``s
     every entry that is not bypassed and has no guarded codes whether or not it
     entered Dynamo, so a generated-but-never-executed resume entry is skipped
-    there and is not a gap here. ``backend_graphs`` counts the backend ids of the entries that are
-    not bypassed, the ones ``install()`` loads: a save-time bypass
-    (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
-    the entry and leaves its ids in place. ``truncated`` comes from the compile
-    path, which sees a frame hit the limit once and records it as ``co_name
-    (filename:firstlineno)``, so that set cannot merge two frames.
-    ``served_eagerly`` names the frames ``PrecompileSession._served_entry``
-    emptied: they hold no guarded code by design, not for lack of coverage.
+    there and is not a gap here. ``backend_graphs`` counts the backend ids of
+    the entries that are not bypassed, the ones ``install()`` loads: a
+    save-time bypass (``PrecompileCacheEntry.from_cache_entry``, backend
+    artifact missing) marks the entry and leaves its ids in place.
+    ``truncated`` comes from the compile path, which sees a frame hit the limit
+    once and records it as ``co_name (filename:firstlineno)``, so that set
+    cannot merge two frames. ``served_eagerly`` names the frames
+    ``PrecompileSession._served_entry`` emptied: they hold no guarded code by
+    design, not for lack of coverage.
     """
     return PrecompileSummary(
         frames=len(entry.codes),
@@ -2023,18 +2024,11 @@ class PrecompileSession(Generic[_P, _R]):
                 f"risk explicitly."
             )
         if require_complete:
-            if summary.capture_errors:
-                raise PackageError(
-                    "Precompilation is incomplete because a captured call raised: "
-                    f"{list(summary.capture_errors)}. Re-run every example "
-                    "successfully, or pass require_complete=False to save the partial "
-                    "artifact."
-                )
             entry = self._package.cache_entry()
             if _is_variantless_entry_fallback(entry):
                 # The artifact build refuses this too, so require_complete=False
-                # is no way out; say so rather than suggest it. Checked before
-                # the no-compiled-code gates: the entry did run.
+                # is no way out; say so rather than suggest it. Checked first:
+                # the entry did run, and every later gate suggests that way out.
                 raise PackageError(
                     f"Precompilation has no variant of the entry frame "
                     f"{entry.codes[0].python_code.co_name!r}: Dynamo gave up on it "
@@ -2044,6 +2038,13 @@ class PrecompileSession(Generic[_P, _R]):
                     f"The artifact build refuses that whatever require_complete "
                     f"says: remove that graph break, or capture the functions the "
                     f"entry calls instead."
+                )
+            if summary.capture_errors:
+                raise PackageError(
+                    "Precompilation is incomplete because a captured call raised: "
+                    f"{list(summary.capture_errors)}. Re-run every example "
+                    "successfully, or pass require_complete=False to save the partial "
+                    "artifact."
                 )
             if summary.guarded_codes == 0:
                 raise PackageError(
