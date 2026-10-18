@@ -142,17 +142,11 @@ bool is_supported_device(Device device) {
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
-// Shell dtypes with no defined value conversion. Rejecting casts on the host
-// keeps backends consistent; on CUDA they would otherwise device-assert in the
-// dynamic-cast kernel.
-bool is_uncastable_shell_type(ScalarType t) {
-  return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
-      isSubByteIntType(t);
-}
-
+// Shell dtypes have no defined value conversion. Rejecting casts on the host
+// keeps every backend consistent with tracing; on CUDA they would otherwise
+// device-assert in the dynamic-cast kernel.
 void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
-  if (dst == src ||
-      !(is_uncastable_shell_type(dst) || is_uncastable_shell_type(src))) {
+  if (dst == src || !(isShellType(dst) || isShellType(src))) {
     return;
   }
   if (dst == ScalarType::Float4_e2m1fn_x2 ||
@@ -169,7 +163,7 @@ void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "Casting from ", src, " to ", dst, " is not supported: ",
-      is_uncastable_shell_type(src) ? src : dst,
+      isShellType(src) ? src : dst,
       " is a shell dtype with no defined conversions. Use .view() to "
       "reinterpret the bytes as a same-size integer dtype instead.");
 }
@@ -238,16 +232,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
-  // Meta is checked so FakeTensor tracing rejects these casts like eager does;
-  // this applies to traced tensors of every device, since meta loses the
-  // original device. Eager out-of-tree devices keep their own handling through
-  // _copy_from.
-  const auto checks_shell_cast = [](Device d) {
-    return d.is_meta() || is_supported_device(d);
-  };
-  if (checks_shell_cast(self.device()) && checks_shell_cast(src.device())) {
-    check_shell_dtype_cast(src.scalar_type(), self.scalar_type());
-  }
+  // Checked for every device, including meta and out-of-tree backends, so
+  // eager and FakeTensor tracing reject the same casts.
+  check_shell_dtype_cast(src.scalar_type(), self.scalar_type());
 
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {

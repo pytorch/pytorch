@@ -503,15 +503,17 @@ class TestFloat4Dtype(TestCase):
         }
         dtypes = {d for d in vars(torch).values() if isinstance(d, torch.dtype)}
         for dtype in dtypes - quantized - {torch.float32}:
-            src = torch.empty(2, dtype=dtype, device="meta")
-            try:
-                src.to(torch.float32)
-                rejected = False
-            except NotImplementedError:
-                rejected = True
-            self.assertEqual(
-                rejected, dtype in _uncastable_shell_dtypes, msg=str(dtype)
-            )
+            meta = torch.empty(2, dtype=dtype, device="meta")
+            meta_f32 = torch.empty(2, device="meta")
+            for cast in (lambda: meta.to(torch.float32), lambda: meta_f32.to(dtype)):
+                try:
+                    cast()
+                    rejected = False
+                except NotImplementedError:
+                    rejected = True
+                self.assertEqual(
+                    rejected, dtype in _uncastable_shell_dtypes, msg=str(dtype)
+                )
 
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(

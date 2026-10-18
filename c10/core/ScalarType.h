@@ -129,6 +129,13 @@ constexpr bool isSubByteIntType(ScalarType t) {
       t == ScalarType::Int5 || t == ScalarType::Int6 || t == ScalarType::Int7;
 }
 
+// Shell dtypes: Float4_e2m1fn_x2, Bits*, and the sub-byte ints. They have no
+// defined value conversion to or from any other dtype.
+inline bool isShellType(ScalarType t) {
+  return t == ScalarType::Float4_e2m1fn_x2 || isBitsType(t) ||
+      isSubByteIntType(t);
+}
+
 constexpr bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||

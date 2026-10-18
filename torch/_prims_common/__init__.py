@@ -1061,8 +1061,9 @@ _low_precision_dtypes = (
 _complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
 
 
-# Shell dtypes with no defined value conversion. Mirrors the eager check in
-# aten/src/ATen/native/Copy.cpp so tracing rejects the same casts.
+# Shell dtypes with no defined value conversion. Mirrors c10::isShellType and
+# the eager check in aten/src/ATen/native/Copy.cpp so tracing rejects the same
+# casts.
 _uncastable_shell_dtypes = frozenset(
     (
         torch.float4_e2m1fn_x2,
