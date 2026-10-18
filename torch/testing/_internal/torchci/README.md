@@ -121,8 +121,8 @@ replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
 
 In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
-described below, in the jobs `_torchci_reports_default` selects: for now, the
-trunk, pull, slow, inductor and periodic-strict workflows' jobs. `run_tests` has
+described below, in every job except on XPU builds, which write none until the
+XPU CI image has `pyzes`: without it, `device_count` would be `0`. `run_tests` has
 no default, so a test file run some other way writes no report.
 
 ## Upload

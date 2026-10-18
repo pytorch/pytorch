@@ -576,6 +576,22 @@ class TestReportEnablement(TestCase):
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
             self.assertEqual(args("test_type_info", False, "/reports"), [])
 
+    def test_run_test_default_reports_dir(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        default = run_test_module._torchci_reports_default
+        ci_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
+        for is_ci, xpu, expected in (
+            (False, None, None),
+            (True, None, ci_dir),
+            # XPU builds write none in CI.
+            (True, "20250101", None),
+        ):
+            with (
+                unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
+                unittest.mock.patch.object(torch.version, "xpu", xpu),
+            ):
+                self.assertEqual(default(), expected)
+
 
 # gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
 # fields gtest_identities reads.
