@@ -39,7 +39,7 @@ inner(torch.randn(2, 2).to("{device}"))
         self._run_full_test(run_code, "aot", expected_error, isolate=True)
 
 
-class MinifierIsolateTestsOnlyCPU(MinifierIsolateTests):
+class MinifierIsolateTestsForCPU(MinifierIsolateTests):
     hw_classification = HardwareClassification.CPU
 
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
@@ -47,11 +47,11 @@ class MinifierIsolateTestsOnlyCPU(MinifierIsolateTests):
     @skipIfWindows(
         msg="Build Failed: fatal error C1083: Cannot open include file: 'Python.h': No such file or directory"
     )
-    def test_after_aot_cpu_runtime_error(self, device):
-        self._test_after_aot_runtime_error(device, "")
+    def test_after_aot_cpu_runtime_error(self):
+        self._test_after_aot_runtime_error("cpu", "")
 
 
-class MinifierIsolateTestsACCELERATOR(MinifierIsolateTests):
+class MinifierIsolateTestsAccelerator(MinifierIsolateTests):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfRocmWithoutDebugAsserts
@@ -68,9 +68,8 @@ class MinifierIsolateTestsACCELERATOR(MinifierIsolateTests):
         self._test_after_aot_runtime_error(device, expected_error)
 
 
-instantiate_device_type_tests(MinifierIsolateTestsOnlyCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(
-    MinifierIsolateTestsACCELERATOR, globals(), except_for="cpu", allow_xpu=True
+    MinifierIsolateTestsAccelerator, globals(), except_for="cpu", allow_xpu=True
 )
 
 
