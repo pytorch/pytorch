@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <ATen/CuDNNFlags.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -90,6 +91,8 @@ class TORCH_API ThreadLocalState {
 
   // TLS for arbitrary python objects that is registered via hooks
   at::impl::ThreadLocalPythonObjects saved_objects_;
+
+  at::impl::CuDNNFlags cudnn_flags_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && \
     !defined(BUILD_LITE_INTERPRETER)

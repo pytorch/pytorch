@@ -1,6 +1,7 @@
 #include <ATen/Config.h>
 
 #include <ATen/Context.h>
+#include <ATen/CuDNNFlags.h>
 
 #include <c10/core/CPUAllocator.h>
 
@@ -39,8 +40,53 @@ namespace at {
 namespace {
 
 std::atomic<bool> xnnpack_backend_available{false};
+thread_local impl::CuDNNFlags cudnn_flags;
+
+void validateFloat32Precision(
+    Float32Backend backend,
+    Float32Op op,
+    Float32Precision p) {
+  TORCH_CHECK(
+      !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
+      "backend 'cuda' does not support precision 'bf16'");
+  if (p == Float32Precision::BF16X9) {
+    TORCH_CHECK(
+        backend == Float32Backend::CUDA && op == Float32Op::MATMUL,
+        "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'");
+    const auto& cuda_hooks = detail::getCUDAHooks();
+    TORCH_CHECK(
+        !cuda_hooks.hasROCM(),
+        "bfx9 precision is only supported on NVIDIA CUDA");
+    TORCH_CHECK(
+        cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 12090,
+        "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
+  }
+  TORCH_CHECK(
+      p != Float32Precision::DEFAULT,
+      "DEFAULT precision is internal and cannot be set explicitly");
+}
 
 } // namespace
+
+const impl::CuDNNFlags& impl::CuDNNFlags::get_tls_state() {
+  return cudnn_flags;
+}
+
+void impl::CuDNNFlags::set_tls_state(const CuDNNFlags& state) {
+  if (state.fp32_precision.has_value()) {
+    validateFloat32Precision(
+        Float32Backend::CUDA, Float32Op::ALL, *state.fp32_precision);
+  }
+  if (state.conv_fp32_precision.has_value()) {
+    validateFloat32Precision(
+        Float32Backend::CUDA, Float32Op::CONV, *state.conv_fp32_precision);
+  }
+  if (state.rnn_fp32_precision.has_value()) {
+    validateFloat32Precision(
+        Float32Backend::CUDA, Float32Op::RNN, *state.rnn_fp32_precision);
+  }
+  cudnn_flags = state;
+}
 
 namespace native::xnnpack::internal {
 
@@ -162,7 +208,8 @@ Context& globalContext() {
 // that CuDNN was enabled, it doesn't actually say anything about
 // whether or not CuDNN is actually usable.
 bool Context::userEnabledCuDNN() const {
-  return enabled_cudnn;
+  const auto& value = impl::CuDNNFlags::get_tls_state().enabled;
+  return value.has_value() ? *value : enabled_cudnn;
 }
 
 void Context::setUserEnabledCuDNN(bool e) {
@@ -178,7 +225,8 @@ void Context::setUserEnabledMkldnn(bool e) {
 }
 
 bool Context::deterministicCuDNN() const {
-  return deterministic_cudnn;
+  const auto& value = impl::CuDNNFlags::get_tls_state().deterministic;
+  return value.has_value() ? *value : deterministic_cudnn;
 }
 
 void Context::setDeterministicCuDNN(bool b) {
@@ -243,7 +291,8 @@ void Context::setUserEnabledNNPACK(bool e) {
 }
 
 CuDNNDepthwiseKernel Context::cudnnDepthwiseKernel() const {
-  return depthwise_kernel_cudnn;
+  const auto& value = impl::CuDNNFlags::get_tls_state().depthwise_kernel;
+  return value.has_value() ? *value : depthwise_kernel_cudnn;
 }
 
 void Context::setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k) {
@@ -251,11 +300,13 @@ void Context::setCuDNNDepthwiseKernel(CuDNNDepthwiseKernel k) {
 }
 
 bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
+  const auto& value = impl::CuDNNFlags::get_tls_state().allow_tf32;
+  bool allow_tf32 = value.has_value() ? *value : allow_tf32_cudnn;
   if (!op.has_value()) {
     bool allow_tf32_rnn = float32Precision(Float32Backend::CUDA, Float32Op::RNN) == Float32Precision::TF32;
     bool allow_tf32_conv = float32Precision(Float32Backend::CUDA, Float32Op::CONV) == Float32Precision::TF32;
     TORCH_CHECK(
-        allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32_cudnn,
+        allow_tf32_rnn == allow_tf32_conv && allow_tf32_rnn == allow_tf32,
         "PyTorch is checking whether allow_tf32 is enabled for cuDNN without a specific operator name,",
         "but the current flag(s) indicate that cuDNN conv and cuDNN RNN have different TF32 flags.",
         "This combination indicates that you have used a mix of the legacy and new APIs to set the TF32 flags. ",
@@ -264,7 +315,7 @@ bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
   } else {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
-  return allow_tf32_cudnn;
+  return allow_tf32;
 }
 
 void Context::setAllowTF32CuDNN(bool b) {
@@ -372,7 +423,8 @@ bool Context::userEnabledOverrideableSDP() const {
 }
 
 bool Context::benchmarkCuDNN() const {
-  return benchmark_cudnn;
+  const auto& value = impl::CuDNNFlags::get_tls_state().benchmark;
+  return value.has_value() ? *value : benchmark_cudnn;
 }
 
 void Context::setBenchmarkCuDNN(bool b) {
@@ -380,7 +432,8 @@ void Context::setBenchmarkCuDNN(bool b) {
 }
 
 int Context::benchmarkLimitCuDNN() const {
-  return benchmark_limit_cudnn;
+  const auto& value = impl::CuDNNFlags::get_tls_state().benchmark_limit;
+  return value.has_value() ? *value : benchmark_limit_cudnn;
 }
 
 void Context::setBenchmarkLimitCuDNN(int b) {
@@ -442,20 +495,32 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 }
 
 Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op) const {
-  std::pair<Float32Backend, Float32Op> key{backend, op};
-  auto it = fp32_precision.find(key);
-  TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
+  auto get_precision = [this](Float32Backend backend, Float32Op op) {
+    if (backend == Float32Backend::CUDA) {
+      const auto& flags = impl::CuDNNFlags::get_tls_state();
+      if (op == Float32Op::ALL && flags.fp32_precision.has_value()) {
+        return *flags.fp32_precision;
+      }
+      if (op == Float32Op::CONV && flags.conv_fp32_precision.has_value()) {
+        return *flags.conv_fp32_precision;
+      }
+      if (op == Float32Op::RNN && flags.rnn_fp32_precision.has_value()) {
+        return *flags.rnn_fp32_precision;
+      }
+    }
+    auto it = fp32_precision.find(std::make_pair(backend, op));
+    TORCH_CHECK(it != fp32_precision.end(), "Invalid (backend, op) pair: (", backend, ", ", op, ")");
+    return it->second;
+  };
 
-  Float32Precision precision = it->second;
+  Float32Precision precision = get_precision(backend, op);
 
   // DEFAULT means "inherit from parent if set, otherwise use the legacy TF32
   // default". It is only used as the initial state for CUDA conv/rnn.
   if (precision == Float32Precision::DEFAULT) {
-    key.second = Float32Op::ALL;
-    Float32Precision parent = fp32_precision.find(key)->second;
+    Float32Precision parent = get_precision(backend, Float32Op::ALL);
     if (parent == Float32Precision::NONE || parent == Float32Precision::DEFAULT) {
-      key.first = Float32Backend::GENERIC;
-      parent = fp32_precision.find(key)->second;
+      parent = get_precision(Float32Backend::GENERIC, Float32Op::ALL);
     }
     if (parent != Float32Precision::NONE && parent != Float32Precision::DEFAULT) {
       // A parent explicitly overrides; apply it (cuda does not support bf16).
@@ -467,12 +532,10 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
   }
 
   if (precision == Float32Precision::NONE) {
-    key.second = Float32Op::ALL;
-    precision = fp32_precision.find(key)->second;
+    precision = get_precision(backend, Float32Op::ALL);
   }
   if (precision == Float32Precision::NONE) {
-    key.first = Float32Backend::GENERIC;
-    precision = fp32_precision.find(key)->second;
+    precision = get_precision(Float32Backend::GENERIC, Float32Op::ALL);
   }
 
   // "cuda" does not support "bf16"
@@ -517,24 +580,7 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   TORCH_CHECK(
       it != fp32_precision.end(),
       "Invalid (backend, op) pair: (", backend, ", ", op, ")");
-  TORCH_CHECK(
-      !(backend == Float32Backend::CUDA && p == Float32Precision::BF16),
-      "backend 'cuda' does not support precision 'bf16'");
-  if (p == Float32Precision::BF16X9) {
-    TORCH_CHECK(
-        backend == Float32Backend::CUDA && op == Float32Op::MATMUL,
-        "precision 'bfx9' is only supported for backend 'cuda' and op 'matmul'");
-    const auto& cuda_hooks = detail::getCUDAHooks();
-    TORCH_CHECK(
-        !cuda_hooks.hasROCM(),
-        "bfx9 precision is only supported on NVIDIA CUDA");
-    TORCH_CHECK(
-        cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 12090,
-        "bfx9 precision requires PyTorch to be built with CUDA 12.9 or later");
-  }
-  TORCH_CHECK(
-      p != Float32Precision::DEFAULT,
-      "DEFAULT precision is internal and cannot be set explicitly");
+  validateFloat32Precision(backend, op, p);
 
   it->second = p;
 }
