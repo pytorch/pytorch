@@ -79,7 +79,7 @@ TEST_F(ContextTest, cow_deleter) {
   auto& context = *new cow::COWDeleterContext(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::cow_deleter(&context);
+  cow::cow_deleter(new cow::COWReference(&context));
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
@@ -155,7 +155,8 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
       /*size_bytes=*/5,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/
+          new cow::COWReference(new cow::COWDeleterContext(std::move(data))),
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -199,7 +200,8 @@ TEST(materialize_test, copy_on_write_single_reference) {
       /*size_bytes=*/4,
       at::DataPtr(
           /*data=*/data_ptr,
-          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          /*ctx=*/
+          new cow::COWReference(new cow::COWDeleterContext(std::move(data))),
           cow::cow_deleter,
           Device(Device::Type::CPU)),
       /*allocator=*/nullptr,
@@ -239,8 +241,8 @@ TEST(materialize_test, copy_on_write) {
   auto new_storage = cow::lazy_clone_storage(original_storage);
   ASSERT_THAT(new_storage, testing::NotNull());
 
-  auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
-      cow::cow_deleter);
+  auto context =
+      new_storage->data_ptr().cast_context<cow::COWReference>(cow::cow_deleter);
   ASSERT_THAT(context, testing::NotNull());
 
   // Materialized storage has new copy of data.
@@ -267,6 +269,59 @@ TEST(lazy_clone_storage_test, sets_materializer) {
   // Both storages should have materializers set.
   ASSERT_TRUE(original_storage.has_materializer());
   ASSERT_TRUE(new_storage->has_materializer());
+}
+
+class FailingAllocator final : public Allocator {
+ public:
+  DataPtr allocate(size_t n) override {
+    TORCH_CHECK(!fail, "injected allocation failure");
+    return GetDefaultCPUAllocator()->allocate(n);
+  }
+
+  void copy_data(void* dest, const void* src, size_t count) const override {
+    default_copy_data(dest, src, count);
+  }
+
+  bool fail = false;
+};
+
+TEST(materialize_test, allocation_failure_keeps_storage_valid) {
+  FailingAllocator allocator;
+  StorageImpl source({}, 4, &allocator, false);
+  std::memcpy(source.mutable_data(), "abcd", 4);
+  auto clone = cow::lazy_clone_storage(source);
+
+  allocator.fail = true;
+  ASSERT_ANY_THROW(clone->mutable_data());
+  ASSERT_THAT(*clone, is_copy_on_write());
+  ASSERT_THAT(source, is_copy_on_write());
+  ASSERT_EQ(clone->data(), source.data());
+
+  allocator.fail = false;
+  ASSERT_NE(clone->mutable_data(), source.data());
+  ASSERT_TRUE(buffers_are_equal(clone->data(), source.data(), 4));
+  allocator.fail = true;
+  const auto* ptr = source.data();
+  ASSERT_EQ(source.mutable_data(), ptr);
+}
+
+TEST(lazy_clone_storage_test, cuda_without_allocator_is_rejected) {
+  auto* bytes = new std::byte[4];
+  StorageImpl storage(
+      {},
+      4,
+      DataPtr(
+          bytes,
+          bytes,
+          +[](void* ptr) { delete[] static_cast<std::byte*>(ptr); },
+          Device(DeviceType::CUDA, 0)),
+      nullptr,
+      false);
+  EXPECT_THAT(
+      [&] { cow::lazy_clone_storage(storage); },
+      testing::ThrowsMessage<c10::Error>(
+          testing::HasSubstr("without an allocator")));
+  EXPECT_FALSE(storage.has_materializer());
 }
 
 TEST(materialize_test, one_shot_materializer) {
@@ -300,6 +355,17 @@ TEST(materialize_test, read_does_not_materialize_cow) {
 
   // Data should still be shared.
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
+}
+
+TEST(materialize_test, completion_is_noop_on_cpu) {
+  StorageImpl source({}, 4, GetCPUAllocator(), false);
+  auto clone = cow::lazy_clone_storage(source);
+  cow::record_done(source);
+  cow::record_done(*clone);
+  ASSERT_TRUE(source.has_materializer());
+  ASSERT_TRUE(clone->has_materializer());
+  ASSERT_EQ(source.data(), clone->data());
+  ASSERT_NE(source.mutable_data(), clone->data());
 }
 
 TEST(materialize_test, set_data_ptr_materializes) {
