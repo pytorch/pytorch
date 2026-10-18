@@ -473,9 +473,28 @@ test_cpuset_num_threads() {
   assert_git_not_dirty
 }
 
+# H100 needs a targeted list; B200 discovers all python_native suites below. Install
+# CuTeDSL before either run. H100 reproduced all 112 B200-generated hashes.
+PYTHON_NATIVE_CUTEDSL_SUITES=(
+  python_native/test_cutedsl_smoketest
+  python_native/test_sum_cutedsl
+  python_native/test_sum_inner_tree_plan
+  python_native/test_inner_tree_order
+  python_native/test_kernel_coltile
+  python_native/test_kernel_xcta
+  python_native/test_kernel_rowtile
+  python_native/test_kernel_general
+  python_native/test_hw_caps
+  python_native/test_traits
+  python_native/test_instrumentation
+  python_native/test_tile_datapath
+)
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
+  install_flash_attn_cute
+  time python test/run_test.py --include "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -1982,8 +2001,8 @@ test_distributed_single_gpu() {
 
 test_distributed_4gpu() {
   # Distributed tests that need more GPUs than the standard 2-GPU distributed
-  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
-  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
+  # runner provides (3-4 GPU tests), run on runners with 4-GPU labels.
+  # Selection reuses the native `multigpu` marker machinery (see
   # test/conftest.py): --distributed-tests discovers every distributed test file
   # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
   # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
@@ -2484,7 +2503,7 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e .
+  pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)

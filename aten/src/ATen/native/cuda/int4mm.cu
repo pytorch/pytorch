@@ -893,6 +893,8 @@ at::Tensor _weight_int4pack_mm_cuda(
   TORCH_CHECK(
       A.device() == B.device() && A.device() == qScaleAndZeros.device());
 
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_weight_int4pack_mm_cuda requires a GPU with compute capability 8.0 or newer");
 
   constexpr int32_t kMTileSize = 16;
   constexpr int32_t kNTileSize = 8;
@@ -1078,6 +1080,8 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   // which is the maximum vectorized load/store size
   TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8);
 
+  TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
+              "_convert_weight_to_int4pack_cuda requires a GPU with compute capability 8.0 or newer");
   constexpr int32_t kNTileSize = 8;
   constexpr int32_t kKTileSize = 16;
 
