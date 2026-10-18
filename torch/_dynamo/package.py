@@ -634,8 +634,9 @@ class _DynamoCodeCacheEntry:
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
       12. Whether Dynamo gave up on the frame during capture and skipped it
-         from then on (a graph break it could not resume from, such as one
-         inside a loop). A frame with no variants is skipped at install like a
+         from then on: a graph break it could not resume from (such as one
+         inside a loop), or a backend that declined the graph by raising
+         ``SkipFrame``. A frame with no variants is skipped at install like a
          trivial one; for a frame with variants, an installed precompile
          artifact serves them and runs a call they miss eagerly instead of
          refusing it.

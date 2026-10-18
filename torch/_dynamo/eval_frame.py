@@ -295,7 +295,9 @@ class _FailOnRecompileCallback:
         # to prevent cache miss due to different backend
         self._torchdynamo_orig_backend = callback
         # Frames whose miss runs eagerly instead of raising, keyed by id since
-        # code objects compare by value.
+        # code objects compare by value. Only _RefuseRecompileCallback fills it;
+        # it is checked in __call__ here because an overriding __call__ would
+        # shift the sys._getframe(1) below off the missed frame's caller.
         self._eager_codes: dict[int, types.CodeType] = {}
 
     def __call__(
@@ -357,7 +359,9 @@ class _FailOnRecompileCallback:
 class _RefuseRecompileCallback(_FailOnRecompileCallback):
     """A ``_FailOnRecompileCallback`` bound once into a context's callback (an
     installed precompile artifact); ``_callback_from_stance`` keeps it under
-    every stance that would compile.
+    every stance that would compile. A miss of a frame in ``eager_codes`` (one
+    Dynamo gave up on during capture) runs that call eagerly instead of
+    raising.
     """
 
     _message_prefix = (
