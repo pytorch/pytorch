@@ -3,6 +3,7 @@
 import builtins
 import cmath
 import collections
+import copyreg
 import dataclasses
 import enum
 import functools
@@ -255,6 +256,107 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
+_ALIAS = typing.List  # noqa: UP006
+
+
+class _Sentinel:
+    def __reduce__(self):
+        return "_SENTINEL"
+
+
+_SENTINEL = _Sentinel()
+
+
+# Pickled through the copyreg.dispatch_table entries the test registers.
+class _CopyregToItself:
+    pass
+
+
+class _CopyregToAnotherGlobal:
+    pass
+
+
+_COPYREG_TO_ITSELF = _CopyregToItself()
+_COPYREG_TO_ANOTHER_GLOBAL = _CopyregToAnotherGlobal()
+
+
+class _ReducesToAnotherGlobal:
+    def __reduce__(self):
+        return "_ALIAS"
+
+
+class _ReducesToAMissingName:
+    def __reduce__(self):
+        return "_EnumOwner.Missing"
+
+
+class _ReducesToACall:
+    def __reduce__(self):
+        return (_ReducesToACall, ())
+
+
+class _ReducesFromAMissingModule:
+    __module__ = "_not_imported"
+
+    def __reduce__(self):
+        return "_ReducesFromAMissingModule"
+
+
+# Module globals, so the identity check gets past its module-globals scan; the
+# last one is refused there anyway, since its __module__ is not imported.
+_REDUCES_TO_ANOTHER_GLOBAL = _ReducesToAnotherGlobal()
+_REDUCES_TO_A_MISSING_NAME = _ReducesToAMissingName()
+_REDUCES_TO_A_CALL = _ReducesToACall()
+_REDUCES_FROM_A_MISSING_MODULE = _ReducesFromAMissingModule()
+
+
+class _ModuleRaises:
+    def __reduce__(self):
+        return "_MODULE_RAISES"
+
+    @property
+    def __module__(self):
+        raise RuntimeError("no module")
+
+
+class _UnhashableModule:
+    __module__ = ["typing"]  # type: ignore[assignment]
+
+    def __reduce__(self):
+        return "_UNHASHABLE_MODULE"
+
+
+class _ReduceExByValue:
+    # Pickle calls __reduce_ex__, which here bypasses the __reduce__ name.
+    def __reduce__(self):
+        return "_REDUCE_EX_BY_VALUE"
+
+    def __reduce_ex__(self, protocol):
+        return (_ReduceExByValue, ())
+
+
+_REDUCE_EX_BY_VALUE = _ReduceExByValue()
+
+
+class _SentinelOwner:
+    class Sentinel:
+        def __reduce__(self):
+            return "_NESTED_SENTINEL"
+
+
+_NESTED_SENTINEL = _SentinelOwner.Sentinel()
+
+
+class _CountsReduces:
+    calls = 0
+
+    def __reduce__(self):
+        type(self).calls += 1
+        return "_CountsReduces"
+
+
+_MODULE_RAISES = _ModuleRaises()
+_UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
 
 
@@ -3863,6 +3965,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_typing_alias(self):
+        def fn(x):
+            if _ALIAS is typing.List:  # noqa: UP006
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        # typing.List pickles as a reference to the typing.List global, so the
+        # guard survives serialization instead of being dropped.
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):  # noqa: UP006
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_id_match_on_a_member_of_a_nested_enum(self):
         def fn(x):
             if _LEVEL is _EnumOwner.Level.LOW:
@@ -3923,6 +4040,24 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_EnumOwner.Level.LOW, True),
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
+            # Its __reduce__ names the typing global it is.
+            (typing.List, True),  # noqa: UP006
+            (typing.Optional, True),
+            # A subscripted alias is not a global of typing.
+            (typing.List[int], False),  # noqa: UP006
+            (_REDUCES_TO_A_CALL, False),
+            (_SENTINEL, True),
+            (_COPYREG_TO_ITSELF, True),
+            # Each reduction names something other than the object itself.
+            (_COPYREG_TO_ANOTHER_GLOBAL, False),
+            (_REDUCES_TO_ANOTHER_GLOBAL, False),
+            (_REDUCES_TO_A_MISSING_NAME, False),
+            (_REDUCES_FROM_A_MISSING_MODULE, False),
+            (_MODULE_RAISES, False),
+            (_UNHASHABLE_MODULE, False),
+            (_REDUCE_EX_BY_VALUE, False),
+            # The guard-state pickler refuses an instance of a nested class.
+            (_NESTED_SENTINEL, False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
@@ -3936,13 +4071,28 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # instance's type and leads to a different object.
             (torch._C._get_tracing_state, False),
         ]
+        dispatch = {
+            _CopyregToItself: lambda _: "_COPYREG_TO_ITSELF",
+            _CopyregToAnotherGlobal: lambda _: "_ALIAS",
+        }
         for value, expected in cases:
-            with self.subTest(value=value):
+            with (
+                self.subTest(value=value),
+                mock.patch.dict(copyreg.dispatch_table, dispatch),
+            ):
                 self.assertEqual(
                     is_portable_identity_guard("ID_MATCH", (), value), expected
                 )
                 if expected and not isinstance(value, types.ModuleType):
-                    self.assertIs(pickle.loads(pickle.dumps(value)), value)
+                    buf = io.BytesIO()
+                    GuardsStatePickler({id(value): value}, {}, {}, {}, buf).dump(value)
+                    self.assertIs(load_guards_state(buf.getvalue()), value)
+
+    def test_identity_check_reduces_only_a_module_global(self):
+        # Reducing runs user code, so an instance that is not one of its
+        # module's globals is refused without it.
+        self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _CountsReduces()))
+        self.assertEqual(_CountsReduces.calls, 0)
 
     def test_class_match_on_a_named_tuple_nested_in_a_class(self):
         def fn(x):
