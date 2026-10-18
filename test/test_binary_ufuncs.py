@@ -1380,8 +1380,25 @@ class TestBinaryUfuncsDevice(TestCase):
         denom = torch.logspace(-4, 4, steps=20)
         denom = [d.item() for d in denom]
         res = [num / d for d in denom]
-        ref = [num * (1 / d) for d in denom]
+        if self.device_type == "cuda" and dtype == torch.float:
+            # CUDA float32 divides with IEEE rounding
+            ref = [num / torch.tensor(d, device=device) for d in denom]
+        else:
+            ref = [num * (1 / d) for d in denom]
         self.assertEqual(res, ref, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_float32_division_by_scalar_is_correctly_rounded(self, device):
+        # x * (1/s) is one ulp off for many x when s is not a power of two,
+        # e.g. 49 / 7 gave 7.0000005. Block quantizers computing amax / 6.0 then
+        # round exact ties of the FP4 grid the wrong way.
+        x = torch.randn(1 << 16, device=device) * 100
+        x = torch.cat([x, torch.tensor([49.0, 169.0, 318.75], device=device)])
+        for s in (3.0, 6.0, 7.0, 13.0, 255.0, 448.0, 2688.0, 0.1, 2.0, 0.25):
+            s_float = torch.tensor(s).item()
+            expect = (x.cpu().double() / s_float).float().to(device)
+            self.assertEqual(x / s, expect, atol=0, rtol=0)
+            self.assertEqual(x.clone().div_(s), expect, atol=0, rtol=0)
 
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)

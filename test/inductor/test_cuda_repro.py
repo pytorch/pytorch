@@ -3754,6 +3754,17 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         # is already float16 and the output is int64.
         self.assertNotIn(".to(tl.float16)", code[0])
 
+    @skipIfXpu(msg="eager XPU float32 division by a scalar uses a reciprocal")
+    def test_float32_div_by_constant_matches_eager(self):
+        # Eager CUDA float32 divides by a non-power-of-two scalar with IEEE
+        # rounding, so compiled code must use div_rn, not x * (1 / s).
+        x = torch.randn(1 << 16, device=device_type) * 100
+        for s, uses_div_rn in ((6.0, True), (448.0, True), (0.25, False)):
+            torch._dynamo.reset()
+            actual, code = run_and_get_code(torch.compile(lambda t: t / s), x)
+            self.assertEqual(actual, x / s, atol=0, rtol=0)
+            self.assertEqual("div_rn" in code[0], uses_div_rn)
+
     @config.patch("eager_numerics.division_rounding", True)
     def test_reciprocal_precision_rounding(self):
         # Test that reciprocal matches eager when division_rounding is enabled.

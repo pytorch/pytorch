@@ -17,6 +17,16 @@ namespace at::native {
 namespace binary_internal {
 
 constexpr char div_name[] = "div_kernel";
+
+bool is_power_of_two(double b) {
+  int exponent = 0;
+  return std::abs(std::frexp(b, &exponent)) == 0.5;
+}
+
+bool is_power_of_two(c10::complex<double>) {
+  return false;
+}
+
 void div_true_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (iter.common_dtype() == kComplexHalf) {
@@ -37,6 +47,12 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division. If 1/b overflows or is
     // subnormal in opmath (tiny or huge b), divide by b instead.
+    //
+    // float32 keeps the reciprocal only when b is a power of two, where it is
+    // exact, so a / b is correctly rounded like CPU and tensor/tensor division;
+    // the division costs nothing measurable for bandwidth-bound kernels. Half and
+    // bfloat16 results round from float opmath, so the extra bit rarely matters,
+    // and float64 division is much slower than multiplication on some GPUs.
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         kHalf, kBFloat16, common_dtype, "div_true_cuda", [&]() {
           using opmath_t = at::opmath_type<scalar_t>;
@@ -47,7 +63,9 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
           const auto b = iter.scalar_value<high_prec_t>(2);
           const auto inv_b = static_cast<opmath_t>(high_prec_t(1.0) / b);
           iter.remove_operand(2);
-          if (is_usable_reciprocal(inv_b)) {
+          const bool use_reciprocal = is_usable_reciprocal(inv_b) &&
+              (!std::is_same_v<scalar_t, float> || is_power_of_two(b));
+          if (use_reciprocal) {
             gpu_kernel(
                 iter,
                 BUnaryFunctor<scalar_t, scalar_t, scalar_t, MulFunctor<opmath_t>>(
