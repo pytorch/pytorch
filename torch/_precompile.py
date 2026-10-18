@@ -3380,20 +3380,21 @@ def capture(
     multi-graph capture: it analyzes the Python rather than tracing one path,
     records every graph-break continuation and guarded recompilation the calls
     exercise, takes as many calls as you make (keyword arguments included), and
-    the artifact dispatches among the captured variants by their guards -- a call
-    no variant covers RAISES rather than silently serving, since there is no
-    compiler behind a source artifact, unless Dynamo gave up on that frame
+    the artifact dispatches among the captured variants by their guards -- a
+    call no variant covers RAISES rather than silently serving, since there is
+    no compiler behind a source artifact, unless Dynamo gave up on that frame
     during the capture (``PrecompileSummary.eager_fallbacks``): the capture ran
-    that frame eagerly, so the call runs eagerly too. :class:`MakeFxTracer` is one non-strict
-    ATen trace: the capture takes exactly ONE positional call, refuses a second,
-    and specializes control flow and shapes to that call, with the contract of
-    Note [precompile programming model] in ``torch/_precompile.py``. ``fn`` is
-    the whole computation, e.g. a module-level ``def step(model, x): return
-    model(x)`` (only a :class:`MakeFxTracer` capture also takes a lambda): the
-    ``nn.Module`` arguments have their params/buffers lifted to graph inputs (no
-    weights are baked in) and the rest are the runtime inputs; the reloaded
-    callable is invoked with the same argument structure, and the runtime model
-    must match the captured model's parameter/buffer structure.
+    that frame eagerly, so the call runs eagerly too. :class:`MakeFxTracer` is
+    one non-strict ATen trace: the capture takes exactly ONE positional call,
+    refuses a second, and specializes control flow and shapes to that call, with
+    the contract of Note [precompile programming model] in
+    ``torch/_precompile.py``. ``fn`` is the whole computation, e.g. a
+    module-level ``def step(model, x): return model(x)`` (only a
+    :class:`MakeFxTracer` capture also takes a lambda): the ``nn.Module``
+    arguments have their params/buffers lifted to graph inputs (no weights are
+    baked in) and the rest are the runtime inputs; the reloaded callable is
+    invoked with the same argument structure, and the runtime model must match
+    the captured model's parameter/buffer structure.
 
     A Dynamo artifact is STANDALONE: it rebuilds the entry from its code object
     and installs nothing, so ``fn`` must be a module-level function of an
@@ -3537,8 +3538,11 @@ def load(
     missed frame is one Dynamo gave up on during the capture (listed in
     ``PrecompileSummary.eager_fallbacks`` and marked ``# eager fallback`` in
     the artifact's ``FRAMES``), since the capture ran that frame eagerly too;
-    it logs a warning the first time each such frame misses. Only that frame
-    runs eagerly: the frames it calls still dispatch to their own variants.
+    it logs a warning the first time each such frame misses. Under an
+    installed artifact only that frame runs eagerly: the frames it calls still
+    dispatch to their own variants. A standalone artifact runs the whole call
+    as plain Python, since the frame's original bytecode never reaches its
+    continuations.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve
