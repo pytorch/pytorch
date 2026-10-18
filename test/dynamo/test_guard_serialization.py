@@ -255,6 +255,7 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
+_ALIAS = typing.List
 _torch_add = torch.add
 
 
@@ -3863,6 +3864,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
+    def test_id_match_on_a_typing_alias(self):
+        def fn(x):
+            if _ALIAS is typing.List:
+                return x + 1
+            return x - 1
+
+        x = torch.randn(3)
+
+        # typing.List pickles as a reference to the typing.List global, so the
+        # guard survives serialization instead of being dropped.
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
     def test_id_match_on_a_member_of_a_nested_enum(self):
         def fn(x):
             if _LEVEL is _EnumOwner.Level.LOW:
@@ -3923,6 +3939,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_EnumOwner.Level.LOW, True),
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
+            # Its __reduce__ names the typing global it is.
+            (typing.List, True),
+            (typing.Optional, True),
+            # A subscripted alias reduces to a constructor call, not a name.
+            (typing.List[int], False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
