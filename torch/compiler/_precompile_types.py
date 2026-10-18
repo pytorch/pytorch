@@ -144,10 +144,9 @@ class PrecompileSummary:
             graph break it could not resume from (such as one inside a loop), a
             ``UserError`` (a misused Dynamo API) that Dynamo suppressed by
             skipping the frame, or a backend that declined the graph by raising
-            ``SkipFrame``. A compile
-            error ``suppress_errors=True`` swallows is not one: Dynamo skips that
-            frame too, but it stays in ``uncovered_frames`` so the failure is
-            seen.
+            ``SkipFrame``. A compile error ``suppress_errors=True`` swallows is
+            not one: Dynamo skips that frame too, but it stays in
+            ``uncovered_frames`` so the failure is seen.
             Not a gap, and not in ``uncovered_frames``: a load serves the
             variants its earlier calls compiled, if any, and runs any call they
             miss eagerly, logging a warning once per frame (the capture skipped

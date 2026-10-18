@@ -1653,10 +1653,12 @@ def _summarize(
     ``bypassed`` and ``uncovered_frames`` are read off the entry, one bare
     ``co_name`` per frame, so a repeated name is two frames and both lists are
     subsets of ``frames`` by construction. Uncovered is the coverage gap: the
-    frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
-    neither bypassed nor an ``eager_fallback`` (Dynamo gave up on it, so a load
-    serves any variants it has and runs a call they miss eagerly; those are
-    ``eager_fallbacks``). ``install()`` ``skip_code()``s every entry that is not
+    frame entered Dynamo (``has_compile_id``, or ``eager_fallback`` for a
+    generator entry, flagged before ``_compile``), holds no guarded code, and
+    was neither bypassed nor served as an ``eager_fallback`` (Dynamo gave up on
+    it, so a load serves any variants it has and runs a call they miss
+    eagerly; those are ``eager_fallbacks``). ``install()`` ``skip_code()``s
+    every entry that is not
     bypassed and has no guarded codes whether or not it entered Dynamo, so a
     generated-but-never-executed resume entry is skipped there and is not a gap
     here. ``backend_graphs`` counts the backend ids of the entries that are
@@ -1680,7 +1682,7 @@ def _summarize(
         uncovered_frames=tuple(
             c.python_code.co_name
             for c in entry.codes
-            if c.has_compile_id
+            if (c.has_compile_id or c.eager_fallback)
             and not c.guarded_codes
             and not c.bypassed
             and _frame_key(c.python_code) not in served_eagerly
