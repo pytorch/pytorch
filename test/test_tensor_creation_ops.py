@@ -3538,8 +3538,6 @@ class TestRandomTensorCreation(TestCase):
                 with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                     torch.normal(input, std)
 
-    # https://github.com/pytorch/pytorch/issues/126834
-    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
@@ -3560,23 +3558,26 @@ class TestRandomTensorCreation(TestCase):
 
         values = [double_min, float_min, -42, 0, 42, float_max, double_max]
 
+        def assert_uniform_raises(t, from_, to_, message):
+            with self.assertRaises(RuntimeError) as ctx:
+                t.uniform_(from_, to_)
+            err = ctx.exception
+            # Under dynamo, eager_noexcept wraps an error raised by the generated
+            # GraphModule; check the original error instead of the wrapper.
+            if isinstance(err, torch._dynamo.exc.TorchDynamoException):
+                err = err.__cause__
+                self.assertIsInstance(err, RuntimeError)
+            self.assertRegex(str(err), message)
+
         for from_ in values:
             for to_ in values:
                 t = torch.empty(size, dtype=dtype, device=device)
                 if not (min_val <= from_ <= max_val) or not (min_val <= to_ <= max_val):
                     pass
                 elif to_ < from_:
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "uniform_ expects to return",
-                        lambda: t.uniform_(from_, to_)
-                    )
+                    assert_uniform_raises(t, from_, to_, "uniform_ expects to return")
                 elif to_ - from_ > max_val:
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "uniform_ expects to-from",
-                        lambda: t.uniform_(from_, to_)
-                    )
+                    assert_uniform_raises(t, from_, to_, "uniform_ expects to-from")
                 else:
                     t.uniform_(from_, to_)
                     range_ = to_ - from_
