@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/BatchNorm.h>
 #include <c10/metal/common.h>
 #include <c10/metal/reduction_utils.h>
 #include <metal_simdgroup>
@@ -220,3 +221,85 @@ kernel void layer_norm_looped(
 instantiate_layer_norm(float);
 instantiate_layer_norm(half);
 instantiate_layer_norm(bfloat);
+
+template <typename T>
+[[max_total_threads_per_threadgroup(BN_MAX_THREADS)]]
+kernel void batch_norm_reduce(
+    device const T* x [[buffer(0)]],
+    device packed_float3* out [[buffer(1)]],
+    constant uint* sizes [[buffer(2)]],
+    uint3 tg [[threadgroup_position_in_grid]],
+    uint3 ntg [[threadgroups_per_grid]],
+    uint3 pos [[thread_position_in_threadgroup]],
+    uint3 tptg [[threads_per_threadgroup]]) {
+  const uint C = sizes[0], inner = sizes[1], outer = sizes[2];
+  const bool channels_last = inner == 1;
+  const uint c = channels_last ? tg.x * tptg.x + pos.x : tg.x;
+  const uint o0 = tg.y * tptg.y + pos.y,
+             r0 = channels_last ? 0 : tg.z * tptg.x + pos.x;
+  float3 acc = 0;
+  if (c < C && o0 < outer && r0 < inner) {
+    const float k = float(x[(o0 * C + c) * inner + r0]);
+    float3 sum = 0;
+    for (uint o = o0; o < outer; o += tptg.y * ntg.y) {
+      for (uint r = r0; r < inner; r += tptg.x * ntg.z) {
+        const float v = float(x[(o * C + c) * inner + r]) - k;
+        sum += float3(v, v * v, 1);
+      }
+    }
+    acc = float3(k + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
+  }
+  threadgroup float3 buf[BN_MAX_THREADS];
+  const uint tid = channels_last ? pos.y : pos.y * tptg.x + pos.x;
+  const uint base = channels_last ? pos.x * tptg.y : 0;
+  buf[base + tid] = acc;
+  acc = threadgroup_welford_combine(
+      buf + base, tid, channels_last ? tptg.y : tptg.x * tptg.y);
+  if (tid == 0 && c < C) {
+    out[(tg.z * ntg.y + tg.y) * C + c] = packed_float3(acc);
+  }
+}
+
+kernel void batch_norm_stats(
+    device const packed_float3* part [[buffer(0)]],
+    device const float* weight [[buffer(1)]],
+    device const float* bias [[buffer(2)]],
+    device float* stats [[buffer(3)]],
+    constant uint* sizes [[buffer(4)]],
+    constant float& eps [[buffer(5)]],
+    uint c [[thread_position_in_grid]]) {
+  float3 acc = part[c];
+  for (uint i = 1; i < sizes[1]; ++i) {
+    acc = welford_combine(acc, float3(part[i * sizes[0] + c]));
+  }
+  const float invstd = metal::precise::rsqrt(acc.y / acc.z + eps);
+  device float* s = stats + BN_NUM_STATS * c;
+  s[BN_MEAN] = acc.x;
+  s[BN_SCALE] = weight != nullptr ? invstd * weight[c] : invstd;
+  s[BN_SHIFT] = bias != nullptr ? bias[c] : 0;
+  s[BN_INVSTD] = invstd;
+  s[BN_VAR] = acc.y / (acc.z - 1);
+}
+
+template <typename T>
+kernel void batch_norm_elemt(
+    device T* out [[buffer(0)]],
+    device const T* x [[buffer(1)]],
+    device const float* stats [[buffer(2)]],
+    uint3 pos [[thread_position_in_grid]],
+    uint3 size [[threads_per_grid]]) {
+  const uint i = (pos.z * size.y + pos.y) * size.x + pos.x;
+  device const float* k = stats + pos.y * BN_NUM_STATS;
+  out[i] =
+      static_cast<T>((float(x[i]) - k[BN_MEAN]) * k[BN_SCALE] + k[BN_SHIFT]);
+}
+
+#define REGISTER_BATCH_NORM_OPS(T)                           \
+  template [[host_name("batch_norm_reduce_" #T)]] [[kernel]] \
+  decltype(batch_norm_reduce<T>) batch_norm_reduce<T>;       \
+  template [[host_name("batch_norm_elemt_" #T)]] [[kernel]]  \
+  decltype(batch_norm_elemt<T>) batch_norm_elemt<T>
+
+REGISTER_BATCH_NORM_OPS(float);
+REGISTER_BATCH_NORM_OPS(half);
+REGISTER_BATCH_NORM_OPS(bfloat);
