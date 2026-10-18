@@ -290,6 +290,11 @@ class _ReducesToAMissingName:
         return "_EnumOwner.Missing"
 
 
+class _ReducesToACall:
+    def __reduce__(self):
+        return (_ReducesToACall, ())
+
+
 class _ReducesFromAMissingModule:
     __module__ = "_not_imported"
 
@@ -301,6 +306,7 @@ class _ReducesFromAMissingModule:
 # last one is refused there anyway, since its __module__ is not imported.
 _REDUCES_TO_ANOTHER_GLOBAL = _ReducesToAnotherGlobal()
 _REDUCES_TO_A_MISSING_NAME = _ReducesToAMissingName()
+_REDUCES_TO_A_CALL = _ReducesToACall()
 _REDUCES_FROM_A_MISSING_MODULE = _ReducesFromAMissingModule()
 
 
@@ -4037,8 +4043,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             # Its __reduce__ names the typing global it is.
             (typing.List, True),  # noqa: UP006
             (typing.Optional, True),
-            # A subscripted alias reduces to a constructor call, not a name.
+            # A subscripted alias is not a global of typing.
             (typing.List[int], False),  # noqa: UP006
+            (_REDUCES_TO_A_CALL, False),
             (_SENTINEL, True),
             (_COPYREG_TO_ITSELF, True),
             # Each reduction names something other than the object itself.
@@ -5532,24 +5539,27 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def bar(ddp, x):
                 return ddp.module(x)
 
-            torch._dynamo.reset()
-            module = torch.nn.Sequential(torch.nn.Linear(10, 10))
-            module[0].bias.requires_grad_(False)
-            ddp_model = DDP(
-                module,
-                delay_all_reduce_named_params=[("0.weight", module[0].weight)],
-                param_to_hook_all_reduce=module[0].weight,
-            )
-            self.assertFalse(hasattr(ddp_model, "reducer"))
-            # DDP's own pickling still refuses it, at dump rather than at load.
-            with self.assertRaisesRegex(RuntimeError, "every parameter is delayed"):
-                pickle.dumps(ddp_model)
-            x = torch.randn(4, 10)
-            state = guards_state(ddp_model, x, bar)
-            loaded = torch._dynamo.package.load_guard_manager(
-                state, bar.__code__, bar.__globals__
-            )
-            self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
+            for pg in (None, dist.new_group([0])):
+                with self.subTest(all_delayed=True, default_group=pg is None):
+                    torch._dynamo.reset()
+                    module = torch.nn.Sequential(torch.nn.Linear(10, 10))
+                    module[0].bias.requires_grad_(False)
+                    ddp_model = DDP(
+                        module,
+                        process_group=pg,
+                        delay_all_reduce_named_params=[("0.weight", module[0].weight)],
+                        param_to_hook_all_reduce=module[0].weight,
+                    )
+                    self.assertFalse(hasattr(ddp_model, "reducer"))
+                    # DDP's own pickling still refuses it, at dump not at load.
+                    with self.assertRaisesRegex(RuntimeError, "parameter is delayed"):
+                        pickle.dumps(ddp_model)
+                    x = torch.randn(4, 10)
+                    state = guards_state(ddp_model, x, bar)
+                    loaded = torch._dynamo.package.load_guard_manager(
+                        state, bar.__code__, bar.__globals__
+                    )
+                    self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
         finally:
             dist.destroy_process_group()
             tmpfile.close()

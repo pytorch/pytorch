@@ -5649,13 +5649,15 @@ def _pickles_as_its_own_global(value: object) -> bool:
         # snapshots the dict, which another thread may grow mid-scan.
         if module is None or not any(v is value for v in list(vars(module).values())):
             return False
-        name = reduce(value) if reduce else value.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
-        if not isinstance(name, str):
-            return False
-        obj = module
-        for part in name.split("."):
-            obj = getattr(obj, part, None)
-        return obj is value
+        name = (
+            reduce(value)
+            if reduce
+            else value.__reduce_ex__(_GUARDS_STATE_PICKLE_PROTOCOL)
+        )
+        return (
+            isinstance(name, str)
+            and FunctionPicklerBase._lookup(module_name, name) is value
+        )
     except Exception:
         return False
 
@@ -5756,6 +5758,11 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+# _pickles_as_its_own_global predicts GuardsStatePickler's reduction with this
+# protocol and the global copyreg.dispatch_table (the pickler sets none).
+_GUARDS_STATE_PICKLE_PROTOCOL = pickle.DEFAULT_PROTOCOL
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -5792,6 +5799,7 @@ def pickle_guards_state(
             missing_values,
             builder.value_guarded_containers,
             buf,
+            protocol=_GUARDS_STATE_PICKLE_PROTOCOL,
         )
 
         if all(

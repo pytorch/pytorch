@@ -744,9 +744,10 @@ def _build_installed_forward():
     callback is a _RefuseRecompileCallback bound at load, which
     _callback_from_stance keeps even under stances that would compile, so, as
     for a standalone artifact, a call no captured variant covers raises instead
-    of compiling. load(allow_serve_time_compiles=True) flips the artifact's
-    _ALLOW_SERVE_TIME_COMPILES = False to True to keep the ordinary compiling
-    callback instead.
+    of compiling, or runs eagerly for a frame the capture ran eagerly (its
+    code is in the callback's eager_codes). load(allow_serve_time_compiles=True)
+    flips the artifact's _ALLOW_SERVE_TIME_COMPILES = False to True to keep the
+    ordinary compiling callback instead.
     """
     import base64
     import importlib

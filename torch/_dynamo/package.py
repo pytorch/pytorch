@@ -330,17 +330,21 @@ class FunctionPicklerBase(pickle.Pickler):
         on this alone."""
         if "<locals>" in fn.__qualname__.split("."):
             return False
+        return FunctionPicklerBase._lookup(fn.__module__, fn.__qualname__) is fn
+
+    @staticmethod
+    def _lookup(module_name: object, dotted_name: str) -> object:
+        """What pickle's by-reference lookup of ``module_name.dotted_name``
+        finds among the imported modules, or None."""
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
-        module = (
-            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
-        )
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
         if module is None:
-            return False
+            return None
         resolved: object = module
-        for name in fn.__qualname__.split("."):
+        for name in dotted_name.split("."):
             resolved = getattr(resolved, name, None)
-        return resolved is fn
+        return resolved
 
     @staticmethod
     def _read_raw_annotations(obj: Any, *, evaluate: bool = False) -> dict[str, Any]:

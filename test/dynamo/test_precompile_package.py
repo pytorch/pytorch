@@ -384,8 +384,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(list(keep), [k for _, _, k in rows])
 
     def test_default_guard_filter_keeps_a_typing_alias(self):
-        # typing.List pickles as the global typing.List; typing.List[int] does
-        # not, it reduces to a constructor call.
+        # typing.List pickles as the global typing.List; typing.List[int] is
+        # not a global of typing, so it is dropped before any reduction.
         rows = [(typing.List, True), (typing.List[int], False)]  # noqa: UP006
         entries = [_entry(GlobalSource("_ALIAS"), v, "ID_MATCH") for v, _ in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
