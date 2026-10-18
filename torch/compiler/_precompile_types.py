@@ -140,12 +140,14 @@ class PrecompileSummary:
             but never ran is not one, so this is not ``frames`` minus
             ``bypassed`` minus the frames that hold guarded code.
         eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame Dynamo
-            gave up on during the capture and skipped for the rest of the
-            process, for any of Dynamo's soft reasons: a graph break it could
+            gave up on during the capture and skipped for the rest of it, for
+            any of Dynamo's soft reasons: a graph break it could
             not resume from (such as one inside a loop), a
             ``torch._dynamo.skip_frame()`` call, a frame it refuses to trace, a
             ``UserError`` it suppressed by skipping the frame, or a backend that
-            declined the graph by raising ``SkipFrame``. A compile error
+            declined the graph by raising ``SkipFrame`` or failed on it with an
+            error Dynamo falls back on (such as
+            ``DynamicOutputShapeException``). A compile error
             ``suppress_errors=True`` swallows is not one: Dynamo skips that
             frame too, but it stays in ``uncovered_frames`` so the failure is
             seen. Not a gap, and not in ``uncovered_frames``: a load serves the

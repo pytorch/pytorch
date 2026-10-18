@@ -5130,6 +5130,10 @@ class TestPrecompileDynamoCapture(TestCase):
         ):
             with self._capture(entry, backend="eager") as cap:
                 cap(self.model, self.x2)
+                summary = cap.summary()
+        self.assertEqual(summary.uncovered_frames, ("entry",), summary)
+        self.assertEqual(summary.eager_fallbacks, (), summary)
+        self.assertFalse(summary.complete, summary)
         # require_complete=False does not get past it.
         tracer = DynamoTracer(require_complete=False)
         with self.assertRaisesRegex(

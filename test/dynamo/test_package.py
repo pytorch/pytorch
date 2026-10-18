@@ -41,7 +41,7 @@ from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -628,6 +628,26 @@ print(eval(f"bbmod.{name}.{path}") is code)
         entry = package._codes[fn.__code__]
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_fallback_error_is_an_eager_fallback(self):
+        # Dynamo turns this into a soft Unsupported for the whole frame.
+        calls = []
+
+        def backend(gm, example_inputs):
+            calls.append(gm)
+            raise DynamicOutputShapeException(torch.ops.aten.nonzero.default)
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        compiled_fn(torch.randn(3))
+        compiled_fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(entry.guarded_codes, [])
 
     def test_a_recompile_limit_hit_or_suppressed_error_is_not_an_eager_fallback(self):
         def fn(x):
