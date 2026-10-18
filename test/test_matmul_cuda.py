@@ -830,9 +830,9 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize(
         "config",
         [
-            subtest(("TRITON", False), name="no_max_autotune"),
-            subtest(("TRITON", True), name="triton_max_autotune"),
-            subtest(("GLUON", True), name="gluon_max_autotune"),
+            subtest(("triton", False), name="no_max_autotune"),
+            subtest(("triton", True), name="triton_max_autotune"),
+            subtest(("gluon", True), name="gluon_max_autotune"),
         ],
     )
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
@@ -842,9 +842,9 @@ class TestMatmulCuda(InductorTestCase):
     def test_grouped_gemm_compiled(
         self, config, op, a_row_major, b_row_major, dtype_AB
     ):
-        backend, max_autotune = config
+        template, max_autotune = config
 
-        if backend == "GLUON":
+        if template == "gluon":
             major, minor = torch.cuda.get_device_capability()
             if not (major == 10 and minor in [0, 3]):
                 self.skipTest("Supported only on CC 10.0 and 10.3")
@@ -861,7 +861,8 @@ class TestMatmulCuda(InductorTestCase):
             options.update(
                 {
                     "max_autotune": True,
-                    "max_autotune_gemm_backends": backend,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.gluon_mode": "force" if template == "gluon" else None,
                 }
             )
         f = torch.compile(
@@ -978,9 +979,9 @@ class TestMatmulCuda(InductorTestCase):
             self.assertEqual(C, C_ref)
 
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
-    @parametrize("backend", ["TRITON", "GLUON"])
-    def test_grouped_gemm_compiled_epilogue(self, backend):
-        if backend == "GLUON":
+    @parametrize("template", ["triton", "gluon"])
+    def test_grouped_gemm_compiled_epilogue(self, template):
+        if template == "gluon":
             major, minor = torch.cuda.get_device_capability()
             if not (major == 10 and minor in [0, 3]):
                 self.skipTest("Supported only on CC 10.0 and 10.3")
@@ -997,7 +998,12 @@ class TestMatmulCuda(InductorTestCase):
             return F.grouped_mm(a, b, offs=offs).relu() * 2
 
         f_compiled = torch.compile(
-            f, options={"max_autotune": True, "max_autotune_gemm_backends": backend}
+            f,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.gluon_mode": "force" if template == "gluon" else None,
+            },
         )
         self.assertEqual(f_compiled(A, B, offs), f(A, B, offs))
 

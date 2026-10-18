@@ -251,7 +251,7 @@ def _maybe_wrap_cuda_graph(fn, label, use_cuda_graphs):
         return fn
 
 
-BACKEND_CHOICES = ["aten", "triton", "cutedsl", "nvgemm", "gluon"]
+BACKEND_CHOICES = ["aten", "triton", "cutedsl", "nvgemm", "gluon", "triton_gluon"]
 
 
 def _has_gluon():
@@ -270,6 +270,7 @@ def _available_backends(backends):
             "cutlass.operators not installed",
         ),
         "gluon": (_has_gluon, "Triton has no Gluon support"),
+        "triton_gluon": (_has_gluon, "Triton has no Gluon support"),
     }
     available = []
     for b in backends:
@@ -281,7 +282,7 @@ def _available_backends(backends):
 
 
 def _autotune_winning_config(A, B, offs):
-    """Autotune the Gluon backend and return the config that won.
+    """Autotune the Gluon template and return the config that won.
 
     Timed without instrumentation, so the winner is the one that is
     actually fastest.
@@ -303,7 +304,8 @@ def _autotune_winning_config(A, B, offs):
             torch._grouped_mm,
             options={
                 "max_autotune": True,
-                "max_autotune_gemm_backends": "GLUON",
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.gluon_mode": "force",
                 "fx_graph_cache": False,
             },
             dynamic=False,
@@ -402,7 +404,8 @@ def _proton_profile_gluon(
             torch._grouped_mm,
             options={
                 "max_autotune": True,
-                "max_autotune_gemm_backends": "GLUON",
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.gluon_mode": "force",
                 "gluon_enable_proton_profiling": True,
                 "fx_graph_cache": False,
                 # Proton instruments during the Triton compile and
@@ -505,7 +508,7 @@ def _print_results(results):
         f"A: {first['A dim']}d {first['A layout']}, B: {first['B dim']}d {first['B layout']}"
         " | us = median time, x = speedup over ATen"
     )
-    names = ("ATen", "Triton", "CuTeDSL", "NVGEMM", "Gluon")
+    names = ("ATen", "Triton", "CuTeDSL", "NVGEMM", "Gluon", "Triton+Gluon")
     shape = {k: [r[k] for r in results] for k in ("G", "M", "N", "K")}
     nan = float("nan")
 
@@ -663,6 +666,7 @@ def benchmark_grouped_mm(
                     options={
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "TRITON",
+                        "triton.gluon_mode": None,
                     },
                     dynamic=False,
                 )
@@ -814,7 +818,8 @@ def benchmark_grouped_mm(
                         torch._grouped_mm,
                         options={
                             "max_autotune": True,
-                            "max_autotune_gemm_backends": "GLUON",
+                            "max_autotune_gemm_backends": "TRITON",
+                            "triton.gluon_mode": "force",
                         },
                         dynamic=False,
                     )
@@ -867,6 +872,57 @@ def benchmark_grouped_mm(
                 done.append("gluon")
                 _save_progress(result_file, done, result)
 
+            if "triton_gluon" in backends:
+                try:
+                    torch._dynamo.reset()
+                    compile_start = time.perf_counter()
+                    compiled_both = torch.compile(
+                        torch._grouped_mm,
+                        options={
+                            "max_autotune": True,
+                            "max_autotune_gemm_backends": "TRITON",
+                            "triton.gluon_mode": "allow",
+                        },
+                        dynamic=False,
+                    )
+                    fn_both = lambda: compiled_both(  # noqa: E731
+                        A, B.transpose(-2, -1), offs
+                    )
+                    if timing_details:
+                        result["Triton+Gluon compile (s)"] = _first_call_seconds(
+                            fn_both, compile_start
+                        )
+                    bench_both = _do_bench_cuda(
+                        _maybe_wrap_cuda_graph(
+                            fn_both, "triton_gluon", use_cuda_graphs
+                        ),
+                        warmup=warmup,
+                        rep=rep,
+                        cooldown_seconds=cooldown_seconds,
+                    )
+                    us_both = bench_both["median_us"]
+                    tflops_both = flops * 1e-12 / (us_both * 1e-6)
+                    print(
+                        f"  Triton+Gluon: {us_both:.2f} us ({tflops_both:.2f} TFLOPS; "
+                        f"min={bench_both['min_us']:.2f}, max={bench_both['max_us']:.2f})"
+                    )
+                    result["Triton+Gluon (us)"] = us_both
+                    if us_aten is not None:
+                        result["Triton+Gluon speedup"] = us_aten / us_both
+
+                    try:
+                        C_both = compiled_both(A, B.transpose(-2, -1), offs)
+                        torch.testing.assert_close(C_both, C_ref, rtol=rtol, atol=atol)
+                        print("  ✓ Triton+Gluon correctness check passed")
+                    except AssertionError:
+                        print("  ✗ Triton+Gluon correctness check FAILED")
+                except Exception as e:
+                    print(f"  Triton+Gluon: Failed ({e})")
+                gc.collect()
+                torch.cuda.empty_cache()
+                done.append("triton_gluon")
+                _save_progress(result_file, done, result)
+
         results.append(result)
         print()
 
@@ -907,7 +963,7 @@ def _benchmark_isolated(gmnk, backends, child_args, layout):
                         f"  {remaining.pop(0)}: crashed the benchmark process (exit {rc}), skipped\n",
                         flush=True,
                     )
-            for b in ("Triton", "CuTeDSL", "NVGEMM", "Gluon"):
+            for b in ("Triton", "CuTeDSL", "NVGEMM", "Gluon", "Triton+Gluon"):
                 if "ATen (us)" in merged and f"{b} (us)" in merged:
                     merged[f"{b} speedup"] = merged["ATen (us)"] / merged[f"{b} (us)"]
             results.append(merged)

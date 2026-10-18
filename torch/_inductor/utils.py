@@ -99,7 +99,7 @@ if TYPE_CHECKING:
     from torch.fx.node import Node
     from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
-    from .codegen.common import BackendFeature, WorkspaceArg
+    from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
     from .dependencies import Dep
     from .graph import GraphLowering
@@ -1348,11 +1348,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1398,8 +1393,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -2328,15 +2322,14 @@ def _use_conv_bwd_input_autotune_backend(backend: str) -> bool:
     ]
 
 
-def _use_template_backend(
+def use_triton_template(
     layout: Layout,
-    backend: str,
-    template_feature: BackendFeature,
+    *,
     enable_int32: bool = False,
     enable_float8: bool = False,
     check_max_autotune: bool = True,
 ) -> bool:
-    from .codegen.common import has_backend_feature
+    from .codegen.common import BackendFeature, has_backend_feature
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
@@ -2350,8 +2343,8 @@ def _use_template_backend(
     return (
         # some callers handle max-autotune checking externally
         (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend(backend)
-        and has_backend_feature(layout.device, template_feature)
+        and _use_autotune_backend("TRITON")
+        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
         and (
             (
                 is_gpu(layout.device.type)
@@ -2359,44 +2352,6 @@ def _use_template_backend(
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
-    )
-
-
-def use_triton_template(
-    layout: Layout,
-    *,
-    enable_int32: bool = False,
-    enable_float8: bool = False,
-    check_max_autotune: bool = True,
-) -> bool:
-    from .codegen.common import BackendFeature
-
-    return _use_template_backend(
-        layout,
-        "TRITON",
-        BackendFeature.TRITON_TEMPLATES,
-        enable_int32=enable_int32,
-        enable_float8=enable_float8,
-        check_max_autotune=check_max_autotune,
-    )
-
-
-def use_gluon_template(
-    layout: Layout,
-    *,
-    enable_int32: bool = False,
-    enable_float8: bool = False,
-    check_max_autotune: bool = True,
-) -> bool:
-    from .codegen.common import BackendFeature
-
-    return _use_template_backend(
-        layout,
-        "GLUON",
-        BackendFeature.GLUON_TEMPLATES,
-        enable_int32=enable_int32,
-        enable_float8=enable_float8,
-        check_max_autotune=check_max_autotune,
     )
 
 
@@ -4223,6 +4178,44 @@ def is_output_of_multi_outputs_template(
     )
 
 
+def get_collective_config(node: torch.fx.Node) -> dict[str, Any] | None:
+    """A functional collective's per-collective configuration, if any."""
+    target = node.target
+    if (
+        not isinstance(target, torch._ops.OpOverload)
+        or target.namespace != "_c10d_functional"
+    ):
+        return None
+    for index, arg in enumerate(target._schema.arguments):
+        if arg.name == "config":
+            if index < len(node.args):
+                return node.args[index]  # type: ignore[return-value]
+            return node.kwargs.get("config")  # type: ignore[return-value]
+    return None
+
+
+def _config_value_key(value: Any) -> Any:
+    # Types are part of the key so 1, 1.0 and True stay distinct.
+    if isinstance(value, dict):
+        return (
+            dict,
+            tuple(sorted((k, _config_value_key(v)) for k, v in value.items())),
+        )
+    if isinstance(value, (list, tuple)):
+        return (type(value), tuple(_config_value_key(v) for v in value))
+    return (type(value), value)
+
+
+def collective_config_value_key(config: dict[str, Any] | None) -> Any:
+    """A hashable form of a collective configuration."""
+    return None if config is None else _config_value_key(config)
+
+
+def collective_config_key(node: torch.fx.Node) -> Any:
+    """A hashable form of the collective's configuration."""
+    return collective_config_value_key(get_collective_config(node))
+
+
 def is_collective(
     node: Node | Operation | None,
     op: torch._ops.OperatorBase | None = None,
@@ -4440,14 +4433,11 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         self: PythonWrapperCodegen,
         kernel_name: str,
         kernel_code: str,
-        metadata: str | None = None,
-        gpu: bool = True,
-        cpp_definition: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, *args, **kwargs)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -4827,6 +4817,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    if config.avoid_32bit_indexing_guards:
+        return False
 
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.

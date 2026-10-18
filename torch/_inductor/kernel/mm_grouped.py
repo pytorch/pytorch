@@ -14,6 +14,7 @@ from torch._inductor.virtualized import V
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
+from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import ChoiceCaller, is_unaligned, Layout, TensorBox
 from ..lowering import fallback_handler, register_lowering
@@ -35,7 +36,6 @@ from ..utils import (
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
     use_flydsl_gemm_template,
-    use_gluon_template,
     use_nv_universal_gemm_template,
     use_triton_template,
 )
@@ -661,9 +661,19 @@ def _tuned_grouped_mm_common(
 
     scaled = scale_a is not None
 
+    gluon_mode = inductor_config.triton.gluon_mode
+    use_gluon = (
+        is_nonzero
+        and gluon_mode is not None
+        and use_triton_template(layout)
+        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
+        and not scaled
+    )
+
     if (
         is_nonzero
         and use_triton_template(layout)
+        and not (use_gluon and gluon_mode == "force")
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
         and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
@@ -759,12 +769,7 @@ def _tuned_grouped_mm_common(
             accumulator_type=torch.float32,
         )
 
-    if (
-        is_nonzero
-        and use_gluon_template(layout)
-        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
-        and not scaled
-    ):
+    if use_gluon:
         kwargs = {
             "A_IS_2D": a_is_2d,
             "B_IS_2D": b_is_2d,
