@@ -24,7 +24,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.exc import PackageError, SkipFrame, Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -563,6 +563,41 @@ print(eval(f"bbmod.{name}.{path}") is code)
             self.assertRaisesRegex(RuntimeError, "Detected recompile"),
         ):
             compiled_fn(x, 1)
+
+    def test_install_runs_a_miss_of_a_frame_its_backend_skipped_eagerly(self):
+        # A backend that raises SkipFrame on the recompile is a fallback too.
+        compiled = []
+
+        def backend(gm, example_inputs):
+            if compiled:
+                raise SkipFrame("declined")
+            compiled.append(gm)
+            return gm.forward
+
+        def fn(x):
+            return x.sin()
+
+        ctx = DiskDynamoStore()
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        compiled_fn(x)
+        compiled_fn(x.double())
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+        for backend_id, compiled_backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, compiled_backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin())
+            self.assertEqual(compiled_fn(x.double()), x.double().sin())
+        package.uninstall()
 
     def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
         # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
