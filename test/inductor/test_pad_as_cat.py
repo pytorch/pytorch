@@ -76,6 +76,70 @@ class TestCatMultiConsumer(TestCase):
         )
 
 
+def _high_arity_inputs(batch, width=3):
+    return [
+        torch.randn(batch, width + index % 5, device=GPU_TYPE) for index in range(18)
+    ]
+
+
+def _tanh_cat(*inputs):
+    return torch.cat([x.tanh() for x in inputs], dim=1)
+
+
+class TestChunkedPointwiseCat(TestCase):
+    @torch._inductor.config.patch(fx_graph_cache=False)
+    @requires_gpu()
+    def test_high_arity_simple_cat(self):
+        compiled = torch.compile(_tanh_cat, dynamic=True)
+        inputs = _high_arity_inputs(32)
+        metrics.reset()
+        result = compiled(*inputs)
+
+        self.assertEqual(result, _tanh_cat(*inputs))
+        self.assertEqual(metrics.generated_kernel_count, 3)
+
+        dynamic_inputs = _high_arity_inputs(47)
+        self.assertEqual(compiled(*dynamic_inputs), _tanh_cat(*dynamic_inputs))
+
+    def _kernel_count(self, fn, width=3, **config_patches):
+        inputs = _high_arity_inputs(32, width)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch._inductor.config.patch(fx_graph_cache=False, **config_patches):
+            self.assertEqual(torch.compile(fn)(*inputs), fn(*inputs))
+        return metrics.generated_kernel_count
+
+    @requires_gpu()
+    def test_pointwise_cat_chunk_size(self):
+        self.assertEqual(self._kernel_count(_tanh_cat, pointwise_cat_chunk_size=6), 3)
+        self.assertEqual(self._kernel_count(_tanh_cat, pointwise_cat_chunk_size=18), 1)
+        self.assertEqual(
+            self._kernel_count(_tanh_cat, pointwise_cat_chunk_size=1),
+            self._kernel_count(_tanh_cat, max_pointwise_cat_inputs=1),
+        )
+
+    @requires_gpu()
+    def test_high_arity_realized_inputs_keep_concat_kernel(self):
+        def fn(*inputs):
+            return torch.cat([inputs[0].tanh(), *inputs[1:]], dim=1)
+
+        self.assertEqual(
+            self._kernel_count(fn),
+            self._kernel_count(fn, pointwise_cat_chunk_size=1),
+        )
+
+    @requires_gpu()
+    def test_high_arity_reduction_inputs_keep_concat_kernel(self):
+        def fn(*inputs):
+            return torch.cat([x.sum(1, keepdim=True).tanh() for x in inputs], dim=1)
+
+        # Width 64 keeps each sum a real reduction instead of an unrolled pointwise op.
+        self.assertEqual(
+            self._kernel_count(fn, width=64),
+            self._kernel_count(fn, width=64, pointwise_cat_chunk_size=1),
+        )
+
+
 class TestPadAsCat(TestCase):
     @requires_gpu()
     def test_mul_pad_addmm(self):
