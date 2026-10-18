@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
-from functools import partial, wraps
+from functools import cache, partial, wraps
 from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
@@ -36,6 +36,18 @@ _PYTORCH_MIN_ALLOCATE = (
 _TOTAL_KEY = "Total"
 
 __all__ = ["MemTracker"]
+
+
+@cache
+def _get_accelerator_type() -> str | None:
+    """Return the device type of the accelerator available at compilation time,
+    or ``None`` if there is none.
+
+    The accelerator type is fixed at build time, so it is safe to cache this
+    query instead of issuing it for every tracked tensor storage.
+    """
+    accelerator = torch.accelerator.current_accelerator()
+    return accelerator.type if accelerator is not None else None
 
 
 class _RefType(str, Enum):
@@ -153,8 +165,8 @@ class _WeakRefInfo:
             int: The memory consumed in bytes.
         """
         mem = self.size * self.element_size
-        accelerator = torch.accelerator.current_accelerator()
-        if accelerator is not None and self.device.type == accelerator.type:
+        accelerator_type = _get_accelerator_type()
+        if accelerator_type is not None and self.device.type == accelerator_type:
             return math.ceil((mem) / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
         return mem
 
