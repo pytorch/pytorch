@@ -5509,12 +5509,12 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  const auto input_shape = input.sizes();
+  const auto input_shape = input.sym_sizes();
   const auto input_ndim = input.dim();
   const auto normalized_ndim = static_cast<int64_t>(normalized_shape.size());
   const auto axis = input_ndim - normalized_ndim;
 
-  int64_t N_rms = 1;
+  c10::SymInt N_rms = 1;
   for (int i = 0; i < normalized_ndim; ++i) {
     N_rms *= input_shape[axis + i];
   }
@@ -5522,13 +5522,13 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
   Tensor dX;
   Tensor dgamma;
 
-  std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
+  std::vector<c10::SymInt> rstd_view_shape = rstd.sym_sizes().vec();
   for (int i = 0;
        i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
        ++i) {
-    rstd_view_shape.push_back(1);
+    rstd_view_shape.emplace_back(1);
   }
-  Tensor rstd_broadcast = rstd.view(rstd_view_shape);
+  Tensor rstd_broadcast = rstd.view_symint(rstd_view_shape);
   Tensor rstd_pow3 = rstd_broadcast.pow(3);
   Tensor grad_x_hat;
 
@@ -5554,14 +5554,12 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
       Tensor sum_input_times_grad_x_hat =
           sum(input * grad_x_hat, inner_sum_dims, /*keepdim=*/true);
       dX_from_dY_path = rstd_broadcast * grad_x_hat -
-          (input * rstd_pow3 / static_cast<double>(N_rms)) *
-              sum_input_times_grad_x_hat;
+          (input * rstd_pow3).div(N_rms) * sum_input_times_grad_x_hat;
     }
 
     if (drstd.defined()) {
-      Tensor drstd_broadcast = drstd.view(rstd_view_shape);
-      dX_from_drstd_path =
-          -(input * rstd_pow3 / static_cast<double>(N_rms)) * drstd_broadcast;
+      Tensor drstd_broadcast = drstd.view_symint(rstd_view_shape);
+      dX_from_drstd_path = -(input * rstd_pow3).div(N_rms) * drstd_broadcast;
     }
 
     if (dX_from_dY_path.defined() && dX_from_drstd_path.defined()) {
