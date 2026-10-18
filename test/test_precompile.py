@@ -5083,6 +5083,38 @@ class TestPrecompileDynamoCapture(TestCase):
             with self._capture(entry, tracer=tracer, backend="eager") as cap:
                 cap(self.model, self.x2)
 
+    def test_a_lone_entry_dynamo_gave_up_on_names_the_cause(self):
+        # Nothing compiles, but the entry did run: the refusal says why rather
+        # than "the callable must actually be run".
+        opaque = torch._dynamo.disable(lambda y: y + 0)
+
+        def lone(x):
+            for _ in range(1):
+                x = opaque(x)
+            return x.sin()
+
+        with self.assertRaisesRegex(
+            PrecompileError, r"no variant of the entry frame 'lone': Dynamo gave up"
+        ):
+            with self._capture(lone, backend="eager") as cap:
+                cap(self.x2)
+
+    def test_a_generator_entry_is_refused_naming_the_cause(self):
+        # Dynamo refuses to trace a generator frame and suppresses that, so the
+        # entry is flagged rather than left a plain uncovered frame.
+        def gen(model, x):
+            yield model(x)
+
+        with self.assertRaisesRegex(
+            PrecompileError, r"no variant of the entry frame 'gen': Dynamo gave up"
+        ):
+            with self._capture(gen, backend="eager") as cap:
+                next(cap(self.model, self.x2))
+        tracer = DynamoTracer(require_complete=False)
+        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+            with self._capture(gen, tracer=tracer, backend="eager") as cap:
+                next(cap(self.model, self.x2))
+
     @skipIfCrossRef
     def test_a_frame_dynamo_gave_up_on_is_not_a_coverage_gap(self):
         # dispatch falls back to eager on its first call and never compiles, so
