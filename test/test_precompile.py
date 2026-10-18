@@ -262,6 +262,7 @@ class TestPrecompile(TestCase):
         self.assertFalse(summary(bypassed=("f",)).complete)
         self.assertFalse(summary(truncated=("f",)).complete)
         self.assertFalse(summary(uncovered_frames=("f",)).complete)
+        self.assertTrue(summary(eager_fallbacks=("f (m.py:1)",)).complete)
         # Coverage only: the guard fields never make a capture incomplete.
         risky = (("ID_MATCH", "self.act"),)
         flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
@@ -634,7 +635,7 @@ class TestPrecompile(TestCase):
         def step(x):
             return x * scale
 
-        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False, **kw):
             return _DynamoCodeCacheEntry(
                 python_code=SerializedCode.from_code_object(fn.__code__),
                 python_module=__name__,
@@ -645,6 +646,7 @@ class TestPrecompile(TestCase):
                 code_source=None,
                 install_to_global=resume_name is not None,
                 bypassed=bypassed,
+                **kw,
             )
 
         def reject(fn_name, codes):
@@ -671,6 +673,10 @@ class TestPrecompile(TestCase):
         # A bypassed HELPER beside a variant-less entry is the thin-wrapper case.
         with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
             reject("fwd_loss_bwd", [thin, dead_helper])
+        # An entry Dynamo gave up on at its first call is not a thin wrapper.
+        fallback = code_entry(fwd_loss_bwd, eager_fallback=True)
+        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+            reject("fwd_loss_bwd", [fallback])
         # A healthy entry beside a bypassed continuation has nothing to refuse,
         # and neither has an empty capture.
         reject("fwd_loss_bwd", [healthy, dead_cont])
@@ -4949,10 +4955,11 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(len(summary.eager_fallbacks), 1, summary)
         self.assertTrue(summary.eager_fallbacks[0].startswith("dispatch ("), summary)
         self.assertIn("1 eager fallback: ", str(summary))
-        self._serve_in_fresh_process(
-            [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)],
-            mode="installed",
-        )
+        self.assertTrue(summary.complete, summary)
+        # The capture skipped every call after the fallback; a load still serves
+        # the variant after the miss.
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1], mode="installed")
 
     @skipIfCrossRef
     def test_a_standalone_artifact_runs_a_continuations_eager_fallback_eagerly(self):
@@ -4965,6 +4972,7 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(compiled, base + 1)
         self.assertEqual(eager, base)
         self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(summary.complete, summary)
         self._serve_in_fresh_process(
             [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
         )
