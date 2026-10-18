@@ -1044,8 +1044,11 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         }
     )
     @skip_if_caches_force_disabled
-    def test_backward_opt_out_reuses_aot_autograd_cache(self):
-        """A warm start reuses the forward's box; the backward opted out of it."""
+    @parametrize("backward_cudagraphs", (False, True))
+    def test_backward_setting_survives_aot_autograd_cache_hit(
+        self, backward_cudagraphs
+    ):
+        """A warm start captures the same graphs as the cold compile."""
         from torch._dynamo.utils import counters
         from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
         from torch._inductor import cudagraph_trees
@@ -1057,8 +1060,8 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
 
         options = get_invoke_subgraph_compile_options(
-            fw_inductor_config_patches={"triton.cudagraphs": True},
-            bw_inductor_config_patches={"triton.cudagraphs": False},
+            fw_inductor_config_patches={"triton.cudagraphs": not backward_cudagraphs},
+            bw_inductor_config_patches={"triton.cudagraphs": backward_cudagraphs},
         )
 
         @torch.compiler.nested_compile_region(options=options)
@@ -1068,6 +1071,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         def fn(x):
             return (torch.cos(x) + region(x)).sum()
 
+        captured = []
         with mock.patch(
             "torch._inductor.compile_fx.cudagraphify", wraps=cudagraphify
         ) as cudagraphify_mock:
@@ -1077,13 +1081,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 torch._dynamo.reset()
                 x = torch.randn(16, 16, device="cuda", requires_grad=True)
                 torch.compile(fn, backend="inductor", fullgraph=True)(x).backward()
+                calls = cudagraphify_mock.call_args_list
+                captured.append({call.kwargs["is_backward"] for call in calls})
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
-        self.assertEqual(
-            {call.kwargs["is_backward"] for call in cudagraphify_mock.call_args_list},
-            {False},
-        )
+        self.assertEqual(captured, [{backward_cudagraphs}] * 2)
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
