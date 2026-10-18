@@ -21,6 +21,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Prelu.h>
 
 namespace at::native {
 
@@ -34,8 +35,8 @@ Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
   const ideep::tensor& w = itensor_from_tensor(weight);
 
   ideep::tensor y;
-  ideep::prelu_forward::compute(
-      x, w, y, ideep::prop_kind::forward_training);
+  mkldnn::prelu_forward(
+      x, w, y, dnnl::prop_kind::forward_training);
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt());
 }
@@ -47,8 +48,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
   ideep::tensor gradx;
   ideep::tensor gradw;
 
-  ideep::prelu_backward::compute(
-      x, w, grady, gradx, gradw, ideep::prop_kind::backward);
+  mkldnn::prelu_backward(x, w, grady, gradx, gradw);
   if (weight.is_mkldnn()) {
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(gradx),
