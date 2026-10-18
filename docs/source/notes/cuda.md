@@ -1015,12 +1015,12 @@ allocator with Python callables:
 from cuda.bindings import runtime
 
 
-def alloc(size: int) -> int | None:
+def alloc(size: int, _device: int, _stream: int) -> int | None:
     err, ptr = runtime.cudaMalloc(size)
     return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
 
 
-def free(ptr: int, _size: int) -> None:
+def free(ptr: int, _size: int, _device: int, _stream: int) -> None:
     (err,) = runtime.cudaFree(ptr)
     if err != runtime.cudaError_t.cudaSuccess:
         raise RuntimeError(f"cudaFree failed with error {err}")
@@ -1039,9 +1039,10 @@ observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
 fails. Other exceptions raised by the allocation callback propagate normally.
 Exceptions raised by the free callback produce a warning and are swallowed.
 
-PyTorch makes the segment's device and allocation stream current before calling
-either function. A callback that needs them can use
-{func}`torch.cuda.current_device` and {func}`torch.cuda.current_stream`.
+The ``device`` argument is the segment's CUDA device ordinal and ``stream`` is
+the raw address of its allocation stream. PyTorch does not make them current
+before entering the callback. Allocators using APIs that rely on current CUDA
+state are responsible for establishing the appropriate device and stream.
 
 Callbacks can be invoked concurrently from multiple threads, so their Python
 and native state must be thread-safe, including in a no-GIL Python build.
