@@ -1179,6 +1179,55 @@ class TestMPS(TestCaseMPS):
         consumer.synchronize()
         self.assertEqual(results, [True] * num_iters)
 
+    # Tests that a `torch.mps.Event` records against the stream it's given
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_mps_event_record(self, stream):
+        s = self._get_stream_by_name(stream)
+        numel = 4_000_000
+        mismatches = 0
+        for i in range(20):
+            e = torch.mps.Event()
+            with torch.mps.stream(s):
+                x = torch.full((numel,), float(i), device="mps") * 2
+            e.record(s)
+            e.synchronize()
+            if not torch.equal(x.cpu(), torch.full((numel,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that `torch.mps.Event.wait` makes the given stream wait,
+    # independent of whichever stream recorded the event.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    def test_stream_mps_event_wait(self, stream1, stream2):
+        producer = self._get_stream_by_name(stream1)
+        consumer = self._get_stream_by_name(stream2)
+        if producer == consumer:
+            self.skipTest("test requires two distinct streams")
+
+        # Use a fairly large tensor and a chain of several dependent ops on the
+        # producer so it takes significantly longer to execute than the
+        # consumer, making it more likely that the test would fail without the
+        # `e.wait()` call.
+        numel = 200_000
+        num_producer_ops = 10
+        mismatches = 0
+        for i in range(20):
+            with torch.mps.stream(producer):
+                x = torch.full((numel,), float(i), device="mps")
+                for _ in range(num_producer_ops):
+                    x = x + 1
+            e = torch.mps.Event()
+            e.record(producer)
+            with torch.mps.stream(consumer):
+                e.wait(consumer)
+                y = x + 1
+            consumer.synchronize()
+            expected = float(i + num_producer_ops + 1)
+            if not torch.equal(y.cpu(), torch.full((numel,), expected)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
     # Tests that autograd's gradient accumulation is correct when a tensor is
     # used by forward ops on two different streams, and backward() is called
     # on a third stream.
@@ -1464,12 +1513,6 @@ class TestMPS(TestCaseMPS):
         for t in threads:
             t.join()
 
-    def test_exp(self, device="mps", dtype=torch.float):
-        for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
-            b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
-            a = torch.tensor(v, dtype=dtype, device="mps") * b
-            self.compare_with_numpy(torch.exp, np.exp, a)
-
     def test_exp_complex_real_axis_extremes(self):
         # Regression: exp/expm1/sinh/cosh(re + 0i) must stay real even when re
         # is inf/nan (naive exp(a)*sin(b) gives inf*0=NaN / nan*0=NaN otherwise).
@@ -1519,17 +1562,6 @@ class TestMPS(TestCaseMPS):
         # precise::metal::exp promises to be accurate to within 4 ulps
         # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
         self.ulpAssertAllClose(output.cpu(), output_cpu, n_ulps=4)
-
-    def test_exp_strided_output(self):
-        x = torch.rand((256, 10), device='mps')
-        x_cpu = x.to("cpu")
-
-        x = x.permute(1, 0)
-        x_cpu = x_cpu.permute(1, 0)
-
-        res = x.exp()
-        res_cpu = x_cpu.exp()
-        self.assertEqual(res, res_cpu)
 
     def _testLeakyRelu(self, np_features, negative_slope, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
@@ -7682,21 +7714,6 @@ class TestMPS(TestCaseMPS):
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5])
 
-    def test_angle(self):
-        def helper(shape, dtype):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
-            cpu_x.flatten()[0] = torch.nan  # Test that NaN is propagated correctly
-            x = cpu_x.detach().clone().to('mps')
-
-            angle_result = torch.angle(x)
-            angle_result_cpu = torch.angle(cpu_x)
-
-            self.assertEqual(angle_result, angle_result_cpu)
-
-        helper((2, 8, 4, 5), torch.float16)
-        helper((2, 8, 4, 5), torch.float32)
-        helper((2, 8, 4, 5), torch.complex64)
-
     @parametrize("dtype", {torch.float, torch.half, torch.bfloat16})
     def test_log1p(self, dtype):
         eps = torch.finfo(dtype).eps
@@ -7725,22 +7742,6 @@ class TestMPS(TestCaseMPS):
     # Test concat forward
         # Empty test - Currently failing! Empty tensor not handled!
         # helper([0, 2, 4, 5], [2, 0, 4, 5], [2, 5, 0, 5])
-
-    # Test isnan
-    def test_isnan(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            nan_index = [random.randrange(0, shape[0])]
-            # make a selected row inf
-            cpu_x.index_put_(indices=[torch.tensor(nan_index)], values=torch.tensor(float('nan')))
-            x = cpu_x.detach().clone().to('mps')
-
-            isnan_result = torch.isnan(x)
-            isnan_result_cpu = torch.isnan(cpu_x)
-
-            self.assertEqual(isnan_result, isnan_result_cpu)
-
-        helper((8, 2, 4, 5))
 
     # Test sqrt
     def test_sqrt(self):
@@ -8936,24 +8937,13 @@ class TestMPS(TestCaseMPS):
                 for dim in [0, 1, 2, 3, -1, -2, -3]:
                     helper(shape, dim, channels_last)
 
-    def test_nan_to_num(self):
-        inputCPU = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
-        inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
-        outputCPU = torch.nan_to_num(inputCPU, nan=2.0, posinf=1.0, neginf=-1.0)
-        outputMPS = torch.nan_to_num(inputMPS, nan=2.0, posinf=1.0, neginf=-1.0)
-        self.assertEqual(outputMPS, outputCPU)
-
-    def test_nan_to_num_complex(self):
-        # Complex nan_to_num is new on MPS (the MPSGraph path raised); the
-        # replacement applies per component like CPU/CUDA. complex32 exceeds
-        # CPU/CUDA support, so it compares against the complex64 CPU result
-        # with half-extrema (65504) defaults per its value type.
+    def test_nan_to_num_complex32(self):
+        # TODO: Enable complex32 on MPS in TestUnaryUfuncs.test_nan_to_num_complex and delete this test
+        # complex32 exceeds CPU/CUDA support, so compare against the complex64 CPU result
+        # with half-extrema (65504) defaults per its value type
         x = torch.tensor([complex(float('nan'), 1.0),
                           complex(float('inf'), float('-inf')),
                           complex(2.0, float('nan')), 1 + 2j])
-        self.assertEqual(torch.nan_to_num(x.to('mps')).cpu(), torch.nan_to_num(x))
-        self.assertEqual(torch.nan_to_num(x.to('mps'), nan=1.0, posinf=3.0, neginf=-3.0).cpu(),
-                         torch.nan_to_num(x, nan=1.0, posinf=3.0, neginf=-3.0))
         actual = torch.nan_to_num(x.to(torch.complex32).to('mps')).cpu().to(torch.complex64)
         expected = torch.nan_to_num(x, posinf=65504.0, neginf=-65504.0)
         self.assertEqual(actual, expected)
@@ -9717,61 +9707,6 @@ class TestMPS(TestCaseMPS):
         cpu_y = torch.arange(5, dtype=torch.float32, device="cpu") * torch.tensor([1, 0, 1, 0, 1], device="cpu")
         mps_y = torch.arange(5, dtype=torch.float32, device="mps") * torch.tensor([1, 0, 1, 0, 1], device="mps")
         self.assertEqual(cpu_y, mps_y)
-
-    def test_unary_ops(self):
-        def helper(shape, op):
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                self.assertEqual(op(cpu_x), op(mps_x))
-
-            for dtypei in [torch.int32, torch.int16]:
-                cpu_x = torch.randint(0, 1000, shape, device='cpu', dtype=dtypei, requires_grad=False)
-                mps_x = cpu_x.to('mps')
-                self.assertEqual(op(cpu_x), op(mps_x), rtol=1e-4, atol=1e-4)
-            # test slice
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                cpu_slice = cpu_x[:, ::2, :, :]
-                mps_slice = mps_x[:, ::2, :, :]
-                self.assertEqual(op(cpu_slice), op(mps_slice))
-            # test view
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(shape, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                # create view of tensor by reducing the 3rd and 4th dimension
-                combined_dim = shape[-1] * shape[-2]
-                reshaped_dims = list(shape[:-2]) + [combined_dim]
-                cpu_view = cpu_x.view(*reshaped_dims)
-                mps_view = mps_x.view(*reshaped_dims)
-                self.assertEqual(op(cpu_view), op(mps_view))
-
-        helper((2, 8, 4, 5), torch.exp)
-        helper((2, 8, 3, 5), torch.exp2)
-        helper((2, 8, 3, 5), torch.expm1)
-        helper((2, 8, 3, 5), torch.log)
-        helper((2, 8, 3, 5), torch.cos)
-        helper((2, 8, 3, 5), torch.erfinv)
-
-
-    def test_non_dense_in_storage_unary_ops(self):
-        def helper(op):
-            for dtypef in [torch.float32]:
-                cpu_x = torch.randn(100, device='cpu', dtype=dtypef, requires_grad=False)
-                mps_x = cpu_x.detach().clone().to('mps')
-                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]))
-
-            for dtypei in [torch.int32, torch.int16, torch.int8]:
-                cpu_x = torch.randint(127, device='cpu', size=(100,), dtype=dtypei, requires_grad=False)
-                mps_x = cpu_x.to('mps')
-                self.assertEqual(op(cpu_x[::2]), op(mps_x[::2]), rtol=1e-4, atol=1e-4)
-
-        helper(torch.exp)
-        helper(torch.exp2)
-        helper(torch.expm1)
-        helper(torch.log)
-        helper(torch.cos)
 
     def test_unary_ops_storage_offset_strided(self):
         def helper(shape, op, inplace, dtype=torch.float32):

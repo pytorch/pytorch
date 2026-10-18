@@ -555,6 +555,37 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         return 4
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_copy(self):
+        # A size-1 shard mesh copies each sharded parameter into its output
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+
+        def init_models():
+            model = nn.Sequential(
+                nn.Linear(8, 8, device=device_type), nn.Linear(8, 8, device=device_type)
+            )
+            ref_model = copy.deepcopy(model)
+            for module in (*model, model):
+                fully_shard(module, mesh=mesh)
+            return model, ref_model
+
+        inp = torch.randn((2, 8), device=device_type)
+        # The inner modules all-gather again in backward, keeping version counters
+        model, ref_model = init_models()
+        for _ in range(2):
+            model(inp).sum().backward()
+            ref_model(inp).sum().backward()
+            check_sharded_parity(self, ref_model, model)
+        # Outputs created under inference mode have no version counter
+        model, ref_model = init_models()
+        with torch.inference_mode():
+            for _ in range(2):
+                self.assertEqual(model(inp), ref_model(inp))
+
+    @skip_if_lt_x_gpu(1)
     def test_post_forward_shard_dim1_parity(self):
         # Post-forward shards are flat, and an empty one needs no divisible dim 0
         model = nn.Sequential(

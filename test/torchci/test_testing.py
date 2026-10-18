@@ -576,6 +576,22 @@ class TestReportEnablement(TestCase):
         with unittest.mock.patch.object(run_test_module, "HAS_TORCHCI_REPORTS", False):
             self.assertEqual(args("test_type_info", False, "/reports"), [])
 
+    def test_run_test_default_reports_dir(self) -> None:
+        run_test_module = importlib.import_module("run_test")
+        default = run_test_module._torchci_reports_default
+        ci_dir = str(run_test_module.REPO_ROOT / "test/torchci-reports")
+        for is_ci, xpu, expected in (
+            (False, None, None),
+            (True, None, ci_dir),
+            # XPU builds write none in CI.
+            (True, "20250101", None),
+        ):
+            with (
+                unittest.mock.patch.object(run_test_module, "IS_CI", is_ci),
+                unittest.mock.patch.object(torch.version, "xpu", xpu),
+            ):
+                self.assertEqual(default(), expected)
+
 
 # gtest's JSON test list (--gtest_list_tests --gtest_output=json:<file>), with the
 # fields gtest_identities reads.
@@ -1011,6 +1027,45 @@ class TestReportHelpers(TestCase):
         ) as probe:
             environment.capture()
         probe.assert_not_called()
+
+    @skipIfTorchDynamo("Dynamo calls the patched torch._C functions while tracing")
+    @parametrize(
+        "accelerator, library_count",
+        [
+            subtest(("cuda", "torch.cuda._device_count_nvml"), name="cuda"),
+            subtest(("rocm", "torch.cuda._device_count_amdsmi"), name="rocm"),
+            subtest(("xpu", "torch.xpu._device_count_zes"), name="xpu"),
+        ],
+    )
+    def test_device_count_never_poisons_fork(self, accelerator, library_count):
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        # The device runtimes' counts register the fork handler that poisons fork.
+        with (
+            unittest.mock.patch.object(
+                torch._C, "_cuda_getDeviceCount", create=True
+            ) as cuda_runtime,
+            unittest.mock.patch.object(
+                torch._C, "_xpu_getDeviceCount", create=True
+            ) as xpu_runtime,
+        ):
+            with unittest.mock.patch(library_count, return_value=2):
+                self.assertEqual(environment._device_count(accelerator), 2)
+            # The library can't count devices: 0, with no runtime fallback.
+            with unittest.mock.patch(library_count, return_value=-1):
+                self.assertEqual(environment._device_count(accelerator), 0)
+        cuda_runtime.assert_not_called()
+        xpu_runtime.assert_not_called()
+
+    @skipIfTorchDynamo("patches torch.mps")
+    def test_device_count_mps(self) -> None:
+        environment = importlib.import_module(
+            "torch.testing._internal.torchci.environment"
+        )
+        # Not 0, which would also leave the device name out of MPS reports.
+        with unittest.mock.patch("torch.mps.device_count", return_value=1):
+            self.assertEqual(environment._device_count("mps"), 1)
 
     def test_rocm_version(self):
         environment = importlib.import_module(

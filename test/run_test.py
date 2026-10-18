@@ -543,10 +543,9 @@ def _torchci_report_args(
 
 def _torchci_reports_default() -> str | None:
     # Every CI job writes reports by default; upload-test-artifacts uploads this
-    # folder. Deferred on XPU until its CI image has pyzes.
-    if not IS_CI:
-        return None
-    if torch.version.xpu and importlib.util.find_spec("pyzes") is None:
+    # folder. Not XPU builds until their CI image has pyzes, without which the
+    # writer can't count XPU devices.
+    if not IS_CI or torch.version.xpu:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
@@ -1731,7 +1730,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
+        help="write test run reports to DIR (default in CI, except on XPU builds: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
