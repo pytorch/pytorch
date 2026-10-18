@@ -22258,11 +22258,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
         ),
@@ -22280,14 +22275,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64],
-            ),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
         ),
@@ -22301,18 +22288,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
-        skips=(
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'argmin',
@@ -22321,18 +22296,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
-        skips=(
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=floating_types_and(
-                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
-                ),
-            ),
-        ),
     ),
     ReductionOpInfo(
         'count_nonzero',
@@ -22389,14 +22352,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # IEEE-754 behavior that differs from the CPU reference.
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
                          device_type='xpu', dtypes=[torch.complex64]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'),
-                'TestReductions',
-                'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128],
-            ),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a
             # result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
@@ -22430,11 +22385,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          device_type='cuda', dtypes=[torch.complex64]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -22463,11 +22413,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
             # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
@@ -22576,11 +22521,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             # FIXME: ValueError: The data in MaskedTensor a and Tensor b do not match
             DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float16]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128, torch.int8, torch.int16, torch.int32, torch.int64]),
         ),
     ),
     ReductionOpInfo(
@@ -22613,11 +22553,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float32]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -22645,11 +22580,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          dtypes=[torch.float16]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
             # of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
@@ -26356,11 +26286,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='mps'),
         ),
@@ -26375,11 +26300,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64]),
             # RuntimeError: MPS supports tensors with dimensions <= 16, but got 65.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='mps'),
         ),
@@ -26428,11 +26348,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
         ),
     ),
     ReductionPythonRefInfo(
@@ -26453,11 +26368,6 @@ python_ref_db = [
                 unittest.skip("Skipped!"), 'TestReductions',
                 'test_ref_duplicate_values',
                 dtypes=(torch.float16,)),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.float64]),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
@@ -26487,12 +26397,6 @@ python_ref_db = [
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                 dtypes=[torch.float32]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.complex128]),
-
         ),
     ),
     PythonRefInfo(
@@ -26535,11 +26439,6 @@ python_ref_db = [
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                 dtypes=[torch.float16, torch.complex64]),
-            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
-                device_type='xpu',
-                dtypes=[torch.int64, torch.int8, torch.int16, torch.int32, torch.complex128]),
         ),
     ),
     ReductionPythonRefInfo(
