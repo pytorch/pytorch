@@ -1376,8 +1376,10 @@ Reusing a pageable buffer can also amortize
 these costs as long as its pages remain mapped and physically allocated.
 Once populated, pageable and pinned buffers can have similar transfer
 performance. Reuse does not pin pageable memory: it remains eligible for
-swapping. Pinned buffers are recommended for large, repeated transfers to
-avoid swapping, but excessive pinning can put pressure on available RAM
+swapping or migration to another CPU NUMA node. Pinned buffers remain useful
+for large, repeated transfers because they prevent these movements and help
+maintain transfer performance across hardware-coherent and non-coherent
+systems. However, excessive pinning can put pressure on available RAM
 (see {ref}`cuda-memory-pinning`).
 
 ```{note}
