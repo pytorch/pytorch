@@ -4789,6 +4789,22 @@ def falls_back_in_the_entry(model, x, opaque_layers=0, scale=1):
         y = opaque(y)
     torch._dynamo.graph_break()
     return y.sin() * scale + int(torch.compiler.is_compiling())
+
+
+def tagged_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos() + int(torch.compiler.is_compiling())
+
+
+def falls_back_around_a_helper(model, x, opaque_layers=0):
+    # Under nested_graph_breaks=False, tagged_helper is a frame the entry cannot
+    # reach, so the artifact is installed. The entry's recompile for
+    # opaque_layers=1 falls back; its eager run still calls tagged_helper.
+    y = x * 2
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return tagged_helper(y) + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -5022,6 +5038,35 @@ class TestPrecompileDynamoCapture(TestCase):
             self.assertIn("('dispatch', 1),  # eager fallback", f.read())
         # The capture skipped every call after the fallback; a load still serves
         # the variant after the miss.
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1], mode="installed")
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_artifact_runs_an_entrys_eager_fallback_eagerly(self):
+        # The entry compiles for opaque_layers=0 and falls back for 1. A load
+        # serves its variant, runs its miss eagerly, and the eager run's callee
+        # still dispatches to its own variant and refuses a miss of its own (the
+        # loader's dtype miss reaches tagged_helper with a float64 input).
+        fn = self.mod.falls_back_around_a_helper
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = (self.x2 * 2).sin().cos()
+        self.assertEqual(compiled, base + 2)
+        # The entry ran eagerly; only tagged_helper's served variant adds 1.
+        self.assertEqual(eager, base + 1)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(
+            summary.eager_fallbacks[0].startswith("falls_back_around_a_helper ("),
+            summary,
+        )
+        self.assertTrue(summary.complete, summary)
+        with open(self.artifact) as f:
+            code = f.read()
+        self.assertIn('SERVING_MODE = "installed"', code)
+        self.assertIn("('falls_back_around_a_helper', 1),  # eager fallback", code)
         calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
         self._serve_in_fresh_process(calls + calls[:1], mode="installed")
 

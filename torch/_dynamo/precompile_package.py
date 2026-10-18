@@ -2032,13 +2032,14 @@ class PrecompileSession(Generic[_P, _R]):
             if _is_variantless_entry_fallback(entry):
                 # The artifact build refuses this too, so require_complete=False
                 # is no way out; say so rather than suggest it. Checked first:
-                # the entry did run, and every later gate suggests that way out.
+                # the entry did run, and the later gates either suggest
+                # require_complete=False or say it never ran.
                 raise PackageError(
                     f"Precompilation has no variant of the entry frame "
                     f"{entry.codes[0].python_code.co_name!r}: Dynamo gave up on it "
                     f"at its first call, after a graph break it cannot resume from "
                     f"(such as one inside a loop; check TORCH_LOGS=graph_breaks), "
-                    f"a generator, a suppressed UserError, or a backend SkipFrame. "
+                    f"a generator, or a backend SkipFrame. "
                     f"The artifact build refuses that whatever require_complete "
                     f"says: remove that graph break, or capture the functions the "
                     f"entry calls instead."
