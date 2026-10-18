@@ -1509,6 +1509,12 @@ class DistributedDataParallel(Module, Joinable):
 
     def __getstate__(self):
         self._check_default_group()
+        if self._delay_all_reduce_all_params:
+            # __setstate__ would build the reducer this DDP never had.
+            raise RuntimeError(
+                "DDP Pickling/Unpickling is not supported when the all-reduce of "
+                "every parameter is delayed"
+            )
         attrs = self._picklable_state()
         # broadcast_buffers is a property; include it for backward compat.
         attrs["broadcast_buffers"] = self.forward_sync_buffers
