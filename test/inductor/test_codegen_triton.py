@@ -1439,6 +1439,24 @@ def helper(x):
             self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
 
     @parametrize("scheduled", [False, True])
+    @parametrize(
+        "storage_numel, expected",
+        [(2**30 - 1, True), (2**30, False), (2**30 + 1, False)],
+    )
+    def test_constant_pointer_range_checks_backing_storage(
+        self, scheduled, storage_numel, expected
+    ):
+        self._graph.constants["weight"] = torch.empty(
+            storage_numel, dtype=torch.float16, device="meta"
+        )[:32]
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
+    @parametrize("scheduled", [False, True])
     @parametrize("tensor_input", [False, True])
     def test_graph_input_pointer_range_survives_scheduling(
         self, scheduled, tensor_input

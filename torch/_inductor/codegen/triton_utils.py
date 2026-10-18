@@ -6,6 +6,7 @@ from typing import Any
 import sympy
 
 import torch
+from torch.utils._sympy.functions import Max
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._triton import has_triton_block_ptr
 
@@ -371,6 +372,10 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     try:
         layout = _get_buffer_layout(arg.buffer)
         storage_bytes = layout.storage_size() * arg.dtype.itemsize
+        if arg.buffer in V.graph.constants:
+            # Constant views can access beyond their original layout via as_strided.
+            tensor = V.graph.constants[arg.buffer]
+            storage_bytes = Max(storage_bytes, tensor.untyped_storage().nbytes())
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
         return False
