@@ -189,6 +189,50 @@ class TestComplexTensorGeneric(TestCase):
 
         self.assertEqual(torch.ne(r, xc), torch.ne(r, c))
 
+    def test_interleaved_views_input(self):
+        from torch._subclasses.complex_tensor import (
+            ComplexTensor,
+            InterleavedComplexTensor,
+        )
+
+        t = torch.randn(4, 6, dtype=torch.complex128)[:, ::2]
+        x = InterleavedComplexTensor(t)
+
+        self.assertEqual(x.stride(), t.stride())
+        self.assertEqual(x.re.data_ptr(), t.data_ptr())
+        self.assertEqual(x.as_interleaved(), t)
+
+        y = x * x
+        self.assertIsInstance(y, ComplexTensor)
+        self.assertEqual(y.as_interleaved(), t * t)
+
+        x.real = torch.zeros(4, 3)
+        self.assertEqual(t.real, torch.zeros(4, 3, dtype=torch.float64))
+
+    def test_interleaved_inplace_writes_through(self):
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
+
+        a = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)
+        b = torch.tensor([7 - 8j, -9 + 1j], dtype=torch.complex64)
+        expected = a * b
+
+        xa = InterleavedComplexTensor(a)
+        result = xa.mul_(b)
+
+        self.assertIs(result, xa)
+        self.assertEqual(a, expected)
+
+        xa.copy_(b)
+        self.assertEqual(a, b)
+
+    def test_interleaved_rejects_invalid_input(self):
+        from torch._subclasses.complex_tensor import InterleavedComplexTensor
+
+        with self.assertRaises(TypeError):
+            InterleavedComplexTensor(torch.randn(3))
+        with self.assertRaises(RuntimeError):
+            InterleavedComplexTensor(torch.randn(3, dtype=torch.complex64).conj())
+
 
 @unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestCase):

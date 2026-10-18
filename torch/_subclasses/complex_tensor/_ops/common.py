@@ -11,7 +11,7 @@ from torch.types import Number
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 
 
 _P = ParamSpec("_P")
@@ -60,7 +60,7 @@ def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
         >>> is_complex_tensor(ct)
         True
     """
-    return isinstance(obj, ComplexTensor)
+    return isinstance(obj, ComplexTensor | InterleavedComplexTensor)
 
 
 @overload
@@ -293,10 +293,29 @@ def register_simple(
     return register_complex(op, impl)
 
 
+def register_inductor(
+    op: OpType,
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    def impl(*a, **kw):
+        a, kw = tree_map(_as_interleaved, (a, kw), is_leaf=is_complex_tensor)
+        out = op(*a, **kw)
+        return tree_map(
+            _as_complex_tensor,
+            out,
+            is_leaf=lambda x: isinstance(x, Tensor) and x.dtype.is_complex,
+        )
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
 def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
-        not isinstance(arg, ComplexTensor)
+        not isinstance(arg, ComplexTensor | InterleavedComplexTensor)
         and isinstance(arg, Tensor)
         and arg.dtype in COMPLEX_TO_REAL
     ):
