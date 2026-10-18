@@ -912,6 +912,13 @@ class CompiledFxGraph(OutputCode):
                 else:
                     counters["inductor"]["cudagraph_skips"] += 1
                 BoxedBool.disable(cudagraphs)
+            elif self.cudagraph_info is None:
+                # Compiled with cudagraphs off, so there is no capture metadata
+                # to replay with. A cache hit lands here when this graph's setting
+                # differs from the one the caller's box carries (a backward-specific
+                # or region-local opt-out).
+                counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
                     if "boxed_forward_device_index" not in graph_kwargs:
