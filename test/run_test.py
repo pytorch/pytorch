@@ -545,7 +545,8 @@ def _torchci_reports_default() -> str | None:
     # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
     # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
     # the writer count XPU devices with Level Zero Sysman instead of the runtime.
-    if os.environ.get("GITHUB_REPOSITORY") != "pytorch/pytorch" or torch.version.xpu:
+    in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    if not in_pytorch_ci or torch.version.xpu:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
