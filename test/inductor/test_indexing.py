@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import ctypes
+import itertools
 import os
 import sys
 import types
@@ -9,7 +11,8 @@ import sympy
 
 import torch
 from torch._dynamo.source import ConstantSource
-from torch._inductor import config
+from torch._inductor import config, ir
+from torch._inductor.codecache import CppCodeCache
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import texpr
@@ -28,6 +31,9 @@ from torch._inductor.utils import (
     run_and_get_kernels,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
+from torch.fx.experimental import _config as fx_config
+from torch.fx.experimental.symbolic_shapes import DimDynamic
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -65,6 +71,89 @@ REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 
 class TestIndexingSimplification(InductorTestCase):
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    def test_cpp_printer_signed_unsigned_comparisons(self):
+        symbol = sympy.Symbol("u0", integer=True)
+        definitions = ["#include <cstdint>", "#include <c10/macros/Export.h>"]
+        cases = []
+        for bound, relation, reverse, (cpp_type, arg_type, values) in itertools.product(
+            (2**63, 2**64 - 1),
+            (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge, sympy.Eq, sympy.Ne),
+            (False, True),
+            (
+                ("int64_t", ctypes.c_int64, (-(2**63), -1, 0, 2**63 - 1)),
+                ("uint64_t", ctypes.c_uint64, (0, 2**63 - 1, 2**63, 2**64 - 1)),
+            ),
+        ):
+            args = (bound, symbol) if reverse else (symbol, bound)
+            expr = relation(*args, evaluate=False)
+            name = f"compare_{len(cases)}"
+            definitions.append(
+                f'extern "C" C10_EXPORT bool {name}({cpp_type} u0) '
+                f"{{ return {cexpr(expr, simplify=False)}; }}"
+            )
+            cases.append((name, arg_type, values, expr))
+
+        library = CppCodeCache.load("\n".join(definitions))
+        for name, arg_type, values, expr in cases:
+            compare = getattr(library, name)
+            compare.argtypes = [arg_type]
+            compare.restype = ctypes.c_bool
+            for value in values:
+                with self.subTest(expr=expr, arg_type=arg_type, value=value):
+                    self.assertEqual(compare(value), bool(expr.subs(symbol, value)))
+
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @config.patch(
+        cpp_wrapper=True, scalar_asserts=True, unsafe_skip_scalar_range_asserts=False
+    )
+    def test_cpp_wrapper_unsigned_runtime_bound(self):
+        x = torch.arange(4, dtype=torch.float32)
+        for reject_upper_half in (True, False):
+
+            def fn(value, x):
+                scalar = value.clone().item()
+                if reject_upper_half:
+                    torch._check(scalar < 2**63)
+                else:
+                    torch._check(scalar != 2**63)
+                return x + 1
+
+            compiled = torch.compile(fn, fullgraph=True)
+            valid = (0, 7, 2**63 - 1)
+            invalid = (2**63,)
+            if reject_upper_half:
+                invalid += (2**64 - 1,)
+            else:
+                valid += (2**64 - 1,)
+            for scalar in valid:
+                value = torch.tensor(scalar, dtype=torch.uint64)
+                self.assertEqual(compiled(value, x), fn(value, x))
+            for scalar in invalid:
+                with self.assertRaisesRegex(RuntimeError, r"Expected (?:Ne|u\d+)"):
+                    compiled(torch.tensor(scalar, dtype=torch.uint64), x)
+
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @config.patch(
+        cpp_wrapper=True, scalar_asserts=True, unsafe_skip_scalar_range_asserts=False
+    )
+    def test_cpp_wrapper_oversized_runtime_bounds(self):
+        def fn(value, x):
+            scalar = value.sum().item()
+            torch._check(scalar >= 0)
+            torch._check(scalar <= 2**64)
+            return x + scalar
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = torch.arange(4, dtype=torch.float32)
+        for scalar in (7, 0, 2**63 - 1):
+            value = torch.tensor([scalar, 0], dtype=torch.int64)
+            self.assertEqual(compiled(value, x), fn(value, x))
+        with self.assertRaisesRegex(RuntimeError, "Expected .* >= 0"):
+            compiled(torch.tensor([-1, 0], dtype=torch.int64), x)
+
     def test_simplify_index_in_vec_range(self):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
 
@@ -937,6 +1026,55 @@ class TestIndexExprUpperBounds(InductorTestCase):
         )
         regular.indexing_node_schedule = [overflow]
         self.assertTrue(regular.any_index_expr_overflows_int32())
+
+
+@instantiate_parametrized_tests
+class TestSliceNormalization(InductorTestCase):
+    @unittest.skipUnless(HAS_CPU, "requires CPU codegen")
+    @parametrize("size_oblivious", [False, True])
+    def test_backed_slice_scatter_lowering(self, size_oblivious):
+        def fn(x):
+            return torch.slice_scatter(x, x[1:] + 1, 0, 1, sys.maxsize)
+
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            compiled = torch.compile(fn, dynamic=True, fullgraph=True)
+            for length in (4, 8, 16):
+                x = torch.arange(length, dtype=torch.float32)
+                self.assertEqual(compiled(x), fn(x))
+
+    @parametrize("size_oblivious", [False, True])
+    @parametrize("bounds", [(0, 8, 1), (8, 20, 1), (-8, -2, 2), (20, 8, 1)])
+    def test_backed_slice_clamps(self, size_oblivious, bounds):
+        start, end, step = bounds
+        with fx_config.patch(backed_size_oblivious=size_oblivious):
+            sizevars = SizeVarAllocator()
+            symbol = sizevars.shape_env.create_symbol(
+                16, source=ConstantSource("slice_size"), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            buffer = ir.InputBuffer(
+                name="slice_input",
+                layout=ir.FixedLayout(
+                    torch.device("cpu"), torch.float32, [symbol], [1]
+                ),
+            )
+            guards_before = list(sizevars.shape_env.guards)
+            with V.set_graph_handler(SimpleNamespace(sizevars=sizevars)):
+                view = ir.SliceView.create(ir.StorageBox(buffer), 0, start, end, step)
+
+            if size_oblivious:
+                self.assertEqual(sizevars.shape_env.guards, guards_before)
+            elif bounds == (0, 8, 1):
+                self.assertGreater(len(sizevars.shape_env.guards), len(guards_before))
+
+            for length in (2, 5, 8, 9, 16, 32) if size_oblivious else (16,):
+                with self.subTest(length=length):
+                    layout = view.get_layout()
+                    size = int(sympy.sympify(view.get_size()[0]).subs(symbol, length))
+                    stride = int(sympy.sympify(layout.stride[0]).subs(symbol, length))
+                    offset = int(sympy.sympify(layout.offset).subs(symbol, length))
+                    source = torch.arange(length, dtype=torch.float32)
+                    actual = torch.as_strided(source, (size,), (stride,), offset)
+                    self.assertEqual(actual, source[start:end:step])
 
 
 class TestEvaluateMinMax(InductorTestCase):

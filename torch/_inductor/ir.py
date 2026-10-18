@@ -65,6 +65,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -4409,11 +4410,12 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
+        if fx_config.backed_size_oblivious or any(
+            free_unbacked_symbols(x) for x in (start, end, dim_size)
+        ):
             min_func = Min
             max_func = Max
         elif any(
-            # Only needed when backed_size_oblivious is on.
             x.has(sympy.Min, sympy.Max, Min, Max)
             for x in (start, end, dim_size)
             if isinstance(x, Expr)
