@@ -2033,11 +2033,12 @@ class PrecompileSession(Generic[_P, _R]):
                 raise PackageError(
                     f"Precompilation has no variant of the entry frame "
                     f"{entry.codes[0].python_code.co_name!r}: Dynamo gave up on it "
-                    f"at its first call, after a graph break it cannot resume from "
-                    f"(such as one inside a loop; check TORCH_LOGS=graph_breaks), "
-                    f"a generator, or a backend SkipFrame. "
-                    f"The artifact build refuses that whatever require_complete "
-                    f"says: remove that graph break, or capture the functions the "
+                    f"at its first call, because of a graph break it cannot resume "
+                    f"from (such as one inside a loop; check TORCH_LOGS=graph_breaks), "
+                    f"because it is a generator, because it raised a UserError "
+                    f"Dynamo suppressed, or because the backend raised SkipFrame. "
+                    f"The artifact build refuses that whatever "
+                    f"require_complete says: fix that, or capture the functions the "
                     f"entry calls instead."
                 )
             if summary.capture_errors:
