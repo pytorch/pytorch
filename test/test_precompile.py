@@ -5018,6 +5018,8 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertTrue(summary.eager_fallbacks[0].startswith("dispatch ("), summary)
         self.assertIn("1 eager fallback: ", str(summary))
         self.assertTrue(summary.complete, summary)
+        with open(self.artifact) as f:
+            self.assertIn("('dispatch', 1),  # eager fallback", f.read())
         # The capture skipped every call after the fallback; a load still serves
         # the variant after the miss.
         calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
