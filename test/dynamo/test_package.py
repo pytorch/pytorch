@@ -24,7 +24,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, SkipFrame, Unsupported
+from torch._dynamo.exc import PackageError, SkipFrame, Unsupported, UserError
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -582,10 +582,20 @@ print(eval(f"bbmod.{name}.{path}") is code)
             return x.sin()
 
         package = CompilePackage(fn)
+        # Unsupported is flagged too, so pin that this one is a UserError.
+        flagged = []
+        record = package.record_eager_fallback
+
+        def spy(code):
+            flagged.append(type(sys.exc_info()[1]))
+            record(code)
+
         compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
         x = torch.randn(3)
         compiled_fn(x, False)
-        self.assertEqual(compiled_fn(x, True), x.sin())
+        with patch.object(package, "record_eager_fallback", spy):
+            self.assertEqual(compiled_fn(x, True), x.sin())
+        self.assertEqual(flagged, [UserError])
         entry = package._codes[fn.__code__]
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
