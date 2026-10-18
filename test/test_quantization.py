@@ -64,6 +64,15 @@ log = logging.getLogger(__name__)
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
 # using fx quantization.
 try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxPrepareAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.fx.test_quantize_fx import TestQuantizeFxPrepareAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
+try:
     from quantization.fx.test_quantize_fx import TestFuseFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
