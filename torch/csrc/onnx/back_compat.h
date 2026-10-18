@@ -1,6 +1,6 @@
 #pragma once
 
-#include <onnx/onnx_pb.h>
+#include <torch/csrc/onnx/onnx_pb.h>
 
 namespace torch::onnx {
 

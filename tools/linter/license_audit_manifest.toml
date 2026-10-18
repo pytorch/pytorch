@@ -42,11 +42,6 @@ excluded = [
   # docs / test / nested googletest trees
   'third_party/nlohmann/docs/mkdocs/docs/home/license.md',
   'third_party/onnx/third_party/pybind11/LICENSE',
-  'third_party/protobuf/third_party/benchmark/LICENSE',
-  'third_party/protobuf/third_party/googletest/LICENSE',
-  'third_party/protobuf/third_party/googletest/googlemock/LICENSE',
-  'third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE',
-  'third_party/protobuf/third_party/googletest/googletest/LICENSE',
   'third_party/protobuf/third_party/utf8_range/LICENSE',
   'third_party/python-peachpy/LICENSE.rst',
   'third_party/tensorpipe/third_party/googletest/LICENSE',

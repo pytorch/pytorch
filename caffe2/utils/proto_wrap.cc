@@ -21,3 +21,19 @@ TORCH_API const ::std::string& GetEmptyStringAlreadyInited() {
 }
 
 }  // namespace ONNX_NAMESPACE
+
+namespace caffe2 {
+
+void ShutdownProtobufLibrary() {
+  ::google::protobuf::ShutdownProtobufLibrary();
+}
+
+}  // namespace caffe2
+
+namespace torch {
+
+void ShutdownProtobufLibrary() {
+  ::google::protobuf::ShutdownProtobufLibrary();
+}
+
+}  // namespace torch
