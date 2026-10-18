@@ -2066,7 +2066,8 @@ _SERVING_NOTES = {
 # minted while tracing (import aliases, the builtins dict key, the compiled subgraphs
 # under their backend ids) are re-seeded and stay. The flip side is that there is no
 # compiler behind it: a call no captured variant covers RAISES rather than compiling a
-# new one.
+# new one, except in a frame Dynamo gave up on during capture (the summary's
+# eager_fallbacks), which runs it eagerly.
 """,
     "installed": """\
 # This artifact SERVES BY INSTALLING the Dynamo package in _PACKAGE onto the live code
@@ -2076,7 +2077,9 @@ _SERVING_NOTES = {
 # as under the fail_on_recompile stance (but without setting that process-wide
 # stance), so a call no captured variant covers raises rather than compiling a new
 # graph, under every process-wide stance that would compile it (force_backend,
-# "eager_then_compile", ...) too. Two stances you set yourself do change serving:
+# "eager_then_compile", ...) too; a frame Dynamo gave up on during capture (the
+# summary's eager_fallbacks) runs such a call eagerly instead. Two stances you set
+# yourself do change serving:
 # "force_eager" runs every call eagerly, bypassing the installed entries, and
 # "eager_on_recompile" serves the captured variants and runs any other call eagerly.
 """,
@@ -2115,8 +2118,8 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
             # trailing .backward(). Either way it ran eager during capture, so
             # the driver runs it eager too.
             "trivial": not code.guarded_codes and not code.bypassed,
-            # Dynamo gave up on the frame during capture and ran it eager, so a
-            # call no variant matches runs eager, as there.
+            # Dynamo gave up on the frame during capture and skipped it from
+            # then on; a load still serves its variants and runs a miss eager.
             "eager_fallback": code.eager_fallback and not code.bypassed,
             "code": code.python_code,
             "python_module": code.python_module,
@@ -2218,6 +2221,14 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"look for the package-bypass warning, or the precompile_cache_bypass / "
             f"dynamo_cache_bypass artifacts under tlparse. Fix that rather than "
             f"restructuring the captured callable."
+        )
+    if entry_frame["eager_fallback"] and not entry_frame["variants"]:
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
+            f"Dynamo gave up on the entry frame on its first call (a graph break "
+            f"it cannot resume from, such as one inside a loop; check "
+            f"TORCH_LOGS=graph_breaks), so it holds no variant to serve. Remove "
+            f"that graph break, or capture the functions it calls instead."
         )
     if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper

@@ -590,7 +590,7 @@ def _build_multigraph_forward():
         # from f_locals and every guard on it misses.
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
-        # Capture ran a call its variants missed eagerly (see _multigraph_frames).
+        # Dynamo gave up on the frame during capture: a miss runs eagerly.
         eager_fallback = frame["eager_fallback"]
 
         def _function(code, closure):
@@ -834,7 +834,9 @@ def _build_installed_forward():
             # stance, so other threads' compiles are unaffected. It must be bound
             # before context(fn), which captures the callback when it wraps.
             if not _ALLOW_SERVE_TIME_COMPILES:
-                context.callback = _RefuseRecompileCallback(context.callback)
+                flagged = [e.eager_fallback and not e.bypassed for _, e in entries]
+                eager = [t for t, f in zip(targets, flagged) if f]
+                context.callback = _RefuseRecompileCallback(context.callback, eager)
             compiled = context(fn)
         package.install(package_state["backends"])
     except _PrecompileError:

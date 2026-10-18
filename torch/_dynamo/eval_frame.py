@@ -294,6 +294,9 @@ class _FailOnRecompileCallback:
     def __init__(self, callback: DynamoCallback) -> None:
         # to prevent cache miss due to different backend
         self._torchdynamo_orig_backend = callback
+        # Frames whose miss runs eagerly instead of raising, keyed by id since
+        # code objects compare by value.
+        self._eager_codes: dict[int, types.CodeType] = {}
 
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
@@ -310,6 +313,11 @@ class _FailOnRecompileCallback:
             disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
         ) is not None:
             return disabled
+        if id(frame.f_code) in self._eager_codes:
+            return ConvertFrameReturn(
+                apply_to_code=False,
+                skip_reason="Dynamo gave up on this frame during capture",
+            )
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -356,6 +364,13 @@ class _RefuseRecompileCallback(_FailOnRecompileCallback):
         "Detected recompile of a frame whose callable refuses to recompile. "
     )
     _error = _RecompileRefusedError
+
+    def __init__(
+        self, callback: DynamoCallback, eager_codes: Sequence[types.CodeType] = ()
+    ) -> None:
+        super().__init__(callback)
+        # The frames Dynamo gave up on during capture.
+        self._eager_codes = {id(code): code for code in eager_codes}
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:

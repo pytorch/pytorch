@@ -74,10 +74,9 @@ FrameExecStrategy get_region_exec_strategy(
   }
   // Isolated regions inherit SKIP from the global strategy (deliberate
   // "do not trace" marks from skip_code / @torch._dynamo.skip / FX
-  // plumbing / TorchScript __init__ / etc.) but deliberately do NOT
-  // inherit RUN_ONLY, which comes from a prior non-isolated
-  // recompile-limit hit or from CompilePackage.install() (an eager
-  // fallback frame), and would otherwise poison every new region.
+  // plumbing / TorchScript __init__ / etc.) but do NOT inherit
+  // RUN_ONLY, which can only come from a prior non-isolated
+  // recompile-limit hit and would otherwise poison every new region.
   FrameExecStrategy global = extra_state->strategy;
   if (global.cur_action == FrameAction::SKIP) {
     result.cur_action = FrameAction::SKIP;

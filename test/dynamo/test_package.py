@@ -508,53 +508,20 @@ print(eval(f"bbmod.{name}.{path}") is code)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
 
-    def test_exec_holds_release_and_a_skip_wins_over_run_only(self):
-        from torch._dynamo.package import _update_exec_hold
-
-        def fn(x):
-            return x + 1
-
-        events = []
-
-        def backend(gm, example_inputs):
-            events.append("compile")
-
-            def run(*args):
-                events.append("run")
-                return gm(*args)
-
-            return run
-
-        compiled_fn = torch._dynamo.optimize(backend)(fn)
-        hit, miss = torch.randn(3), torch.randn(3, dtype=torch.float64)
-        compiled_fn(hit)
-
-        def served(x):
-            events.clear()
-            self.assertEqual(compiled_fn(x), x + 1)
-            return events[:]
-
-        code = fn.__code__
-        # RUN_ONLY: the entry still serves, a miss runs eagerly.
-        _update_exec_hold(code, None, hold=True)
-        self.assertEqual(served(hit), ["run"])
-        self.assertEqual(served(miss), [])
-        # A skip another package holds wins: not even the entry runs.
-        _update_exec_hold(code, False, hold=True)
-        self.assertEqual(served(hit), [])
-        # Releasing the skip falls back to the RUN_ONLY still held.
-        _update_exec_hold(code, False, hold=False)
-        self.assertEqual(served(hit), ["run"])
-        self.assertEqual(served(miss), [])
-        # Releasing the last hold puts the default back: a miss recompiles.
-        _update_exec_hold(code, None, hold=False)
-        self.assertEqual(served(miss), ["compile", "run"])
-
-    def test_install_runs_a_miss_of_an_eager_fallback_frame_eagerly(self):
-        # Any install() of a frame Dynamo gave up on, whether a precompile load
-        # or DynamoCache's: the variant serves and a call it misses runs eagerly,
-        # as in the capturing process, instead of reaching Dynamo again.
+    def save_and_reload(self, fn, package):
         ctx = DiskDynamoStore()
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        return ctx.load_package(fn, self.path())
+
+    def test_refuse_callback_runs_a_miss_of_an_eager_fallback_frame_eagerly(self):
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
         x = torch.randn(3)
         package = CompilePackage(_dispatch)
         compiled_fn = torch._dynamo.optimize("eager", package=package)(_dispatch)
@@ -563,26 +530,39 @@ print(eval(f"bbmod.{name}.{path}") is code)
         entry = package._codes[_dispatch.__code__]
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
-        for backend_id, backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, backend)
-        ctx.save_package(package, self.path())
+        package, backends = self.save_and_reload(_dispatch, package)
 
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(_dispatch, self.path())
+        # A plain install() (DynamoCache's) takes no hold for the flag: a miss
+        # still reaches the callback.
         compiled_fn = torch._dynamo.optimize(package=package)(_dispatch)
         package.install(backends)
-        runs = self.count_backend_runs(_dispatch, backends)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled_fn(x, 0), x.sin())
-            self.assertEqual(len(runs), 1)
-            self.assertEqual(compiled_fn(x, 1), x.sin())
-            self.assertEqual(len(runs), 1)
-        package.uninstall()
         with (
             torch.compiler.set_stance("fail_on_recompile"),
             self.assertRaisesRegex(RuntimeError, "Detected recompile"),
         ):
             compiled_fn(x, 1)
+        package.uninstall()
+
+        # An installed precompile artifact's callback serves the variant and runs
+        # the miss eagerly; without the frame in eager_codes it refuses.
+        for eager_codes in ([_dispatch.__code__], []):
+            torch._dynamo.reset()
+            package, backends = self.save_and_reload(_dispatch, package)
+            context = torch._dynamo.optimize(package=package)
+            context.callback = _RefuseRecompileCallback(context.callback, eager_codes)
+            compiled_fn = context(_dispatch)
+            package.install(backends)
+            runs = self.count_backend_runs(_dispatch, backends)
+            self.assertEqual(compiled_fn(x, 0), x.sin())
+            self.assertEqual(len(runs), 1)
+            if eager_codes:
+                self.assertEqual(compiled_fn(x, 1), x.sin())
+                self.assertEqual(compiled_fn(x, 0), x.sin())
+                self.assertEqual(len(runs), 2)
+            else:
+                with self.assertRaises(_RecompileRefusedError):
+                    compiled_fn(x, 1)
+            package.uninstall()
 
     def test_a_suppressed_user_error_is_an_eager_fallback(self):
         def fn(x, branch):
@@ -604,8 +584,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
 
-    def test_install_runs_a_miss_of_a_frame_its_backend_skipped_eagerly(self):
-        # A backend that raises SkipFrame on the recompile is a fallback too.
+    def test_a_backend_skip_is_an_eager_fallback(self):
         compiled = []
 
         def backend(gm, example_inputs):
@@ -617,30 +596,40 @@ print(eval(f"bbmod.{name}.{path}") is code)
         def fn(x):
             return x.sin()
 
-        ctx = DiskDynamoStore()
-        x = torch.randn(3)
         package = CompilePackage(fn)
         compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        x = torch.randn(3)
         compiled_fn(x)
         compiled_fn(x.double())
         entry = package._codes[fn.__code__]
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
-        for backend_id, compiled_backend in package.cached_backends.items():
-            ctx.record_eager_backend(backend_id, compiled_backend)
-        ctx.save_package(package, self.path())
 
-        torch._dynamo.reset()
-        package, backends = ctx.load_package(fn, self.path())
-        compiled_fn = torch._dynamo.optimize(package=package)(fn)
-        package.install(backends)
-        runs = self.count_backend_runs(fn, backends)
-        with torch.compiler.set_stance("fail_on_recompile"):
-            self.assertEqual(compiled_fn(x), x.sin())
-            self.assertEqual(len(runs), 1)
-            self.assertEqual(compiled_fn(x.double()), x.double().sin())
-            self.assertEqual(len(runs), 1)
-        package.uninstall()
+    def test_a_recompile_limit_hit_or_suppressed_error_is_not_an_eager_fallback(self):
+        def fn(x):
+            return x.sin()
+
+        def failing_backend(gm, example_inputs):
+            if example_inputs[0].dtype == torch.float64:
+                raise RuntimeError("backend failed")
+            return gm.forward
+
+        x = torch.randn(3)
+        # The limit sets RUN_ONLY and stays a coverage gap; a non-soft error
+        # suppressed by suppress_errors is not Dynamo giving up on the frame.
+        for backend, config_patch in (
+            ("eager", torch._dynamo.config.patch(recompile_limit=1)),
+            (failing_backend, torch._dynamo.config.patch(suppress_errors=True)),
+        ):
+            torch._dynamo.reset()
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+            with config_patch:
+                compiled_fn(x)
+                self.assertEqual(compiled_fn(x.double()), x.double().sin())
+            entry = package._codes[fn.__code__]
+            self.assertEqual(len(entry.guarded_codes), 1)
+            self.assertFalse(entry.eager_fallback)
 
     def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
         # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
