@@ -307,6 +307,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         opt = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt(torch.ones(3)), fn(torch.ones(3)))
 
+    @parametrize("index_dtype", (torch.uint8, torch.int32))
+    def test_take_integer_index(self, index_dtype):
+        def fn(source, index):
+            return torch.take(source, index)
+
+        source = torch.arange(8.0)
+        index = torch.tensor([0, 3, 7], dtype=index_dtype)
+        expected = fn(source, index)
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(source, index), expected)
+
     def test_lru_cache_warning_issued_during_tracing(self):
         import warnings
         from functools import lru_cache

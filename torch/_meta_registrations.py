@@ -177,9 +177,13 @@ def meta_linspace_logspace(
 @out_wrapper()
 def meta_take(self, index):
     # Type and device checks
+    supports_integral_indices = device_hint(index) in ("cpu", "cuda")
     torch._check(
-        index.dtype == torch.long,
-        lambda: f"take(): Expected a long tensor for index, but got {index.dtype}",
+        index.dtype == torch.long
+        or (supports_integral_indices and utils.is_integer_dtype(index.dtype)),
+        lambda: "take(): Expected a long tensor for index on all devices, "
+        "or any non-boolean integral tensor on CPU or CUDA, "
+        f"but got {index.dtype}",
     )
     # Index checks
     torch._check_index(

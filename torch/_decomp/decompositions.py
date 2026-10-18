@@ -6116,7 +6116,11 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
 @out_wrapper()
 def take(self, index):
     flattened = self.reshape(-1)
-    return flattened[index]
+    index_long = index.to(torch.int64)
+    if index.dtype == torch.uint64:
+        # Overflowing uint64 values must not wrap into valid negative indices.
+        index_long = torch.where(index_long < 0, flattened.numel(), index_long)
+    return flattened[index_long]
 
 
 @register_decomposition(aten.resize_as)
