@@ -306,13 +306,6 @@ class _FailOnRecompileCallback:
     )
     _error: type[RuntimeError] = RuntimeError
 
-    # Frames whose miss runs eagerly instead of raising, keyed by id since code
-    # objects compare by value. Only _RefuseRecompileCallback sets it (this one is
-    # built per call under the fail_on_recompile stance); it is checked in
-    # __call__ here because an overriding __call__ would shift the
-    # sys._getframe(1) below off the missed frame's caller.
-    _eager_codes: Mapping[int, types.CodeType] = {}
-
     def __init__(self, callback: DynamoCallback) -> None:
         # to prevent cache miss due to different backend
         self._torchdynamo_orig_backend = callback
@@ -332,12 +325,8 @@ class _FailOnRecompileCallback:
             disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
         ) is not None:
             return disabled
-        if id(frame.f_code) in self._eager_codes:
-            _warn_eager_fallback_miss(frame.f_code)
-            return ConvertFrameReturn(
-                apply_to_code=False,
-                skip_reason="Dynamo gave up on this frame during capture",
-            )
+        if (served := self._serve_miss(frame)) is not None:
+            return served
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,
@@ -373,6 +362,11 @@ class _FailOnRecompileCallback:
                 message += f"\n{entry.guard_manager}{entry.guard_manager.check_verbose(frame.f_locals)}"  # type: ignore[attr-defined]
         raise self._error(message)
 
+    def _serve_miss(self, frame: DynamoFrameType) -> ConvertFrameReturn | None:
+        # A hook rather than an overridable __call__: an override would shift the
+        # sys._getframe(1) in __call__ off the missed frame's caller.
+        return None
+
 
 class _RefuseRecompileCallback(_FailOnRecompileCallback):
     """A ``_FailOnRecompileCallback`` bound once into a context's callback (an
@@ -391,8 +385,20 @@ class _RefuseRecompileCallback(_FailOnRecompileCallback):
         self, callback: DynamoCallback, eager_codes: Sequence[types.CodeType] = ()
     ) -> None:
         super().__init__(callback)
-        # The frames Dynamo gave up on during capture.
-        self._eager_codes = {id(code): code for code in eager_codes}
+        # The frames Dynamo gave up on during capture, keyed by id since code
+        # objects compare by value.
+        self._eager_codes: Mapping[int, types.CodeType] = {
+            id(code): code for code in eager_codes
+        }
+
+    def _serve_miss(self, frame: DynamoFrameType) -> ConvertFrameReturn | None:
+        if id(frame.f_code) not in self._eager_codes:
+            return None
+        _warn_eager_fallback_miss(frame.f_code)
+        return ConvertFrameReturn(
+            apply_to_code=False,
+            skip_reason="Dynamo gave up on this frame during capture",
+        )
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:

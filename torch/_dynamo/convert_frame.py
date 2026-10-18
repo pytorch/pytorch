@@ -2533,13 +2533,14 @@ class ConvertFrame:
             package = self._inner_convert._package
             if (
                 package is not None
-                and isinstance(e, (Unsupported, UserError))
+                and isinstance(e, Unsupported)
                 and e.frame_exec_strategy is None
                 and e.apply_to_code
             ):
                 # Dynamo gave up on the frame and skips it from now on, so a load
                 # runs it eagerly too. A recompile limit hit sets RUN_ONLY instead
-                # and stays a coverage gap.
+                # and stays a coverage gap, and a suppressed UserError (a misused
+                # Dynamo API) is a bug in user code, so it stays one too.
                 package.record_eager_fallback(code)
 
             # Suppress the error.  NB: It's very important to do the

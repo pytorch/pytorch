@@ -2231,8 +2231,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"variant to serve. Either it hit a graph break it cannot resume from, "
             f"such as one inside a loop (check TORCH_LOGS=graph_breaks; remove that "
             f"graph break), or Dynamo refused to trace it at all, as for a "
-            f"generator, or Dynamo suppressed a UserError it raised for a misused "
-            f"Dynamo API, or the backend declined the graph by raising SkipFrame "
+            f"generator, or the backend declined the graph by raising SkipFrame "
             f"(check the backend's log). Fix that, or capture the functions the "
             f"entry calls instead."
         )
