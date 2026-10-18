@@ -750,7 +750,7 @@ CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+static CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
   TORCH_CHECK(
       !(allow_reduced_precision && !allow_splitk),
       "allow_splitk=False is not supported when reduced precision reductions are enabled");

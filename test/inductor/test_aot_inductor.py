@@ -97,12 +97,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
-    NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     set_cwd,
-    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -4416,12 +4414,11 @@ class AOTInductorTestsTemplate:
             package = torch._inductor.aoti_compile_and_package(
                 ep, package_path=os.path.join(directory, "model.pt2")
             )
-            loaded = torch._inductor.aoti_load_package(package)
+            loaded = AOTIRunnerUtil.load_package(package)
             actual = loaded(x)
         self.assertIs(type(actual), type(expected))
         self.assertEqual(actual, expected)
 
-    @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -7386,7 +7383,9 @@ class AOTInductorTestsTemplate:
                 "triton.enable_persistent_tma_matmul": True,
                 # Pin the choice: the workspace only exists on the TMA
                 # template, and which template wins is a timing outcome.
-                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                "test_configs.autotune_choice_name_regex": (
+                    "mm_persistent_tma|blackwell_ws_persistent_tma"
+                ),
             }
         ):
             _, code = run_and_get_cpp_code(
@@ -10426,7 +10425,6 @@ class AOTInductorTestsTemplate:
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
-    @skipIfRocmArch(NAVI_ARCH)
     def test_copy_non_blocking_is_pinned(self):
         if self.device == "cpu" or self.device == "mps":
             raise unittest.SkipTest("only matters for device-to-cpu copy")
@@ -10527,6 +10525,10 @@ class AOTInductorTestsTemplate:
 
             del model, example_inputs, ep
             torch.accelerator.synchronize()
+            # cuBLAS/hipBLASLt workspaces are cached per handle and stream and
+            # counted by memory_allocated(); drop them so only leaks remain.
+            if self.device == "cuda":
+                torch._C._cuda_clearCublasWorkspaces()
             torch.accelerator.empty_cache()
             gc.collect()
             allocated_memory.append(torch.accelerator.memory_allocated())
@@ -11684,6 +11686,50 @@ class TestCheckUpperboundConfig(TestCase):
                 0,
                 exactly=True,
             ).run(code)
+
+
+@unittest.skipIf(not HAS_GPU or GPU_TYPE != "cuda", "requires CUDA/ROCm")
+class TestAOTITunableOpDynamicDimsGuard(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_dynamic_addmm_loads_tunableop_c_shim(self):
+        class Model(torch.nn.Module):
+            def forward(self, bias, x, weight):
+                return torch.addmm(bias, x, weight)
+
+        model = Model()
+        inputs = (
+            torch.randn(32, device=GPU_TYPE),
+            torch.randn(8, 16, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
+        )
+        dynamic_shapes = (None, {0: Dim("batch", min=2, max=16)}, None)
+        previous_enabled = torch.cuda.tunable.is_enabled()
+        previous_tuning = torch.cuda.tunable.tuning_is_enabled()
+        try:
+            torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.tuning_enable(False)
+            expected = model(*inputs)
+            package_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
+                model,
+                inputs,
+                inductor_configs={
+                    "cuda.autotune_tunableop_dynamic_dims_wildcard": True,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN",
+                },
+                dynamic_shapes=dynamic_shapes,
+            )
+            self.assertIn("AOTICudaTunableOpDynamicDimsGuard", code)
+            self.assertIn("tunable_dynamic_dims_guard(1)", code)
+            self.assertNotIn("ATen/cuda/tunable/Tunable.h", code)
+            self.assertNotIn("at::cuda::tunable", code)
+            optimized = torch._inductor.aoti_load_package(package_path)
+            self.assertEqual(optimized(*inputs), expected)
+        finally:
+            torch.cuda.tunable.enable(previous_enabled)
+            torch.cuda.tunable.tuning_enable(previous_tuning)
 
 
 class TestCppWrapperFallbackProfiling(TestCase):
