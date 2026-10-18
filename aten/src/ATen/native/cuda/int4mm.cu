@@ -1165,32 +1165,32 @@ struct __align__(16) f16x8 {
 
 // bf16 vector types
 struct __align__(2) bf16x1 {
-  __nv_bfloat16 vals[1];
+  __hip_bfloat16 vals[1];
 };
 
 struct __align__(4) bf16x2 {
-  __nv_bfloat16 vals[2];
+  __hip_bfloat16 vals[2];
 };
 
 struct __align__(8) bf16x4 {
-  __nv_bfloat16 vals[4];
+  __hip_bfloat16 vals[4];
 };
 
 struct __align__(16) bf16x8 {
-  __nv_bfloat16 vals[8];
+  __hip_bfloat16 vals[8];
 };
 
 // bf162 vector types
 struct __align__(4) bf16x2x1 {
-  __nv_bfloat162 vals[1];
+  __hip_bfloat162 vals[1];
 };
 
 struct __align__(8) bf16x2x2 {
-  __nv_bfloat162 vals[2];
+  __hip_bfloat162 vals[2];
 };
 
 struct __align__(16) bf16x2x4 {
-  __nv_bfloat162 vals[4];
+  __hip_bfloat162 vals[4];
 };
 
 struct __align__(16) bf16x2x4_u32 {
@@ -1522,7 +1522,7 @@ struct ALayout_RM {
     // access
     // [mTile * kMTileSize + (laneId / 4)]
     // [kTileStart * kKTileSize + (laneId % 4) * 2]
-    auto aPtr = reinterpret_cast<const __nv_bfloat16*>(A) + mLane * k + kLane;
+    auto aPtr = reinterpret_cast<const __hip_bfloat16*>(A) + mLane * k + kLane;
     bool m0InBounds = mLane < m;
 
 
@@ -1551,7 +1551,7 @@ struct ALayout_RM {
       constexpr int kCRowStride = RocmMma::kCRowStride;
       const int outRow = mTile * kMTileSize + RocmMma::cRowBase(laneId);
       const int outCol = nTile * kNTileSize + (laneId % kNTileSize);
-      auto cPtr = reinterpret_cast<__nv_bfloat16*>(C) + outRow * n + outCol;
+      auto cPtr = reinterpret_cast<__hip_bfloat16*>(C) + outRow * n + outCol;
 #pragma unroll
       for (int j = 0; j < RocmMma::kCValues; ++j) {
         if ((outRow + j * kCRowStride) < m)
@@ -1652,7 +1652,7 @@ struct BLayout_TC_int4 {
         ? 1
         : (KTilesToLoad / kKTilesPerQGroup);
 
-    __nv_bfloat162 qScaleAndZero[kNumQGroups];
+    __hip_bfloat162 qScaleAndZero[kNumQGroups];
     {
       int32_t laneN = nTile * kNTileSize + (laneId % kNTileSize);
       int32_t groupStart = (kTileStart * kKTileSize) / QGroupSize;
@@ -1660,13 +1660,13 @@ struct BLayout_TC_int4 {
       int32_t n = nTiles * kNTileSize;
 
       // offset [qScale_kGroup][qScale_n][0]
-      auto qInfoPtr = reinterpret_cast<const __nv_bfloat16*>(quantizationInfo) +
+      auto qInfoPtr = reinterpret_cast<const __hip_bfloat16*>(quantizationInfo) +
           (groupStart * n + laneN) * 2;
 
 #pragma unroll
       for (int i = 0; i < kNumQGroups; ++i) {
         qScaleAndZero[i] =
-            *reinterpret_cast<const __nv_bfloat162*>(qInfoPtr + i * n * 2);
+            *reinterpret_cast<const __hip_bfloat162*>(qInfoPtr + i * n * 2);
       }
     }
 
@@ -1677,8 +1677,8 @@ struct BLayout_TC_int4 {
     {
       // FIXME: does this negatively affect register counts, or will nvcc
       // move this expansion (and data loads above) closer to the point of use?
-      __nv_bfloat162 qScale[kNumQGroups];
-      __nv_bfloat162 qZero[kNumQGroups];
+      __hip_bfloat162 qScale[kNumQGroups];
+      __hip_bfloat162 qZero[kNumQGroups];
 
 #pragma unroll
       for (int i = 0; i < kNumQGroups; ++i) {
@@ -1705,7 +1705,7 @@ struct BLayout_TC_int4 {
             v.vals[k] = __hfma2(v.vals[k], qScale[curQGroup], qZero[curQGroup]);
           }
 
-          // type pun, the __nv_bfloat162 value in bf16x2x4 is a struct and
+          // type pun, the __hip_bfloat162 value in bf16x2x4 is a struct and
           // can't be used as a 32-bit asm register argument for `mma`
           static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]));
           // On Windows with ROCm, std::memcpy resolves to a __host__-only
@@ -1943,7 +1943,7 @@ void launch_tinygemm_kernel(
     int32_t m,
     int32_t n,
     int32_t k,
-    cudaStream_t stream) {
+    hipStream_t stream) {
   // The chunking kernel requires that kTiles is a multiple of kInnerKTiles
   TORCH_CHECK(
       kTiles >= BLayout::kInnerKTiles &&
@@ -1977,8 +1977,8 @@ void launch_tinygemm_kernel(
       kTiles);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaFuncAttributes funcAttr;
-  C10_CUDA_CHECK(cudaFuncGetAttributes(
+  hipFuncAttributes funcAttr;
+  C10_CUDA_CHECK(hipFuncGetAttributes(
       &funcAttr,
       (void *)func
   ));
