@@ -731,6 +731,41 @@ class TestPrecompile(TestCase):
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         return ns["_build_multigraph_forward"]
 
+    def test_multigraph_driver_runs_an_eager_fallback_miss_eagerly(self):
+        # A frame the capture flagged eager_fallback: a miss of its variant runs
+        # it as plain Python and warns once for the frame, not once per miss.
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _multigraph_frames
+
+        def step(x, scale=2.0):
+            return x.sin() * scale + int(torch.compiler.is_compiling())
+
+        x = torch.randn(3)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        expected = compiled(x)
+        frames = _multigraph_frames(package.cache_entry())
+        frames[0]["eager_fallback"] = True
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        self._scrub_minted(step.__globals__)
+        binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+        forward = self._multigraph_driver(frames, backends, binding)()
+        torch._logging._internal.warning_once.cache_clear()
+        with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+            self.assertEqual(forward(x, 3.0), x.sin() * 3.0)
+            self.assertEqual(forward(x, 4.0), x.sin() * 4.0)
+        self.assertEqual(len(logs.output), 1, logs.output)
+        self.assertIn("no captured variant of step", logs.output[0])
+        self.assertEqual(forward(x), expected)
+
     def test_multigraph_driver_dispatches_entry_frame(self):
         # The driver rebuilds the entry frame's f_locals (a keyword-only default
         # the call omits, *args) and guards them against this module's LIVE dict.
@@ -5043,6 +5078,11 @@ class TestPrecompileDynamoCapture(TestCase):
         ):
             with self._capture(entry, backend="eager") as cap:
                 cap(self.model, self.x2)
+        # Past that gate, the build refuses it for the flag the capture recorded.
+        tracer = DynamoTracer(require_complete=False)
+        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+            with self._capture(entry, tracer=tracer, backend="eager") as cap:
+                cap(self.model, self.x2)
 
     @skipIfCrossRef
     def test_a_frame_dynamo_gave_up_on_is_not_a_coverage_gap(self):
@@ -5371,6 +5411,47 @@ class TestPrecompileDynamoCapture(TestCase):
             counters.clear()
             self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
             self.assertEqual(counters["frames"]["total"] > 0, compiles)
+
+    @skipIfCrossRef
+    def test_a_lossy_graphless_frame_that_falls_back_is_not_an_eager_fallback(self):
+        # lookup() holds no graph and drops G['op'], so the capture serves it as
+        # plain Python. Its recompile for k=1 then graph-breaks in a loop, which
+        # flags it, but a frame served as plain Python has no variant to miss.
+        name = f"{self.module_name}_lossy_fallback"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\n"
+                "def _double(module, n):\n    return 2 * n\n\n"
+                "op = type(_double)(_double.__code__, {'__builtins__': __builtins__})\n\n"
+                "@torch._dynamo.disable\n"
+                "def opaque():\n    pass\n\n"
+                "def lookup(module, n, k):\n"
+                "    for _ in range(k):\n        opaque()\n"
+                "    return op(module, n)\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x, k):\n    return x * lookup(torch.nn.Module(), 3, k)\n\n"
+                "def step(x, k=0):\n    return scale(x.sin(), k)\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        x = torch.randn(4)
+        capturing = self._capture(mod.step, tracer=tracer, backend="eager")
+        with build as built, capturing as cap:
+            self.assertEqual(cap(x, 0), x.sin() * 6)
+            self.assertEqual(cap(x, 1), x.sin() * 6)
+            summary = cap.summary()
+        self.assertEqual(summary.eager_fallbacks, (), summary)
+        self.assertNotIn("lookup", summary.uncovered_frames, summary)
+        codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
+        lookup = codes["lookup"]
+        self.assertEqual((lookup.guarded_codes, lookup.skip_recursive), ([], True))
+        self.assertFalse(lookup.eager_fallback)
 
     @skipIfCrossRef
     @parametrize("caching_precompile", [False, True])

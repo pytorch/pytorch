@@ -2047,10 +2047,11 @@ class PrecompileSession(Generic[_P, _R]):
                     f"frame whose compile error was suppressed (suppress_errors=True; "
                     f"check TORCH_LOGS=graph_breaks). If the frame is the entry, Dynamo "
                     f"may instead have given up on it at its first call (a graph break "
-                    f"it cannot resume from, or a backend SkipFrame), and the artifact "
-                    f"build refuses that whatever require_complete says: remove that "
-                    f"graph break, or capture the functions the entry calls. Otherwise "
-                    f"pass require_complete=False once you have confirmed which."
+                    f"it cannot resume from, a generator, or a backend SkipFrame), and "
+                    f"the artifact build refuses that whatever require_complete says: "
+                    f"remove that graph break, or capture the functions the entry "
+                    f"calls. Otherwise pass require_complete=False once you have "
+                    f"confirmed which."
                 )
             if summary.bypassed:
                 raise PackageError(
