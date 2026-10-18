@@ -482,6 +482,8 @@ class OutputGraphGuardsState:
     compile_on_one_rank: bool = False
     # torch.fx.traceback annotation active when the frame started tracing
     fx_annotation: dict[str, Any] | None = None
+    # ___unnamed_scope_* key -> source of the namespace it was minted for
+    unnamed_scope_sources: dict[str, Source] = dc_field(default_factory=dict)
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -508,6 +510,7 @@ class OutputGraphGuardsState:
             current_device=self.current_device,
             global_state_guard=self.global_state_guard,
             fx_annotation=self.fx_annotation,
+            unnamed_scope_sources=self.unnamed_scope_sources,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -663,6 +666,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
             output_graph_guards_state.compile_on_one_rank,
             fx_annotation=output_graph_guards_state.fx_annotation,
+            unnamed_scope_sources=output_graph_guards_state.unnamed_scope_sources,
         )
 
         self.import_sources = import_sources or {}
@@ -2975,6 +2979,8 @@ class OutputGraph(OutputGraphCommon):
             if next(gm.parameters(), None) is not None:
                 # If dynamo produces a graph with parameters, skip package stuff
                 # Bypass output graph
+                if self.package is not None:
+                    self.package.note_compute()
                 self.bypass_package(
                     "Graph contains named parameters due to static addresses.",
                     gm=gm.print_readable(

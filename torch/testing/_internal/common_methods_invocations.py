@@ -6527,14 +6527,13 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
         yield SampleInput(mt((1, 9, 10)), kwargs=dict(n_fft=16, hop_length=4, center=center))
 
-    window = make_arg(10, low=.5, high=2.0)
+    make_window = partial(make_arg, low=.5, high=2.0)
     yield SampleInput(mt((10, 10, 6)), kwargs=dict(
-        n_fft=10, window=window, center=center, return_complex=dtype.is_complex))
+        n_fft=10, window=make_window(10), center=True, return_complex=dtype.is_complex))
     yield SampleInput(mt((10, 10, 10)), kwargs=dict(
-        n_fft=10, window=window[:8], win_length=8, center=center, return_complex=True))
-
-    real_window = window if not dtype.is_complex else window.real
-    yield SampleInput(mt((10, 5, 6)), kwargs=dict(n_fft=8, window=real_window[:8], center=center))
+        n_fft=10, window=make_window(8), win_length=8, center=True, return_complex=True))
+    yield SampleInput(mt((10, 5, 6)), kwargs=dict(
+        n_fft=8, window=make_window(8, dtype=dtype.to_real()), center=True))
 
 def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
     # create a helper function wrapping `make_tensor`
@@ -14048,9 +14047,6 @@ op_db: list[OpInfo] = [
            ),
            skips=(
                skipCPUIfNoFFT,
-               # gradcheck fails on ROCm (gh-68429)
-               # grad is computed improperly (probably for weights tensor)
-               # Pre-existing condition (calls .item); needs to be fixed
             ),
            ),
     UnaryUfuncInfo('floor',
@@ -21458,6 +21454,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                    decorators=(precisionOverride({torch.float16: 7e-1}),
                                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=4e-6)}),
                                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                                            'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
                                ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -24360,7 +24358,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
-        decorators=(precisionOverride({torch.float16: 7e-1}),),
+        decorators=(
+            precisionOverride({torch.float16: 7e-1}),
+            DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=4e-6)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='mps'),
+        ),
         skips=(
             # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
