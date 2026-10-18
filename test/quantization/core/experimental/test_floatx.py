@@ -291,7 +291,7 @@ class TestFloat8Dtype(TestCase):
         to the float8 dtype and back to float32, comparing against simulated
         lower precision."""
         if dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):
-            return unittest.skip(f"numerics for {dtype} are tested elsewhere")
+            self.skipTest(f"numerics for {dtype} are tested elsewhere")
 
         x = get_input(dtype, device)
         x = torch.cat((x, -x))
@@ -606,8 +606,10 @@ class TestFloat8E5M3FNU(TestCase):
         self.assertEqual(bits(full), torch.full((3,), 0x78, dtype=torch.uint8))
         full.fill_(114688.0)
         self.assertEqual(bits(full), torch.full((3,), 0xFE, dtype=torch.uint8))
-        # like the other float8 dtypes, Scalar fills are range-checked: values
-        # below finfo.min (0) raise instead of following the cast rule (|x|)
+        # like the other float8 dtypes, the checked Scalar conversion in
+        # fill_kernel rejects values below finfo.min (0) instead of following
+        # the cast rule (|x|); some fill paths (one-element CPU tensors,
+        # integer Scalars) skip that check, as they do for float8_e8m0fnu
         with self.assertRaisesRegex(RuntimeError, "without overflow"):
             full.fill_(-1.0)
         t = torch.tensor([0.5, 2.0], dtype=self.dtype, device=device)
@@ -661,7 +663,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
     def test_mul(self, dtype):
         # TODO(#113663): remove arithmetic support from all float8 dtypes
         if dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):
-            return unittest.skip(f"arithmetic not supported for {dtype}")
+            self.skipTest(f"arithmetic not supported for {dtype}")
         shape = (10, 10)
         a = torch.randn(shape)
         a8_simulated = simulate_fp8_precision(a, dtype)
@@ -677,7 +679,7 @@ class TestFloat8DtypeCPUOnly(TestCase):
     @dtypes(*CUDA_FLOAT8_DTYPES)
     def test_pt2_traceable_aot_eager(self, dtype):
         if dtype in (torch.float8_e8m0fnu, torch.float8_e5m3fnu):
-            return unittest.skip(f"PT2 support for {dtype} is not implemented yet")
+            self.skipTest(f"PT2 support for {dtype} is not implemented yet")
 
         @torch.compile(backend="aot_eager", fullgraph=True)
         def f(x):
