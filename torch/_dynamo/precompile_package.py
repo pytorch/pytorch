@@ -2030,6 +2030,16 @@ class PrecompileSession(Generic[_P, _R]):
         """Run the coverage and guard gates, or raise saying which one failed."""
         entry, eager = self._served_entry()
         summary = self._summary_of(entry, eager)
+        if require_complete and _is_variantless_entry_fallback(entry):
+            # The artifact build refuses this too, so no flag is a way out; say
+            # so rather than suggest one. Checked before every other gate: the
+            # entry did run, and the later gates either suggest a flag or say it
+            # never ran.
+            name = entry.codes[0].python_code.co_name
+            raise PackageError(
+                f"{_variantless_entry_fallback_message(name)} The artifact build "
+                f"refuses this whatever require_complete says."
+            )
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped guard(s) that can affect dispatch on "
@@ -2043,16 +2053,6 @@ class PrecompileSession(Generic[_P, _R]):
                 f"risk explicitly."
             )
         if require_complete:
-            if _is_variantless_entry_fallback(entry):
-                # The artifact build refuses this too, so require_complete=False
-                # is no way out; say so rather than suggest it. Checked first:
-                # the entry did run, and the later gates either suggest
-                # require_complete=False or say it never ran.
-                name = entry.codes[0].python_code.co_name
-                raise PackageError(
-                    f"{_variantless_entry_fallback_message(name)} The artifact build "
-                    f"refuses this whatever require_complete says."
-                )
             if summary.capture_errors:
                 raise PackageError(
                     "Precompilation is incomplete because a captured call raised: "
