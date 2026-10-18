@@ -602,10 +602,16 @@ class CeilDiv(sympy.Function):
     def __new__(cls, base: sympy.Expr, divisor: sympy.Expr) -> sympy.Basic:
         base = sympy.sympify(base)
         divisor = sympy.sympify(divisor)
-        if sympy.gcd(base, divisor) == divisor:
-            return CleanDiv(base, divisor)
-        else:
-            return FloorDiv(base + (divisor - 1), divisor)
+        try:
+            # Note: [gcd on non-polynomial expressions]
+            # sympy.gcd raises PolynomialError for expressions that are not
+            # polynomials in their generators, e.g. Piecewise expressions
+            # coming from sym_ite. Fall back to FloorDiv in that case.
+            if sympy.gcd(base, divisor) == divisor:
+                return CleanDiv(base, divisor)
+        except sympy.PolynomialError:
+            pass
+        return FloorDiv(base + (divisor - 1), divisor)
 
 
 class LShift(sympy.Function):
