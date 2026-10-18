@@ -1658,10 +1658,9 @@ def _summarize(
     was neither bypassed nor served as an ``eager_fallback`` (Dynamo gave up on
     it, so a load serves any variants it has and runs a call they miss
     eagerly; those are ``eager_fallbacks``). ``install()`` ``skip_code()``s
-    every entry that is not
-    bypassed and has no guarded codes whether or not it entered Dynamo, so a
-    generated-but-never-executed resume entry is skipped there and is not a gap
-    here. ``backend_graphs`` counts the backend ids of the entries that are
+    every entry that is not bypassed and has no guarded codes whether or not it
+    entered Dynamo, so a generated-but-never-executed resume entry is skipped
+    there and is not a gap here. ``backend_graphs`` counts the backend ids of the entries that are
     not bypassed, the ones ``install()`` loads: a save-time bypass
     (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
     the entry and leaves its ids in place. ``truncated`` comes from the compile
@@ -2065,8 +2064,8 @@ class PrecompileSession(Generic[_P, _R]):
                     f"from the artifact. This is expected for a frame that only "
                     f"dispatches to covered submodules; it also looks exactly like a "
                     f"frame whose compile error was suppressed (suppress_errors=True; "
-                    f"check TORCH_LOGS=graph_breaks). Pass require_complete=False once "
-                    f"you have confirmed which."
+                    f"Dynamo logs that error as a warning). Pass require_complete=False "
+                    f"once you have confirmed which."
                 )
             if summary.bypassed:
                 raise PackageError(

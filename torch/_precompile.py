@@ -2066,8 +2066,8 @@ _SERVING_NOTES = {
 # minted while tracing (import aliases, the builtins dict key, the compiled subgraphs
 # under their backend ids) are re-seeded and stay. The flip side is that there is no
 # compiler behind it: a call no captured variant covers RAISES rather than compiling a
-# new one, except in a frame Dynamo gave up on during capture (the summary's
-# eager_fallbacks), which runs it eagerly.
+# new one, except in a frame Dynamo gave up on during capture (marked "eager
+# fallback" in FRAMES below), which runs it eagerly.
 """,
     "installed": """\
 # This artifact SERVES BY INSTALLING the Dynamo package in _PACKAGE onto the live code
@@ -2077,8 +2077,8 @@ _SERVING_NOTES = {
 # as under the fail_on_recompile stance (but without setting that process-wide
 # stance), so a call no captured variant covers raises rather than compiling a new
 # graph, under every process-wide stance that would compile it (force_backend,
-# "eager_then_compile", ...) too; a frame Dynamo gave up on during capture (the
-# summary's eager_fallbacks) runs such a call eagerly instead. Two stances you set
+# "eager_then_compile", ...) too; a frame Dynamo gave up on during capture (marked
+# "eager fallback" in FRAMES below) runs such a call eagerly instead. Two stances you set
 # yourself do change serving:
 # "force_eager" runs every call eagerly, bypassing the installed entries, and
 # "eager_on_recompile" serves the captured variants and runs any other call eagerly.
@@ -2231,9 +2231,10 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"variant to serve. Either it hit a graph break it cannot resume from, "
             f"such as one inside a loop (check TORCH_LOGS=graph_breaks; remove that "
             f"graph break), or Dynamo refused to trace it at all, as for a "
-            f"generator, or the backend declined the graph by raising SkipFrame "
-            f"(check the backend's log). Fix that, or capture the functions the "
-            f"entry calls instead."
+            f"generator, or it suppressed a UserError (a misused Dynamo API), or "
+            f"the backend declined the graph by raising SkipFrame (check the "
+            f"backend's log). Fix that, or capture the functions the entry calls "
+            f"instead."
         )
     if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
@@ -2323,10 +2324,12 @@ def _build_multigraph_python_source(
     buf.writeline(
         "# frame name -> number of captured variants. A frame with one variant"
     )
-    buf.writeline("# serves one specialization; the artifact covers no other.")
+    buf.writeline("# serves one specialization; the artifact covers no other, except")
+    buf.writeline("# that an eager fallback runs a call its variants miss eagerly.")
     buf.writeline("FRAMES = [")
     for frame in frames:
-        buf.writeline(f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),")
+        row = f"    ({frame['code'].co_name!r}, {len(frame['variants'])}),"
+        buf.writeline(row + ("  # eager fallback" if frame["eager_fallback"] else ""))
     buf.writeline("]")
     buf.writeline("")
     buf.writeline(
