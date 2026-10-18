@@ -255,7 +255,54 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
-_ALIAS = typing.List
+_ALIAS = list
+
+
+class _ReducesToAnotherGlobal:
+    def __reduce__(self):
+        return "_ALIAS"
+
+
+class _ReducesToAMissingName:
+    def __reduce__(self):
+        return "_EnumOwner.Missing"
+
+
+class _ReducesFromAMissingModule:
+    __module__ = "_not_imported"
+
+    def __reduce__(self):
+        return "_ReducesFromAMissingModule"
+
+
+class _ModuleRaises:
+    def __reduce__(self):
+        return "_MODULE_RAISES"
+
+    @property
+    def __module__(self):
+        raise RuntimeError("no module")
+
+
+class _UnhashableModule:
+    __module__ = ["typing"]  # type: ignore[assignment]
+
+    def __reduce__(self):
+        return "_UNHASHABLE_MODULE"
+
+
+class _ReduceExByValue:
+    # Pickle calls __reduce_ex__, which here bypasses the __reduce__ name.
+    def __reduce__(self):
+        return "_REDUCE_EX_BY_VALUE"
+
+    def __reduce_ex__(self, protocol):
+        return (_ReduceExByValue, ())
+
+
+_REDUCE_EX_BY_VALUE = _ReduceExByValue()
+_MODULE_RAISES = _ModuleRaises()
+_UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
 
 
@@ -3866,7 +3913,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_id_match_on_a_typing_alias(self):
         def fn(x):
-            if _ALIAS is typing.List:
+            if _ALIAS is list:
                 return x + 1
             return x - 1
 
@@ -3876,7 +3923,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # guard survives serialization instead of being dropped.
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
-        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):
+        with mock.patch.dict(globals(), {"_ALIAS": dict}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_id_match_on_a_member_of_a_nested_enum(self):
@@ -3940,10 +3987,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
             # Its __reduce__ names the typing global it is.
-            (typing.List, True),
+            (list, True),
             (typing.Optional, True),
             # A subscripted alias reduces to a constructor call, not a name.
-            (typing.List[int], False),
+            (list[int], False),
+            # Each __reduce__ names something other than the object itself.
+            (_ReducesToAnotherGlobal(), False),
+            (_ReducesToAMissingName(), False),
+            (_ReducesFromAMissingModule(), False),
+            (_MODULE_RAISES, False),
+            (_UNHASHABLE_MODULE, False),
+            (_REDUCE_EX_BY_VALUE, False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
