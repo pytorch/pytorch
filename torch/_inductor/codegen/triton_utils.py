@@ -6,7 +6,6 @@ from typing import Any
 import sympy
 
 import torch
-from torch.utils._sympy.functions import Max
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._triton import has_triton_block_ptr
 
@@ -294,11 +293,9 @@ def signature_to_meta(
 
 
 def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
-    """Get layouts from graph inputs, constants, or scheduler buffers."""
+    """Get layouts from graph inputs or scheduler buffers."""
     if buf_name in V.graph.graph_inputs:
         return V.graph.graph_inputs[buf_name].get_layout()
-    if buf_name in V.graph.constants:
-        return V.graph.get_buffer(buf_name).get_layout()
     if V.graph.scheduler:
         layout = V.graph.scheduler.get_buffer_layout(buf_name)
     else:
@@ -364,18 +361,17 @@ def equal_1_arg_indices(
 def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     """Check if a tensor argument's storage is provably within 2GB.
 
-    Mirrors HIPBackend.is_within_2gb() but uses compile-time symbolic analysis
-    instead of runtime tensor inspection. This enables canonicalize_pointers to
+    Mirrors HIPBackend.is_within_2gb() using known constant storage sizes or
+    compile-time symbolic layouts. This enables canonicalize_pointers to
     decompose pointer arithmetic into (splat(base), offset) form for buffer ops.
     """
     MAX_BYTES = 2**31 - 1
     try:
-        layout = _get_buffer_layout(arg.buffer)
-        storage_bytes = layout.storage_size() * arg.dtype.itemsize
         if arg.buffer in V.graph.constants:
-            # Constant views can access beyond their original layout via as_strided.
-            tensor = V.graph.constants[arg.buffer]
-            storage_bytes = Max(storage_bytes, tensor.untyped_storage().nbytes())
+            storage_bytes = V.graph.constants[arg.buffer].untyped_storage().nbytes()
+        else:
+            layout = _get_buffer_layout(arg.buffer)
+            storage_bytes = layout.storage_size() * arg.dtype.itemsize
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
         return False
