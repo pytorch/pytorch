@@ -543,8 +543,8 @@ def _torchci_report_args(
 
 def _torchci_reports_default() -> str | None:
     # Every CI job writes reports by default; upload-test-artifacts uploads this
-    # folder. Not XPU builds until their CI image has pyzes, without which the
-    # writer can't count XPU devices.
+    # folder. Not XPU builds yet: their test jobs fall back to GitHub artifacts,
+    # which upload-test-stats doesn't backfill for XPU, so reports can't reach S3.
     if not IS_CI or torch.version.xpu:
         return None
     return str(REPO_ROOT / "test/torchci-reports")

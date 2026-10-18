@@ -45,7 +45,7 @@ open-ended string-to-string maps.
 | `cc_compiler_version` | string | Compiler version as `torch.__config__._cxx_compiler()` gives it (`11.4`, `21.1.0`, or MSVC's `_MSC_FULL_VER`, `194134120`) |
 | `accelerator` | string | `cpu`, `cuda`, `rocm`, `xpu`, or `mps` |
 | `accelerator_version` | string | `torch.version.cuda`, `torch.version.rocm` (the ROCm release, not HIP), or `torch.version.xpu` (the SYCL compiler, `20250101`); `""` for CPU and MPS |
-| `device_count` | int | Visible devices of `accelerator`: NVML's, amdsmi's or Level Zero Sysman's count, honoring `CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES` and `ZE_AFFINITY_MASK`, or `0` when that library can't count them; `torch.mps.device_count()` for MPS; `0` for CPU |
+| `device_count` | int | Visible devices of `accelerator`, honoring `CUDA_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`; `0` for CPU |
 | `device_name` | string | The first visible device's name as its vendor reports it (`NVIDIA L4`, `AMD Instinct MI350X VF`, `Apple M2 Pro`, `Intel(R) Data Center GPU Max 1100`); empty with no device |
 
 `flags` maps the env var of every flag and setting registered with
@@ -121,9 +121,10 @@ replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
 
 In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
-described below, in every job except on XPU builds, which write none until the
-XPU CI image has `pyzes`: without it, `device_count` would be `0`. `run_tests` has
-no default, so a test file run some other way writes no report.
+described below, in every job except on XPU builds, which write none for now:
+XPU test jobs fall back to the GitHub artifact, which `upload-test-stats` doesn't
+backfill for XPU. `run_tests` has no default, so a test file run some other way
+writes no report.
 
 ## Upload
 

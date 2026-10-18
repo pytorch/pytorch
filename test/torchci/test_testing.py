@@ -1028,45 +1028,6 @@ class TestReportHelpers(TestCase):
             environment.capture()
         probe.assert_not_called()
 
-    @skipIfTorchDynamo("Dynamo calls the patched torch._C functions while tracing")
-    @parametrize(
-        "accelerator, library_count",
-        [
-            subtest(("cuda", "torch.cuda._device_count_nvml"), name="cuda"),
-            subtest(("rocm", "torch.cuda._device_count_amdsmi"), name="rocm"),
-            subtest(("xpu", "torch.xpu._device_count_zes"), name="xpu"),
-        ],
-    )
-    def test_device_count_never_poisons_fork(self, accelerator, library_count):
-        environment = importlib.import_module(
-            "torch.testing._internal.torchci.environment"
-        )
-        # The device runtimes' counts register the fork handler that poisons fork.
-        with (
-            unittest.mock.patch.object(
-                torch._C, "_cuda_getDeviceCount", create=True
-            ) as cuda_runtime,
-            unittest.mock.patch.object(
-                torch._C, "_xpu_getDeviceCount", create=True
-            ) as xpu_runtime,
-        ):
-            with unittest.mock.patch(library_count, return_value=2):
-                self.assertEqual(environment._device_count(accelerator), 2)
-            # The library can't count devices: 0, with no runtime fallback.
-            with unittest.mock.patch(library_count, return_value=-1):
-                self.assertEqual(environment._device_count(accelerator), 0)
-        cuda_runtime.assert_not_called()
-        xpu_runtime.assert_not_called()
-
-    @skipIfTorchDynamo("patches torch.mps")
-    def test_device_count_mps(self) -> None:
-        environment = importlib.import_module(
-            "torch.testing._internal.torchci.environment"
-        )
-        # Not 0, which would also leave the device name out of MPS reports.
-        with unittest.mock.patch("torch.mps.device_count", return_value=1):
-            self.assertEqual(environment._device_count("mps"), 1)
-
     def test_rocm_version(self):
         environment = importlib.import_module(
             "torch.testing._internal.torchci.environment"

@@ -132,26 +132,17 @@ def _accelerator() -> tuple[str, str]:
 
 
 def _device_count(accelerator: str) -> int:
-    """Visible devices as NVML, amdsmi or Level Zero Sysman counts them, or 0 when
-    it can't. Avoid API calls that internally fall back to device runtime and
-    poison fork."""
+    if accelerator == "cpu":
+        return 0
+    # ROCm builds expose HIP devices as torch.cuda.
+    backend = "cuda" if accelerator == "rocm" else accelerator
     try:
-        if accelerator == "cuda":
-            count = torch.cuda._device_count_nvml()
-        elif accelerator == "rocm":
-            count = torch.cuda._device_count_amdsmi()
-        elif accelerator == "xpu":
-            count = torch.xpu._device_count_zes()
-        elif accelerator == "mps":
-            # PyTorch has no runtime-free MPS count; common_utils' TEST_MPS makes
-            # the same call first.
-            count = torch.mps.device_count()
-        else:
-            count = 0
+        # An explicit backend, not torch.accelerator: that latches MTIA's hooks
+        # before a test can register its own (test_cpp_extensions_mtia_backend) and
+        # counts PrivateUse1 backends that tests register at import.
+        return torch.get_device_module(backend).device_count()
     except Exception:
         return 0
-    # The library counts are -1 when they can't count.
-    return max(count, 0)
 
 
 def _device(accelerator: str) -> tuple[str, str, str]:
