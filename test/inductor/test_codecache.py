@@ -768,25 +768,6 @@ class TestFxGraphCache(TestCase):
         torch._dynamo.reset()
         clear_caches()
 
-    @config.patch({"fx_graph_cache": True})
-    @config.patch({"fx_graph_remote_cache": False})
-    def test_bundled_autotune_remote_cache_flag_is_not_in_the_cache_key(self):
-        # Precompile capture and CompilePackage.install() turn the flag off; a
-        # hashed flag would make them miss entries a flag-on compile wrote.
-        def fn(x, y):
-            return x * 2 + (y @ y).view(25)
-
-        a = torch.rand(25)
-        b = torch.rand(5, 5)
-        with config.patch(bundled_autotune_remote_cache=True):
-            torch.compile(fn)(a, b)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.reset()
-        with config.patch(bundled_autotune_remote_cache=False):
-            self.assertEqual(torch.compile(fn)(a, b), fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
     def _check_cpu_thread_count_cache_key_no_input(self, return_expr):
         script = textwrap.dedent(
             f"""

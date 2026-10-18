@@ -7603,50 +7603,6 @@ def forward(self, primals_1, tangents_1):
             torch.compile(model, backend=backend, fullgraph=True)(x).backward()
         self.assertIsNotNone(x.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_min_cut_partitions_must_save_device_valued_node(self):
-        """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
-
-        compile_on_one_rank emits one current_device() node per graph, at the first
-        device= operand. When that operand is inside a checkpointed region whose
-        policy says MUST_SAVE, the node inherits the tag, and the same node later
-        feeds the parameter cast that min-cut recomputes in the backward (see
-        test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
-        recompute, and a device cannot be saved, so no finite cut existed.
-        """
-        from functorch.compile import min_cut_rematerialization_partition
-        from torch._dynamo.backends.common import aot_autograd
-        from torch.utils.checkpoint import (
-            checkpoint,
-            CheckpointPolicy,
-            create_selective_checkpoint_contexts,
-        )
-
-        def must_save(ctx, op, *args, **kwargs):
-            return CheckpointPolicy.MUST_SAVE
-
-        context_fn = partial(create_selective_checkpoint_contexts, must_save)
-        w = torch.randn(64, 64, device="cuda", requires_grad=True)
-
-        def inner(x):
-            return x.sin() + torch.zeros(x.shape, device="cuda", dtype=x.dtype)
-
-        def f(x):
-            y = checkpoint(inner, x, use_reentrant=False, context_fn=context_fn)
-            return (y @ w.to(device="cuda", dtype=torch.bfloat16)).relu().sum()
-
-        backend = aot_autograd(
-            fw_compiler=lambda gm, _: gm.forward,
-            bw_compiler=lambda gm, _: gm.forward,
-            partition_fn=min_cut_rematerialization_partition,
-        )
-        torch._dynamo.reset()
-        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-        with torch.compiler.config.patch(compile_on_one_rank=True):
-            torch.compile(f, backend=backend, fullgraph=True)(x).backward()
-        self.assertIsNotNone(x.grad)
-        self.assertIsNotNone(w.grad)
-
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_unbounded_error_message(self):
         """Test that NetworkXUnbounded errors produce user-friendly error messages."""

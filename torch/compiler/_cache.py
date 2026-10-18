@@ -50,11 +50,6 @@ class CacheArtifact(ABC):
         pass
 
     @staticmethod
-    def populate_first() -> bool:
-        """Whether populate_caches must populate this artifact before others."""
-        return False
-
-    @staticmethod
     def type() -> str:
         """
         Returns the type of the artifact. Must be unique across all CacheArtifact classes.
@@ -323,11 +318,7 @@ class CacheArtifactManager:
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
         info = CacheInfo()
-        ordered = sorted(
-            chain(*artifacts.values()),
-            key=lambda artifact: not artifact.populate_first(),
-        )
-        for artifact in ordered:
+        for artifact in chain(*artifacts.values()):
             log.debug("writing: %s", artifact)
             info.add(artifact)
             artifact.populate_cache()
@@ -350,5 +341,5 @@ class CacheArtifactManager:
             AutotuneCacheArtifact,
         )
         from torch.compiler._runtime_cache import (  # noqa: F401
-            TritonRuntimeCacheArtifact,
+            InductorTritonCacheArtifact,
         )

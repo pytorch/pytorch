@@ -39,7 +39,7 @@ namespace KINETO_NAMESPACE {
 // on dynamic attach which can hang for more than 5+ seconds.
 // If the workload was meant to be traced, preload the CUPTI
 // to take the performance hit early on.
-// https://docs.nvidia.com/cupti/main/main.html#cupti-overhead
+// https://docs.nvidia.com/cupti/r_main.html#r_overhead
 static bool shouldPreloadCuptiInstrumentation() {
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11020
   return true;

@@ -134,7 +134,6 @@ class DispatchKey(Enum):
     AutocastCPU = auto()
     AutocastCUDA = auto()
     AutocastXPU = auto()
-    AutocastPrivateUse1 = auto()
     Batched = auto()
     VmapMode = auto()
     FuncTorchGradWrapper = auto()

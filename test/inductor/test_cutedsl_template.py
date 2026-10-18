@@ -875,36 +875,6 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             body,
         )
 
-    def test_cutedsl_constant_division_lowers_to_multiply(self):
-        # Reciprocal multiplication avoids costly division in GEMM epilogues.
-        from torch._inductor.codegen.common import CSEVariable
-        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
-            CuteDSLOpOverrides,
-            use_cutedsl_fast_math,
-        )
-        from torch.utils._sympy.value_ranges import ValueRanges
-
-        x = MagicMock(spec=CSEVariable)
-        x.__str__.return_value = "x"
-        x.dtype = torch.float32
-        x.bounds = ValueRanges.unknown()
-        x.shape = (32, 64)
-
-        def lowered(divisor, fast_math):
-            kernel = CuteDSLTemplateKernel(
-                kernel_name="test_div", input_nodes=[], output_node=None
-            )
-            with V.set_kernel_handler(kernel), use_cutedsl_fast_math(fast_math):
-                CuteDSLOpOverrides.truediv(x, divisor)
-            return kernel.body.getvalue()
-
-        with V.set_graph_handler(MockGraphHandler()):
-            # 1 / 4 is exactly representable as a normal fp32; no fast math needed.
-            self.assertIn("x * cute.full_like(x, 0.25)", lowered(4.0, False))
-            self.assertIn("x / ", lowered(25.0, False))
-            self.assertIn("x * cute.full_like(x, 0.04)", lowered(25.0, True))
-            self.assertIn("x / ", lowered(0.0, True))
-
     def test_cutedsl_op_overrides_fast_math(self):
         from torch._inductor.codegen.common import CSEVariable
         from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (

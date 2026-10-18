@@ -503,10 +503,20 @@ class ComboKernelPartitionLoggingTests(TestCase):
         self.assertEqual(len(large_pointwise_logs), 2)
 
 
-def _kernel_groups(fn, *inps):
-    """Returns (category, sorted sub-kernel r0_numels) for each kernel fn compiles to."""
-    # multi_kernel raises the persistent rnumel limit 16x, which would change which
-    # reductions the tests expect to be persistent.
+def _compile_persistent_and_looped_reductions():
+    """Returns (category, sorted sub-kernel r0_numels) for each generated kernel."""
+
+    def fn(a, b, c):
+        return a.sum(-1), b.sum(-1), c.sum(-1)
+
+    inps = [
+        torch.randn(1024, 512, device=GPU_TYPE),  # persistent
+        torch.randn(1024, 2048, device=GPU_TYPE),  # looped
+        torch.randn(4096, 768, device=GPU_TYPE),  # persistent
+    ]
+    # Contiguous rows get ReductionHint.INNER on any GPU, so rnumel <= 1024 is
+    # persistent and no rnumel <= 8192 is split. multi_kernel raises the persistent
+    # limit 16x, which would make the 2048 row persistent too.
     with torch._inductor.config.patch("triton.multi_kernel", 0):
         out_compiled, kernels = run_and_get_kernels(torch.compile(fn), *inps)
     torch.testing.assert_close(out_compiled, fn(*inps), atol=1e-4, rtol=1e-4)
@@ -516,20 +526,6 @@ def _kernel_groups(fn, *inps):
             sorted(map(int, re.findall(r"r0_numel = (\d+)", kernel))),
         )
         for kernel in kernels
-    )
-
-
-def _compile_persistent_and_looped_reductions():
-    def fn(a, b, c):
-        return a.sum(-1), b.sum(-1), c.sum(-1)
-
-    # Contiguous rows get ReductionHint.INNER on any GPU, so rnumel <= 1024 is
-    # persistent and no rnumel <= 8192 is split.
-    return _kernel_groups(
-        fn,
-        torch.randn(1024, 512, device=GPU_TYPE),  # persistent
-        torch.randn(1024, 2048, device=GPU_TYPE),  # looped
-        torch.randn(4096, 768, device=GPU_TYPE),  # persistent
     )
 
 
@@ -1102,32 +1098,6 @@ class ComboKernelTests(TestCase):
             # Sub-kernels share one XBLOCK, which cannot suit both kinds.
             self.assertListEqual(
                 kernels, [("persistent_reduction", [512, 768]), ("reduction", [2048])]
-            )
-
-    @requires_gpu_and_triton
-    def test_very_large_short_reduction_runs_standalone(self):
-        def fn(a, b, c):
-            return a.sum(-1), b.sum(-1), c.sum(-1)
-
-        inps = (
-            # numel * rnumel just above LARGE_NUMELS, in short persistent rows
-            torch.randn(int(LARGE_NUMELS) // 128 + 1, 128, device=GPU_TYPE),
-            torch.randn(1024, 768, device=GPU_TYPE),
-            torch.randn(2048, 512, device=GPU_TYPE),
-        )
-        self.assertListEqual(
-            _kernel_groups(fn, *inps),
-            [("persistent_reduction", [128]), ("persistent_reduction", [512, 768])],
-        )
-        # With benchmarking the benchmark decides. Accepting every combo makes the
-        # kernels show the partition rather than the timing.
-        with (
-            torch._inductor.config.patch(benchmark_combo_kernel=True),
-            patch.object(Scheduler, "speedup_by_combo_kernel", return_value=True),
-            fresh_cache(),
-        ):
-            self.assertListEqual(
-                _kernel_groups(fn, *inps), [("persistent_reduction", [128, 512, 768])]
             )
 
     @requires_gpu_and_triton

@@ -34,21 +34,8 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-// A storage whose data was released with an error message set (e.g. a remat
-// placeholder or an overwritten cudagraph-tree output) throws on data pointer
-// access: use null.
-static const void* storageData(const at::Tensor& t) {
-  if (!t.has_storage()) {
-    return nullptr;
-  }
-  const auto& storage = t.storage();
-  return storage.unsafeGetStorageImpl()->throw_on_immutable_data_ptr()
-      ? nullptr
-      : storage.data();
-}
-
 RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
-    : data_{storageData(t)},
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
       size_dim_{static_cast<uint32_t>(t.sizes().size())} {

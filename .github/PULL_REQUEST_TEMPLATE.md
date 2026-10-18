@@ -11,7 +11,6 @@ Go through the following checklist
 - [ ] Included benchmark results (for PRs impacting perf)
 
 ---
-<!-- Delete this line and everything above it once you've gone through the checklist. -->
 
 ## Linked issue or supporting maintainer
 

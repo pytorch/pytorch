@@ -117,7 +117,7 @@ struct GpuActivity : public RocprofActivity<rocprofAsyncRow> {
   void visitTypedMetadata(ITypedMetadataVisitor& visitor) const override;
 
   // Add small buffer to fix visual error created by
-  // https://github.com/ROCm/roctracer/issues/105 Once this is resolved we can
+  // https://github.com/ROCm/rocprof/issues/105 Once this is resolved we can
   // use ifdef to handle having this buffer or not based on version
   int64_t timestamp() const override {
     return activity_.begin + 1;

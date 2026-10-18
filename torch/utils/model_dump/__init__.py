@@ -12,10 +12,6 @@ The tool extracts information from the model and serializes it as JSON.
 That JSON can then be rendered by an HTML+JS page, either by
 loading the JSON over HTTP or producing a fully self-contained page
 with all of the code and data burned-in.
-
-This module is deprecated and will be removed in a future PyTorch release.
-It is unsafe to use on untrusted models: inspecting a model can execute
-arbitrary code stored in it.
 """
 
 # Maintainer notes follow.
@@ -82,8 +78,6 @@ import zipfile
 from pathlib import Path
 import warnings
 
-from typing_extensions import deprecated
-
 import torch.utils.show_pickle
 
 
@@ -92,13 +86,7 @@ DEFAULT_EXTRA_FILE_SIZE_LIMIT = 16 * 1024
 __all__ = ['get_storage_info', 'hierarchical_pickle', 'get_model_info', 'get_inline_skeleton',
            'burn_in_info', 'get_info_and_burn_skeleton']
 
-_DEPRECATION_MSG = (
-    "torch.utils.model_dump is deprecated and will be removed in a future PyTorch release. "
-    "It is unsafe to use on untrusted models as it can execute arbitrary code."
-)
-
-
-def _get_storage_info(storage):
+def get_storage_info(storage):
     if not isinstance(storage, torch.utils.show_pickle.FakeObject):
         raise AssertionError(f"storage is not FakeObject: {type(storage)}")
     if storage.module != "pers":
@@ -128,20 +116,20 @@ def _get_storage_info(storage):
     return storage_info
 
 
-def _hierarchical_pickle(data):
+def hierarchical_pickle(data):
     if isinstance(data, (bool, int, float, str, type(None))):
         return data
     if isinstance(data, list):
-        return [_hierarchical_pickle(d) for d in data]
+        return [hierarchical_pickle(d) for d in data]
     if isinstance(data, tuple):
         return {
-            "__tuple_values__": _hierarchical_pickle(list(data)),
+            "__tuple_values__": hierarchical_pickle(list(data)),
         }
     if isinstance(data, dict):
         return {
             "__is_dict__": True,
-            "keys": _hierarchical_pickle(list(data.keys())),
-            "values": _hierarchical_pickle(list(data.values())),
+            "keys": hierarchical_pickle(list(data.keys())),
+            "values": hierarchical_pickle(list(data.values())),
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
@@ -152,19 +140,19 @@ def _hierarchical_pickle(data):
                 raise AssertionError("data.args is not ()")
             return {
                 "__module_type__": typename,
-                "state": _hierarchical_pickle(data.state),
+                "state": hierarchical_pickle(data.state),
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             if data.state is not None:
                 raise AssertionError("data.state is not None")
             storage, offset, size, stride, requires_grad, *_ = data.args
-            storage_info = _get_storage_info(storage)
+            storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
             if data.state is not None:
                 raise AssertionError("data.state is not None")
             storage, offset, size, stride, quantizer, requires_grad, *_ = data.args
-            storage_info = _get_storage_info(storage)
+            storage_info = get_storage_info(storage)
             if not isinstance(quantizer, tuple):
                 raise AssertionError("quantizer is not a tuple")
             if not isinstance(quantizer[0], torch.utils.show_pickle.FakeClass):
@@ -189,14 +177,14 @@ def _hierarchical_pickle(data):
             obj, typ = data.args
             if not isinstance(typ, str):
                 raise AssertionError("typ is not a string")
-            return _hierarchical_pickle(obj)
+            return hierarchical_pickle(obj)
         if re.fullmatch(r"torch\.jit\._pickle\.build_[a-z]+list", typename):
             if data.state is not None:
                 raise AssertionError("data.state is not None")
             ls, = data.args
             if not isinstance(ls, list):
                 raise AssertionError("ls is not a list")
-            return _hierarchical_pickle(ls)
+            return hierarchical_pickle(ls)
         if typename == "torch.device":
             if data.state is not None:
                 raise AssertionError("data.state is not None")
@@ -216,16 +204,22 @@ def _hierarchical_pickle(data):
             # TODO: Undo at least that second hack.  We should support string states.
             return {
                 "__module_type__": typename,
-                "state": _hierarchical_pickle((msg,)),
+                "state": hierarchical_pickle((msg,)),
             }
         raise Exception(f"Can't prepare fake object of type for JS: {typename}")  # noqa: TRY002
     raise Exception(f"Can't prepare data of type for JS: {type(data)}")  # noqa: TRY002
 
 
-def _get_model_info(
+def get_model_info(
         path_or_file,
         title=None,
         extra_file_size_limit=DEFAULT_EXTRA_FILE_SIZE_LIMIT):
+    """Get JSON-friendly information about a model.
+
+    The result is suitable for being saved as model_info.json,
+    or passed to burn_in_info.
+    """
+
     if isinstance(path_or_file, os.PathLike):
         default_title = os.fspath(path_or_file)
         file_size = path_or_file.stat().st_size  # type: ignore[attr-defined]
@@ -267,7 +261,7 @@ def _get_model_info(
                 raise AssertionError("path_prefix is None")
             with zf.open(path_prefix + f"/{name}.pkl") as handle:
                 raw = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
-                return _hierarchical_pickle(raw)
+                return hierarchical_pickle(raw)
 
         model_data = get_pickle("data")
         constants = get_pickle("constants")
@@ -389,7 +383,13 @@ def _get_model_info(
     }
 
 
-def _get_inline_skeleton():
+def get_inline_skeleton():
+    """Get a fully-inlined skeleton of the frontend.
+
+    The returned HTML page has no external network dependencies for code.
+    It can load model_info.json over HTTP, or be passed to burn_in_info.
+    """
+
     import importlib.resources
 
     # pyrefly: ignore [bad-argument-type]
@@ -405,7 +405,13 @@ def _get_inline_skeleton():
     return skeleton
 
 
-def _burn_in_info(skeleton, info):
+def burn_in_info(skeleton, info):
+    """Burn model info into the HTML skeleton.
+
+    The result will render the hard-coded model info and
+    have no external network dependencies for code or data.
+    """
+
     # Note that Python's json serializer does not escape slashes in strings.
     # Since we're inlining this JSON directly into a script tag, a string
     # containing "</script>" would end the script prematurely and
@@ -415,82 +421,30 @@ def _burn_in_info(skeleton, info):
         "BURNED_IN_MODEL_INFO = " + json.dumps(info, sort_keys=True).replace("/", "\\/"))
 
 
-@deprecated(_DEPRECATION_MSG, category=FutureWarning)
 def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
-    model_info = _get_model_info(path_or_bytesio, **kwargs)
-    skeleton = _get_inline_skeleton()
-    page = _burn_in_info(skeleton, model_info)
+    model_info = get_model_info(path_or_bytesio, **kwargs)
+    skeleton = get_inline_skeleton()
+    page = burn_in_info(skeleton, model_info)
     return page
 
 
 def main(argv, *, stdout=None) -> None:
-    warnings.warn(_DEPRECATION_MSG, FutureWarning, stacklevel=2)
+    warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.", stacklevel=2)
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")
     parser.add_argument("model")
     args = parser.parse_args(argv[1:])
 
-    info = _get_model_info(args.model, title=args.title)
+    info = get_model_info(args.model, title=args.title)
 
     output = stdout or sys.stdout
 
     if args.style == "json":
         output.write(json.dumps(info, sort_keys=True) + "\n")
     elif args.style == "html":
-        skeleton = _get_inline_skeleton()
-        page = _burn_in_info(skeleton, info)
+        skeleton = get_inline_skeleton()
+        page = burn_in_info(skeleton, info)
         output.write(page)
     else:
         raise Exception("Invalid style")  # noqa: TRY002
-
-
-@deprecated(_DEPRECATION_MSG, category=FutureWarning)
-def get_storage_info(storage):
-    return _get_storage_info(storage)
-
-
-@deprecated(_DEPRECATION_MSG, category=FutureWarning)
-def hierarchical_pickle(data):
-    return _hierarchical_pickle(data)
-
-
-@deprecated(_DEPRECATION_MSG, category=FutureWarning)
-def get_model_info(
-        path_or_file,
-        title=None,
-        extra_file_size_limit=DEFAULT_EXTRA_FILE_SIZE_LIMIT):
-    """Get JSON-friendly information about a model.
-
-    The result is suitable for being saved as model_info.json,
-    or passed to burn_in_info.
-
-    .. warning::
-        ``torch.utils.model_dump`` is deprecated and unsafe on untrusted models:
-        inspecting a model can execute arbitrary code stored in it.
-    """
-    return _get_model_info(path_or_file, title, extra_file_size_limit)
-
-
-@deprecated(_DEPRECATION_MSG, category=FutureWarning)
-def get_inline_skeleton():
-    """Get a fully-inlined skeleton of the frontend.
-
-    The returned HTML page has no external network dependencies for code.
-    It can load model_info.json over HTTP, or be passed to burn_in_info.
-
-    .. warning::
-        ``torch.utils.model_dump`` is deprecated and unsafe on untrusted models:
-        inspecting a model can execute arbitrary code stored in it.
-    """
-    return _get_inline_skeleton()
-
-
-@deprecated(_DEPRECATION_MSG, category=FutureWarning)
-def burn_in_info(skeleton, info):
-    """Burn model info into the HTML skeleton.
-
-    The result will render the hard-coded model info and
-    have no external network dependencies for code or data.
-    """
-    return _burn_in_info(skeleton, info)
