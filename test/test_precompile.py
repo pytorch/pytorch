@@ -5193,6 +5193,7 @@ class TestPrecompileDynamoCapture(TestCase):
             eager = cap(self.model, self.x2, 1)
             summary = cap.summary()
         self.assertEqual(eager, torch.relu(self.model.lin(self.x2)).sin() + 1)
+        self.assertTrue(summary.complete, summary)
         self.assertNotIn("dispatch", summary.uncovered_frames)
         self.assertTrue(
             any(f.startswith("dispatch (") for f in summary.eager_fallbacks), summary
