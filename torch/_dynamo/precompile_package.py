@@ -1632,10 +1632,10 @@ def _variantless_entry_fallback_message(fn_name: str) -> str:
         f"Dynamo gives up on, and skips for the rest of the process, a frame with a "
         f"graph break it cannot resume from (such as one inside a loop; check "
         f"TORCH_LOGS=graph_breaks), a frame that calls torch._dynamo.skip_frame(), "
-        f"a frame it refuses to trace such as a generator, a frame that raised a UserError it "
-        f"suppressed, or one whose graph the backend declined by raising SkipFrame "
-        f"(check the backend's log). Fix that, or capture the functions the entry "
-        f"calls instead."
+        f"a frame it refuses to trace such as a generator, a frame whose UserError "
+        f"Dynamo suppressed, or one whose graph the backend declined by raising "
+        f"SkipFrame (check the backend's log). Fix that, or capture the functions "
+        f"the entry calls instead."
     )
 
 
