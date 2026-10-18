@@ -5,6 +5,7 @@ import gc
 import json
 import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -40,6 +41,8 @@ class _Transfer:
     local: _Descriptors
     remote: _Descriptors
     remote_agent: str
+    notification: bytes = b""
+    completed: bool = False
 
 
 @dataclass
@@ -63,6 +66,7 @@ class _Agent:
         )
         self.registrations = []
         self.remote_metadata = {}
+        self.notifications = {}
         self.released = 0
         self.agents[name] = self
 
@@ -137,9 +141,18 @@ class _Agent:
                 return tensor.view(torch.uint8).flatten()[offset : offset + length]
         raise RuntimeError("unknown local memory")
 
-    def transfer(self, handle):
-        if self.transfer_state != "DONE":
-            return self.transfer_state
+    def transfer(self, handle, notif_msg=b""):
+        handle.notification = notif_msg
+        if self.transfer_state == "DONE":
+            self.complete_transfer(handle)
+        return self.transfer_state
+
+    def check_xfer_state(self, handle):
+        return self.transfer_state
+
+    def complete_transfer(self, handle):
+        if handle.completed:
+            return
         peer = self.agents[handle.remote_agent]
         local = self._view(handle.local)
         remote = peer._view(handle.remote)
@@ -147,10 +160,23 @@ class _Agent:
             remote.copy_(local.clone())
         else:
             local.copy_(remote.clone())
-        return "DONE"
+        if handle.notification:
+            peer.notifications.setdefault(self.name, []).append(handle.notification)
+        handle.completed = True
 
-    def check_xfer_state(self, handle):
-        return self.transfer_state
+    def send_notif(self, remote_agent, payload, backend=None):
+        if backend is not None and backend not in self.backends:
+            raise AssertionError("unexpected notification backend")
+        if remote_agent not in self.remote_metadata:
+            raise RuntimeError("unknown notification peer")
+        peer = self.agents[remote_agent]
+        peer.notifications.setdefault(self.name, []).append(payload)
+
+    def get_new_notifs(self, *, backends):
+        if backends != list(self.backends):
+            raise AssertionError("unexpected notification backend")
+        notifications, self.notifications = self.notifications, {}
+        return notifications
 
     def release_xfer_handle(self, handle):
         self.released += 1
@@ -186,6 +212,278 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         source = first.register_memory(tensor)
         target = second.register_memory(torch.zeros_like(tensor))
         return first, second, source, target.to_remote_buffer()
+
+    def test_standalone_notifications(self):
+        first, second = self.make_transport_pair()
+        self.assertTrue(first.supports_notifications())
+        self.assertEqual(second.poll_notifications(), [])
+        payloads = [b"ready:1", b"\x00\xffready:2", b"ready:1"]
+        for payload in payloads:
+            first.send_notification(payload)
+        self.assertCountEqual(second.poll_notifications(), payloads)
+        self.assertEqual(second.poll_notifications(), [])
+        second.send_notification(b"released")
+        self.assertEqual(first.poll_notifications(), [b"released"])
+        self.assertFalse(first._registrations)
+        self.assertFalse(first._transfers)
+
+    def test_notifications_discard_other_senders(self):
+        first, second = self.make_transport_pair()
+        second._agent.notifications["other"] = [b"unrelated"]
+        first.send_notification(b"selected")
+        self.assertEqual(second.poll_notifications(), [b"selected"])
+        self.assertNotIn("other", second._agent.notifications)
+        self.assertEqual(second.poll_notifications(), [])
+
+    @parametrize("operation", ["read", "write"])
+    @parametrize("mode", ["sync", "work", "async"])
+    def test_transfer_notification(self, operation, mode):
+        tensor = torch.arange(1, 9)
+        first, second, memory, remote = self.registered_pair(tensor)
+        view = memory.to_mutable_view() if operation == "read" else memory.to_view()
+        payload = b"done\x00\xff"
+        if mode == "async":
+            asyncio.run(
+                getattr(first, operation + "_async")(view, remote, notification=payload)
+            )
+        else:
+            work = getattr(first, operation)(
+                view, remote, async_op=mode == "work", notification=payload
+            )
+            if mode == "work":
+                work.wait()
+        self.assertEqual(second.poll_notifications(), [payload])
+        if operation == "read":
+            self.assertEqual(tensor, torch.zeros_like(tensor))
+        else:
+            self.assertEqual(second._agent.registrations[0].tensor, tensor)
+        self.assertEqual(second.poll_notifications(), [])
+
+    @parametrize("operation", ["read", "write"])
+    def test_notification_waits_for_transfer_after_timeout(self, operation):
+        tensor = torch.arange(1, 9)
+        first, second, memory, remote = self.registered_pair(tensor)
+        view = memory.to_mutable_view() if operation == "read" else memory.to_view()
+        with patch.object(first._agent, "transfer_state", "PROC"):
+            work = getattr(first, operation)(
+                view, remote, async_op=True, timeout=0, notification=b"done"
+            )
+            with self.assertRaises(TimeoutError):
+                work.wait()
+            self.assertTrue(first._pending)
+            first._agent.complete_transfer(work._handle)
+            self.assertEqual(second.poll_notifications(), [b"done"])
+            self.assertFalse(work.is_completed())
+        work.wait()
+        self.assertEqual(second.poll_notifications(), [])
+
+    def test_notification_can_precede_a_local_error(self):
+        first, second, memory, remote = self.registered_pair()
+        with patch.object(first._agent, "transfer_state", "PROC"):
+            work = first.write(
+                memory.to_view(), remote, async_op=True, notification=b"done"
+            )
+            first._agent.complete_transfer(work._handle)
+            self.assertEqual(second.poll_notifications(), [b"done"])
+        with patch.object(first._agent, "transfer_state", "ERR"):
+            with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+                work.wait()
+
+    def test_cancelled_waiter_does_not_suppress_notification(self):
+        first, second, memory, remote = self.registered_pair()
+
+        async def run():
+            entered = asyncio.Event()
+            transfer = first._agent.transfer
+
+            def dispatch(*args, **kwargs):
+                entered.set()
+                return transfer(*args, **kwargs)
+
+            with (
+                patch.object(first._agent, "transfer_state", "PROC"),
+                patch.object(first._agent, "transfer", side_effect=dispatch),
+            ):
+                task = asyncio.create_task(
+                    first.write_async(memory.to_view(), remote, notification=b"done")
+                )
+                await entered.wait()
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertTrue(first._pending)
+                work = next(iter(first._pending.values()))
+                first._agent.complete_transfer(work._handle)
+                self.assertEqual(second.poll_notifications(), [b"done"])
+                self.assertFalse(work.is_completed())
+
+        asyncio.run(run())
+        next(iter(first._pending.values())).wait()
+        self.assertEqual(second.poll_notifications(), [])
+
+    def test_ordinary_transfer_does_not_notify(self):
+        first, second, memory, remote = self.registered_pair()
+        first.write(memory.to_view(), remote)
+        self.assertEqual(second.poll_notifications(), [])
+
+    @parametrize("payload", [b"", "message", bytearray(b"message"), 1])
+    def test_invalid_notification_does_not_submit(self, payload):
+        first, second, memory, remote = self.registered_pair()
+        error = ValueError if payload == b"" else TypeError
+        with patch.object(first._agent, "initialize_xfer") as initialize:
+            with self.assertRaises(error):
+                first.write(memory.to_view(), remote, notification=payload)
+            initialize.assert_not_called()
+        with patch.object(first._agent, "send_notif") as send:
+            with self.assertRaises(error):
+                first.send_notification(payload)
+            send.assert_not_called()
+
+    def test_none_is_invalid_standalone_payload(self):
+        first, second = self.make_transport_pair()
+        with self.assertRaises(TypeError):
+            first.send_notification(None)
+
+    def test_zero_byte_transfer_notification(self):
+        first, second, memory, remote = self.registered_pair()
+        with patch.object(first._agent, "initialize_xfer") as initialize:
+            with self.assertRaisesRegex(ValueError, "zero-byte"):
+                first.write(memory.to_view(length=0), remote, notification=b"done")
+            initialize.assert_not_called()
+        self.assertEqual(first.write(memory.to_view(length=0), remote), 0)
+        self.assertEqual(second.poll_notifications(), [])
+
+    def test_notifications_require_connection(self):
+        first, second = self.make_transport_pair()
+        with patch.object(first, "_peer_name", None):
+            with self.assertRaisesRegex(RuntimeError, "not connected"):
+                first.send_notification(b"ready")
+            with self.assertRaisesRegex(RuntimeError, "not connected"):
+                first.poll_notifications()
+
+    @parametrize("plugin", ["LIBFABRIC", "UCCL"])
+    def test_notifications_require_supported_plugin(self, plugin):
+        first, second, memory, remote = self.registered_pair()
+        with patch.object(first, "_plugin", plugin):
+            self.assertFalse(first.supports_notifications())
+            with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                first.send_notification(b"ready")
+            with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                first.poll_notifications()
+            with patch.object(first._agent, "initialize_xfer") as initialize:
+                with self.assertRaisesRegex(NotImplementedError, "notifications"):
+                    first.write(memory.to_view(), remote, notification=b"done")
+                initialize.assert_not_called()
+
+    @parametrize("method", ["send_notif", "get_new_notifs"])
+    def test_notifications_require_native_api(self, method):
+        first, second = self.make_transport_pair()
+        with patch.object(first._agent, method, None):
+            self.assertFalse(first.supports_notifications())
+
+    @parametrize("closing", [False, True])
+    def test_notifications_reject_closed_transport(self, closing):
+        first, second = self.make_transport_pair()
+        if closing:
+            first._closing = True
+        else:
+            first.close()
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            first.send_notification(b"ready")
+        with self.assertRaisesRegex(RuntimeError, "closed"):
+            first.poll_notifications()
+
+    @parametrize("operation", ["read_stream", "write_stream"])
+    def test_closing_stream_reports_endpoint_state(self, operation):
+        first, second, mem, remote = self.registered_pair()
+        view = mem.to_mutable_view() if operation == "read_stream" else mem.to_view()
+        first._closing = True
+        with (
+            patch.object(first, "supports_notifications", return_value=False),
+            patch.object(first, "_cuda_stream") as ordering,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "closed"):
+                getattr(first, operation)(
+                    view, remote, stream=object(), notification=b"done"
+                )
+            ordering.assert_not_called()
+
+    def test_notification_native_errors(self):
+        first, second = self.make_transport_pair()
+        with patch.object(first._agent, "send_notif", side_effect=RuntimeError("send")):
+            with self.assertRaisesRegex(RuntimeError, "send"):
+                first.send_notification(b"ready")
+        with patch.object(
+            first._agent, "get_new_notifs", side_effect=RuntimeError("poll")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "poll"):
+                first.poll_notifications()
+        first.send_notification(b"retry")
+        self.assertEqual(second.poll_notifications(), [b"retry"])
+
+    def test_concurrent_notification_polls(self):
+        first, second = self.make_transport_pair()
+        payloads = [str(index).encode() for index in range(20)]
+        for payload in payloads[:10]:
+            first.send_notification(payload)
+        entered, release, contending = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        native_poll = second._agent.get_new_notifs
+
+        def drain(*, backends):
+            messages = native_poll(backends=backends)
+            if not entered.is_set():
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError("first poll was not released")
+            return messages
+
+        def competing_poll():
+            contending.set()
+            return second.poll_notifications()
+
+        with (
+            patch.object(second._agent, "get_new_notifs", side_effect=drain),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            one = executor.submit(second.poll_notifications)
+            try:
+                self.assertTrue(entered.wait(5))
+                two = executor.submit(competing_poll)
+                self.assertTrue(contending.wait(5))
+                self.assertFalse(two.done())
+                for payload in payloads[10:]:
+                    first.send_notification(payload)
+            finally:
+                release.set()
+            self.assertCountEqual(one.result(timeout=5), payloads[:10])
+            self.assertCountEqual(two.result(timeout=5), payloads[10:])
+        self.assertEqual(second.poll_notifications(), [])
+
+    def test_notification_lock_timeout(self):
+        first, second = self.make_transport_pair()
+        acquired, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with first._operation_lock:
+                acquired.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        try:
+            self.assertTrue(acquired.wait(5))
+            with self.assertRaises(TimeoutError):
+                first.send_notification(b"ready", timeout=0.001)
+            with self.assertRaises(TimeoutError):
+                first.poll_notifications(timeout=0.001)
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
 
     def test_unregister_invalidates_aliases_and_views(self):
         tensor = torch.ones(8)

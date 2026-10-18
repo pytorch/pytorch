@@ -171,6 +171,35 @@ class NIXLTransport(Transport):
     def connected(self) -> bool:
         return self._peer_name is not None and not self._closed and not self._closing
 
+    def supports_notifications(self) -> bool:
+        # Only UCX has been validated against the transport notification contract.
+        return self._plugin == "UCX" and all(
+            callable(getattr(self._agent, name, None))
+            for name in ("send_notif", "get_new_notifs")
+        )
+
+    def _check_notification_endpoint(self) -> None:
+        self._ensure_open()
+        super()._check_notification_endpoint()
+
+    def send_notification(
+        self, payload: bytes, *, timeout: float | None = None
+    ) -> None:
+        with self._locked(timeout):
+            agent = self._ensure_open()
+            self._check_notification(payload)
+            agent.send_notif(self._peer_name, payload)
+
+    def poll_notifications(self, *, timeout: float | None = None) -> list[bytes]:
+        with self._locked(timeout):
+            self._check_notification_endpoint()
+            # TODO(thisisatharva-rh): get_new_notifs drains the agent's global
+            # queue; messages from senders other than the connected peer are
+            # dropped here. Fine while a transport has a single peer, but revisit
+            # if the usage model ever broadens.
+            messages = self._agent.get_new_notifs(backends=[self._plugin])
+            return messages.get(self._peer_name, [])
+
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
     ) -> NIXLMemory:
@@ -286,9 +315,12 @@ class NIXLTransport(Transport):
         *,
         mutable: bool,
         timeout: float,
+        notification: bytes | None = None,
     ) -> _NIXLWork:
         agent = self._ensure_open()
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        if notification is not None:
+            self._check_notification(notification, local_buffer)
         local_buffer = cast(NIXLMemoryView, local_buffer)
         remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
         registration = local_buffer._memory._registration
@@ -336,7 +368,7 @@ class NIXLTransport(Transport):
         self._pending[id(work)] = work
         _live_transports.add(self)
         try:
-            work._state = agent.transfer(work._handle)
+            work._state = agent.transfer(work._handle, notif_msg=notification or b"")
         except BaseException as error:
             # Dispatch may have started DMA before raising. Keep polling and
             # retain buffers until a native terminal state establishes safety.
@@ -352,13 +384,19 @@ class NIXLTransport(Transport):
         mutable: bool,
         async_op: bool,
         timeout: float | None,
+        notification: bytes | None,
     ) -> int | Work:
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
         with self._locked(timeout):
             work = self._submit(
-                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
+                operation,
+                local_buffer,
+                remote_buffer,
+                mutable=mutable,
+                timeout=timeout,
+                notification=notification,
             )
         if async_op:
             return work
@@ -374,6 +412,7 @@ class NIXLTransport(Transport):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
         return self._start(
             "WRITE",
@@ -382,6 +421,7 @@ class NIXLTransport(Transport):
             mutable=False,
             async_op=async_op,
             timeout=timeout,
+            notification=notification,
         )
 
     def read(
@@ -391,6 +431,7 @@ class NIXLTransport(Transport):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
         return self._start(
             "READ",
@@ -399,6 +440,7 @@ class NIXLTransport(Transport):
             mutable=True,
             async_op=async_op,
             timeout=timeout,
+            notification=notification,
         )
 
     async def _transfer_async(
@@ -409,13 +451,19 @@ class NIXLTransport(Transport):
         *,
         mutable: bool,
         timeout: float | None,
+        notification: bytes | None,
     ) -> None:
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
         async with self._locked_async(deadline):
             work = self._submit(
-                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
+                operation,
+                local_buffer,
+                remote_buffer,
+                mutable=mutable,
+                timeout=timeout,
+                notification=notification,
             )
         await wait_all([work], timeout=max(0.0, deadline - time.monotonic()))
 
@@ -425,9 +473,15 @@ class NIXLTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         await self._transfer_async(
-            "WRITE", local_buffer, remote_buffer, mutable=False, timeout=timeout
+            "WRITE",
+            local_buffer,
+            remote_buffer,
+            mutable=False,
+            timeout=timeout,
+            notification=notification,
         )
 
     async def read_async(
@@ -436,9 +490,15 @@ class NIXLTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         await self._transfer_async(
-            "READ", local_buffer, remote_buffer, mutable=True, timeout=timeout
+            "READ",
+            local_buffer,
+            remote_buffer,
+            mutable=True,
+            timeout=timeout,
+            notification=notification,
         )
 
     def _begin_close(self, timeout: float) -> list[_NIXLWork]:

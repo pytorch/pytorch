@@ -5,6 +5,8 @@ import multiprocessing
 import os
 import unittest
 
+from transport_test_utils import NotificationInbox
+
 import torch
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import NIXLRemoteBuffer
@@ -28,6 +30,12 @@ def _native_worker(rank, connection, progress_thread):
     ) as transport:
         connection.send_bytes(transport.bind())
         transport.connect(_receive(connection))
+        inbox = NotificationInbox(transport)
+        if not transport.supports_notifications():
+            raise AssertionError("UCX notifications are unavailable")
+        transport.send_notification(b"hello\x00\xff")
+        if inbox.receive(1) != [b"hello\x00\xff"]:
+            raise AssertionError("unexpected standalone notification")
         source = torch.arange(1024, dtype=torch.float32) + rank
         target = torch.zeros_like(source)
         other_target = torch.zeros_like(source)
@@ -39,11 +47,18 @@ def _native_worker(rank, connection, progress_thread):
         remote_source, remote_target, remote_other = (
             NIXLRemoteBuffer.deserialize(_receive(connection)) for _ in range(3)
         )
-        work = transport.write(source_memory.to_view(), remote_target, async_op=True)
+        work = transport.write(
+            source_memory.to_view(),
+            remote_target,
+            async_op=True,
+            notification=b"target",
+        )
         other_work = transport.write(
-            source_memory.to_view(), remote_other, async_op=True
+            source_memory.to_view(), remote_other, async_op=True, notification=b"other"
         )
         asyncio.run(wait_all([work, other_work], timeout=5))
+        if sorted(inbox.receive(2)) != [b"other", b"target"]:
+            raise AssertionError("unexpected write notifications")
         connection.send_bytes(b"written")
         if _receive(connection) != b"written":
             raise AssertionError("unexpected control-plane message")
@@ -51,11 +66,17 @@ def _native_worker(rank, connection, progress_thread):
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
         torch.testing.assert_close(other_target, target)
+        target.fill_(-1)
         asyncio.run(
             transport.read_async(
-                target_memory.to_mutable_view(), remote_source, timeout=5
+                target_memory.to_mutable_view(),
+                remote_source,
+                timeout=5,
+                notification=b"read",
             )
         )
+        if inbox.receive(1) != [b"read"]:
+            raise AssertionError("unexpected read notification")
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
@@ -83,6 +104,8 @@ def _native_worker(rank, connection, progress_thread):
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 11 - rank
         )
+        if inbox.poll():
+            raise AssertionError("ordinary transfer produced a notification")
         transport.unregister_memory(source_memory)
         transport.unregister_memory(target_memory)
         asyncio.run(transport.close_async(timeout=5))
