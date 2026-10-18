@@ -485,8 +485,9 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     }
     std::sort(ids.begin(), ids.end());
     for (int64_t id : ids) {
-      for (CacheEntry& e : extra->cache_entry_map[id]) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntry& e : extra->cache_entry_map[id]) {
+        result.append(
+            py::cast(e.copy_for_python(), py::return_value_policy::move));
       }
     }
   }
@@ -505,8 +506,9 @@ py::list _get_cache_entries_for_region(
   if (extra != nullptr) {
     auto it = extra->cache_entry_map.find(isolate_recompiles_id);
     if (it != extra->cache_entry_map.end()) {
-      for (CacheEntry& e : it->second) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntry& e : it->second) {
+        result.append(
+            py::cast(e.copy_for_python(), py::return_value_policy::move));
       }
     }
   }
@@ -563,8 +565,8 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
-    for (PrecompileEntry& e : extra->precompile_entries) {
-      result.append(py::cast(e, py::return_value_policy::reference));
+    for (const PrecompileEntry& e : extra->precompile_entries) {
+      result.append(py::cast(e, py::return_value_policy::copy));
     }
   }
   return result;
