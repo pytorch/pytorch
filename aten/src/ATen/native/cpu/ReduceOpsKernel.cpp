@@ -85,6 +85,8 @@ void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        // Seed with the first element rather than 0: +0.0 + -0.0 == +0.0
+        // would drop the sign of a leading -0.0. Inputs are non-empty here.
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
         auto cum_number = (at::acc_type<scalar_t, false>)self_data[0];
         result_data[0] = (scalar_t)cum_number;

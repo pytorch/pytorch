@@ -105,6 +105,32 @@ class TestReductions(TestCase):
     # ReductionOpInfo unit tests
     ###########################################################################
 
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_cumsum_preserves_signed_zero(self, device, dtype):
+        # A prefix of -0.0 should preserve its sign.
+        for shape, dim in [((1,), 0), ((5,), 0), ((3, 4), 0), ((3, 4), 1)]:
+            x = torch.full(shape, -0.0, device=device, dtype=dtype)
+            result = torch.cumsum(x, dim)
+            self.assertTrue(
+                torch.signbit(result).all().item(),
+                msg=f"shape={shape}, dim={dim}, result={result}",
+            )
+
+        # Also exercise a non-contiguous input.
+        x = torch.full((4, 6), -0.0, device=device, dtype=dtype)[::2, ::2]
+        result = torch.cumsum(x, 1)
+        self.assertTrue(
+            torch.signbit(result).all().item(),
+            msg=f"non-contiguous input, result={result}",
+        )
+
+        # Adding +0.0 changes the running sum to +0.0; it stays positive
+        # when the following -0.0 is added.
+        x = torch.tensor([-0.0, -0.0, 0.0, -0.0], device=device, dtype=dtype)
+        expected = torch.tensor([True, True, False, False], device=device)
+        self.assertEqual(torch.signbit(torch.cumsum(x, 0)), expected)
+
+
     def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
         """Tests output shape for input with ndim and dim and keepdim kwargs"""
         shape = torch.randint(2, 5, (ndim,)).tolist()
@@ -3765,12 +3791,6 @@ class TestReductionsOnCPU(TestCase):
 
     def test_cumsum_integer_upcast(self):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumsum(x, 0, **kwargs))
-
-    def test_cumsum_preserves_signed_zero(self):
-        for dtype in (torch.half, torch.bfloat16, torch.float, torch.double):
-            x = torch.tensor([-0.0, -0.0, 1.0], dtype=dtype)
-            result = torch.cumsum(x, 0)
-            self.assertEqual(torch.signbit(result), torch.tensor([True, True, False]))
 
     def test_cumprod_integer_upcast(self):
         self._test_reduce_integer_upcast(lambda x, **kwargs: torch.cumprod(x, 0, **kwargs))
