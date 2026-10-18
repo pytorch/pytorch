@@ -61,7 +61,8 @@ def raise_flex_decoding_kernel_options_error(
         f"options are {_flex_kernel_tuning_options('decode')}. For example: "
         f"{_flex_kernel_options_example('decode')}. If you did not pin "
         "these options, compiling with mode='max-autotune-no-cudagraphs' "
-        "can also fix this by trying more FlexAttention configs."
+        "tries more BLOCK_N values, which can fix a SPARSE_KV_BLOCK_SIZE "
+        "mismatch (not a BLOCK_M one)."
     )
 
 
@@ -320,7 +321,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
             # BLOCK_M tiles GQA-folded rows. Cap it at 128 rows (or GQA_SHARED_HEADS if larger):
             # bigger tiles overflow shared memory in fp32 and run 5-8x slower in bf16. Also cap
             # its BLOCK_M // GQA_SHARED_HEADS query positions at the largest power of two that
-            # divides SPARSE_Q_BLOCK_SIZE, so every tile reads one sparse Q row.
+            # divides SPARSE_Q_BLOCK_SIZE, so every tile reads one sparse Q row. The 16-row floor
+            # wins only when that cap is below 16 rows (e.g. 8-row sparse blocks without GQA);
+            # the check below then rejects every config, as it did before.
             max(
                 min(
                     next_power_of_2(
