@@ -32,7 +32,6 @@ import io
 import itertools
 import logging
 import math
-import pickle
 import sys
 import textwrap
 import traceback
@@ -5270,14 +5269,15 @@ class GuardsStatePickler(FunctionPicklerBase):
             if is_ddp:
                 # Not DDP.__getstate__: its default-process-group check only
                 # protects DDP.__setstate__, which _unpickle_ddp_module never
-                # calls. Keep the dropped keys in sync with DDP.__getstate__
-                # (broadcast_buffers, which it also adds, is a property).
-                state = {
-                    k: v
-                    for k, v in obj.__dict__.items()
-                    if k not in ("process_group", "reducer", "logger")
-                }
-                return type(self)._unpickle_ddp_module, (state,)
+                # calls. A guard on a dropped attribute could not be rebuilt
+                # at load, so refuse here, a bypass, rather than save it.
+                for name in obj._unpicklable_attrs:
+                    attr = obj.__dict__.get(name)
+                    if attr is not None and id(attr) in self.guard_tree_values:
+                        raise torch._dynamo.exc.PackageError(
+                            f"a guard reads DistributedDataParallel.{name}, which does not pickle"
+                        )
+                return type(self)._unpickle_ddp_module, (obj._picklable_state(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
@@ -5615,41 +5615,7 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return _is_registered_custom_op_def(value) or _pickles_as_its_own_global(value)
-
-
-def _pickles_as_its_own_global(value: object) -> bool:
-    """Whether pickle's default lookup (``copyreg.dispatch_table``, then
-    ``__reduce_ex__``) saves ``value`` as a reference to the module global that
-    is ``value`` itself, as for ``typing.List``, which reduces to ``"List"``.
-    User objects can raise anywhere in here, which just means no."""
-    if isinstance(value, (torch.Tensor, torch.nn.Module)):
-        return False
-    try:
-        cls = type(value)
-        if cls.__qualname__ != cls.__name__:
-            # GuardsStatePickler.reducer_override, which pickle tries first,
-            # refuses an instance of a nested or local class.
-            return False
-        reduce = copyreg.dispatch_table.get(cls)
-        if (
-            reduce is None
-            and cls.__reduce_ex__ is object.__reduce_ex__
-            and cls.__reduce__ is object.__reduce__
-        ):
-            return False
-        name = reduce(value) if reduce else value.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
-        module_name = getattr(value, "__module__", None)
-        if not isinstance(name, str) or not isinstance(module_name, str):
-            return False
-        obj = sys.modules.get(module_name)
-        if obj is None:
-            return False
-        for part in name.split("."):
-            obj = getattr(obj, part, None)
-        return obj is value
-    except Exception:
-        return False
+    return _is_registered_custom_op_def(value)
 
 
 def is_portable_identity_guard(

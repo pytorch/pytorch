@@ -255,63 +255,6 @@ class _NameClash(enum.Enum):
 
 
 _MODE = _Mode.FAST
-_ALIAS = typing.List  # noqa: UP006
-
-
-class _ReducesToAnotherGlobal:
-    def __reduce__(self):
-        return "_ALIAS"
-
-
-class _ReducesToAMissingName:
-    def __reduce__(self):
-        return "_EnumOwner.Missing"
-
-
-class _ReducesFromAMissingModule:
-    __module__ = "_not_imported"
-
-    def __reduce__(self):
-        return "_ReducesFromAMissingModule"
-
-
-class _ModuleRaises:
-    def __reduce__(self):
-        return "_MODULE_RAISES"
-
-    @property
-    def __module__(self):
-        raise RuntimeError("no module")
-
-
-class _UnhashableModule:
-    __module__ = ["typing"]  # type: ignore[assignment]
-
-    def __reduce__(self):
-        return "_UNHASHABLE_MODULE"
-
-
-class _ReduceExByValue:
-    # Pickle calls __reduce_ex__, which here bypasses the __reduce__ name.
-    def __reduce__(self):
-        return "_REDUCE_EX_BY_VALUE"
-
-    def __reduce_ex__(self, protocol):
-        return (_ReduceExByValue, ())
-
-
-_REDUCE_EX_BY_VALUE = _ReduceExByValue()
-
-
-class _SentinelOwner:
-    class Sentinel:
-        def __reduce__(self):
-            return "_NESTED_SENTINEL"
-
-
-_NESTED_SENTINEL = _SentinelOwner.Sentinel()
-_MODULE_RAISES = _ModuleRaises()
-_UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
 
 
@@ -3920,21 +3863,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with mock.patch.dict(globals(), {"_MODE": _Mode.SLOW}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
-    def test_id_match_on_a_typing_alias(self):
-        def fn(x):
-            if _ALIAS is typing.List:  # noqa: UP006
-                return x + 1
-            return x - 1
-
-        x = torch.randn(3)
-
-        # typing.List pickles as a reference to the typing.List global, so the
-        # guard survives serialization instead of being dropped.
-        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
-        self._test_check_fn(ref, loaded, {"x": x}, True)
-        with mock.patch.dict(globals(), {"_ALIAS": typing.Dict}):  # noqa: UP006
-            self._test_check_fn(ref, loaded, {"x": x}, False)
-
     def test_id_match_on_a_member_of_a_nested_enum(self):
         def fn(x):
             if _LEVEL is _EnumOwner.Level.LOW:
@@ -3995,20 +3923,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
             (_EnumOwner.Level.LOW, True),
             (_Perm.R | _Perm.W, False),
             (_NameClash["name"], True),
-            # Its __reduce__ names the typing global it is.
-            (typing.List, True),  # noqa: UP006
-            (typing.Optional, True),
-            # A subscripted alias reduces to a constructor call, not a name.
-            (typing.List[int], False),  # noqa: UP006
-            # Each __reduce__ names something other than the object itself.
-            (_ReducesToAnotherGlobal(), False),
-            (_ReducesToAMissingName(), False),
-            (_ReducesFromAMissingModule(), False),
-            (_MODULE_RAISES, False),
-            (_UNHASHABLE_MODULE, False),
-            (_REDUCE_EX_BY_VALUE, False),
-            # The guard-state pickler refuses an instance of a nested class.
-            (_NESTED_SENTINEL, False),
             (types.ModuleType("_unregistered"), False),
             (Local, False),
             # Its __qualname__ leads to _wrapped_target instead.
@@ -5419,39 +5333,54 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
-            def bar(ddp, x):
-                return ddp.module(x)
-
-            def guards_state(fn, ddp_model, x):
-                package = CompilePackage(fn)
+            def guards_state(ddp_model, x):
+                package = CompilePackage(foo)
                 torch._dynamo.optimize(
                     package=package,
                     guard_filter_fn=lambda gs: [
                         g.guard_type not in unsupported for g in gs
                     ],
-                )(fn)(ddp_model, x)
-                self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
+                )(foo)(ddp_model, x)
+                self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
                 return torch._dynamo.package.load_guards_state(
-                    package._codes[fn.__code__].guarded_codes[0].guards_state
+                    package._codes[foo.__code__].guarded_codes[0].guards_state
                 )
 
-            # DDP itself pickles only on the default process group.
+            # DDP itself pickles only on the default process group. BatchNorm1d
+            # gives the module buffers, which DDP.forward syncs.
             for process_group in (None, dist.new_group([0])):
-                with self.subTest(default_group=process_group is None):
-                    torch._dynamo.reset()
-                    ddp_model = DDP(GlobalNestedModule(), process_group=process_group)
-                    x = torch.randn(10)
-                    guards_state(foo, ddp_model, x)
-                    # foo's guards reach DDP.forward's self.logger, which the
-                    # pickled state drops (as DDP.__getstate__'s does), so its
-                    # guard manager cannot be rebuilt; check the reload via bar.
-                    state = guards_state(bar, ddp_model, x)
-                    loaded = torch._dynamo.package.load_guard_manager(
-                        state, bar.__code__, bar.__globals__
-                    )
-                    self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
-                    y = torch.randn(11)
-                    self.assertFalse(loaded.check({"ddp": ddp_model, "x": y}))
+                for module in (
+                    GlobalNestedModule(),
+                    torch.nn.Sequential(
+                        torch.nn.Linear(10, 10), torch.nn.BatchNorm1d(10)
+                    ),
+                ):
+                    with self.subTest(
+                        default_group=process_group is None, module=type(module)
+                    ):
+                        torch._dynamo.reset()
+                        ddp_model = DDP(module, process_group=process_group)
+                        x = torch.randn(4, 10)
+                        with torch._dynamo.config.patch(nested_graph_breaks=False):
+                            state = guards_state(ddp_model, x)
+                        loaded = torch._dynamo.package.load_guard_manager(
+                            state, foo.__code__, foo.__globals__
+                        )
+                        self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
+                        y = torch.randn(4, 11)
+                        self.assertFalse(loaded.check({"ddp": ddp_model, "x": y}))
+
+                        # A frame resuming inside DDP.forward guards the type of
+                        # its C++ logger, which the state cannot carry: refused
+                        # at save (a bypass), not a load that fails.
+                        torch._dynamo.reset()
+                        with (
+                            torch._dynamo.config.patch(nested_graph_breaks=True),
+                            self.assertRaisesRegex(
+                                PackageError, "DistributedDataParallel.logger"
+                            ),
+                        ):
+                            guards_state(ddp_model, x)
         finally:
             dist.destroy_process_group()
             tmpfile.close()
