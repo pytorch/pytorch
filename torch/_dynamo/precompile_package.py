@@ -1616,13 +1616,20 @@ class _CapturePackage(CompilePackage):
         super().add_resume_function(python_code, python_module, function_name)
 
 
-def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
+def _is_variantless_entry_fallback(entry: _DynamoCacheEntry) -> bool:
     # The artifact build refuses an entry frame that fell back on its first
     # call (it has no variant to dispatch to), so that one stays uncovered.
+    if not entry.codes:
+        return False
+    first = entry.codes[0]
+    return first.eager_fallback and not first.bypassed and not first.guarded_codes
+
+
+def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
     return (
         code.eager_fallback
         and not code.bypassed
-        and (code is not entry.codes[0] or bool(code.guarded_codes))
+        and not (code is entry.codes[0] and _is_variantless_entry_fallback(entry))
     )
 
 
@@ -2022,6 +2029,21 @@ class PrecompileSession(Generic[_P, _R]):
                     "successfully, or pass require_complete=False to save the partial "
                     "artifact."
                 )
+            entry = self._package.cache_entry()
+            if _is_variantless_entry_fallback(entry):
+                # The artifact build refuses this too, so require_complete=False
+                # is no way out; say so rather than suggest it. Checked before
+                # the no-compiled-code gates: the entry did run.
+                raise PackageError(
+                    f"Precompilation has no variant of the entry frame "
+                    f"{entry.codes[0].python_code.co_name!r}: Dynamo gave up on it "
+                    f"at its first call, after a graph break it cannot resume from "
+                    f"(such as one inside a loop; check TORCH_LOGS=graph_breaks), "
+                    f"a generator, a suppressed UserError, or a backend SkipFrame. "
+                    f"The artifact build refuses that whatever require_complete "
+                    f"says: remove that graph break, or capture the functions the "
+                    f"entry calls instead."
+                )
             if summary.guarded_codes == 0:
                 raise PackageError(
                     "Precompilation captured no compiled code. Capture happens by "
@@ -2033,19 +2055,6 @@ class PrecompileSession(Generic[_P, _R]):
                     "Precompilation compiled no graph: every captured frame was "
                     "empty, so the artifact carries no compiled compute. Pass "
                     "require_complete=False to write the guards-only artifact anyway."
-                )
-            first = self._package.cache_entry().codes[0]
-            if first.eager_fallback and not first.bypassed and not first.guarded_codes:
-                # The artifact build refuses this too, so require_complete=False
-                # is no way out; say so rather than suggest it.
-                raise PackageError(
-                    f"Precompilation has no variant of the entry frame "
-                    f"{first.python_code.co_name!r}: Dynamo gave up on it at its first "
-                    f"call, after a graph break it cannot resume from (such as one "
-                    f"inside a loop; check TORCH_LOGS=graph_breaks), a generator, or "
-                    f"a backend SkipFrame. The artifact build refuses that whatever "
-                    f"require_complete says: remove that graph break, or capture the "
-                    f"functions the entry calls instead."
                 )
             if summary.uncovered_frames:
                 raise PackageError(
