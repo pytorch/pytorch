@@ -1136,6 +1136,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
 
+        # Slot pool: when SHM_POOL=1 and pin_memory is enabled, create the
+        # fork-inherited coordination primitives (free-list queue + ready
+        # Event) before forking workers.  The slot *size* is auto-measured by
+        # the pin thread from the first batch (no user tuning); workers
+        # ``wait()`` on the Event, then attach to the SharedMemory regions and
+        # pool every CPU tensor — avoiding per-batch /dev/shm fd churn + munmap.
+        if self._pin_memory:
+            from torch.utils.data._utils import shm_pool as _shm_pool
+            if _shm_pool.is_enabled():
+                _n_slots = max(self._prefetch_factor * self._num_workers, 4)
+                _shm_pool.init_coordination(_n_slots)
+
         self._index_queues = []
         self._workers = []
         for i in range(self._num_workers):
