@@ -5444,7 +5444,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
                     x = torch.randn(10)
                     guards_state(foo, ddp_model, x)
                     # foo's guards reach DDP.forward's self.logger, which the
-                    # state drops, so only bar's rebuild against it.
+                    # pickled state drops (as DDP.__getstate__'s does), so its
+                    # guard manager cannot be rebuilt; check the reload via bar.
                     state = guards_state(bar, ddp_model, x)
                     loaded = torch._dynamo.package.load_guard_manager(
                         state, bar.__code__, bar.__globals__
