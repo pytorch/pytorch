@@ -299,6 +299,18 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         b = self.type2test(b"mississippi")
         self.assertEqual(b.count(b"i"), 4)
         self.assertEqual(b.count(b"i", 6), 2)
+    
+    @make_dynamo_test
+    def test_rindex(self):
+        b = self.type2test(b"abcabc")
+
+        self.assertEqual(b.rindex(b"b"), 4)
+        self.assertEqual(b.rindex(b"b", 0, 4), 1)
+
+        with self.assertRaises(ValueError):
+            b.rindex(b"x")
+        with self.assertRaisesRegex(TypeError, "integer or bytes-like object"):
+            b.rindex("b")
 
     @make_dynamo_test
     def test_hex(self):

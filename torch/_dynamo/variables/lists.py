@@ -2350,6 +2350,30 @@ class ByteArrayVariable(VariableTracker):
                 {**kwargs, "not_found_msg": not_found_msg},
             )
 
+    def bytearray_rindex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        check_positional(tx, "rindex", len(args), 1, 3)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+
+        try:
+            return VariableTracker.build(
+                tx, self.data.rindex(*const_args, **const_kwargs)
+            )
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(
+                type(e),
+                tx,
+                args=list(e.args),
+            )
+
     def bytearray_count(
         self,
         tx: "InstructionTranslatorBase",
@@ -2486,6 +2510,7 @@ class ByteArrayVariable(VariableTracker):
 
     tp_methods = {
         "index": Method(bytearray_index),
+        "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
