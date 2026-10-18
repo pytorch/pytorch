@@ -662,6 +662,30 @@ TEST(StaticRuntime, EmbeddingBagWithMixedInt32Int64Input) {
   testStaticRuntime(embedding_bag_default, args);
 }
 
+TEST(StaticRuntime, EmbeddingBagHalfTypesWithAndWithoutWeights) {
+  const std::string embedding_bag = R"JIT(
+    def forward(self, weight: Tensor, indices: Tensor, offsets: Tensor, per_sample_weights: Tensor):
+        unweighted, _, _, _ = torch.embedding_bag(weight, indices, offsets)
+        weighted, _, _, _ = torch.embedding_bag(
+            weight, indices, offsets, False, 0, False, per_sample_weights)
+        return unweighted.clone(), weighted.clone()
+  )JIT";
+
+  const auto indices = torch::tensor({0, 2, 1, 3}, at::ScalarType::Long);
+  const auto offsets = torch::tensor({0, 2}, at::ScalarType::Long);
+  const auto make_args = [&](const at::ScalarType dtype) {
+    const auto options = torch::TensorOptions().dtype(dtype);
+    const auto weight = torch::arange(1, 33, options).reshape({4, 8}) / 8;
+    const auto per_sample_weights =
+        torch::tensor({0.5, 1.5, 2.0, 0.25}, options);
+    return std::vector<IValue>{
+        weight, indices, offsets, per_sample_weights};
+  };
+
+  testStaticRuntime(embedding_bag, make_args(at::ScalarType::Half));
+  testStaticRuntime(embedding_bag, make_args(at::ScalarType::BFloat16));
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
