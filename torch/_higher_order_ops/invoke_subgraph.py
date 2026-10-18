@@ -343,9 +343,19 @@ class InvokeSubgraphHOP(HigherOrderOperator):
                 f"identifier must be None or a string, got {type(identifier)}"
             )
 
+        # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
+        # cached GraphModule is unpickled (_deserialize_graph_module).
         if not all(
             isinstance(
-                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+                o,
+                (
+                    torch.Tensor,
+                    int,
+                    torch.SymInt,
+                    torch.Generator,
+                    FakeScriptObject,
+                    torch.fx.Proxy,
+                ),
             )
             or is_custom_class(type(o))
             for o in operands
@@ -694,6 +704,8 @@ def get_output_metadata(subgraph, *operands):
     output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
     output_metadata.num_fw_outs = len(output_node.args[0])
 
+    tensor_out_idxs = []
+
     for idx, output_arg in enumerate(output_node.args[0]):
         if not isinstance(output_arg, torch.fx.Node):
             if isinstance(output_arg, int):
@@ -713,13 +725,22 @@ def get_output_metadata(subgraph, *operands):
             output_metadata.indexes_with_symint.add(idx)
             output_metadata.indexes_with_no_grad.add(idx)
         elif isinstance(val, torch.Tensor):
-            # Check if tensor requires grad from metadata
-            if hasattr(val, "requires_grad") and not val.requires_grad:
-                output_metadata.indexes_with_no_grad.add(idx)
+            tensor_out_idxs.append(idx)
         else:
             # Non-tensor, non-symint (shouldn't happen but be safe)
             output_metadata.indexes_with_no_grad.add(idx)
 
+    # meta["val"] is recorded below autograd, so its requires_grad can't be
+    # trusted (see Note [invariants for node meta 'val']). Which tensor outputs
+    # need a grad is only knowable by execution, and only matters if some
+    # operand requires grad.
+    if tensor_out_idxs and any(
+        isinstance(operand, torch.Tensor) and operand.requires_grad
+        for operand in operands
+    ):
+        return _get_output_metadata_by_execution(subgraph, *operands)
+
+    output_metadata.indexes_with_no_grad.update(tensor_out_idxs)
     return output_metadata
 
 
