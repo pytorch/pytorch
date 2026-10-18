@@ -330,7 +330,12 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 runs.append(1)
                 return _installed(*args)
 
-            self.addCleanup(setattr, module, backend_id, installed)
+            def restore(backend_id=backend_id, run=run, installed=installed):
+                # uninstall() may already have removed the name; leave it gone.
+                if vars(module).get(backend_id) is run:
+                    setattr(module, backend_id, installed)
+
+            self.addCleanup(restore)
             setattr(module, backend_id, run)
         return runs
 
@@ -508,9 +513,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
 
-    def _save_and_reload_eager_package(self, fn, package):
+    def _reload_eager_package(self, fn, package, backends):
         ctx = DiskDynamoStore()
-        for backend_id, backend in package.cached_backends.items():
+        for backend_id, backend in backends.items():
             ctx.record_eager_backend(backend_id, backend)
         ctx.save_package(package, self.path())
         torch._dynamo.reset()
@@ -530,7 +535,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
         entry = package._codes[_dispatch.__code__]
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
-        package, backends = self._save_and_reload_eager_package(_dispatch, package)
+        # A reloaded package caches no backends, so keep the captured ones.
+        eager = dict(package.cached_backends)
+        package, backends = self._reload_eager_package(_dispatch, package, eager)
 
         # A plain install() (DynamoCache's) takes no hold for the flag: a miss
         # still reaches the callback.
@@ -547,7 +554,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         # the miss eagerly; without the frame in eager_codes it refuses.
         for eager_codes in ([_dispatch.__code__], []):
             torch._dynamo.reset()
-            package, backends = self._save_and_reload_eager_package(_dispatch, package)
+            package, backends = self._reload_eager_package(_dispatch, package, eager)
             context = torch._dynamo.optimize(package=package)
             context.callback = _RefuseRecompileCallback(context.callback, eager_codes)
             compiled_fn = context(_dispatch)
