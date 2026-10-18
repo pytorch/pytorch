@@ -32,6 +32,7 @@ import io
 import itertools
 import logging
 import math
+import pickle
 import sys
 import textwrap
 import traceback
@@ -5268,7 +5269,9 @@ class GuardsStatePickler(FunctionPicklerBase):
             # is often a toplevel module.
             if is_ddp:
                 # Not DDP.__getstate__: it refuses a non-default process group,
-                # which only DDP.__setstate__ needs, to rebind it.
+                # which only DDP.__setstate__ needs, to rebind it. Drops the
+                # keys DDP.__getstate__ drops, so keep the two in sync; the
+                # broadcast_buffers it also adds is a property.
                 state = {
                     k: v
                     for k, v in obj.__dict__.items()
@@ -5616,24 +5619,33 @@ def _resolves_by_reference(value: object) -> bool:
 
 
 def _pickles_as_its_own_global(value: object) -> bool:
-    """Whether pickle saves ``value`` as a reference to the module global that
-    is ``value`` itself: its class's ``__reduce__`` returns a name, as for
-    ``typing.List``, which names ``"List"`` in ``typing``."""
+    """Whether pickle's default lookup (``copyreg.dispatch_table``, then
+    ``__reduce_ex__``) saves ``value`` as a reference to the module global that
+    is ``value`` itself, as for ``typing.List``, which reduces to ``"List"``.
+    User objects can raise anywhere in here, which just means no."""
     if isinstance(value, (torch.Tensor, torch.nn.Module)):
         return False
-    if type(value).__reduce__ is object.__reduce__:
-        return False
     try:
-        name = value.__reduce__()
+        cls = type(value)
+        reduce = copyreg.dispatch_table.get(cls)
+        if (
+            reduce is None
+            and cls.__reduce_ex__ is object.__reduce_ex__
+            and cls.__reduce__ is object.__reduce__
+        ):
+            return False
+        name = reduce(value) if reduce else value.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
+        module_name = getattr(value, "__module__", None)
+        if not isinstance(name, str) or not isinstance(module_name, str):
+            return False
+        obj = sys.modules.get(module_name)
+        if obj is None:
+            return False
+        for part in name.split("."):
+            obj = getattr(obj, part, None)
+        return obj is value
     except Exception:
         return False
-    module = sys.modules.get(getattr(value, "__module__", None) or "")
-    if not isinstance(name, str) or module is None:
-        return False
-    obj: object = module
-    for part in name.split("."):
-        obj = getattr(obj, part, None)
-    return obj is value
 
 
 def is_portable_identity_guard(

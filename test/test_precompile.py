@@ -4720,6 +4720,16 @@ def call_dispatch(y, opaque_layers):
 
 def falls_back_on_a_branch(model, x, opaque_layers=0):
     return call_dispatch(model(x), opaque_layers) + 1
+
+
+def falls_back_after_a_break(model, x, opaque_layers=0):
+    # The continuation is reachable from the entry, so the artifact stays
+    # standalone, and its recompile for opaque_layers=1 falls back like dispatch.
+    y = model(x)
+    torch._dynamo.graph_break()
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return y.sin() + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -4942,6 +4952,21 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(
             [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)],
             mode="installed",
+        )
+
+    @skipIfCrossRef
+    def test_a_standalone_artifact_runs_a_continuations_eager_fallback_eagerly(self):
+        fn = self.mod.falls_back_after_a_break
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = torch.relu(self.model.lin(self.x2)).sin().detach()
+        self.assertEqual(compiled, base + 1)
+        self.assertEqual(eager, base)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self._serve_in_fresh_process(
+            [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
         )
 
     @skipIfCrossRef
