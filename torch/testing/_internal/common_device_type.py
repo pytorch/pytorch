@@ -2,6 +2,7 @@
 
 import copy
 import gc
+import importlib.util
 import inspect
 import logging
 import os
@@ -328,26 +329,57 @@ class Capability:
 
     Tests declare requirements with :func:`requires_capabilities`::
 
-        @requires_capabilities(
-            Capability.dtype.fp8, Capability.attention.flash_attention
-        )
+        @requires_capabilities(Capability.dtype.fp8, Capability.distributed.backend)
         def test_foo(self, device): ...
 
     Device test bases declare what they support by overriding
-    :meth:`DeviceTypeTestBase._capabilities` with the same constants as keys.
+    :meth:`DeviceTypeTestBase._capabilities` with a flat mapping from the same
+    constants to predicates. The inner classes only organize the identifiers.
     """
 
     class dtype:
-        """Data type capabilities (fp8, bf16, etc.)."""
+        """Data type capabilities (fp8, bf16, fp64, etc.)."""
 
         fp8 = "dtype.fp8"
         bf16 = "dtype.bf16"
+        fp64 = "dtype.fp64"
 
     class attention:
         """Attention backend capabilities."""
 
         flash_attention = "attention.flash_attention"
         mem_efficient_attention = "attention.mem_efficient_attention"
+
+    class distributed:
+        """Distributed runtime capabilities."""
+
+        backend = "distributed.backend"
+
+    class compile:
+        """Compilation backend capabilities."""
+
+        inductor = "compile.inductor"
+
+
+def _inductor_available_for_device(device_type: str) -> bool:
+    try:
+        if not torch.get_device_module(device_type).is_available():
+            return False
+    except (AttributeError, RuntimeError):
+        return False
+    return importlib.util.find_spec("torch._inductor") is not None
+
+
+def _distributed_backend_available(device_type: str) -> bool:
+    import torch.distributed as dist
+
+    if not dist.is_available():
+        return False
+    try:
+        backend = dist.get_default_backend_for_device(device_type)
+    except (AttributeError, ValueError):
+        return False
+    return dist.is_backend_available(backend)
 
 
 class DeviceTypeTestBase(TestCase):
@@ -423,7 +455,9 @@ class DeviceTypeTestBase(TestCase):
     # declare supported capabilities. This method evaluates the support checks.
     @classmethod
     def get_capabilities(cls) -> dict[str, bool]:
-        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
+        return {
+            key: bool(predicate()) for key, predicate in cls._capabilities().items()
+        }
 
     # Returns a capability map from capability identifier to a callable that
     # determines whether the current device supports it.
@@ -788,12 +822,23 @@ class CPUTestBase(DeviceTypeTestBase):
 
     @classmethod
     def _capabilities(cls):
-        return {
-            Capability.dtype.fp8: lambda: True,
-            Capability.dtype.bf16: lambda: True,
-            Capability.attention.flash_attention: lambda: True,
-            Capability.attention.mem_efficient_attention: lambda: False,
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype.fp8: lambda: True,
+                Capability.dtype.bf16: lambda: True,
+                Capability.dtype.fp64: lambda: True,
+                Capability.attention.flash_attention: lambda: True,
+                Capability.attention.mem_efficient_attention: lambda: False,
+                Capability.distributed.backend: lambda: _distributed_backend_available(
+                    cls.device_type
+                ),
+                Capability.compile.inductor: lambda: _inductor_available_for_device(
+                    cls.device_type
+                ),
+            }
+        )
+        return capabilities
 
 
 class CUDATestBase(DeviceTypeTestBase):
@@ -817,12 +862,23 @@ class CUDATestBase(DeviceTypeTestBase):
             SM80OrLater,
         )
 
-        return {
-            Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
-            Capability.dtype.bf16: lambda: SM80OrLater,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
-            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+                Capability.dtype.bf16: lambda: SM80OrLater,
+                Capability.dtype.fp64: lambda: True,
+                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+                Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                Capability.distributed.backend: lambda: _distributed_backend_available(
+                    cls.device_type
+                ),
+                Capability.compile.inductor: lambda: _inductor_available_for_device(
+                    cls.device_type
+                ),
+            }
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -884,6 +940,22 @@ class MPSTestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
 
     @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype.fp8: lambda: False,
+                Capability.dtype.bf16: lambda: True,
+                Capability.dtype.fp64: lambda: False,
+                Capability.attention.flash_attention: lambda: False,
+                Capability.attention.mem_efficient_attention: lambda: False,
+                Capability.distributed.backend: lambda: False,
+                Capability.compile.inductor: lambda: False,
+            }
+        )
+        return capabilities
+
+    @classmethod
     def get_primary_device(cls):
         return cls.primary_device
 
@@ -917,15 +989,6 @@ class MPSTestBase(DeviceTypeTestBase):
             )
         )
 
-    @classmethod
-    def _capabilities(cls):
-        return {
-            Capability.dtype.fp8: lambda: False,
-            Capability.dtype.bf16: lambda: True,
-            Capability.attention.flash_attention: lambda: False,
-            Capability.attention.mem_efficient_attention: lambda: False,
-        }
-
 
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
@@ -937,12 +1000,24 @@ class XPUTestBase(DeviceTypeTestBase):
             PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
         )
 
-        return {
-            Capability.dtype.fp8: lambda: True,
-            Capability.dtype.bf16: lambda: True,
-            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
-            Capability.attention.mem_efficient_attention: lambda: True,
-        }
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype.fp8: lambda: True,
+                Capability.dtype.bf16: lambda: True,
+                Capability.dtype.fp64: lambda: torch.xpu.is_available()
+                and torch.xpu.get_device_properties().has_fp64,
+                Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+                Capability.attention.mem_efficient_attention: lambda: True,
+                Capability.distributed.backend: lambda: _distributed_backend_available(
+                    cls.device_type
+                ),
+                Capability.compile.inductor: lambda: _inductor_available_for_device(
+                    cls.device_type
+                ),
+            }
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
@@ -974,6 +1049,16 @@ class XPUTestBase(DeviceTypeTestBase):
 class HPUTestBase(DeviceTypeTestBase):
     device_type = "hpu"
     primary_device: ClassVar[str]
+
+    @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        capabilities.update(
+            {
+                Capability.dtype.fp64: lambda: False,
+            }
+        )
+        return capabilities
 
     @classmethod
     def get_primary_device(cls):
