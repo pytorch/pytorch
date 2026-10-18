@@ -1501,8 +1501,10 @@ class DistributedDataParallel(Module, Joinable):
 
     def _picklable_state(self):
         attrs = copy.copy(self.__dict__)
+        # A DDP that delays every parameter's all-reduce never builds a reducer
+        # or logger.
         for name in self._unpicklable_attrs:
-            del attrs[name]
+            attrs.pop(name, None)
         return attrs
 
     def __getstate__(self):
