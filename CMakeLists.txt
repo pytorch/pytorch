@@ -1660,6 +1660,13 @@ if(SKBUILD)
   # headers, etc.) into the torch package.  Previously declared via
   # setup.py package_data.
   include(cmake/PackageData.cmake)
+
+  # setuptools-era top_level.txt; without it importlib.metadata.packages_distributions()
+  # stats every RECORD entry to infer top-level names. Keep in sync with
+  # [tool.scikit-build.wheel] packages in pyproject.toml.
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/top_level.txt" "functorch\ntorch\ntorchgen\n")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/top_level.txt"
+    DESTINATION "${SKBUILD_METADATA_DIR}")
 endif()
 
 include(cmake/PostBuildSteps.cmake)
