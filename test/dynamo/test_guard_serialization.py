@@ -332,6 +332,16 @@ class _SentinelOwner:
 
 
 _NESTED_SENTINEL = _SentinelOwner.Sentinel()
+
+
+class _CountsReduces:
+    calls = 0
+
+    def __reduce__(self):
+        type(self).calls += 1
+        return "_CountsReduces"
+
+
 _MODULE_RAISES = _ModuleRaises()
 _UNHASHABLE_MODULE = _UnhashableModule()
 _torch_add = torch.add
@@ -4063,6 +4073,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
                     buf = io.BytesIO()
                     GuardsStatePickler({id(value): value}, {}, {}, {}, buf).dump(value)
                     self.assertIs(load_guards_state(buf.getvalue()), value)
+
+    def test_identity_check_reduces_only_a_module_global(self):
+        # Reducing runs user code, so an instance that is not one of its
+        # module's globals is refused without it.
+        self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _CountsReduces()))
+        self.assertEqual(_CountsReduces.calls, 0)
 
     def test_class_match_on_a_named_tuple_nested_in_a_class(self):
         def fn(x):
