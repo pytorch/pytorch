@@ -5620,10 +5620,12 @@ def _resolves_by_reference(value: object) -> bool:
 
 
 def _pickles_as_its_own_global(value: object) -> bool:
-    """Whether pickle's default lookup (``copyreg.dispatch_table``, then
-    ``__reduce_ex__``) saves ``value`` as a reference to the module global that
-    is ``value`` itself, as for ``typing.List``, which reduces to ``"List"``.
-    User objects can raise anywhere in here, which just means no."""
+    """Whether ``value``, one of its ``__module__``'s globals, is saved by
+    pickle's default lookup (``copyreg.dispatch_table``, then ``__reduce_ex__``)
+    as a reference to the module global that is ``value`` itself, as for
+    ``typing.List``, which reduces to ``"List"``. Any other value is refused
+    without running its reduction. User objects can raise anywhere in here,
+    which just means no."""
     if isinstance(value, (torch.Tensor, torch.nn.Module)):
         return False
     try:
