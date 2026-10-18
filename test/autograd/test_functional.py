@@ -918,6 +918,19 @@ class TestAutogradFunctional(_AutogradFunctionalHelpers, TestCase):
         y = ctors.randn(3, 5)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
+    # squeeze_ on a LoggingTensor doesn't update the sizes of the wrapper, so
+    # even the reverse-mode Jacobian fails for it
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_vector_matrix_product(self, ctors):
+        # matmul of a 1-D and a 2-D tensor uses squeeze_, whose tangent must
+        # be squeezed as well for the following op to work under forward AD
+        def f(x, y):
+            return (x @ y).exp()
+
+        x = ctors.randn(2)
+        y = ctors.randn(2, 3)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
     @base_and_logging_tensor
     def test_jacobian_vectorize_correctness_multi_input_multi_output(self, ctors):
         def f(x, y):

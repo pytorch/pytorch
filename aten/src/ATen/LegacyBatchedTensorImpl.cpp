@@ -19,7 +19,10 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   set_storage_access_should_throw();
   set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
+  refreshTensorMetadata();
+}
 
+void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
@@ -32,6 +35,14 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   storage_offset_ = value_.storage_offset();
   refresh_numel();
   refresh_contiguous();
+}
+
+void BatchedTensorImpl::unsafe_set_value(Tensor value, BatchDims bdims) {
+  TORCH_INTERNAL_ASSERT(value.defined());
+  value_ = std::move(value);
+  bdims_ = std::move(bdims);
+  checkInvariants();
+  refreshTensorMetadata();
 }
 
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
