@@ -31,6 +31,7 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
 )
 from torch._inductor.utils import (
+    _get_launch_params_file,
     fresh_cache,
     run_and_get_code,
     triton_version_uses_attrs_dict,
@@ -70,7 +71,7 @@ requires_cuda_tma = unittest.skipIf(
 
 @contextlib.contextmanager
 def _dump_launch_params(value: str):
-    launch_params_file = f"{os.path.abspath(sys.argv[0])}.launch_params"
+    launch_params_file = _get_launch_params_file()
     if value == "1" and os.path.exists(launch_params_file):
         os.remove(launch_params_file)
     with mock.patch.dict(os.environ, {"TORCHINDUCTOR_DUMP_LAUNCH_PARAMS": value}):
