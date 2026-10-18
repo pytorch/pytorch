@@ -567,15 +567,15 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   // weights, dst
   auto w = *weight_;
   auto dst_dims = {x.get_dim(0), w.get_dim(1)};
-  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/q_params.scale);
-  const ideep::scale_t& weights_scales = w.get_scale();
+  const std::vector<float>& src_scales = std::vector<float>(1, 1.0/q_params.scale);
+  const std::vector<float>& weights_scales = w.get_scale();
   // Compute -> f32
   // Use ideep::matmul_forward instead of ideep::inner_product_forward,
   // since the latter does not support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::empty(dst_dims, input.options().dtype(at::kFloat));
   if (output.numel() == 0) return output;
-  ideep::tensor y({dst_dims, ideep::tensor::data_type::f32,
+  ideep::tensor y({dst_dims, dnnl::memory::data_type::f32,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -596,9 +596,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/true>(
           params, x, w, b, y,
-          src_scales, weights_scales, ideep::scale_t(),
-          src_zero_point, ideep::zero_point_t(), 1.0f, 1.0f, op_attr,
-          ideep::tensor::data_type::f32, std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
+          src_scales, weights_scales, std::vector<float>(),
+          src_zero_point, std::vector<int32_t>(), 1.0f, 1.0f, op_attr,
+          dnnl::memory::data_type::f32, std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
       get_cache() = LinearPrimitiveCache(cache_key, params);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
@@ -607,8 +607,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     ideep::matmul_forward::compute(params, x, w, b, y, src_scales, src_zero_point);
   } else {
     ideep::matmul_forward::compute(x, w, b, y,
-                                   src_scales, weights_scales, ideep::scale_t(),
-                                   src_zero_point, ideep::zero_point_t(),
+                                   src_scales, weights_scales, std::vector<float>(),
+                                   src_zero_point, std::vector<int32_t>(),
                                    1.0f, 1.0f, op_attr);
   }
   auto out_sizes = input.sizes().vec();
@@ -683,15 +683,15 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   static tensor::desc empty_tensor_desc;
 
   // Create matmul primitive
-  auto src_dtype = ideep::data_type::f32;
-  auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
+  auto src_dtype = dnnl::memory::data_type::f32;
+  auto src_desc = tensor::desc(src_dims, src_dtype, dnnl::memory::format_tag::any);
   // onednn does not support f32f16f32 matmul, so we get primitive with f32 weight desc
   // weight is stored in f16 and reordered to f32 below by `reorder_if_differ_in`
-  auto weights_desc = tensor::desc(packed_weight.get_dims(), ideep::data_type::f32, ideep::format_tag::any);
+  auto weights_desc = tensor::desc(packed_weight.get_dims(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::any);
   auto dst_dtype = dst.get_data_type();
-  auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
+  auto dst_desc = tensor::desc(dst_dims, dst_dtype, dnnl::memory::format_tag::any);
   auto bias_desc = with_bias ?
-      tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
+      tensor::desc(onednn_bias.value().get_dims(), dnnl::memory::data_type::f32, dnnl::memory::format_tag::any) :
       empty_tensor_desc;
   // Get op attr for primitive
   auto op_attr = relu_fused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
@@ -707,7 +707,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
 
   // Prepare args and execute primitive
   tensor scratchpad(primitive_desc.scratchpad_desc());
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
