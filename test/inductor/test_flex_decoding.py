@@ -2253,23 +2253,75 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
-    @common_utils.parametrize("q_seq_len", [17, 32, 64, 127])
-    def test_gqa_default_block_m_fits_sparse_q_block(self, q_seq_len, device):
-        # The default BLOCK_M tiles GQA-folded rows (q_seq_len * 8 > 128 here), but
-        # each tile covers only BLOCK_M // 8 query positions, which fit in one
-        # 128-row sparse Q block.
-        def mask_mod(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
+    @skip_on_cpu
+    @common_utils.parametrize(
+        "q_seq_len,num_kv_heads,block_size,pinned_block_m",
+        [
+            (17, 4, 128, None),
+            (32, 4, 128, None),
+            (64, 4, 128, None),
+            (127, 4, 128, None),
+            # 16-row sparse Q blocks, as in the vLLM integration: tiles span 4 sparse rows.
+            (64, 4, 16, None),
+            (64, 8, 16, None),
+            # A pinned BLOCK_M the old check rejected: 256 rows / 8 heads = 32 positions.
+            (32, 4, 128, 256),
+        ],
+    )
+    def test_gqa_block_m_fits_sparse_q_block(
+        self, q_seq_len, num_kv_heads, block_size, pinned_block_m, device
+    ):
+        # The decode kernel tiles GQA-folded rows: each BLOCK_M tile covers
+        # BLOCK_M // (Hq // Hkv) query positions, which must fit in one sparse Q block.
+        kv_seq_len = 256
+        offset = kv_seq_len - q_seq_len
 
-        num_q_heads, num_kv_heads, head_dim = 32, 4, 64
-        mask = create_block_mask(mask_mod, 1, None, q_seq_len, q_seq_len, device=device)
+        def mask_mod(b, h, q_idx, kv_idx):
+            # Causal with an offset, so every query row reads a different KV range.
+            return q_idx + offset >= kv_idx
+
+        num_q_heads, head_dim = 32, 64
+        mask = create_block_mask(
+            mask_mod,
+            1,
+            None,
+            q_seq_len,
+            kv_seq_len,
+            device=device,
+            BLOCK_SIZE=block_size,
+        )
         q = torch.randn(1, num_q_heads, q_seq_len, head_dim, device=device)
-        k = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
-        v = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
-        kwargs = dict(block_mask=mask, enable_gqa=True)
-        eager = flex_attention(q, k, v, **kwargs)
-        out = torch.compile(flex_attention)(q, k, v, **kwargs)
+        k = torch.randn(1, num_kv_heads, kv_seq_len, head_dim, device=device)
+        v = torch.randn(1, num_kv_heads, kv_seq_len, head_dim, device=device)
+        eager = flex_attention(q, k, v, block_mask=mask, enable_gqa=True)
+        kernel_options = (
+            {} if pinned_block_m is None else {"fwd_BLOCK_M": pinned_block_m}
+        )
+        out, code = run_and_get_code(
+            torch.compile(flex_attention),
+            q,
+            k,
+            v,
+            block_mask=mask,
+            enable_gqa=True,
+            kernel_options=kernel_options,
+        )
+        # Ensure the decode kernel ran: only it tiles GQA-folded rows.
+        FileCheck().check("BLOCK_M_PER_HQ").run(code[0])
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_gqa_block_m_not_multiple_of_shared_heads_raises(self, device):
+        q = torch.randn(1, 32, 8, 64, device=device)
+        k = torch.randn(1, 4, 8, 64, device=device)
+        v = torch.randn(1, 4, 8, 64, device=device)
+        with self.assertRaisesRegex(
+            InductorError, "BLOCK_M must be a multiple of GQA_SHARED_HEADS"
+        ):
+            torch.compile(flex_attention)(
+                q, k, v, enable_gqa=True, kernel_options={"fwd_BLOCK_M": 4}
+            )
 
     @supported_platform
     @parametrize_device_dtype("dtypes_fast")

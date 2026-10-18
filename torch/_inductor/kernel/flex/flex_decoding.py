@@ -309,22 +309,27 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
+    # Mark SPARSE_Q_BLOCK_SIZE as static: the default BLOCK_M below depends on it.
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     kernel_options.setdefault(
         "BLOCK_M",
         (
             # m
             # if V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 0))
             # else  # Always use a BLOCK_M > 16 before Triton fix https://github.com/triton-lang/triton/pull/4061 is in pin
-            # Cap at 128 folded rows (or GQA_SHARED_HEADS if larger) and use more M blocks:
-            # bigger tiles overflow shared memory in fp32 and run 5-8x slower in bf16.
-            min(
-                max(
+            # BLOCK_M tiles GQA-folded rows. Cap it at 128 rows (or GQA_SHARED_HEADS if larger):
+            # bigger tiles overflow shared memory in fp32 and run 5-8x slower in bf16. Also cap
+            # its BLOCK_M // GQA_SHARED_HEADS query positions at the largest power of two that
+            # divides SPARSE_Q_BLOCK_SIZE, so every tile reads one sparse Q row.
+            max(
+                min(
                     next_power_of_2(
                         V.graph.sizevars.optimization_hint(seq_len_q) * gqa_shared_heads
                     ),
-                    1 if torch.xpu.is_available() else 16,
+                    max(128, gqa_shared_heads),
+                    gqa_shared_heads * (SPARSE_Q_BLOCK_SIZE & -SPARSE_Q_BLOCK_SIZE),
                 ),
-                max(128, V.graph.sizevars.optimization_hint(gqa_shared_heads)),
+                1 if torch.xpu.is_available() else 16,
             )
         ),
     )
@@ -352,7 +357,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
-    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
 
     original_kernel_options = kernel_options.copy()
