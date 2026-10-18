@@ -5000,9 +5000,8 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(eager, base)
         self.assertEqual(len(summary.eager_fallbacks), 1, summary)
         self.assertTrue(summary.complete, summary)
-        self._serve_in_fresh_process(
-            [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
-        )
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1])
 
     @skipIfCrossRef
     def test_a_standalone_artifact_runs_an_entrys_eager_fallback_eagerly(self):

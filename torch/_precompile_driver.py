@@ -433,7 +433,6 @@ def _build_multigraph_forward():
 
     import torch
     from torch._dynamo.aot_compile import bind_locals
-    from torch._dynamo.eval_frame import _warn_eager_fallback_miss
     from torch._dynamo.output_graph import get_builtins_dict
     from torch._dynamo.package import (
         load_guard_manager,
@@ -469,6 +468,8 @@ def _build_multigraph_forward():
             f"guard state, which is torch-build-locked. Regenerate the artifact "
             f"under the serving torch."
         )
+    # After the version checks: a torch without it fails them cleanly first.
+    from torch._dynamo.eval_frame import _warn_eager_fallback_miss
 
     def _import(module_name):
         if module_name == "__main__":

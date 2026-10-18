@@ -1949,7 +1949,11 @@ class PrecompileSession(Generic[_P, _R]):
                 and (code.bypassed or (code.guarded_codes and key in lossy))
             ):
                 codes[i] = dataclasses.replace(
-                    code, guarded_codes=[], bypassed=False, skip_recursive=True
+                    code,
+                    guarded_codes=[],
+                    bypassed=False,
+                    skip_recursive=True,
+                    eager_fallback=False,
                 )
                 eager.add(key)
         return dataclasses.replace(entry, codes=codes), frozenset(eager)
