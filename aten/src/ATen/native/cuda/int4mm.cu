@@ -137,33 +137,6 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
 template<typename T, uint32_t Rank>
 using VecT = T __attribute__((ext_vector_type(Rank)));
 
-// Device-pass constants for the matrix core tile. Host code uses the runtime
-// warp size instead, since one build serves both wave sizes.
-// RDNA3 (gfx11) wave32: wmma_f32_16x16x16_bf16, each lane holds a full 16-value
-// A row (B column) and the two half-waves carry the same A/B data; 8 f32 C
-// values per lane, two int32 of packed int4 per lane per k-tile.
-// RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16, 8 bf16 A/B values and 8 f32 C
-// values per lane, one int32 of packed int4 per lane per k-tile.
-// CDNA5 (gfx1250) wave32: the gfx12 operand layout, consumed two k-tiles at a
-// time by wmma_f32_16x16x32_bf16.
-// CDNA wave64: mfma_f32_16x16x16bf16_1k, 4 A/B values and 4 C values per lane,
-// one int32 of packed int4 per lane per two k-tiles.
-// kTileLanes is the number of lanes holding distinct A/B data of one 16x16
-// tile; a lane holds 16 * 16 / kTileLanes values of each k-tile.
-#if defined(__GFX11__) || defined(__GFX12__)
-#define INT4MM_ROCM_WMMA_W32 1
-constexpr int32_t kWarpSize = 32;
-using ROCmCAccum = VecT<float, 8>;
-#else
-constexpr int32_t kWarpSize = 64;
-using ROCmCAccum = VecT<float, 4>;
-#endif
-#if defined(__GFX11__)
-constexpr int32_t kTileLanes = 16;
-#else
-constexpr int32_t kTileLanes = kWarpSize;
-#endif
-
 static bool isCDNA2orLater(int index) {
     return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950", "gfx1250"}, index);
 }
@@ -176,9 +149,6 @@ static bool isRDNA4(int index) {
   return at::detail::getCUDAHooks().isGPUArch({"gfx1200", "gfx1201"}, index);
 }
 
-#else
-constexpr int32_t kWarpSize = 32;
-constexpr int32_t kTileLanes = 32;
 #endif
 
 // f16 vector types
@@ -229,62 +199,287 @@ struct __align__(16) bf16x2x4 {
 };
 
 struct __align__(16) bf16x2x4_u32 {
-#if defined(INT4MM_ROCM_WMMA_W32)
-  VecT<short, 8> val;
-#elif defined(USE_ROCM)
+#if defined(USE_ROCM)
   VecT<short, 4> val[2];
 #else
   uint32_t vals[4];
 #endif
 };
 
-struct __align__(8) bf16x2x2_u32 {
-#if defined(USE_ROCM)
-  VecT<short, 4> val;
-#else
-  uint32_t vals[2];
-#endif
-};
-
-#if defined(__GFX11__)
-// One k-tile of the A operand per lane: the full 16-value row
-struct __align__(32) bf16x2x8_u32 {
-  VecT<short, 16> val;
-};
-using ROCmATile = bf16x2x8_u32;
-
-// One k-tile of the B operand per lane: the two dequantized int32 words of the
-// column, k ascending
-inline __device__ VecT<short, 16> rocmBTile(const bf16x2x4_u32& lo, const bf16x2x4_u32& hi) {
-  return __builtin_shufflevector(lo.val, hi.val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-}
-#elif defined(INT4MM_ROCM_WMMA_W32)
-// One k-tile of the A operand per lane
-using ROCmATile = bf16x2x4_u32;
-
-#if defined(__gfx1250__)
-// gfx1250 has no 16x16x16 bf16 WMMA; its 16x16x32 WMMA takes a lane's gfx12
-// operands of two consecutive k-tiles as values 0-7 and 8-15
-inline __device__ VecT<float, 8> rocmWmmaK32(
-    const bf16x2x4_u32& a0,
-    const bf16x2x4_u32& a1,
-    const bf16x2x4_u32& b0,
-    const bf16x2x4_u32& b1,
-    const VecT<float, 8>& c) {
-  using BF16x16 = VecT<__bf16, 16>;
-  const auto a = __builtin_shufflevector(a0.val, a1.val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-  const auto b = __builtin_shufflevector(b0.val, b1.val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-  return __builtin_amdgcn_wmma_f32_16x16x32_bf16(
-      false, __builtin_bit_cast(BF16x16, a), false, __builtin_bit_cast(BF16x16, b), 0, c, false, false);
-}
-#endif
-#elif defined(USE_ROCM)
-using ROCmATile = bf16x2x2_u32;
-#endif
-
 struct __align__(4) bf16x2x1_u32 {
   uint32_t vals[1];
 };
+
+#if defined(USE_ROCM)
+// Matrix-core traits, one struct per ROCm architecture family. Each describes
+// how a 16x16 tile of A, B and C is spread over the lanes of a wave and which
+// instruction multiplies it; the loaders and the kernel are written once
+// against this interface. kTileLanes is the number of lanes holding distinct
+// A/B data of a tile; a lane holds 16 * 16 / kTileLanes values of each k-tile.
+// BWord is one dequantized int32 of packed int4 (8 bf16); the B operand of a
+// k-tile is built from the lane's BWords by bTile().
+
+// CDNA (gfx9) wave64: mfma_f32_16x16x16bf16_1k. 4 A/B values and 4 C values per
+// lane; one int32 of packed int4 covers two k-tiles.
+struct RocmMmaCdna {
+  static constexpr int32_t kWarpSize = 64;
+  static constexpr int32_t kTileLanes = 64;
+  struct __align__(8) ATile {
+    VecT<short, 4> val;
+  };
+  using BWord = bf16x2x4_u32;
+  using CAccum = VecT<float, 4>;
+  // C value j of a lane is row cRowBase(lane) + j * kCRowStride of column
+  // lane % 16
+  static constexpr int32_t kCValues = 4;
+  static constexpr int32_t kCRowStride = 1;
+  static __device__ int32_t cRowBase(int32_t laneId) {
+    return (laneId / 16) * 4;
+  }
+
+  // Offsets into the [n][k / 2] uint8 input of the 4 bytes lane t packs into
+  // its int32 word w: 2 bytes from each of the word's two k-tiles (8 bytes apart)
+  static __device__ void packKs(uint32_t t, int32_t w, int32_t kBase0, int32_t ks[4]) {
+    ks[0] = kBase0 + (t / 16) * 2;
+    ks[1] = ks[0] + 1;
+    ks[2] = kBase0 + 8 + (t / 16) * 2;
+    ks[3] = ks[2] + 1;
+  }
+
+  static __device__ VecT<short, 4> bTile(const BWord* words, int kTile) {
+    return words[kTile / 2].val[kTile % 2];
+  }
+
+  // Workaround for ROCm compiler bug where __builtin_amdgcn_is_invocable
+  // incorrectly reports mfma_f32_16x16x16bf16_1k as available on gfx908.
+  // Targets without MFMA (gfx10, and amdgcnspirv run on such a GPU) end here.
+  static __device__ bool supported() {
+#if defined(__gfx908__)
+    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on gfx908\n");
+    return false;
+#else
+    if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+      printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+      return false;
+    }
+    return true;
+#endif
+  }
+
+  // Partial sums are added per element, and the cross-warp reduction goes
+  // through float4 in shared memory; the vector forms schedule worse here
+  using ReduceAccum = float4;
+  static __device__ void accumulate(CAccum& c, const CAccum& v) {
+    c[0] += v[0];
+    c[1] += v[1];
+    c[2] += v[2];
+    c[3] += v[3];
+  }
+  static __device__ void storeReduce(ReduceAccum& r, const CAccum& c) {
+    r.x = c[0];
+    r.y = c[1];
+    r.z = c[2];
+    r.w = c[3];
+  }
+  static __device__ void addReduce(CAccum& c, const ReduceAccum& r) {
+    c[0] += r.x;
+    c[1] += r.y;
+    c[2] += r.z;
+    c[3] += r.w;
+  }
+
+  // Multiplies k-tiles kTile and kTile + 1 into cTmp[0] and cTmp[1]
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+#if !defined(__gfx908__)
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
+        cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a[kTile + k].val, bTile(words, kTile + k), cTmp[k], 0, 0, 0);
+      }
+    }
+#endif
+  }
+};
+
+// RDNA4 (gfx12) wave32: wmma_f32_16x16x16_bf16. 8 A/B values and 8 C values per
+// lane; one int32 of packed int4 per k-tile.
+struct RocmMmaGfx12 {
+  static constexpr int32_t kWarpSize = 32;
+  static constexpr int32_t kTileLanes = 32;
+  struct __align__(16) ATile {
+    VecT<short, 8> val;
+  };
+  struct __align__(16) BWord {
+    VecT<short, 8> val;
+  };
+  using CAccum = VecT<float, 8>;
+  static constexpr int32_t kCValues = 8;
+  static constexpr int32_t kCRowStride = 1;
+  static __device__ int32_t cRowBase(int32_t laneId) {
+    return (laneId / 16) * 8;
+  }
+
+  static __device__ void packKs(uint32_t t, int32_t w, int32_t kBase0, int32_t ks[4]) {
+    ks[0] = kBase0 + (t / 16) * 4;
+    ks[1] = ks[0] + 1;
+    ks[2] = ks[0] + 2;
+    ks[3] = ks[0] + 3;
+  }
+
+  static __device__ VecT<short, 8> bTile(const BWord* words, int kTile) {
+    return words[kTile].val;
+  }
+
+  using ReduceAccum = CAccum;
+  static __device__ void accumulate(CAccum& c, const CAccum& v) {
+    c += v;
+  }
+  static __device__ void storeReduce(ReduceAccum& r, const CAccum& c) {
+    r = c;
+  }
+  static __device__ void addReduce(CAccum& c, const ReduceAccum& r) {
+    c += r;
+  }
+
+  static __device__ bool supported() {
+    return true;
+  }
+
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a[kTile + k].val, bTile(words, kTile + k), cTmp[k]);
+    }
+  }
+};
+
+// CDNA5 (gfx1250) wave32: the gfx12 layout. There is no 16x16x16 bf16 WMMA; the
+// 16x16x32 WMMA takes a lane's operands of two consecutive k-tiles as values
+// 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
+struct RocmMmaGfx1250 : RocmMmaGfx12 {
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+    using BF16x16 = VecT<__bf16, 16>;
+    const auto aPair = __builtin_shufflevector(a[kTile].val, a[kTile + 1].val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    const auto bPair = __builtin_shufflevector(
+        bTile(words, kTile), bTile(words, kTile + 1), 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    cTmp[0] = __builtin_amdgcn_wmma_f32_16x16x32_bf16(
+        false, __builtin_bit_cast(BF16x16, aPair), false, __builtin_bit_cast(BF16x16, bPair), 0, cTmp[0], false, false);
+  }
+};
+
+// RDNA3 (gfx11) wave32: wmma_f32_16x16x16_bf16. Each lane holds the full
+// 16-value A row (B column); the two half-waves carry identical A/B data and
+// each computes its own 8 C rows. Two int32 of packed int4 per k-tile.
+struct RocmMmaGfx11 {
+  static constexpr int32_t kWarpSize = 32;
+  static constexpr int32_t kTileLanes = 16;
+  struct __align__(32) ATile {
+    VecT<short, 16> val;
+  };
+  struct __align__(16) BWord {
+    VecT<short, 8> val;
+  };
+  using CAccum = VecT<float, 8>;
+  static constexpr int32_t kCValues = 8;
+  // Every other row of one column, from row laneId / 16
+  static constexpr int32_t kCRowStride = 2;
+  static __device__ int32_t cRowBase(int32_t laneId) {
+    return laneId / 16;
+  }
+
+  // Word w % 2 of a k-tile holds k values 8 * (w % 2) .. + 7 of the column
+  static __device__ void packKs(uint32_t t, int32_t w, int32_t kBase0, int32_t ks[4]) {
+    ks[0] = kBase0 + (w % 2) * 4;
+    ks[1] = ks[0] + 1;
+    ks[2] = ks[0] + 2;
+    ks[3] = ks[0] + 3;
+  }
+
+  // The column's two dequantized words, k ascending
+  static __device__ VecT<short, 16> bTile(const BWord* words, int kTile) {
+    return __builtin_shufflevector(
+        words[kTile * 2].val, words[kTile * 2 + 1].val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+  }
+
+  using ReduceAccum = CAccum;
+  static __device__ void accumulate(CAccum& c, const CAccum& v) {
+    c += v;
+  }
+  static __device__ void storeReduce(ReduceAccum& r, const CAccum& c) {
+    r = c;
+  }
+  static __device__ void addReduce(CAccum& c, const ReduceAccum& r) {
+    c += r;
+  }
+
+  static __device__ bool supported() {
+    return true;
+  }
+
+  static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
+#pragma unroll
+    for (int k = 0; k < 2; ++k) {
+      cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[kTile + k].val, bTile(words, kTile + k), cTmp[k]);
+    }
+  }
+};
+
+#if defined(__GFX9__)
+using RocmMma = RocmMmaCdna;
+#elif defined(__GFX11__)
+using RocmMma = RocmMmaGfx11;
+#elif defined(__gfx1250__)
+using RocmMma = RocmMmaGfx1250;
+#elif defined(__GFX12__)
+using RocmMma = RocmMmaGfx12;
+#else
+// The host pass (it uses the runtime warp size), gfx10 (no matrix cores;
+// rejected by the host gate) and amdgcnspirv (no gfx family macro) keep the
+// wave64 MFMA kernel, which is guarded at run time by supported().
+using RocmMma = RocmMmaCdna;
+#endif
+
+constexpr int32_t kWarpSize = RocmMma::kWarpSize;
+constexpr int32_t kTileLanes = RocmMma::kTileLanes;
+using MmaATile = RocmMma::ATile;
+using MmaBWord = RocmMma::BWord;
+using MmaCAccum = RocmMma::CAccum;
+using MmaReduceAccum = RocmMma::ReduceAccum;
+#else
+constexpr int32_t kWarpSize = 32;
+constexpr int32_t kTileLanes = 32;
+using MmaATile = bf16x2x4_u32;
+using MmaBWord = bf16x2x4_u32;
+using MmaCAccum = float4;
+using MmaReduceAccum = float4;
+#endif
+
+inline __device__ void accumulate(MmaCAccum& c, const MmaCAccum& v) {
+#if defined(USE_ROCM)
+  RocmMma::accumulate(c, v);
+#else
+  c.x += v.x;
+  c.y += v.y;
+  c.z += v.z;
+  c.w += v.w;
+#endif
+}
+
+inline __device__ void storeReduce(MmaReduceAccum& r, const MmaCAccum& c) {
+#if defined(USE_ROCM)
+  RocmMma::storeReduce(r, c);
+#else
+  r = c;
+#endif
+}
+
+inline __device__ void addReduce(MmaCAccum& c, const MmaReduceAccum& r) {
+#if defined(USE_ROCM)
+  RocmMma::addReduce(c, r);
+#else
+  accumulate(c, r);
+#endif
+}
 
 template <typename T, int N>
 struct __align__(sizeof(T) * N) VectorType {
@@ -394,21 +589,14 @@ struct ALayout_RM {
       int32_t kTiles,
       int32_t kTileStart,
       int32_t laneId,
+      MmaATile out[KTilesToLoad]) {
 #if defined(USE_ROCM)
-      ROCmATile out[KTilesToLoad]
-#else
-      bf16x2x4_u32 out[KTilesToLoad]
-#endif
-  ) {
-#if defined(USE_ROCM)
-#if defined(__GFX11__)
-    // The two half-waves hold the same A data
-    laneId %= kTileLanes;
-#endif
-    // Each lane holds kAValuesPerLane consecutive k values of one row: 4 for
-    // wave64 MFMA, 8 for gfx12 WMMA, the full 16 for gfx11 WMMA
+    if constexpr (kTileLanes < kWarpSize) {
+      // Lanes beyond kTileLanes hold copies of the same A data
+      laneId %= kTileLanes;
+    }
+    // Each lane holds kAValuesPerLane consecutive k values of one row
     constexpr int32_t kAValuesPerLane = kMTileSize * kKTileSize / kTileLanes;
-    using ALaneVec = decltype(ROCmATile::val);
     const auto mLane = mTile * kMTileSize + (laneId % kMTileSize);
     const auto kLane = kTileStart * kKTileSize + (laneId / kMTileSize) * kAValuesPerLane;
 #else
@@ -431,6 +619,9 @@ struct ALayout_RM {
 #pragma unroll
     for (int i = 0; i < KTilesToLoad; ++i) {
 #if defined(USE_ROCM)
+      // Per tile, into the struct member: this keeps each zero fill next to
+      // its load in the k loop; hoisting either delays the next loads on CDNA
+      using ALaneVec = decltype(MmaATile::val);
       out[i].val = m0InBounds ? *((const ALaneVec*)(aPtr + i * kKTileSize)) : ALaneVec{};
 #else
       out[i].vals[0] = m0InBounds
@@ -459,28 +650,20 @@ struct ALayout_RM {
       int32_t nOutTiles,
       int32_t nTile,
       int32_t laneId,
-#if defined(INT4MM_ROCM_WMMA_W32)
-      const ROCmCAccum& out
-#else
-      const float4& out
-#endif
-  ) {
+      const MmaCAccum& out) {
     static_assert(ReduceType == KReductionType::None);
 
     if constexpr (ReduceType == KReductionType::None) {
-#if defined(__GFX11__)
-      // Each lane holds every other row of one column, from row laneId / 16
-      constexpr int kCRowStride = 2;
-      const int outRow = mTile * kMTileSize + (laneId / kNTileSize);
+#if defined(USE_ROCM)
+      constexpr int kCRowStride = RocmMma::kCRowStride;
+      const int outRow = mTile * kMTileSize + RocmMma::cRowBase(laneId);
       const int outCol = nTile * kNTileSize + (laneId % kNTileSize);
-#elif defined(INT4MM_ROCM_WMMA_W32)
-      // Each lane holds 8 consecutive rows of one column
-      constexpr int kCRowStride = 1;
-      const int outRow = mTile * kMTileSize + (laneId / kNTileSize) * 8;
-      const int outCol = nTile * kNTileSize + (laneId % kNTileSize);
-#elif defined(USE_ROCM)
-      const int outRow = mTile * kMTileSize + (laneId / kNTileSize) * 4;
-      const int outCol = nTile * kNTileSize + (laneId % kNTileSize);
+      auto cPtr = reinterpret_cast<__nv_bfloat16*>(C) + outRow * n + outCol;
+#pragma unroll
+      for (int j = 0; j < RocmMma::kCValues; ++j) {
+        if ((outRow + j * kCRowStride) < m)
+          cPtr[j * kCRowStride * n] = __float2bfloat16(out[j]);
+      }
 #else
       // sum.x / sum.y are written at
       // [laneId / 4], [(laneId % 4) * 2, (laneId % 4) * 2 + 1]
@@ -489,27 +672,10 @@ struct ALayout_RM {
       // i.e., same columns, different row.
       const int outRow = mTile * kMTileSize + (laneId / 4);
       const int outCol = nTile * kNTileSize + (laneId % 4) * 2;
-#endif
 
       // Pointer where sum.x / sum.y is written
       auto cPtr = reinterpret_cast<__nv_bfloat16*>(C) + outRow * n + outCol;
 
-#if defined(INT4MM_ROCM_WMMA_W32)
-#pragma unroll
-      for (int j = 0; j < 8; ++j) {
-        if ((outRow + j * kCRowStride) < m)
-          cPtr[j * kCRowStride * n] = __float2bfloat16(out[j]);
-      }
-#elif defined(USE_ROCM)
-      if (outRow < m)
-        cPtr[0] = __float2bfloat16(out.x);
-      if ((outRow + 1) < m)
-        cPtr[n] = __float2bfloat16(out.y);
-      if ((outRow + 2) < m)
-        cPtr[2*n] = __float2bfloat16(out.z);
-      if ((outRow + 3) < m)
-        cPtr[3*n] = __float2bfloat16(out.w);
-#else
       auto v01 = __float22bfloat162_rn(float2{out.x, out.y});
       auto v23 = __float22bfloat162_rn(float2{out.z, out.w});
 
@@ -564,11 +730,11 @@ struct BLayout_TC_int4 {
       int32_t kTiles,
       int32_t kTileStart,
       int32_t laneId,
-      bf16x2x4_u32 out[KTilesToLoad / InnerKTiles][kInt32PerLane]) {
-#if defined(__GFX11__)
-    // The two half-waves hold the same B data
-    laneId %= kTileLanes;
-#endif
+      MmaBWord out[KTilesToLoad / InnerKTiles][kInt32PerLane]) {
+    if constexpr (kTileLanes < kWarpSize) {
+      // Lanes beyond kTileLanes hold copies of the same B data
+      laneId %= kTileLanes;
+    }
 
     // offset [nTile][kTileStart / InnerKTiles][laneId][0]
     auto bPtr = reinterpret_cast<const int32_t*>(B) +
@@ -689,9 +855,9 @@ struct BLayout_TC_int4 {
           // function and cannot be called from __device__ code. Use the raw
           // memcpy which the HIP compiler provides as a __device__ builtin.
 #if defined(_WIN32) && defined(USE_ROCM)
-          memcpy(&out[i][j], &v, sizeof(bf16x2x4_u32));
+          memcpy(&out[i][j], &v, sizeof(MmaBWord));
 #else
-          std::memcpy(&out[i][j], &v, sizeof(bf16x2x4_u32));
+          std::memcpy(&out[i][j], &v, sizeof(MmaBWord));
 #endif
         }
       }
@@ -730,19 +896,9 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     int32_t kTiles) {
   constexpr int32_t kMTileSize = 16;
 #if defined(USE_ROCM)
-  // Workaround for ROCm compiler bug where __builtin_amdgcn_is_invocable
-  // incorrectly reports mfma_f32_16x16x16bf16_1k as available on gfx908
-#if defined(INT4MM_ROCM_WMMA_W32)
-  // wave32 WMMA path, no MFMA availability check
-#elif defined(__gfx908__)
-  printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on gfx908\n");
-  return;
-#else
-  if (!__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
-    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+  if (!RocmMma::supported()) {
     return;
   }
-#endif
   constexpr int32_t kNTileSize = 16;
 #else
   constexpr int32_t kNTileSize = 8;
@@ -778,11 +934,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
   int32_t mTile = blockIdx.z;
   int32_t nTile = blockIdx.y;
 
-#if defined(USE_ROCM)
-  ROCmCAccum c{};
-#else
-  float4 c{0.0f, 0.0f, 0.0f, 0.0f};
-#endif
+  MmaCAccum c{};
 
   // First, handle whole multiples of KTilesPerIteration
   auto kTilesLimit = roundDown(kTiles, KTilesPerIteration);
@@ -794,11 +946,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     //
     // Load data from A
     //
-#if defined(USE_ROCM)
-    ROCmATile a[KTilesPerIteration];
-#else
-    bf16x2x4_u32 a[KTilesPerIteration];
-#endif
+    MmaATile a[KTilesPerIteration];
     ALayout::template load<KTilesPerIteration>(
         A, m, k, mTiles, mTile, kTiles, kTileBase, laneId, a);
 
@@ -806,7 +954,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     // Load data from B and de-quantize as needed
     // Each k-tile is bf16x2x2
     //
-    bf16x2x4_u32 b[KTilesPerIteration / kInnerKTiles][BLayout::kInt32PerLane];
+    MmaBWord b[KTilesPerIteration / kInnerKTiles][BLayout::kInt32PerLane];
     BLayout::template load<KTilesPerIteration>(
         B,
         B_quantizationInfo,
@@ -832,54 +980,13 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         // We don't simply accumulate into `c` as this creates a too-strong
         // execution dependency. Instead, we only periodically accumulate into
         // `c`
-#if defined(USE_ROCM)
-        // TODO: revisit this, we should not be diverging around the use of
-        //       vectors, it is possible to obtain the underlying native vector
-        //       type and feed it into the builtin.
-        ROCmCAccum cTmp[2];
-#else
-        float4 cTmp[2];
-#endif
+        MmaCAccum cTmp[2] = {};
 
+#if defined(USE_ROCM)
+        RocmMma::mmaKTilePair(a + i * kInnerKTiles, b[i], j * 2, cTmp);
+#else
 #pragma unroll
         for (int k = 0; k < 2; ++k) {
-#if defined(USE_ROCM)
-          cTmp[k] = ROCmCAccum{};
-#else
-          cTmp[k] = float4{0.0f, 0.0f, 0.0f, 0.0f};
-#endif
-        }
-
-#pragma unroll
-        for (int k = 0; k < 2; ++k) {
-#if defined(__GFX11__)
-          cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(
-              a[i * kInnerKTiles + j * 2 + k].val,
-              rocmBTile(b[i][(j * 2 + k) * 2], b[i][(j * 2 + k) * 2 + 1]),
-              cTmp[k]);
-#elif defined(__gfx1250__)
-          // One WMMA covers both k-tiles of the pair
-          if (k == 0) {
-            cTmp[0] = rocmWmmaK32(
-                a[i * kInnerKTiles + j * 2],
-                a[i * kInnerKTiles + j * 2 + 1],
-                b[i][j * 2],
-                b[i][j * 2 + 1],
-                cTmp[0]);
-          }
-#elif defined(INT4MM_ROCM_WMMA_W32)
-          cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-              a[i * kInnerKTiles + j * 2 + k].val,
-              b[i][j * 2 + k].val,
-              cTmp[k]);
-#elif defined(USE_ROCM) && !defined(__gfx908__)
-          if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
-            cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-                a[i * kInnerKTiles + j * 2 + k].val,
-                b[i][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
-                cTmp[k], 0, 0, 0);
-          }
-#elif !defined(USE_ROCM)
           asm volatile(
               "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
               "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
@@ -897,24 +1004,12 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
                 "f"(cTmp[k].y),
                 "f"(cTmp[k].z),
                 "f"(cTmp[k].w));
-#endif
         }
+#endif
 
 #pragma unroll
         for (int k = 0; k < 2; ++k) {
-#if defined(INT4MM_ROCM_WMMA_W32)
-          c += cTmp[k];
-#elif defined(USE_ROCM)
-          c[0] += cTmp[k][0];
-          c[1] += cTmp[k][1];
-          c[2] += cTmp[k][2];
-          c[3] += cTmp[k][3];
-#else
-          c.x += cTmp[k].x;
-          c.y += cTmp[k].y;
-          c.z += cTmp[k].z;
-          c.w += cTmp[k].w;
-#endif
+          accumulate(c, cTmp[k]);
         }
       }
     }
@@ -931,15 +1026,11 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
   // If we have any remainder k-tiles, some warps will handle them, processing
   // kInnerKTiles k-tiles at a time
   if (kTileBaseRemaining < kTiles) {
-#if defined(USE_ROCM)
-    ROCmATile a[kInnerKTiles];
-#else
-    bf16x2x4_u32 a[kInnerKTiles];
-#endif
+    MmaATile a[kInnerKTiles];
     ALayout::template load<kInnerKTiles>(
         A, m, k, mTiles, mTile, kTiles, kTileBaseRemaining, laneId, a);
 
-    bf16x2x4_u32 b[1][BLayout::kInt32PerLane];
+    MmaBWord b[1][BLayout::kInt32PerLane];
     BLayout::template load<kInnerKTiles>(
         B,
         B_quantizationInfo,
@@ -957,46 +1048,13 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
       // We don't simply accumulate into `c` as this creates a too-strong
       // execution dependency. Instead, we only periodically accumulate into
       // `c`
-#if defined(USE_ROCM)
-      ROCmCAccum cTmp[2];
-#else
-      float4 cTmp[2];
-#endif
+      MmaCAccum cTmp[2] = {};
 
+#if defined(USE_ROCM)
+      RocmMma::mmaKTilePair(a, b[0], j * 2, cTmp);
+#else
 #pragma unroll
       for (int k = 0; k < 2; ++k) {
-#if defined(USE_ROCM)
-        cTmp[k] = ROCmCAccum{};
-#else
-        cTmp[k] = float4{0.0f, 0.0f, 0.0f, 0.0f};
-#endif
-      }
-
-#pragma unroll
-      for (int k = 0; k < 2; ++k) {
-#if defined(__GFX11__)
-        cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(
-            a[j * 2 + k].val,
-            rocmBTile(b[0][(j * 2 + k) * 2], b[0][(j * 2 + k) * 2 + 1]),
-            cTmp[k]);
-#elif defined(__gfx1250__)
-        // One WMMA covers both k-tiles of the pair
-        if (k == 0) {
-          cTmp[0] = rocmWmmaK32(a[j * 2], a[j * 2 + 1], b[0][j * 2], b[0][j * 2 + 1], cTmp[0]);
-        }
-#elif defined(INT4MM_ROCM_WMMA_W32)
-        cTmp[k] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(
-            a[j * 2 + k].val,
-            b[0][j * 2 + k].val,
-            cTmp[k]);
-#elif defined(USE_ROCM) && !defined(__gfx908__)
-        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x16bf16_1k)) {
-          cTmp[k] = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(
-            a[j * 2 + k].val,
-            b[0][(j * 2 + k) / 2].val[((j * 2 + k) % 2)],
-            cTmp[k], 0, 0, 0);
-        }
-#elif !defined(USE_ROCM)
         asm volatile(
             "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%10,%11,%12,%13};"
@@ -1011,24 +1069,12 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
               "f"(cTmp[k].y),
               "f"(cTmp[k].z),
               "f"(cTmp[k].w));
-#endif
       }
+#endif
 
 #pragma unroll
       for (int k = 0; k < 2; ++k) {
-#if defined(INT4MM_ROCM_WMMA_W32)
-        c += cTmp[k];
-#elif defined(USE_ROCM)
-        c[0] += cTmp[k][0];
-        c[1] += cTmp[k][1];
-        c[2] += cTmp[k][2];
-        c[3] += cTmp[k][3];
-#else
-        c.x += cTmp[k].x;
-        c.y += cTmp[k].y;
-        c.z += cTmp[k].z;
-        c.w += cTmp[k].w;
-#endif
+        accumulate(c, cTmp[k]);
       }
     }
   }
@@ -1036,48 +1082,22 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
   //
   // Reduce independent k-tiles (same m/n) across warps
   //
-#if defined(INT4MM_ROCM_WMMA_W32)
-  __shared__ ROCmCAccum smem_sum[Warps][kWarpSize];
-#else
-  __shared__ float4 smem_sum[Warps][kWarpSize];
-#endif
+  __shared__ MmaReduceAccum smem_sum[Warps][kWarpSize];
 
   // FIXME: this likely doesn't need to be a true reduction tree, can just be a
   // serial sum, maybe (unless nvcc/ptxas goes back to its old ways)
   // smem_sum[warpId][laneId] = TreeReduce4<KTilesPerIteration>::reduce(c);
-#if defined(INT4MM_ROCM_WMMA_W32)
-  smem_sum[warpId][laneId] = c;
-#elif defined(USE_ROCM)
-  smem_sum[warpId][laneId].x = c[0];
-  smem_sum[warpId][laneId].y = c[1];
-  smem_sum[warpId][laneId].z = c[2];
-  smem_sum[warpId][laneId].w = c[3];
-#else
-  smem_sum[warpId][laneId] = c;
-#endif
+  storeReduce(smem_sum[warpId][laneId], c);
 
   __syncthreads();
 
   if (warpId == 0) {
-#if defined(INT4MM_ROCM_WMMA_W32)
-    ROCmCAccum sum_f32{};
+    MmaCAccum sum_f32{};
 
     // Reduce across the block in the first warp
     for (int i = 0; i < Warps; ++i) {
-      sum_f32 += smem_sum[i][laneId];
+      addReduce(sum_f32, smem_sum[i][laneId]);
     }
-#else
-    float4 sum_f32{0.0f, 0.0f, 0.0f, 0.0f};
-
-    // Reduce across the block in the first warp
-    for (int i = 0; i < Warps; ++i) {
-      float4 v = smem_sum[i][laneId];
-      sum_f32.x += v.x;
-      sum_f32.y += v.y;
-      sum_f32.z += v.z;
-      sum_f32.w += v.w;
-    }
-#endif
 
     // Write the reduced result (in the first warp) into the output
     CLayout::store(
@@ -1188,15 +1208,15 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
   auto kOuterTile = blockIdx.x;
   auto nTile = blockIdx.y;
   auto t = threadIdx.x;
-#if defined(__GFX11__)
-  // The two half-waves hold the same B words; the upper one has nothing to store
-  if (t >= kTileLanes) {
-    return;
+  if constexpr (kTileLanes < kWarpSize) {
+    // Lanes beyond kTileLanes would pack copies of the same words
+    if (t >= kTileLanes) {
+      return;
+    }
   }
-#endif
 
   // Each lane packs kInt32PerLane int32 words of 8 int4 values; a word covers
-  // two k-tiles on NV and CDNA, one on gfx12, half of one on gfx11
+  // two k-tiles on NV and CDNA, one on gfx12 and gfx1250, half of one on gfx11
   constexpr int32_t kInt4PerLane = kKTileSize * kNTileSize / kTileLanes;
   constexpr int32_t kInt32PerLane = InnerKTiles * kInt4PerLane / 8;
 #pragma unroll
@@ -1216,26 +1236,8 @@ __global__ void matrix_to_m16n8k16_Bint4_layout(
 
     auto kBase0 = (kOuterTile * InnerKTiles + innerKTile) * kKTileSize / 2;
 
-#if defined(__GFX11__)
-    // two int32 per k-tile: word w % 2 holds k values 8 * (w % 2) .. + 7 of one
-    // column
-    ks[0] = kBase0 + (w % 2) * 4;
-    ks[1] = ks[0] + 1;
-    ks[2] = ks[0] + 2;
-    ks[3] = ks[0] + 3;
-#elif defined(INT4MM_ROCM_WMMA_W32)
-    // one k-tile per int32: 8 consecutive k values of one column per lane
-    ks[0] = kBase0 + (t / kNTileSize) * 4;
-    ks[1] = ks[0] + 1;
-    ks[2] = ks[0] + 2;
-    ks[3] = ks[0] + 3;
-#elif defined(USE_ROCM)
-    ks[0] = kBase0 + (t / kNTileSize) * 2;
-    ks[1] = ks[0] + 1;
-
-    auto kBase1 = kBase0 + kKTileSize / 2;
-    ks[2] = kBase1 + (t / kNTileSize) * 2;
-    ks[3] = ks[2] + 1;
+#if defined(USE_ROCM)
+    RocmMma::packKs(t, w, kBase0, ks);
 #else
     ks[0] = kBase0 + t % 4;
     ks[1] = ks[0] + 4;
