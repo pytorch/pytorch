@@ -5110,6 +5110,10 @@ class TestPrecompileDynamoCapture(TestCase):
         ):
             with self._capture(gen, backend="eager") as cap:
                 next(cap(self.model, self.x2))
+                summary = cap.summary()
+        # Flagged before _compile, it still counts as a gap.
+        self.assertEqual(summary.uncovered_frames, ("gen",), summary)
+        self.assertFalse(summary.complete, summary)
         tracer = DynamoTracer(require_complete=False)
         with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
             with self._capture(gen, tracer=tracer, backend="eager") as cap:
