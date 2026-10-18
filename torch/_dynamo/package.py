@@ -1115,12 +1115,10 @@ def _compile_frame_context(
 # hold still held (any skip over RUN_ONLY) and goes back to the default only
 # when the last holder uninstalls. A strategy set before install() (e.g. by
 # torch._dynamo.skip) is not restored: there is no getter for it.
-_SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+_EXEC_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
 
 
-def _update_skip_hold(
-    code: types.CodeType, recursive: bool | None, hold: bool
-) -> None:
+def _update_exec_hold(code: types.CodeType, recursive: bool | None, hold: bool) -> None:
     """Take or release one package's hold on ``code``: a skip, recursive or
     not, or ``None`` for RUN_ONLY (serve its entries, run a miss eagerly). A
     skip any package holds wins over RUN_ONLY."""
@@ -1128,14 +1126,14 @@ def _update_skip_hold(
 
     from .types import FrameAction, FrameExecStrategy
 
-    holds = _SKIP_HOLDS.setdefault(code, [])
+    holds = _EXEC_HOLDS.setdefault(code, [])
     if hold:
         holds.append(recursive)
     else:
         holds.remove(recursive)
     skips = [h for h in holds if h is not None]
     if not holds:
-        del _SKIP_HOLDS[code]
+        del _EXEC_HOLDS[code]
         strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
     elif not skips:
         strategy = FrameExecStrategy(FrameAction.RUN_ONLY, FrameAction.DEFAULT)
@@ -1173,9 +1171,9 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
-        # The holds install() keeps in _SKIP_HOLDS, which uninstall() releases:
+        # The holds install() keeps in _EXEC_HOLDS, which uninstall() releases:
         # (code, whether its callees are skipped too, or None for RUN_ONLY).
-        self._skipped_codes: list[tuple[types.CodeType, bool | None]] = []
+        self._held_codes: list[tuple[types.CodeType, bool | None]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1506,9 +1504,9 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
-        for code, recursive in self._skipped_codes:
-            _update_skip_hold(code, recursive, hold=False)
-        self._skipped_codes = []
+        for code, recursive in self._held_codes:
+            _update_exec_hold(code, recursive, hold=False)
+        self._held_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1612,13 +1610,13 @@ class CompilePackage:
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
                 if entry.skip_recursive or len(entry.guarded_codes) == 0:
-                    _update_skip_hold(target_code, entry.skip_recursive, hold=True)
-                    self._skipped_codes.append((target_code, entry.skip_recursive))
+                    _update_exec_hold(target_code, entry.skip_recursive, hold=True)
+                    self._held_codes.append((target_code, entry.skip_recursive))
                 elif entry.eager_fallback:
                     # Serve the variants, and run any call they miss eagerly,
                     # as the capturing process did after its eager fallback.
-                    _update_skip_hold(target_code, None, hold=True)
-                    self._skipped_codes.append((target_code, None))
+                    _update_exec_hold(target_code, None, hold=True)
+                    self._held_codes.append((target_code, None))
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):
