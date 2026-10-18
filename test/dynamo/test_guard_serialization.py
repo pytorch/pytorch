@@ -5398,6 +5398,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 param_to_hook_all_reduce=module[0].weight,
             )
             self.assertFalse(hasattr(ddp_model, "reducer"))
+            # DDP's own pickling still refuses it, at dump rather than at load.
+            with self.assertRaisesRegex(RuntimeError, "every parameter is delayed"):
+                pickle.dumps(ddp_model)
             x = torch.randn(4, 10)
             state = guards_state(ddp_model, x, bar)
             loaded = torch._dynamo.package.load_guard_manager(
