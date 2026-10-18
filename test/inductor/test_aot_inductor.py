@@ -815,6 +815,20 @@ class AOTInductorTestsTemplate:
             "::run_impl("
         ).check_not(call0).run(code)
 
+    def test_constant_folding_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a non-dense view of w with strides (1, 12).
+                return x + self.w[:, :6].t()
+
+        example_inputs = (torch.randn(6, 8, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -4332,6 +4346,53 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
+
+    def test_return_non_dense_view_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # A non-dense view of the constant with strides (1, 12).
+                return (x, self.cst[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        self.check_model(model, example_inputs)
+        # The output_handles path copies a returned constant with
+        # aoti_torch_clone_preserve_strides, so the output keeps the eager
+        # strides. The arrayref variants are covered in test_aot_inductor_arrayref.py.
+        if not (self.allow_stack_allocation or self.use_minimal_arrayref_interface):
+            with torch.no_grad():
+                actual = AOTIRunnerUtil.run(model, example_inputs)
+                expected = model(*example_inputs)
+            self.assertFalse(expected[1].is_contiguous())
+            self.assertEqual(actual[1], expected[1])
+            self.assertEqual(actual[1].stride(), expected[1].stride())
+
+    def test_constant_folding_return_non_dense_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w = torch.randn(8, 12, device=device)
+
+            def forward(self, x):
+                # Folds to a constant; the output is a non-dense view of it.
+                return (x + 1, (self.w * 2)[:, :6].t())
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(5, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(model, example_inputs)
+            # See test_return_non_dense_view_constant.
+            if not (self.allow_stack_allocation or self.use_minimal_arrayref_interface):
+                with torch.no_grad():
+                    actual = AOTIRunnerUtil.run(model, example_inputs)
+                    expected = model(*example_inputs)
+                self.assertFalse(expected[1].is_contiguous())
+                self.assertEqual(actual[1], expected[1])
+                self.assertEqual(actual[1].stride(), expected[1].stride())
 
     def test_profile_benchmark_harness(self):
         batch_size = 32
