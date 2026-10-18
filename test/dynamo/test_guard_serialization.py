@@ -5333,17 +5333,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
             def foo(ddp, x):
                 return ddp(x)
 
-            def guards_state(ddp_model, x):
-                package = CompilePackage(foo)
+            def guards_state(ddp_model, x, fn=foo):
+                package = CompilePackage(fn)
                 torch._dynamo.optimize(
                     package=package,
                     guard_filter_fn=lambda gs: [
                         g.guard_type not in unsupported for g in gs
                     ],
-                )(foo)(ddp_model, x)
-                self.assertEqual(len(package._codes[foo.__code__].guarded_codes), 1)
+                )(fn)(ddp_model, x)
+                self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
                 return torch._dynamo.package.load_guards_state(
-                    package._codes[foo.__code__].guarded_codes[0].guards_state
+                    package._codes[fn.__code__].guarded_codes[0].guards_state
                 )
 
             # DDP itself pickles only on the default process group. BatchNorm1d
@@ -5381,6 +5381,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
                             ),
                         ):
                             guards_state(ddp_model, x)
+
+            # Delaying every parameter that needs a gradient returns from
+            # DDP.__init__ before the reducer and logger are built (and leaves
+            # DDP.forward unusable, so the frame calls the wrapped module). The
+            # frozen bias is what DDP's device check reads.
+            def bar(ddp, x):
+                return ddp.module(x)
+
+            torch._dynamo.reset()
+            module = torch.nn.Sequential(torch.nn.Linear(10, 10))
+            module[0].bias.requires_grad_(False)
+            ddp_model = DDP(
+                module,
+                delay_all_reduce_named_params=[("0.weight", module[0].weight)],
+                param_to_hook_all_reduce=module[0].weight,
+            )
+            self.assertFalse(hasattr(ddp_model, "reducer"))
+            x = torch.randn(4, 10)
+            state = guards_state(ddp_model, x, bar)
+            loaded = torch._dynamo.package.load_guard_manager(
+                state, bar.__code__, bar.__globals__
+            )
+            self.assertTrue(loaded.check({"ddp": ddp_model, "x": x}))
         finally:
             dist.destroy_process_group()
             tmpfile.close()
