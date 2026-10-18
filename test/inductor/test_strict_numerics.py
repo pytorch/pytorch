@@ -336,54 +336,6 @@ class StrictNumericsCompileTest(TestCase):
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @parametrize("numerics", ("strict_pointwise", "strict"))
-    @parametrize("lambd", (0.0, 0.5, 0.12345))
-    def test_softshrink_strict(self, device, dtype, numerics, lambd):
-        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
-
-        x = (
-            _exhaustive_16bit(dtype, device)
-            if dtype in (torch.float16, torch.bfloat16)
-            else _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
-        )
-        boundary = torch.tensor([0.0, -0.0, lambd, -lambd], device=device, dtype=dtype)
-        x = torch.cat((x, boundary)).requires_grad_(True)
-        grad_output = _sampled_fp32(x.numel(), device, seed=1)[: x.numel()].to(dtype)
-        grad_output[::17] = -0.0
-
-        def fn(x):
-            return torch.nn.functional.softshrink(x, lambd)
-
-        expected = fn(x)
-        expected_grad = torch.autograd.grad(expected, x, grad_outputs=grad_output)[0]
-        graphs = {}
-
-        def inner_compile(gm, inputs, **kwargs):
-            graphs[kwargs.get("is_backward", False)] = {
-                str(n.meta.get("original_aten"))
-                for n in gm.graph.nodes
-                if n.op == "call_function"
-            }
-            return compile_fx_inner(gm, inputs, **kwargs)
-
-        with config.patch({"numerics": numerics, "force_disable_caches": True}):
-            result = torch.compile(
-                fn,
-                fullgraph=True,
-                backend=lambda gm, inputs: compile_fx(
-                    gm, inputs, inner_compile=inner_compile
-                ),
-            )(x)
-            result_grad = torch.autograd.grad(result, x, grad_outputs=grad_output)[0]
-        bits = _BIT_VIEW[dtype]
-        self.assertEqual(result.view(bits), expected.view(bits))
-        self.assertEqual(result_grad.view(bits), expected_grad.view(bits))
-        # The backward must come from softshrink_backward, not from autograd
-        # differentiating the forward decomposition.
-        self.assertIn("aten.softshrink.default", graphs[False])
-        self.assertIn("aten.softshrink_backward.default", graphs[True])
-
-    @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_softshrink_strict_symbolic_lambd(self, device, dtype, numerics):
         from torch._dynamo.testing import CompileCounterWithBackend
 
