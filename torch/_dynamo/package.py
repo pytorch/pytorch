@@ -636,7 +636,8 @@ class _DynamoCodeCacheEntry:
       12. Whether Dynamo gave up on the frame during capture and skipped it
          from then on: an ``Unsupported`` or ``UserError`` raised for the whole
          code object (a graph break it could not resume from, such as one
-         inside a loop, or a generator, which it refuses to trace), or a
+         inside a loop, or an entry generator, which it refuses to trace: a
+         callee generator is refused before it gets an entry), or a
          ``SkipFrame``: a backend that declined the graph, or, outside a
          precompile capture (which allows empty graphs), a frame that traced no
          ops. A compile error ``suppress_errors=True`` swallows also makes
