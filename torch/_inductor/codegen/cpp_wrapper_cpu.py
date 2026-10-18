@@ -3504,6 +3504,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             ) or repr(t) in ("Layout", "MemoryFormat", "ScalarType", "SymFloat")
 
         def return_supported(t: torch.JitType) -> bool:
+            if isinstance(t, torch.ListType):
+                return isinstance(t.getElementType(), torch.TensorType)
             if isinstance(t, torch.OptionalType):
                 return isinstance(t.getElementType(), torch.TensorType)
             return isinstance(t, (torch.NoneType, torch.TensorType))
@@ -3638,6 +3640,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         """Emit JIT-mode fallback kernel code (no-Python dispatcher or Python callback)."""
         if not isinstance(op_overload, torch._ops.OpOverload):
             raise AssertionError(type(op_overload))
+        if self._compatible_with_cpp_boxed_dispatch(op_overload) and any(
+            isinstance(r.real_type, torch.ListType) for r in op_overload._schema.returns
+        ):
+            self.generate_fallback_kernel_with_runtime_lookup_boxed(
+                op_overload, raw_args, output_args, outputs
+            )
+            return
         for output in output_args:
             if not (output is None or isinstance(output, str)):
                 raise AssertionError(
@@ -3985,7 +3994,7 @@ if (!custom_op_wrapper) {
         self,
         op_overload: torch._ops.OpOverload,
         raw_args: Sequence[Any],
-        output_args: Sequence[str | None],
+        output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
     ) -> None:
         """Generate a JIT-only fallback call through c10::Dispatcher.
@@ -3998,25 +4007,28 @@ if (!custom_op_wrapper) {
         self.include_extra_header("ATen/core/jit_type.h")
         self.include_extra_header("torch/csrc/inductor/aoti_torch/utils.h")
 
-        if raw_outputs:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg, raw_output_arg in zip(output_args, raw_outputs)
-                if output_arg is not None
-                and not isinstance(raw_output_arg, ir.MutationOutput)
+        returned_outputs = (
+            [
+                output_arg
+                for output_arg, raw_output in zip(output_args, raw_outputs)
+                if not isinstance(raw_output, ir.MutationOutput)
             ]
-        else:
-            declarations_before_scope = [
-                f"RAIIAtenTensorHandle {output_arg};"
-                for output_arg in output_args
-                if output_arg is not None
-            ]
+            if raw_outputs
+            else output_args
+        )
+        declarations_before_scope = [
+            f"RAIIAtenTensorHandle {output_arg};"
+            for output_arg in torch.utils._pytree.tree_leaves(returned_outputs)
+            if output_arg is not None
+        ]
 
         dispatch_lines = IndentedBuffer()
         dispatch_lines.writelines(declarations_before_scope)
         dispatch_lines.writeline("{")
 
         with dispatch_lines.indent():
+            if kernel_profile_enabled():
+                dispatch_lines.writeline(_record_function_handle_line(str(op_overload)))
             tmp_var_number = count()
 
             def next_tmp(prefix: str) -> str:
@@ -4214,16 +4226,50 @@ if (!custom_op_wrapper) {
             )
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
-            stack_idx = 0
-            for output_arg, raw_output_arg in zip(output_args, raw_outputs):
-                if isinstance(raw_output_arg, ir.MutationOutput):
-                    continue
-                if output_arg is not None:
+            def unpack_output(output_arg, schema_type, value, *, is_list_element=False):
+                if output_arg is None:
+                    return
+                if isinstance(schema_type, torch.ListType):
+                    if not isinstance(output_arg, list):
+                        raise AssertionError(type(output_arg))
+                    list_var = next_tmp("tmp_output_list")
+                    dispatch_lines.writeline(
+                        f"const auto {list_var} = {value}.toListRef();"
+                    )
+                    dispatch_lines.writeline(
+                        f"TORCH_CHECK({list_var}.size() == {len(output_arg)}, "
+                        f'"{op_overload._schema.name}: expected {len(output_arg)} '
+                        f'tensors in list return, got ", {list_var}.size());'
+                    )
+                    for idx, item in enumerate(output_arg):
+                        unpack_output(
+                            item,
+                            schema_type.getElementType(),
+                            f"{list_var}[{idx}]",
+                            is_list_element=True,
+                        )
+                else:
+                    tensor_value = (
+                        f"at::Tensor({value}.toTensor())"
+                        if is_list_element
+                        else f"std::move({value}).toTensor()"
+                    )
                     dispatch_lines.writeline(
                         f"{output_arg} = torch::aot_inductor::new_tensor_handle("
-                        f"std::move({stack_var}[{stack_idx}]).toTensor());"
+                        f"{tensor_value});"
                     )
-                stack_idx += 1
+
+            schema_returns = op_overload._schema.returns
+            if len(schema_returns) == 1 and isinstance(
+                schema_returns[0].real_type, torch.ListType
+            ):
+                returned_outputs = [returned_outputs]
+            for idx, (output_arg, schema_return) in enumerate(
+                zip(returned_outputs, schema_returns)
+            ):
+                unpack_output(
+                    output_arg, schema_return.real_type, f"{stack_var}[{idx}]"
+                )
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())
