@@ -2266,6 +2266,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             # sparse row (16 positions), and the grid spans 4.
             (64, 4, 16, None, 128),
             (64, 8, 16, None, 64),
+            # A 96-row Q block (not a power of two), 2 shared heads: positions per tile are
+            # capped at 32, the largest power of two dividing 96 (a 64-position tile won't fit).
+            (64, 16, (96, 128), None, 64),
             # Pinned BLOCK_Ms the old check rejected: 256 rows / 8 heads = 32 positions.
             (32, 4, 128, 256, 256),
             # Q = 16 is a multiple of the default tile but not of the pinned one: SAFE_M_BOUNDARY
