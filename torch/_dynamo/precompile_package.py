@@ -1644,8 +1644,9 @@ def _summarize(
     ``install()`` ``skip_code()``s every entry that is not bypassed and has no
     guarded codes whether or not it entered Dynamo, so a
     generated-but-never-executed resume entry is skipped there and is not a gap
-    here, and gives an ``eager_fallback`` entry with guarded codes RUN_ONLY. ``backend_graphs`` counts the backend ids of the entries that are not
-    bypassed, the ones ``install()`` loads: a save-time bypass
+    here. ``install()`` gives an ``eager_fallback`` entry with guarded codes
+    RUN_ONLY. ``backend_graphs`` counts the backend ids of the entries that are
+    not bypassed, the ones ``install()`` loads: a save-time bypass
     (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
     the entry and leaves its ids in place. ``truncated`` comes from the compile
     path, which sees a frame hit the limit once and records it as ``co_name
