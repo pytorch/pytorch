@@ -100,7 +100,8 @@ class PrecompileSummary:
 
     Attributes:
         frames: Captured frames: every frame the package holds an entry for, the
-            ``bypassed``, ``truncated`` and ``uncovered_frames`` ones included,
+            ``bypassed``, ``truncated``, ``uncovered_frames`` and
+            ``eager_fallbacks`` ones included,
             so the digest's frame clauses cut into this count rather than add
             to it. Also included are the frames the artifact deliberately runs
             as plain Python: a frame other than the entry that compiled no
@@ -278,8 +279,8 @@ class PrecompileSummary:
         if self.wont_generalize:
             base += f", {count(len(self.wont_generalize), 'value-pinned source')}"
         if self.eager_fallbacks:
-            fallbacks = some(self.eager_fallbacks)
-            base += f", {count(len(self.eager_fallbacks), 'eager fallback')}: {fallbacks}"
+            fallbacks = count(len(self.eager_fallbacks), "eager fallback")
+            base += f", {fallbacks}: {some(self.eager_fallbacks)}"
         if self.uncovered_frames:
             base += f", {len(self.uncovered_frames)} UNCOVERED: {some(self.uncovered_frames)}"
         if self.truncated:

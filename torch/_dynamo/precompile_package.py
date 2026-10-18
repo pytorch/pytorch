@@ -1637,10 +1637,12 @@ def _summarize(
     ``co_name`` per frame, so a repeated name is two frames and both lists are
     subsets of ``frames`` by construction. Uncovered is the coverage gap: the
     frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
-    not bypassed. ``install()`` ``skip_code()``s a superset, every entry that is
-    not bypassed and has no guarded codes whether or not it entered Dynamo, so a
+    neither bypassed nor an ``eager_fallback`` (Dynamo gave up on it, so a load
+    runs it eagerly as the capture did; those are ``eager_fallbacks``).
+    ``install()`` ``skip_code()``s every entry that is not bypassed and has no
+    guarded codes whether or not it entered Dynamo, so a
     generated-but-never-executed resume entry is skipped there and is not a gap
-    here. ``backend_graphs`` counts the backend ids of the entries that are not
+    here, and gives an ``eager_fallback`` entry with guarded codes RUN_ONLY. ``backend_graphs`` counts the backend ids of the entries that are not
     bypassed, the ones ``install()`` loads: a save-time bypass
     (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
     the entry and leaves its ids in place. ``truncated`` comes from the compile

@@ -2533,7 +2533,7 @@ class ConvertFrame:
             package = self._inner_convert._package
             if (
                 package is not None
-                and isinstance(e, Unsupported)
+                and isinstance(e, (Unsupported, UserError))
                 and e.frame_exec_strategy is None
                 and e.apply_to_code
             ):
