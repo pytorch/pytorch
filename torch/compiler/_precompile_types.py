@@ -139,21 +139,24 @@ class PrecompileSummary:
             the producer's decision, and a frame the package holds an entry for
             but never ran is not one, so this is not ``frames`` minus
             ``bypassed`` minus the frames that hold guarded code.
-        eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame
-            Dynamo gave up on during the capture and ran eagerly from then on: a
-            graph break it could not resume from (such as one inside a loop), a
-            ``UserError`` Dynamo suppressed by skipping the frame, as it does an
-            unresumable graph break, or a backend that declined the graph by
-            raising ``SkipFrame``. A compile error ``suppress_errors=True``
-            swallows is not one: Dynamo skips that frame too, but it stays in
-            ``uncovered_frames`` so the failure is seen.
-            Not a gap, and not in ``uncovered_frames``: a load serves the
-            variants its earlier calls compiled, if any, and runs any call they
-            miss eagerly, logging a warning once per frame (the capture skipped
-            every later call, even one a variant matches). The exception is an
-            entry frame that fell back on its first call, such as an entry
-            generator, which Dynamo refuses before tracing: it has no variant to
-            dispatch to, so it is in ``uncovered_frames`` instead.
+        eager_fallbacks: ``co_name (filename:firstlineno)`` of each frame Dynamo
+            gave up on during the capture and skipped for the rest of the
+            process, for any of Dynamo's soft reasons: a graph break it could
+            not resume from (such as one inside a loop), a
+            ``torch._dynamo.skip_frame()`` call, a frame it refuses to trace, a
+            ``UserError`` it suppressed by skipping the frame, or a backend that
+            declined the graph by raising ``SkipFrame``. A compile error
+            ``suppress_errors=True`` swallows is not one: Dynamo skips that
+            frame too, but it stays in ``uncovered_frames`` so the failure is
+            seen. Not a gap, and not in ``uncovered_frames``: a load serves the
+            variants its earlier calls compiled and runs any call they miss
+            eagerly, logging a warning once per frame (the capture skipped every
+            later call, even one a variant matches). A frame that compiled no
+            variant is served as plain Python from the start, as a trivial frame
+            is, with no warning. The exception is an entry frame that fell back
+            on its first call, such as an entry generator, which Dynamo refuses
+            before tracing: it has no variant to dispatch to, so it is in
+            ``uncovered_frames`` instead.
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
             guard on a bare argument name pins in some variant (``self.eps`` is
             not a bare name) while no other variant of the same frame guards the

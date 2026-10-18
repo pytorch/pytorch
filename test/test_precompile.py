@@ -5126,7 +5126,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
         # require_complete refuses it, naming the cause, before the build would.
         with self.assertRaisesRegex(
-            PrecompileError, r"no variant of the entry frame 'entry': Dynamo gave up"
+            PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
         ):
             with self._capture(entry, backend="eager") as cap:
                 cap(self.model, self.x2)
@@ -5149,13 +5149,13 @@ class TestPrecompileDynamoCapture(TestCase):
             return x.sin()
 
         with self.assertRaisesRegex(
-            PrecompileError, r"no variant of the entry frame 'lone': Dynamo gave up"
+            PrecompileError, r"'lone': Dynamo gave up.*whatever require_complete"
         ):
             with self._capture(lone, backend="eager") as cap:
                 cap(self.x2)
         # Ahead of a raised call too, whose message suggests require_complete=False.
         with self.assertRaisesRegex(
-            PrecompileError, r"no variant of the entry frame 'lone': Dynamo gave up"
+            PrecompileError, r"'lone': Dynamo gave up.*whatever require_complete"
         ):
             with self._capture(lone, backend="eager") as cap:
                 cap(self.x2)
@@ -5170,7 +5170,7 @@ class TestPrecompileDynamoCapture(TestCase):
             yield model(x)
 
         with self.assertRaisesRegex(
-            PrecompileError, r"no variant of the entry frame 'gen': Dynamo gave up"
+            PrecompileError, r"'gen': Dynamo gave up.*whatever require_complete"
         ):
             with self._capture(gen, backend="eager") as cap:
                 next(cap(self.model, self.x2))

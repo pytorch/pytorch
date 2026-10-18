@@ -633,15 +633,16 @@ class _DynamoCodeCacheEntry:
          uninstall(). Set on a frame a precompile capture serves as plain
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
-      12. Whether Dynamo gave up on the frame during capture and skipped it
-         from then on: an ``Unsupported`` or ``UserError`` raised for the whole
-         code object (a graph break it could not resume from, such as one
-         inside a loop, or an entry generator, which it refuses to trace: a
-         callee generator is refused before it gets an entry), or a
-         ``SkipFrame``: a backend that declined the graph, or, outside a
-         precompile capture (which allows empty graphs), a frame that traced no
-         ops. A compile error ``suppress_errors=True`` swallows also makes
-         Dynamo skip the frame but is not flagged, so that failure stays a
+      12. Whether Dynamo gave up on the frame during capture and skipped it for
+         the rest of the process, for any of its soft reasons: an
+         ``Unsupported`` or ``UserError`` raised for the whole code object (a
+         graph break it could not resume from, such as one inside a loop, a
+         ``torch._dynamo.skip_frame()`` call, or an entry generator, which it
+         refuses to trace: a callee generator is refused before it gets an
+         entry), or a ``SkipFrame``: a backend that declined the graph, or,
+         outside a precompile capture (which allows empty graphs), a frame that
+         traced no ops. A compile error ``suppress_errors=True`` swallows also
+         makes Dynamo skip the frame but is not flagged, so that failure stays a
          coverage gap. A frame with no variants is skipped at install like a
          trivial one; for a frame with variants, an installed precompile
          artifact serves them and runs a call they miss eagerly instead of
