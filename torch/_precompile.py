@@ -2229,8 +2229,9 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
             f"Dynamo gave up on the entry frame on its first call, so it holds no "
             f"variant to serve. Either it hit a graph break it cannot resume from, "
-            f"such as one inside a loop (check TORCH_LOGS=graph_breaks; remove that "
-            f"graph break), or the backend declined the graph by raising SkipFrame "
+            f"such as one inside a loop, or Dynamo refused to trace it at all, as "
+            f"for a generator (check TORCH_LOGS=graph_breaks; remove that graph "
+            f"break), or the backend declined the graph by raising SkipFrame "
             f"(check the backend's log). Fix that, or capture the functions the "
             f"entry calls instead."
         )

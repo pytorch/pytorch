@@ -508,7 +508,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
 
-    def save_and_reload(self, fn, package):
+    def _save_and_reload_eager_package(self, fn, package):
         ctx = DiskDynamoStore()
         for backend_id, backend in package.cached_backends.items():
             ctx.record_eager_backend(backend_id, backend)
@@ -530,7 +530,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         entry = package._codes[_dispatch.__code__]
         self.assertTrue(entry.eager_fallback)
         self.assertEqual(len(entry.guarded_codes), 1)
-        package, backends = self.save_and_reload(_dispatch, package)
+        package, backends = self._save_and_reload_eager_package(_dispatch, package)
 
         # A plain install() (DynamoCache's) takes no hold for the flag: a miss
         # still reaches the callback.
@@ -547,7 +547,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
         # the miss eagerly; without the frame in eager_codes it refuses.
         for eager_codes in ([_dispatch.__code__], []):
             torch._dynamo.reset()
-            package, backends = self.save_and_reload(_dispatch, package)
+            package, backends = self._save_and_reload_eager_package(_dispatch, package)
             context = torch._dynamo.optimize(package=package)
             context.callback = _RefuseRecompileCallback(context.callback, eager_codes)
             compiled_fn = context(_dispatch)
@@ -621,8 +621,9 @@ print(eval(f"bbmod.{name}.{path}") is code)
             return gm.forward
 
         x = torch.randn(3)
-        # The limit sets RUN_ONLY and stays a coverage gap; a non-soft error
-        # suppressed by suppress_errors is not Dynamo giving up on the frame.
+        # The limit sets RUN_ONLY and stays a coverage gap. A non-soft error
+        # suppress_errors swallows skips the frame too, but is left unflagged so
+        # the failure stays a gap rather than a silent eager fallback.
         for backend, config_patch in (
             ("eager", torch._dynamo.config.patch(recompile_limit=1)),
             (failing_backend, torch._dynamo.config.patch(suppress_errors=True)),
