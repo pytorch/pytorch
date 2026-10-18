@@ -102,10 +102,10 @@ class PrecompileSummary:
         frames: Captured frames: every frame the package holds an entry for, the
             ``bypassed``, ``truncated``, ``uncovered_frames`` and
             ``eager_fallbacks`` ones included, so the digest's frame clauses
-            cut into this count rather than add to it. Also included are the frames the artifact deliberately runs
-            as plain Python: a frame other than the entry that compiled no
-            graph or graph-break continuation and either lost a guard to the
-            filter or was bypassed. Running its original bytecode gives up no
+            cut into this count rather than add to it. Also included are the
+            frames the artifact deliberately runs as plain Python: a frame
+            other than the entry that compiled no graph or graph-break
+            continuation and either lost a guard to the filter or was bypassed. Running its original bytecode gives up no
             compiled code, so it is served that way rather than through a
             variant missing a guard, and it is listed in neither ``bypassed``
             nor ``uncovered_frames``.
