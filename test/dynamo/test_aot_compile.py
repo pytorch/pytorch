@@ -162,6 +162,11 @@ class MooType:
         self.x = x
 
 
+class MethodHolder:
+    def scale(self, x):
+        return x * 2
+
+
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
         self.gm = gm
@@ -2433,6 +2438,37 @@ from user code:
                     ]
                 },
             ).aot_compile(((torch.ones(3),), {}))
+
+    def test_aot_compile_user_method_code_guard(self):
+        # obj.scale(x) guards scale's __code__ on the class __dict__ source.
+        # skip_guard_on_globals_unsafe keeps that local-rooted guard, so it is
+        # saved as a code check, and the loaded artifact still enforces it.
+        def fn(obj, x):
+            return obj.scale(x) + 1
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        obj, x = MethodHolder(), torch.ones(3)
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend=backend,
+            options={"guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe},
+        ).aot_compile(((obj, x), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(obj, x), fn(obj, x))
+
+        original = MethodHolder.scale.__code__
+        MethodHolder.scale.__code__ = (lambda self, x: x * 3).__code__
+        try:
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                loaded(obj, x)
+        finally:
+            MethodHolder.scale.__code__ = original
 
     def test_aot_compile_basic_fn_inductor(self):
         def fn(x, y):
