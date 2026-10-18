@@ -289,30 +289,46 @@ def infer_flex_gemm_epilogue_arg_kinds(
     epilogue_args: Sequence[IRNode],
     output_size: list[Any],
 ) -> tuple[str, ...]:
-    """Classify realized captured epilogue tensors for static wrapper kwargs."""
+    """Classify realized captured epilogue tensors for static wrapper kwargs.
+
+    bmm captures may carry a leading batch dim: ``[B, 1, N]`` rows and
+    ``[B, M, 1]`` columns are read per batch, ``[1, 1, N]`` / ``[1, M, 1]`` /
+    ``[1, 1, 1]`` are shared by every batch, and tiles must be ``[B, M, N]``.
+    """
     if not epilogue_args:
         return ()
-    if gemm_op not in QUACK_EPILOGUE_FEATURE_OPS:
+    batched = gemm_op is torch.ops.aten.bmm.default
+    if gemm_op not in QUACK_EPILOGUE_FEATURE_OPS and not batched:
         raise NotImplementedError(
             "FlexGEMM generated epilogues with captured tensor reads currently "
-            "support only aten.mm, aten._scaled_mm_v2 and aten._grouped_mm"
+            "support only aten.mm, aten.bmm, aten._scaled_mm_v2 and aten._grouped_mm"
         )
     m, n = output_size[-2], output_size[-1]
+    shared_leads = ([], [1]) if batched else ([],)
+    vector_leads = (*shared_leads, output_size[:-2]) if batched else shared_leads
+
+    def matches(
+        size: Sequence[Any], leads: Sequence[Sequence[Any]], inner: Sequence[Any]
+    ) -> bool:
+        return any(
+            statically_known_shape_equal(size, [*lead, *inner]) for lead in leads
+        )
+
     epilogue_arg_kinds = []
     for epilogue_arg in epilogue_args:
         epilogue_arg_size = epilogue_arg.get_size()
-        if statically_known_shape_equal(epilogue_arg_size, [1, 1]):
+        if matches(epilogue_arg_size, shared_leads, [1, 1]):
             epilogue_arg_kinds.append("scalar")
         elif statically_known_shape_equal(epilogue_arg_size, output_size):
             epilogue_arg_kinds.append("tile")
-        elif statically_known_shape_equal(
+        elif not batched and statically_known_shape_equal(
             epilogue_arg_size, [*output_size[:-1], 2 * n]
         ):
             # Two lanes interleaved along N, read as ``h.view(..., N, 2)[..., j]``.
             epilogue_arg_kinds.append("interleaved")
-        elif statically_known_shape_equal(epilogue_arg_size, [1, n]):
+        elif matches(epilogue_arg_size, vector_leads, [1, n]):
             epilogue_arg_kinds.append("row")
-        elif statically_known_shape_equal(epilogue_arg_size, [m, 1]):
+        elif matches(epilogue_arg_size, vector_leads, [m, 1]):
             epilogue_arg_kinds.append("col")
         else:
             raise NotImplementedError(
@@ -437,7 +453,26 @@ def require_tma_loadable_tile_captures(
         if kind in ("row", "col"):
             if ir.is_unaligned(arg):
                 arg = ir.ExternKernel.copy_input(arg)
-            arg = cast(TensorBox, ir.ExternKernel.require_contiguous(arg))
+            if len(arg.get_size()) == 3:
+                # QuACK's batched vector ABI requires unit vector stride and
+                # a batch stride divisible by 4 elements after squeezing.
+                vector_dim = -1 if kind == "row" else -2
+                stride = arg.maybe_get_stride()
+                if (
+                    stride is None
+                    or not statically_known_equal(stride[vector_dim], 1)
+                    or not sizevars.statically_known_multiple_of(stride[0], 4)
+                ):
+                    padded = list(arg.get_size())
+                    padded[vector_dim] = ceildiv(padded[vector_dim], 4) * 4
+                    arg = cast(
+                        TensorBox,
+                        ir.ExternKernel.require_exact_strides(
+                            arg, ir.FlexibleLayout.contiguous_strides(padded)
+                        ),
+                    )
+            else:
+                arg = cast(TensorBox, ir.ExternKernel.require_contiguous(arg))
         alignment = max(16 // arg.get_dtype().itemsize, 1)
         if kind in unit_dims and ir.is_unaligned(arg):
             arg = ir.ExternKernel.copy_input(arg)
@@ -534,6 +569,35 @@ def normalize_flex_gemm_1d_captures(
         graph_module.graph.lint()
         graph_module.recompile()
     return normalized
+
+
+def validate_bmm_capture_views(graph_module: torch.fx.GraphModule) -> None:
+    """Views lower as aliases, so they must preserve broadcast axes and dtype."""
+    from ..gemm_epilogue_codegen import _cute_op_name
+
+    for node in graph_module.graph.nodes:
+        if node.op != "call_function" or _cute_op_name(node.target) not in (
+            "view",
+            "reshape",
+            "squeeze",
+            "unsqueeze",
+        ):
+            continue
+        source = node.args[0]
+        if not isinstance(source, torch.fx.Node):
+            continue
+        source_meta, result_meta = source.meta["val"], node.meta["val"]
+        shapes = [list(meta.shape) for meta in (source_meta, result_meta)]
+        for shape in shapes:
+            while shape and statically_known_equal(shape[0], 1):
+                shape.pop(0)
+        if source_meta.dtype != result_meta.dtype or not statically_known_shape_equal(
+            shapes[0], shapes[1]
+        ):
+            raise NotImplementedError(
+                "FlexGEMM bmm epilogue views must preserve batch, row, and column axes "
+                "and dtype; reshape or reinterpret captures before the FlexGEMM call"
+            )
 
 
 def validate_flex_gemm_aux_outputs(
@@ -816,6 +880,8 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         epilogue_args[capture_start:],
         gemm_fx_node.meta["val"].shape,
     )
+    if gemm_op is torch.ops.aten.bmm.default and epilogue_args:
+        validate_bmm_capture_views(subgraph.graph_module)
     gemm_input_names = tuple(
         arg.name if isinstance(arg, torch.fx.Node) else f"gemm_arg{index}"
         for index, arg in enumerate(gemm_operand_nodes)
@@ -998,6 +1064,21 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
             gemm_op, epilogue_args[mainloop_scale_count:], epilogue_lane_size
         ),
     )
+    if gemm_op is torch.ops.aten.bmm.default and epilogue_args:
+        if output_transform is not None:
+            raise NotImplementedError(
+                "FlexGEMM bmm captured tensor reads require a shape-preserving main output"
+            )
+        # Batch-shared captures become the 2-D forms QuACK broadcasts over every
+        # batch; the runtime then passes rows and columns rank-1.
+        epilogue_args = [
+            view(arg, arg.get_size()[1:])
+            if kind != "tile"
+            and len(arg.get_size()) == 3
+            and statically_known_equal(arg.get_size()[0], 1)
+            else arg
+            for arg, kind in zip(epilogue_args, epilogue_arg_kinds, strict=True)
+        ]
     gemm_input_nodes = [
         ir.TemplateBuffer.realize_template_input(arg) for arg in gemm_args
     ]
