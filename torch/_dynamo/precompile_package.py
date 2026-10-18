@@ -2038,6 +2038,19 @@ class PrecompileSession(Generic[_P, _R]):
                     "empty, so the artifact carries no compiled compute. Pass "
                     "require_complete=False to write the guards-only artifact anyway."
                 )
+            first = self._package.cache_entry().codes[0]
+            if first.eager_fallback and not first.bypassed and not first.guarded_codes:
+                # The artifact build refuses this too, so require_complete=False
+                # is no way out; say so rather than suggest it.
+                raise PackageError(
+                    f"Precompilation has no variant of the entry frame "
+                    f"{first.python_code.co_name!r}: Dynamo gave up on it at its first "
+                    f"call, after a graph break it cannot resume from (such as one "
+                    f"inside a loop; check TORCH_LOGS=graph_breaks), a generator, or "
+                    f"a backend SkipFrame. The artifact build refuses that whatever "
+                    f"require_complete says: remove that graph break, or capture the "
+                    f"functions the entry calls instead."
+                )
             if summary.uncovered_frames:
                 raise PackageError(
                     f"Precompilation exercised frame(s) that produced NO guarded code "
@@ -2045,13 +2058,8 @@ class PrecompileSession(Generic[_P, _R]):
                     f"from the artifact. This is expected for a frame that only "
                     f"dispatches to covered submodules; it also looks exactly like a "
                     f"frame whose compile error was suppressed (suppress_errors=True; "
-                    f"check TORCH_LOGS=graph_breaks). If the frame is the entry, Dynamo "
-                    f"may instead have given up on it at its first call (a graph break "
-                    f"it cannot resume from, a generator, or a backend SkipFrame), and "
-                    f"the artifact build refuses that whatever require_complete says: "
-                    f"remove that graph break, or capture the functions the entry "
-                    f"calls. Otherwise pass require_complete=False once you have "
-                    f"confirmed which."
+                    f"check TORCH_LOGS=graph_breaks). Pass require_complete=False once "
+                    f"you have confirmed which."
                 )
             if summary.bypassed:
                 raise PackageError(

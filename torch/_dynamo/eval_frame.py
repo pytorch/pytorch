@@ -40,7 +40,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Generator, Mapping, Sized
+from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -131,7 +131,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
