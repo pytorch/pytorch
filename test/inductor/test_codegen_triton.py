@@ -95,6 +95,7 @@ except ImportError:
 
 if has_triton_package():
     import triton
+    import triton.language as tl
 
     # triton.constexpr_function was introduced in Triton 3.5.
     if hasattr(triton, "constexpr_function"):
@@ -251,6 +252,143 @@ class TestCodegenTriton(InductorTestCase):
         self.assertFalse(can_use(shape=(size,), storage=size))
         self.assertFalse(can_use(shape=(int32_max + 1,), storage=int32_max + 1))
         self.assertFalse(can_use(shape=(1,), storage=int32_max + 1))
+
+    @unittest.skipUnless(has_triton_package(), "requires Triton")
+    def test_user_defined_kernel_preserves_tensor_constants(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        @triton.jit
+        def kernel(X, Y, N, scale_ptr, scalar, BLOCK: tl.constexpr):
+            offsets = tl.arange(0, BLOCK)
+            value = tl.load(X + offsets, offsets < N, 0)
+            scale = tl.load(scale_ptr)
+            tl.store(Y + offsets, value + scale + scalar, offsets < N)
+
+        layout = ir.FixedLayout(torch.device("cuda"), torch.float32, [8], [1])
+        x = ir.TensorBox.create(ir.InputBuffer(name="x", layout=layout))
+        y = ir.TensorBox.create(ir.InputBuffer(name="y", layout=layout))
+        size = sympy.Symbol("s0", integer=True, positive=True)
+        kernel_idx = kernel_side_table.add_kernel(kernel)
+        self._graph.current_node = next(iter(self._gm.graph.nodes))
+
+        for value, dtype, scalar, signature in (
+            (2.5, torch.float32, 2.5, "fp32"),
+            (2, torch.float32, 2.0, "fp32"),
+            (2**40 + 3, torch.int64, 2**40 + 3, "i64"),
+            (1, torch.bool, True, "i1"),
+        ):
+            with self.subTest(dtype=dtype):
+                tensor = torch.tensor(value, dtype=dtype)
+                self._gm.register_buffer("scale", tensor)
+                constant = self._graph.get_attr("scale", (), {})
+                self.assertIsInstance(constant, ir.Constant)
+                node = ir.UserDefinedTritonKernel(
+                    kernel_idx=kernel_idx,
+                    grid=[[1, 1, 1]],
+                    tma_descriptor_metadata={},
+                    kernel_args={
+                        "X": x,
+                        "Y": y,
+                        "N": size,
+                        "scale_ptr": constant,
+                        "scalar": scalar,
+                        "BLOCK": 32,
+                    },
+                    launch_kwargs=(),
+                )
+                scale = node.get_kwargs_value("scale_ptr")
+                self.assertIsInstance(node.kernel_args["scale_ptr"], ir.TensorBox)
+                self.assertIsInstance(scale, ir.ConstantBuffer)
+                self.assertEqual(scale.get_size(), [])
+                self.assertEqual(scale.get_dtype(), dtype)
+                self.assertEqual(self._graph.constants[scale.get_name()], tensor)
+                self.assertIn(scale, node.inputs)
+                self.assertIs(node.get_kwargs_value("scalar"), scalar)
+                self.assertIs(node.get_kwargs_value("N"), size)
+                self.assertEqual(
+                    triton_utils.signature_of(
+                        SizeArg("scalar", scalar),
+                        size_dtype=None,
+                        use_fp64_for_python_float=False,
+                    ),
+                    signature,
+                )
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("runtime", ("python", "cpp", "aoti"))
+    @parametrize("freezing", (False, True))
+    @torch.no_grad()
+    def test_user_defined_kernel_zero_dim_tensor_constant(self, runtime, freezing):
+        @triton.jit
+        def kernel(X, Y, scale_ptr, N, bias, BLOCK: tl.constexpr):
+            offsets = tl.arange(0, BLOCK)
+            value = tl.load(X + offsets, offsets < N, 0)
+            scale = tl.load(scale_ptr)
+            tl.store(Y + offsets, value + scale + bias, offsets < N)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("scale", torch.tensor(2.5, device=GPU_TYPE))
+
+            def forward(self, x):
+                out = torch.empty_like(x)
+                kernel[(1,)](x, out, self.scale, x.numel(), 3, BLOCK=32)
+                return out
+
+        model = Model().eval()
+        x = torch.randn(8, device=GPU_TYPE)
+        with inductor_config.patch(freezing=freezing):
+            if runtime == "aoti":
+                exported = torch.export.export(model, (x,), strict=True)
+                path = torch._inductor.aoti_compile_and_package(
+                    exported,
+                    inductor_configs={"triton.autotune_at_compile_time": False},
+                )
+                compiled = torch._inductor.aoti_load_package(path)
+            else:
+                compiled = torch.compile(
+                    model, fullgraph=True, options={"cpp_wrapper": runtime == "cpp"}
+                )
+            for value in (x, x + 1):
+                actual = compiled(value)
+                self.assertEqual(actual, model(value))
+                self.assertEqual(actual, value + model.scale + 3)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("runtime", ("python", "cpp", "aoti"))
+    @parametrize("scalar", (2.5, 2.0, 2**40 + 3, True))
+    @torch.no_grad()
+    def test_user_defined_kernel_python_scalar(self, runtime, scalar):
+        @triton.jit
+        def kernel(X, Y, N, scalar, BLOCK: tl.constexpr):
+            offsets = tl.arange(0, BLOCK)
+            value = tl.load(X + offsets, offsets < N, 0)
+            tl.store(Y + offsets, value + scalar, offsets < N)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                out = torch.empty_like(x)
+                kernel[(1,)](x, out, x.numel(), scalar, BLOCK=32)
+                return out
+
+        model = Model().eval()
+        x = torch.arange(8, device=GPU_TYPE, dtype=torch.float64)
+        if runtime == "aoti":
+            exported = torch.export.export(model, (x,), strict=True)
+            path = torch._inductor.aoti_compile_and_package(
+                exported,
+                inductor_configs={"triton.autotune_at_compile_time": False},
+            )
+            compiled = torch._inductor.aoti_load_package(path)
+        else:
+            compiled = torch.compile(
+                model, fullgraph=True, options={"cpp_wrapper": runtime == "cpp"}
+            )
+        for value in (x, x + 1):
+            actual = compiled(value)
+            self.assertEqual(actual, model(value))
+            self.assertEqual(actual, value + scalar)
 
     def test_strict_signed_zero_reduction_function(self):
         for reduction_type in ("min", "max"):

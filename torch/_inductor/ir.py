@@ -9043,6 +9043,10 @@ class UserDefinedTritonKernel(ExternKernel):
         kwargs: dict[str, IRNode] = {}
         constant_args: list[IRNode] = []
 
+        kernel_args = {
+            key: self.realize_input(value) if isinstance(value, Constant) else value
+            for key, value in kernel_args.items()
+        }
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))

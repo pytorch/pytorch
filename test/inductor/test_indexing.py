@@ -1292,6 +1292,22 @@ class TestWideExpressionThresholds(InductorTestCase):
         wide = sum(syms)
         self.assertTrue(sizevars.statically_known_multiple_of(wide, wide))
 
+    def test_statically_known_multiple_of_negative_expressions(self):
+        sizevars = SizeVarAllocator()
+        size = sympy.Symbol("s0", integer=True, positive=True)
+        for numerator, expected in (
+            (-1, False),
+            (-17, False),
+            (-32, True),
+            (-size - 1, False),
+            (size - 1, False),
+            (-16 * size, True),
+        ):
+            with self.subTest(numerator=numerator):
+                self.assertEqual(
+                    sizevars.statically_known_multiple_of(numerator, 16), expected
+                )
+
     def test_statically_known_multiple_of_factorable_add_floordiv(self):
         sizevars = SizeVarAllocator()
         s52, s97 = sympy.symbols("s52 s97", integer=True, positive=True)
