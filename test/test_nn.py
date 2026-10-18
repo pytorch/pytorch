@@ -9569,6 +9569,59 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(grad_input[0, 0, 1, 0].item(), 0)
         self.assertEqual(grad_input[0, 0, 64, 64].item(), 1)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("align_corners", [True, False])
+    def test_upsamplingBilinear2d_backward_many_channels(
+        self, device, dtype, memory_format, align_corners
+    ):
+        # C=16 so channels_last takes the NHWC backward kernels (threshold is
+        # channels >= 4). Spatial sizes straddle the ROCm gather/scatter
+        # heuristic (K=6 atomics/addr). NaN-prefilled grad_input checks every
+        # element is written (gather) or correctly zeroed then scattered.
+        n, c = 2, 16
+        # (ih, iw, oh, ow, scales_h, scales_w); scales None => size-based scale.
+        cases = [
+            (6, 8, 24, 32, None, None),       # upsample, atomics/addr=16
+            (7, 5, 13, 11, None, None),       # mild upsample
+            (24, 32, 12, 16, None, None),     # downsample, atomics/addr=1
+            (13, 11, 7, 5, None, None),       # mild downsample
+            (9, 10, 9, 31, None, None),       # anisotropic
+            # scales_h/w are forward scale_factors; 2.0 matches 8->16 size-based scale.
+            (8, 8, 16, 16, 2.0, 2.0),         # explicit scales
+        ]
+        atol_rtol = {
+            torch.float: (1e-5, 1e-5),
+            torch.double: (1e-7, 1e-7),
+            torch.half: (1e-2, 1e-2),
+            torch.bfloat16: (5e-2, 5e-2),
+        }
+        atol, rtol = atol_rtol[dtype]
+
+        for ih, iw, oh, ow, scales_h, scales_w in cases:
+            input_size = [n, c, ih, iw]
+            output_size = [oh, ow]
+            go = torch.randn(n, c, oh, ow, device=device, dtype=dtype)
+            go = go.contiguous(memory_format=memory_format)
+            # NaN prefill exposes any unwritten grad_input element.
+            gi = torch.full(input_size, float("nan"), device=device, dtype=dtype)
+            gi = gi.contiguous(memory_format=memory_format)
+
+            torch.ops.aten.upsample_bilinear2d_backward.grad_input(
+                go, output_size, input_size, align_corners,
+                scales_h, scales_w, grad_input=gi,
+            )
+
+            self.assertTrue(gi.is_contiguous(memory_format=memory_format))
+            self.assertFalse(gi.isnan().any())
+
+            ref = torch.ops.aten.upsample_bilinear2d_backward(
+                go.detach().cpu().double(),
+                output_size, input_size, align_corners, scales_h, scales_w,
+            ).to(dtype=dtype)
+            torch.testing.assert_close(gi.cpu(), ref, atol=atol, rtol=rtol)
+
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("isize, osize", [(20, 11), (10, 15)])
     def test_upsamplingNearest2d_correctness(self, device, memory_format, isize, osize):
