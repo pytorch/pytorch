@@ -6651,6 +6651,16 @@
       "Hints": []
     }
   ],
+  "GB7159": [
+    {
+      "Gb_type": "setattr on an OrderedDict data descriptor",
+      "Context": "object={self}, name={attr}",
+      "Explanation": "Dynamo does not model setting attributes that are data descriptors on the type (e.g. __class__, __dict__).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0359": [
     {
       "Gb_type": "unsupported torch._C._SDPAParams attribute",

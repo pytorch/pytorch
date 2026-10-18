@@ -985,6 +985,21 @@ class OrderedDictVariable(ConstDictVariable):
                 f"attribute name must be string, not '{args[0].python_type_name()}'",
             )
 
+        # __class__/__dict__ resolve to data descriptors on the type, so the
+        # store/delete is a descriptor call, not an instance __dict__ write.
+        type_attr = mro_lookup(self.python_type(), attr)
+        if type_attr is not NO_SUCH_SUBOBJ:
+            from .user_defined import is_data_descriptor
+
+            if is_data_descriptor(type_attr):
+                unimplemented(
+                    gb_type="setattr on an OrderedDict data descriptor",
+                    context=f"object={self}, name={attr}",
+                    explanation="Dynamo does not model setting attributes that are "
+                    "data descriptors on the type (e.g. __class__, __dict__).",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
         se = tx.output.side_effects
         if not se.is_attribute_mutation(self):
             if self.source is not None:
@@ -1024,7 +1039,7 @@ class OrderedDictVariable(ConstDictVariable):
             return None
         try:
             return tx.output.resolve_source_value(self.source)
-        except Exception:
+        except (AttributeError, KeyError, IndexError, TypeError):
             return None
 
     def _live_instance_dict(
