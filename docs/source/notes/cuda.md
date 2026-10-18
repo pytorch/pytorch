@@ -1374,8 +1374,12 @@ and copy that may be used for pageable memory.
 
 Reusing a pageable buffer can also amortize
 these costs as long as its pages remain mapped and physically allocated.
-Once populated, pageable and pinned buffers can have similar transfer
-performance. Reuse does not pin pageable memory: it remains eligible for
+On hardware-coherent NVLink-C2C systems, populated pageable and pinned
+buffers on the CPU NUMA node local to the source tensor's GPU can have
+similar transfer performance: either NVLink-C2C bandwidth or GPU copy-engine
+throughput limits both. This does not extend to buffers on remote CPU NUMA
+nodes, where differences in memory mapping can lead to different data paths.
+Reuse does not pin pageable memory: it remains eligible for
 swapping or migration to another CPU NUMA node. Pinned buffers remain useful
 for large, repeated transfers because they prevent these movements and help
 maintain transfer performance across hardware-coherent and non-coherent
