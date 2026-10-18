@@ -5071,10 +5071,9 @@ class TestPrecompileDynamoCapture(TestCase):
                 x = opaque(x)
             return model(x)
 
-        # require_complete refuses it, before the build's own refusal would.
+        # require_complete refuses it, naming the cause, before the build would.
         with self.assertRaisesRegex(
-            torch.compiler.PrecompileError,
-            r"NO guarded code at all: \['entry'\](?s:.*)given up on it at its first call",
+            PrecompileError, r"no variant of the entry frame 'entry': Dynamo gave up"
         ):
             with self._capture(entry, backend="eager") as cap:
                 cap(self.model, self.x2)
