@@ -2253,6 +2253,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
+    @skip_on_cpu
     def test_pinned_block_m_larger_than_default(self, device):
         # 8 query positions x 8 shared heads = 64 rows, so the default BLOCK_M is 64.
         # A pinned fwd_BLOCK_M=128 leaves rows past Q_LEN in the tile; they must stay
@@ -2267,9 +2268,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         v = torch.randn(1, num_kv_heads, q_seq_len, head_dim, device=device)
         kwargs = dict(block_mask=mask, enable_gqa=True)
         eager = flex_attention(q, k, v, **kwargs)
-        out = torch.compile(flex_attention)(
-            q, k, v, kernel_options={"fwd_BLOCK_M": 128}, **kwargs
+        out, code = run_and_get_code(
+            torch.compile(flex_attention),
+            q,
+            k,
+            v,
+            kernel_options={"fwd_BLOCK_M": 128},
+            **kwargs,
         )
+        # Ensure the decode kernel ran: only it reads SAFE_M_BOUNDARY.
+        FileCheck().check("BLOCK_M_PER_HQ").run(code[0])
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
