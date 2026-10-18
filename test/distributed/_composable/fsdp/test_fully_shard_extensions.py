@@ -746,6 +746,82 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                 states = [fsdp_param.sharded_state for fsdp_param in fsdp_params]
                 self.assertEqual(states, [ShardedState.UNSHARDED] * 2)
 
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_smaller_payload(self):
+        # A size-1 shard mesh copies every payload, and Shard(0) payloads may shrink
+        # and fill a prefix of their output
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        num_tags, tags_dtype = 4, torch.bfloat16
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            tags = torch.arange(num_tags, device=local_tensor.device).bfloat16()
+            payloads = (tags.view(tags_dtype), local_tensor) if num_tags else (tags,)
+            return payloads, (outer_size, num_tags)
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            outer_size, num_rank_tags = metadata
+            tags, weight = all_gather_outputs
+            expected_tags = torch.arange(num_rank_tags, device=tags.device).bfloat16()
+            self.assertEqual(tags[:num_rank_tags], expected_tags)
+            return _finish_post_all_gather(weight.view(outer_size), out)
+
+        model = nn.Linear(8, 16, bias=False, device=device_type)
+        # Seeding is per process, not per thread
+        dist.broadcast(model.weight.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        # An input that requires grad saves the weight for backward, which all-gathers
+        # it again in place, so this also checks every output's version counter
+        inp = torch.randn((2, 8), device=device_type, requires_grad=True)
+        for num_tags in (4, 2):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
+        # A smaller byte payload of a typed output, a payload whose dtype and size
+        # change, or a dropped payload raises
+        for tags_dtype in (torch.uint8, torch.float16):
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                model(inp)
+        num_tags, tags_dtype = 0, torch.bfloat16
+        with self.assertRaisesRegex(ValueError, "zip"):
+            model(inp)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_no_payloads(self):
+        # A size-1 shard mesh copies no payloads for an extension without any
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        weight = torch.ones((8, 8), device=device_type)
+
+        def fsdp_pre_all_gather(local_tensor, mesh):
+            return (), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            return _finish_post_all_gather(weight.clone(), out)
+
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            self.assertEqual(model(inp), inp @ weight.T)
+
 
 if __name__ == "__main__":
     run_tests()

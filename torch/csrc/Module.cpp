@@ -36,6 +36,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
+#include <pybind11/options.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/utils/pybind.h>
@@ -3197,18 +3198,37 @@ Call this whenever a new thread is created in order to propagate values from
       .def_readonly("is_causal", &sdp::sdp_params::is_causal)
       .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
 
-  py::enum_<sdp::SDPBackend>(
-      py_module,
-      "_SDPBackend",
-      "An enum-like class that contains the different backends for scaled dot product attention.\n\n... warning:: This class is in beta and subject to change.\n\n"
-      "This backend class is designed to be used with the sdpa_kernel context manager."
-      "See :func: torch.nn.attention.sdpa_kernel for more details.")
-      .value("ERROR", sdp::SDPBackend::error)
-      .value("MATH", sdp::SDPBackend::math)
-      .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
-      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
-      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
+  {
+    py::options options;
+    options.disable_enum_members_docstring();
+
+    py::enum_<sdp::SDPBackend>(
+        py_module,
+        "_SDPBackend",
+        "An enum-like class that contains the different backends for scaled dot product attention.\n\n"
+        ".. warning:: This class is in beta and subject to change.\n\n"
+        "This backend class is designed to be used with the sdpa_kernel context manager. "
+        "See :func:`torch.nn.attention.sdpa_kernel` for more details.\n\n"
+        "The following members are available:\n\n"
+        "- ``ERROR``: Represents an error while determining the backend.\n"
+        "- ``MATH``: Selects the PyTorch implementation defined in C++ that "
+        "matches the formulation in "
+        ":func:`torch.nn.functional.scaled_dot_product_attention`.\n"
+        "- ``FLASH_ATTENTION``: Selects the FlashAttention backend. The default "
+        "CUDA implementation uses `FlashAttention-2`_: Faster Attention with "
+        "Better Parallelism and Work Partitioning.\n"
+        "- ``EFFICIENT_ATTENTION``: Selects `Memory-Efficient Attention`_.\n"
+        "- ``CUDNN_ATTENTION``: Selects the cuDNN scaled dot product attention implementation.\n"
+        "- ``OVERRIDEABLE``: Selects an overrideable backend provided by an extension.\n\n"
+        ".. _FlashAttention-2: https://arxiv.org/abs/2307.08691\n"
+        ".. _Memory-Efficient Attention: https://github.com/facebookresearch/xformers")
+        .value("ERROR", sdp::SDPBackend::error)
+        .value("MATH", sdp::SDPBackend::math)
+        .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
+        .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
+        .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
+        .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
+  }
 
   py_module.def("_is_flash_attention_available", []() {
 #if defined(USE_CUDA) || defined(USE_XPU)
