@@ -2034,11 +2034,11 @@ class PrecompileSession(Generic[_P, _R]):
         """Run the coverage and guard gates, or raise saying which one failed."""
         entry, eager = self._served_entry()
         summary = self._summary_of(entry, eager)
-        if require_complete and _is_variantless_entry_fallback(entry):
+        if _is_variantless_entry_fallback(entry):
             # The artifact build refuses this too, so no flag is a way out; say
-            # so rather than suggest one. Checked before every other gate: the
-            # entry did run, and the later gates either suggest a flag or say it
-            # never ran.
+            # so rather than suggest one. Checked before every other gate and
+            # whatever require_complete says: the entry did run, and the later
+            # gates either suggest a flag or say it never ran.
             name = entry.codes[0].python_code.co_name
             raise PackageError(
                 f"{_variantless_entry_fallback_message(name)} The artifact build "
