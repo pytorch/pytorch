@@ -433,6 +433,7 @@ def _build_multigraph_forward():
 
     import torch
     from torch._dynamo.aot_compile import bind_locals
+    from torch._dynamo.eval_frame import _warn_eager_fallback_miss
     from torch._dynamo.output_graph import get_builtins_dict
     from torch._dynamo.package import (
         load_guard_manager,
@@ -652,6 +653,7 @@ def _build_multigraph_forward():
                     if manager.check(f_locals):
                         return variant(*args, **kwargs)
             if eager_fallback:
+                _warn_eager_fallback_miss(target)
                 return _function(target, closure)(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "

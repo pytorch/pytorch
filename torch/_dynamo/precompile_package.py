@@ -1616,6 +1616,16 @@ class _CapturePackage(CompilePackage):
         super().add_resume_function(python_code, python_module, function_name)
 
 
+def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
+    # The artifact build refuses an entry frame that fell back on its first
+    # call (it has no variant to dispatch to), so that one stays uncovered.
+    return (
+        code.eager_fallback
+        and not code.bypassed
+        and (code is not entry.codes[0] or bool(code.guarded_codes))
+    )
+
+
 def _summarize(
     entry: _DynamoCacheEntry,
     *,
@@ -1667,13 +1677,13 @@ def _summarize(
             and not c.guarded_codes
             and not c.bypassed
             and _frame_key(c.python_code) not in served_eagerly
-            and not c.eager_fallback
+            and not _served_as_eager_fallback(entry, c)
         ),
         eager_fallbacks=tuple(
             f"{c.python_code.co_name} "
             f"({c.python_code.co_filename}:{c.python_code.co_firstlineno})"
             for c in entry.codes
-            if c.eager_fallback and not c.bypassed
+            if _served_as_eager_fallback(entry, c)
         ),
         wont_generalize=_wont_generalize(kept, guard_sets),
         dropped_guards=tuple(sorted(dropped)),

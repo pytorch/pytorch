@@ -556,7 +556,13 @@ print(eval(f"bbmod.{name}.{path}") is code)
             self.assertEqual(compiled_fn(x, 0), x.sin())
             self.assertEqual(len(runs), 1)
             if eager_codes:
-                self.assertEqual(compiled_fn(x, 1), x.sin())
+                # The eager miss warns, once per frame.
+                torch._logging._internal.warning_once.cache_clear()
+                with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                self.assertEqual(len(logs.output), 1, logs.output)
+                self.assertIn("no captured variant of _dispatch", logs.output[0])
                 self.assertEqual(compiled_fn(x, 0), x.sin())
                 self.assertEqual(len(runs), 2)
             else:
