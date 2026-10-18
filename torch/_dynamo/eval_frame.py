@@ -288,7 +288,11 @@ def _warn_eager_fallback_miss(code: types.CodeType) -> None:
     torch._logging._internal.warning_once(
         log,
         "precompile: no captured variant of %s (%s:%s) matches this call; running "
-        "this frame eagerly, as the capture did after Dynamo gave up on it",
+        "this frame eagerly, as the capture did after Dynamo gave up on it. To "
+        "serve such calls compiled, recapture with a call that covers them, or fix "
+        "what made Dynamo give up on the frame (TORCH_LOGS=graph_breaks during "
+        "capture). This miss is not a recompile, so TORCH_LOGS=recompiles does "
+        "not report it; this warning is logged once per frame",
         code.co_name,
         code.co_filename,
         code.co_firstlineno,
@@ -313,6 +317,10 @@ class _FailOnRecompileCallback:
     def __call__(
         self, frame: DynamoFrameType, *args: Any, **kwargs: Any
     ) -> ConvertFrameReturn:
+        # First: every miss of an eager-fallback frame lands here, so it skips
+        # the checks below, none of which apply to a frame Dynamo compiled.
+        if (served := self._serve_miss(frame)) is not None:
+            return served
         if trace_rules.check(frame.f_code):
             return ConvertFrameReturn()
         if not convert_frame.has_tensor_in_frame(frame):
@@ -325,8 +333,6 @@ class _FailOnRecompileCallback:
             disabled := convert_frame.nonrecursive_disable_skip(sys._getframe(1))
         ) is not None:
             return disabled
-        if (served := self._serve_miss(frame)) is not None:
-            return served
 
         from torch._C._dynamo.eval_frame import (
             _debug_get_cache_entry_list,

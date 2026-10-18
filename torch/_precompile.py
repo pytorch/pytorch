@@ -2228,7 +2228,8 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"restructuring the captured callable."
         )
     if entry_frame["eager_fallback"] and not entry_frame["variants"]:
-        raise PrecompileError(_variantless_entry_fallback_message(entry.fn_name))
+        name = entry_frame["code"].co_name
+        raise PrecompileError(_variantless_entry_fallback_message(name))
     if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
@@ -3533,9 +3534,10 @@ def load(
     one that compiled none is served as plain Python from the start, as a
     trivial frame is, with no warning, since there is no compiled code to lose.
     Under an installed artifact only that frame runs eagerly: the frames it
-    calls still dispatch to their own variants. A standalone artifact runs the
-    whole call as plain Python, since the frame's original bytecode never
-    reaches its continuations.
+    calls still dispatch to their own variants. A standalone artifact installs
+    nothing, so the rest of the call from that frame on, its callees included,
+    runs as plain Python; whatever ran before it, such as the entry's variant
+    up to a graph break whose continuation fell back, still ran compiled.
 
     Frozen C++ kernels are keyed by their full build command, which includes
     the producer's absolute PyTorch include and library paths, so they serve

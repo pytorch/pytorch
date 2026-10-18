@@ -243,6 +243,11 @@ class PrecompileSummary:
         check, because a frame that compiled nothing can still count as one
         guarded code, so ``guarded_codes`` alone cannot tell a real capture
         from an empty one.
+        Nor does it promise that a load serves every call the capture ran: once
+        a frame falls back, the capture runs its later calls eagerly, even one
+        an earlier variant matches, and records nothing past it. A load serves
+        such a call through that variant, and a continuation or callee it then
+        reaches may have no variant for it and refuse the call.
         The guard fields never enter: ``risky_dropped_guards`` is a lint
         finding, not a proof, and ``wont_generalize`` follows from any value the
         capture pinned, so both describe how far a complete capture generalizes
