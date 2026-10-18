@@ -1376,24 +1376,6 @@ torch.ones(10) * 2
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].input_shapes, [[2, 3], [], [3]])
 
-    def test_input_with_poisoned_storage(self):
-        # Metadata-only placeholders (e.g. released cudagraph-tree outputs)
-        # throw on data pointer access. Recording such an input must not leave
-        # the op without its inputs and shift every later op's inputs.
-        placeholder = torch.empty(4, 4)
-        torch._C._set_storage_data_ptr_access_error_msg(
-            placeholder.untyped_storage()._cdata, "placeholder has no data"
-        )
-        x = torch.ones(3, 5)
-        with profile(record_shapes=True) as prof:
-            placeholder.view(16)
-            torch.add(x, x)
-
-        (view,) = [e for e in prof.events() if e.name == "aten::view"]
-        (add,) = [e for e in prof.events() if e.name == "aten::add"]
-        self.assertEqual(view.input_shapes[0], [4, 4])
-        self.assertEqual(add.input_shapes[:2], [[3, 5], [3, 5]])
-
     def test_concrete_inputs_profiling(self):
         x = torch.rand(2, 6)
         with profile(record_shapes=True) as p:

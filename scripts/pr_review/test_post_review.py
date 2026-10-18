@@ -636,33 +636,17 @@ class TestNothingIsDeleted(unittest.TestCase):
         self.assertEqual(gh.writes("PATCH"), [])
         self.assertEqual(minimized(gh), ["N5"])
 
-    def test_a_refused_resolve_still_hides_the_review(self):
-        # What pytorch/pytorch's GITHUB_TOKEN gets back: FORBIDDEN inside a 200.
+    def test_a_failed_resolve_leaves_the_review_visible_for_the_next_run(self):
         class NoResolve(FakeGitHub):
             def request(self, method, path, body=None, idempotent=None):
                 if path == "/graphql" and "resolveReviewThread" in body["query"]:
-                    self.calls.append((method, path, body))
-                    return {"errors": [{"type": "FORBIDDEN"}]}
+                    raise GitHubError(500, "down")
                 return super().request(method, path, body)
 
         gh = NoResolve(reviews=[old_review(5)])
         with mock.patch("post_review._sleep"):
-            self.assertEqual(go(gh), 0)
-        self.assertEqual(resolved(gh), ["T50"] * 3)
-        self.assertEqual(minimized(gh), ["N5"])
-
-    def test_a_failed_thread_listing_still_hides_the_review(self):
-        class NoThreads(FakeGitHub):
-            def request(self, method, path, body=None, idempotent=None):
-                if method == "GET" and path.startswith("/repos/o/r/pulls/1/reviews/5/"):
-                    raise GitHubError(503, "unavailable")
-                return super().request(method, path, body)
-
-        gh = NoThreads(reviews=[old_review(5)])
-        with mock.patch("post_review._sleep"):
             go(gh)
-        self.assertEqual(resolved(gh), [])
-        self.assertEqual(minimized(gh), ["N5"])
+        self.assertEqual(minimized(gh), [])
 
 
 class TestRetries(unittest.TestCase):

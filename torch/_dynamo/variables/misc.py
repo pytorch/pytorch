@@ -515,18 +515,11 @@ class DelayGraphBreakVariable(UnknownVariable):
         self,
         msg: str | None = None,
         hints: list[str] | None = None,
-        callable_var: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.msg = msg
         self.hints = hints or []
-        self.callable_var = callable_var
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self.callable_var is None:
-            return super().reconstruct(codegen)
-        codegen(self.callable_var)
 
     def call_function(
         self,

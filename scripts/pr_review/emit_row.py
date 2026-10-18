@@ -66,7 +66,7 @@ _MODEL_CHARS = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 # PR code, so every string it puts in the row — verdict, summary, findings and
 # failure_detail — is re-checked here with extract_verdict.py's own predicates
 # rather than trusted to have come through that module. `build` holds its
-# output to the same predicates.
+# output to the same predicates, so validate_findings.py sees what this drops.
 _DETAIL_REJECTED = "failure_detail failed the publish-side re-check"
 
 # Terminal statuses. Anything not in this set is a bug in the caller.

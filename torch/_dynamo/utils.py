@@ -2626,12 +2626,11 @@ class CleanupHook:
         return CleanupHook(scope, name, token)
 
     @staticmethod
-    def disown(scope: dict[str, Any], name: str) -> bool:
+    def disown(scope: dict[str, Any], name: str) -> None:
         """Invalidate whichever hook currently owns (scope, name), so that if
         its code object outlives this call, firing later is a no-op instead of
-        deleting a binding something else has since taken over. Returns whether
-        a hook owned it."""
-        return _cleanup_owners.pop((id(scope), name), None) is not None
+        deleting a binding something else has since taken over."""
+        _cleanup_owners.pop((id(scope), name), None)
 
 
 class CleanupManager(ExactWeakKeyDictionary):

@@ -104,10 +104,7 @@ def vt_identity_compare(
     # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable, MappingProxyVariable
     from .exception import ExceptionVariable, TracebackVariable
-    from .functions import (
-        _WrappedSkipFunctionMethodDescriptorCommonVariable,
-        UserMethodVariable,
-    )
+    from .functions import UserMethodVariable
     from .lists import ListVariable
     from .sets import (
         DictKeySetVariable,
@@ -125,20 +122,21 @@ def vt_identity_compare(
     ):
         return ConstantVariable.create(False)
 
-    trace_created_types = (
-        ConstDictVariable,
-        ListVariable,
-        SetVariable,
-        FrozensetVariable,
-        DictKeySetVariable,
-        OrderedSetVariable,
-        TracebackVariable,
-        ExceptionVariable,
-        UserMethodVariable,
-        _WrappedSkipFunctionMethodDescriptorCommonVariable,
-        CurrentDeviceVariable,
-    )
-    if isinstance(left, trace_created_types) or isinstance(right, trace_created_types):
+    if isinstance(
+        left,
+        (
+            ConstDictVariable,
+            ListVariable,
+            SetVariable,
+            FrozensetVariable,
+            DictKeySetVariable,
+            OrderedSetVariable,
+            TracebackVariable,
+            ExceptionVariable,
+            UserMethodVariable,
+            CurrentDeviceVariable,
+        ),
+    ):
         return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.

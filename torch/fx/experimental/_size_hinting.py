@@ -12,11 +12,8 @@ concrete integer hints. Two strategies are provided:
 
 from __future__ import annotations
 
-import contextlib
-import dataclasses
 import logging
 import sys
-import threading
 from functools import lru_cache
 from typing import Any, TYPE_CHECKING
 
@@ -37,8 +34,6 @@ SYMPY_FACTOR_MAX_FREE_SYMBOLS = 50
 SYMPY_SUBS_MAX_SYMBOL_REPLACEMENT_PRODUCT = 1024
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 
@@ -349,148 +344,8 @@ def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
     return expr
 
 
-def _runtime_asserts_by_symbol(
-    shape_env: ShapeEnv,
-) -> dict[sympy.Symbol, list[sympy.Basic]]:
-    """Map each symbol to the runtime asserts that mention it, with
-    replacements applied. ``deferred_runtime_asserts`` keys each assert by its
-    newest unbacked symbol only.
-    """
-    from collections import defaultdict
-
-    by_symbol: dict[sympy.Symbol, list[sympy.Basic]] = defaultdict(list)
-    for asserts in shape_env.deferred_runtime_asserts.values():
-        for ra in asserts:
-            if not isinstance(ra.expr, sympy.Basic):
-                continue
-            expr = ra.expr.xreplace(shape_env.replacements)
-            for sym in expr.free_symbols:
-                by_symbol[sym].append(expr)
-    return by_symbol
-
-
-@dataclasses.dataclass
-class ConsistentHintState:
-    """While set by consistent_hints(state), computes optimization hints for
-    shape_env from one shared per-symbol assignment.
-
-    Use it when several hints must be consistent, e.g. the example inputs of
-    compile-time autotuning, where a view must fit its backing storage and
-    scalar arguments must match tensor shapes (see
-    PythonWrapperCodegen.generate_example_arg_value). The caller keeps the
-    state, so values chosen in one use of the context are reused by the next.
-
-    New constraints do not clear this state's assignments. Callers should use
-    a ConsistentHintState only across hint-extraction scopes that do not add
-    new guards or tighten constraints in shape_env.
-
-    While set, optimization_hint(expr) canonicalizes expr as it does outside
-    the context, then gives each remaining unbacked symbol without a value one,
-    oldest first: the values already in assignments are substituted into the
-    runtime asserts, which then bound it. Its value is stored in assignments
-    and reused by every later hint, and expr is evaluated with those values. E.g. with ``u0 + u1 <= u2`` and fallback 100:
-
-        optimization_hint(u0 + u1)   # decomposed into u0 and u1
-            u0 -> 100
-            u1 -> 100    (u2 still unknown, so the assert gives no bound)
-            returns 200
-        optimization_hint(u2)
-            u2 -> 200    (the assert becomes 100 + 100 <= u2)
-            returns 200
-
-    Outside the context each symbol gets 100 independently, so u0 + u1 = 200
-    but u2 = 100, which violates the assert.
-
-    This is a best-effort heuristic that uses the existing per-symbol hinting
-    logic, and tracks the values already chosen and substitutes them into the
-    runtime asserts. The consistency comes from fixing each symbol's value once
-    it is chosen: if u0 was hinted as 100, every subsequent optimization_hint
-    call uses u0 = 100, both when evaluating an expression and when bounding
-    other symbols through the asserts. It does not make every hint consistent
-    with every assert (e.g. non-linear or coupled asserts can still be
-    violated), but it covers the practical cases, such as a view's offset and
-    size within its storage. As a fallback, users can set an unbacked symbol's
-    hint explicitly with torch._dynamo.override_optimization_hint.
-    """
-
-    shape_env: ShapeEnv
-    # Unbacked symbol -> value chosen for it.
-    assignments: dict[sympy.Symbol, int] = dataclasses.field(default_factory=dict)
-    # Symbol -> runtime asserts mentioning it, for shape_env._version_counter
-    # == version.
-    asserts_by_symbol: dict[sympy.Symbol, list[sympy.Basic]] = dataclasses.field(
-        default_factory=dict
-    )
-    version: int | None = None
-
-
-_consistent_hints_tls = threading.local()
-
-
-def _current_consistent_hints() -> ConsistentHintState | None:
-    return getattr(_consistent_hints_tls, "state", None)
-
-
-@contextlib.contextmanager
-def consistent_hints(state: ConsistentHintState) -> Iterator[None]:
-    """Compute optimization hints for state.shape_env from one shared
-    per-symbol assignment; see ConsistentHintState."""
-    shape_env = state.shape_env
-    if state.version != shape_env._version_counter:
-        state.asserts_by_symbol = _runtime_asserts_by_symbol(shape_env)
-        state.version = shape_env._version_counter
-    prev = getattr(_consistent_hints_tls, "state", None)
-    _consistent_hints_tls.state = state
-    try:
-        yield
-    finally:
-        _consistent_hints_tls.state = prev
-
-
-def _implied_linear_bound(
-    shape_env: ShapeEnv, g: sympy.Expr, s: sympy.Symbol
-) -> tuple[int, int] | None:
-    """Rewrite the runtime assert ``g <= 0`` as ``c*s + k <= 0``, where s is
-    the symbol being bounded, by replacing every other symbol t in g with a
-    number: the end of t's range that gives s the most room (t's minimum if its
-    coefficient is positive, its maximum if negative). E.g. ``a + b - 100 <= 0``
-    with b in [2, 50] gives c = 1, k = -98, i.e. a <= 98.
-
-    This is sound: the chosen end makes each ``c_t * t`` as small as it can be,
-    so ``c*s + k <= g`` for every t in its range, and any s that satisfies the
-    assert (g <= 0) for some t also satisfies ``c*s + k <= 0``. It is also
-    exact for a single assert, since t at that end is itself a valid choice.
-
-    Returns None if g is not linear with integer coefficients or a needed range
-    end is infinite.
-    """
-    c = 0
-    k = 0
-    for term, coeff in sympy.expand(g).as_coefficients_dict().items():
-        if not coeff.is_Integer:
-            return None
-        coeff = int(coeff)
-        if term == 1:
-            k += coeff
-        elif term == s:
-            c += coeff
-        elif isinstance(term, sympy.Symbol):
-            vr = shape_env.var_to_range.get(term)
-            if vr is None:
-                return None
-            bound = vr.lower if coeff > 0 else vr.upper
-            if not isinstance(bound, (int, sympy.Integer)):
-                return None
-            k += coeff * int(bound)
-        else:
-            return None
-    return c, k
-
-
-def _unbacked_hint_bounds_from_runtime_asserts(
-    shape_env: ShapeEnv,
-    s: sympy.Symbol,
-    state: ConsistentHintState | None = None,
+def _hint_bounds_from_runtime_asserts(
+    shape_env: ShapeEnv, s: sympy.Symbol
 ) -> tuple[int | None, int | None]:
     """Concrete ``(lower, upper)`` bounds for an unbacked symbol derived from the
     runtime asserts, with backed symbols replaced by their hint values.
@@ -500,115 +355,54 @@ def _unbacked_hint_bounds_from_runtime_asserts(
     ``[0, unbacked_symint_fallback]``. Feeding these bounds into the size hint keeps
     it consistent with the graph: e.g. a reducing slice ``x[u0:]`` sized ``s44 - u0``
     cannot hint negative, because ``u0`` is capped at ``s44``'s hint instead of the
-    generic fallback.
-
-    Each assert mentioning s is used in three steps:
-
-    1. Normalize it to ``g <= 0`` (or ``g < 0``); an Eq gives two relations,
-       ``lhs - rhs <= 0`` and ``rhs - lhs <= 0``. Only g linear with integer
-       coefficients is used; anything else (products, Mod, FloorDiv, rational
-       coefficients) is skipped.
-    2. Rewrite it as ``c*s + k <= 0`` by replacing the other unknown symbols
-       with numbers (see _implied_linear_bound).
-    3. Solve the remaining ``c*s + k <= 0`` for s: ``c > 0`` gives the upper
-       bound ``s <= -k/c``, ``c < 0`` the lower bound ``s >= -k/c``.
+    generic fallback. Only linear single-symbol bounds (``c*s + k <= 0``) with
+    concrete integer coefficients are used, so this never tightens past what the
+    asserts prove; anything else is skipped.
     """
     lower: int | None = None
     upper: int | None = None
     backed = shape_env.backed_var_to_val
-    known_assignments: dict[sympy.Symbol, int] = (
-        state.assignments if state is not None else {}
-    )
-    if state is not None:
-        # Any assert mentioning s can bound it, through the known values or the
-        # ranges of its other symbols, so read every such assert, not only
-        # those keyed to s.
-        exprs = state.asserts_by_symbol.get(s, ())
-    else:
-        # Outside the context, read only the asserts keyed to s (those whose
-        # newest unbacked symbol is s), as before; finding every assert that
-        # mentions s needs the index the context builds.
-        # TODO: explore reading every assert that mentions s here as well.
-        exprs = [ra.expr for ra in shape_env.deferred_runtime_asserts.get(s, ())]
+    # Read only the asserts keyed to this symbol (bounds on an unbacked symbol
+    # only ever live there); guards constrain backed symbols and would just be a
+    # wasted scan.
     try:
-        for ax in exprs:
+        for ra in shape_env.deferred_runtime_asserts.get(s, ()):
+            ax = ra.expr
             if not isinstance(ax, sympy.Basic):
                 continue
-            # Substitute backed hints, hint overrides and known assignments, in
-            # the order _optimization_hint_impl uses, so e.g. ``u0 <= s44``
-            # becomes ``u0 <= 16``.
-            ax = (
-                ax.xreplace(backed)
-                .xreplace(shape_env.var_to_hint_override)
-                .xreplace(known_assignments)
-            )
+            # Substitute backed hints, so e.g. ``u0 <= s44`` becomes ``u0 <= 16``.
+            ax = ax.xreplace(backed)
             if s not in ax.free_symbols:
                 continue
             # Normalize the relation to ``g < 0`` (strict) or ``g <= 0``.
             if isinstance(ax, sympy.LessThan):
-                relations = [(ax.lhs - ax.rhs, False)]
+                g, strict = ax.lhs - ax.rhs, False
             elif isinstance(ax, sympy.StrictLessThan):
-                relations = [(ax.lhs - ax.rhs, True)]
+                g, strict = ax.lhs - ax.rhs, True
             elif isinstance(ax, sympy.GreaterThan):
-                relations = [(ax.rhs - ax.lhs, False)]
+                g, strict = ax.rhs - ax.lhs, False
             elif isinstance(ax, sympy.StrictGreaterThan):
-                relations = [(ax.rhs - ax.lhs, True)]
-            elif isinstance(ax, sympy.Equality):
-                # ``a == b`` is ``a - b <= 0`` and ``b - a <= 0``; e.g. split's
-                # ``Eq(u0 + u1, 100)`` pins u1 to ``100 - u0`` once u0 is known.
-                relations = [(ax.lhs - ax.rhs, False), (ax.rhs - ax.lhs, False)]
+                g, strict = ax.rhs - ax.lhs, True
             else:
                 continue
-            for g, strict in relations:
-                linear = _implied_linear_bound(shape_env, g, s)
-                if linear is None:
-                    continue
-                c, k = linear
-                if c == 0:
-                    continue
-                thr = sympy.Rational(-k, c)  # c*s + k (<|<=) 0  ->  s (<|<=) thr, c>0
-                if c > 0:
-                    bnd = (
-                        int(sympy.ceiling(thr) - 1) if strict else int(sympy.floor(thr))
-                    )
-                    upper = bnd if upper is None else min(upper, bnd)
-                else:  # dividing by c<0 flips the inequality: s (>|>=) thr
-                    bnd = (
-                        int(sympy.floor(thr) + 1) if strict else int(sympy.ceiling(thr))
-                    )
-                    lower = bnd if lower is None else max(lower, bnd)
+            # Require g == c*s + k with concrete integer c, k (no other free syms).
+            c = g.coeff(s, 1)
+            k = g.coeff(s, 0)
+            if g - (c * s + k) != 0 or not (c.is_Integer and k.is_Integer):
+                continue
+            c, k = int(c), int(k)
+            if c == 0:
+                continue
+            thr = sympy.Rational(-k, c)  # c*s + k (<|<=) 0  ->  s (<|<=) thr, c>0
+            if c > 0:
+                bnd = int(sympy.ceiling(thr) - 1) if strict else int(sympy.floor(thr))
+                upper = bnd if upper is None else min(upper, bnd)
+            else:  # dividing by c<0 flips the inequality: s (>|>=) thr
+                bnd = int(sympy.floor(thr) + 1) if strict else int(sympy.ceiling(thr))
+                lower = bnd if lower is None else max(lower, bnd)
     except Exception:
         pass
     return lower, upper
-
-
-def _bounded_symbol_hint(
-    shape_env: ShapeEnv,
-    s: sympy.Symbol,
-    fallback: int,
-    state: ConsistentHintState | None,
-) -> int:
-    """fallback clamped to s's bounds from var_to_range and the runtime
-    asserts."""
-    lower: int | None = None
-    upper: int | None = None
-    vr = shape_env.var_to_range.get(s, None)
-    if vr is not None:
-        if isinstance(vr.lower, (int, sympy.Integer)):
-            lower = int(vr.lower)
-        if isinstance(vr.upper, (int, sympy.Integer)):
-            upper = int(vr.upper)
-    ra_lower, ra_upper = _unbacked_hint_bounds_from_runtime_asserts(shape_env, s, state)
-    if ra_lower is not None:
-        lower = ra_lower if lower is None else max(lower, ra_lower)
-    if ra_upper is not None:
-        upper = ra_upper if upper is None else min(upper, ra_upper)
-    sym_fallback = fallback
-    if lower is not None:
-        sym_fallback = max(sym_fallback, lower)
-    if upper is not None:
-        sym_fallback = min(sym_fallback, upper)
-    return sym_fallback
 
 
 def _optimization_hint_base(
@@ -625,9 +419,6 @@ def _optimization_hint_base(
     If not provided, fallback will be used along with some heuristics
     that try to maximize consistency with the shape environment.
 
-    Inside consistent_hints(), hints are computed from one shared per-symbol
-    assignment; see ConsistentHintState.
-
     Args:
         shape_env: The ShapeEnv instance.
         expr: A sympy expression or integer to evaluate.
@@ -637,28 +428,6 @@ def _optimization_hint_base(
     Returns:
         A concrete integer hint for the expression.
     """
-    state = _current_consistent_hints()
-    if state is not None and state.shape_env is not shape_env:
-        state = None
-    return _optimization_hint_impl(
-        shape_env,
-        expr,
-        precomputed_replacements,
-        fallback,
-        state,
-    )
-
-
-def _optimization_hint_impl(
-    shape_env: ShapeEnv,
-    expr: sympy.Expr | int,
-    precomputed_replacements: dict[sympy.Expr, sympy.Symbol],
-    fallback: int | None,
-    state: ConsistentHintState | None,
-) -> int:
-    """_optimization_hint_base for one expression. With state, each unbacked
-    symbol left after canonicalization that has no value yet gets one, oldest
-    first, stored in state.assignments; see ConsistentHintState."""
     from torch.fx.experimental.symbolic_shapes import (
         has_free_unbacked_symbols,
         symbol_is_type,
@@ -670,9 +439,6 @@ def _optimization_hint_impl(
         from torch._inductor.config import unbacked_symint_fallback
 
         fallback = unbacked_symint_fallback
-    known_assignments: dict[sympy.Symbol, int] = (
-        state.assignments if state is not None else {}
-    )
 
     # to have expanded (Identity free) expr stored in original
     if isinstance(expr, sympy.Expr):
@@ -728,12 +494,6 @@ def _optimization_hint_impl(
         ):
             original = sympy.factor(original)
         expr = _sub_unbacked_exprs(shape_env, original)
-        # Substitute known values only after the Eq canonicalization above, so
-        # e.g. u0 * u1 still becomes 100 given Eq(u0 * u1, 100).
-        expr = _sympy_subs(expr, known_assignments)
-        result = _maybe_realize_expr(expr, fallback)
-        if result is not None:
-            return result
 
     # For multiple expressions that depend on an unbacked symint,
     # we want to compute them consistently for a size hint we have chosen.
@@ -751,23 +511,26 @@ def _optimization_hint_impl(
     # size expression like s44 - u0 can hint negative and overflow downstream
     # allocations (autotuning example tensors, buffer sizing).
     size_dict = {}
-    if state is None:
-        for s in free_symbols:
-            size_dict[s] = _bounded_symbol_hint(shape_env, s, fallback, None)
-    else:
-        # Give each remaining unbacked symbol a value once, oldest first, so
-        # later symbols are bounded by earlier ones; every subsequent hint
-        # reuses it. For u<idx> names, sorting by (length, name) is creation
-        # order.
-        for s in sorted(free_symbols, key=lambda s: (len(s.name), s.name)):
-            if not symbol_is_type(s, SymT.UNBACKED_INT):
-                size_dict[s] = _bounded_symbol_hint(shape_env, s, fallback, state)
-                continue
-            if s not in state.assignments:
-                state.assignments[s] = _bounded_symbol_hint(
-                    shape_env, s, fallback, state
-                )
-            size_dict[s] = state.assignments[s]
+    for s in free_symbols:
+        lower: int | None = None
+        upper: int | None = None
+        vr = shape_env.var_to_range.get(s, None)
+        if vr is not None:
+            if isinstance(vr.lower, (int, sympy.Integer)):
+                lower = int(vr.lower)
+            if isinstance(vr.upper, (int, sympy.Integer)):
+                upper = int(vr.upper)
+        ra_lower, ra_upper = _hint_bounds_from_runtime_asserts(shape_env, s)
+        if ra_lower is not None:
+            lower = ra_lower if lower is None else max(lower, ra_lower)
+        if ra_upper is not None:
+            upper = ra_upper if upper is None else min(upper, ra_upper)
+        sym_fallback = fallback
+        if lower is not None:
+            sym_fallback = max(sym_fallback, lower)
+        if upper is not None:
+            sym_fallback = min(sym_fallback, upper)
+        size_dict[s] = sym_fallback
 
     try:
         final_result = _sympy_subs(expr, size_dict)

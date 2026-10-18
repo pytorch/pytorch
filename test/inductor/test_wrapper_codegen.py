@@ -18,8 +18,7 @@ from torch._inductor.lowering import _record_symbolic_input_source
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import AotOnlyBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
-from torch.fx.experimental._size_hinting import ConsistentHintState
-from torch.fx.experimental.symbolic_shapes import CallMethodKey, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import CallMethodKey
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -62,7 +61,6 @@ class TestPythonWrapperCodegen(TestCase):
         wrapper.kernel_autotune_tmp_arg_idx = 0
         wrapper.kernel_autotune_example_arg_cache = {}
         wrapper.kernel_autotune_storage_cache = {}
-        wrapper.kernel_autotune_hint_state = ConsistentHintState(ShapeEnv())
         return wrapper, base, view, view_buffer
 
     def _graph_with_sizevars(self, **kwargs):

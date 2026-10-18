@@ -74,6 +74,7 @@ class SideEffectReplayRegistryTests(TestCase):
                 ("bytearray_mutation", 85),
                 ("deque_mutation", 80),
                 ("const_dict_or_set_mutation", 70),
+                ("ordered_dict_mutation", 80),
                 ("torch_function_mode_stack_mutation", 60),
                 ("cell_mutation", 50),
                 ("attribute_mutation", 40),

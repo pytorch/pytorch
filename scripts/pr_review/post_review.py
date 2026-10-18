@@ -11,9 +11,8 @@ Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
   never APPROVE.
 - A new review is posted before earlier ones are hidden. Hiding resolves the
-  review's inline threads where it can and minimizes it as outdated. Nothing
-  is edited or deleted. A change request is hidden only once it no longer
-  stands.
+  review's inline threads and minimizes it as outdated. Nothing is edited or
+  deleted. A change request is hidden only once it no longer stands.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissal is a run retracting its own review because the
@@ -437,10 +436,8 @@ def retract(gh: GitHub, pr: int, review: dict) -> None:
 def take_down(gh: GitHub, pr: int, review: dict) -> None:
     """Resolve the review's threads, then minimize it as outdated.
 
-    Its text and state are unchanged. It is minimized even if a thread cannot
-    be resolved (GITHUB_TOKEN is refused resolveReviewThread on pytorch/pytorch);
-    such a thread stays open, and once the review is minimized no later run
-    retries it.
+    Its text and state are unchanged. If a thread cannot be resolved, the
+    review stays visible for the next run to retry.
     """
     rid = review["id"]
     try:
@@ -453,7 +450,8 @@ def take_down(gh: GitHub, pr: int, review: dict) -> None:
         warn(f"could not resolve the threads of review {rid}: {exc}")
         resolved = False
     if not resolved:
-        warn(f"hiding review {rid} with some of its threads still open")
+        warn(f"leaving review {rid} visible until its threads are resolved")
+        return
     try:
         gh.graphql(_MINIMIZE, {"id": review["node_id"]})
         print(f"hid earlier automated review {rid} as outdated")

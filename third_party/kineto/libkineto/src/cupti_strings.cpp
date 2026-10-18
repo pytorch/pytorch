@@ -132,7 +132,7 @@ std::string driverCbidName(CUpti_CallbackId cbid) {
 }
 
 // From
-// https://docs.nvidia.com/cupti/api/group__CUPTI__ACTIVITY__API.html#_CPPv433CUpti_ActivitySynchronizationType
+// https://docs.nvidia.com/cupti/modules.html#group__CUPTI__ACTIVITY__API_1g80e1eb47615e31021f574df8ebbe5d9a
 //   enum CUpti_ActivitySynchronizationType
 const char* syncTypeString(CUpti_ActivitySynchronizationType kind) {
   switch (kind) {

@@ -93,11 +93,8 @@ LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR = (
 FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR = "FlexGEMM output plans require tensor output nodes"
 FLEX_GEMM_OUTPUT_TENSOR_ERROR = "FlexGEMM expects tensor outputs"
 FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR = (
-    "FlexGEMM chunked group-2 lanes support only one unchanged accumulator auxiliary"
-)
-FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR = (
-    "FlexGEMM expanded main outputs compose only with GEMM-shaped auxiliaries "
-    "computed before the lanes are packed"
+    "FlexGEMM grouped main outputs compose only with the unchanged physical "
+    "GEMM output as an auxiliary"
 )
 FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR = (
     "unsupported FlexGEMM epilogue: contracted output shape must equal the "
@@ -231,30 +228,9 @@ class FlexGemmOutputContraction:
             raise ValueError("grouped main-output group must be greater than one")
 
     @property
-    def concat_layout(self) -> tuple[str, ...] | None:
-        """Return QuACK inputs whose contiguous chunks must be interleaved.
-
-        ``None`` rather than ``()``: QuACK's warm launch cache requires it.
-        """
-        return ("B",) if self.chunked else None
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmOutputExpansion:
-    """Main output stores two GEMM-shaped epilogue lanes along N.
-
-    Interleaved output is ``stack([a, b], -1).view(..., 2 * N)``; chunked output
-    is ``cat([a, b], -1)`` and uses two tile stores into halves of one allocation.
-    """
-
-    chunked: bool = False
-
-    @property
-    def concat_layout(self) -> None:
-        return None
-
-
-FlexGemmOutputTransform = FlexGemmOutputContraction | FlexGemmOutputExpansion
+    def concat_layout(self) -> tuple[str, ...]:
+        """Return QuACK inputs whose contiguous chunks must be interleaved."""
+        return ("B",) if self.chunked else ()
 
 
 FlexGemmLocalReduceGeometry = GemmReductionGeometry

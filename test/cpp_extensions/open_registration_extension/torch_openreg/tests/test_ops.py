@@ -6,8 +6,6 @@ import unittest
 
 import torch
 from torch.nn.attention import SDPBackend
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -298,51 +296,6 @@ class TestSDPA(NNTestCase):
                 philox_offset=philox_offset,
             )
         )
-
-
-class TestFlexAttention(TestCase):
-    def test_flex_attention_forward_backward(self, device):
-        def causal(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        def rel_bias(score, b, h, q_idx, kv_idx):
-            return score + 0.01 * (q_idx - kv_idx)
-
-        seq_len = 128
-        shape = (2, 2, seq_len, 16)
-        q_ref, k_ref, v_ref = (torch.randn(shape, requires_grad=True) for _ in range(3))
-        q, k, v = (
-            t.detach().to(device).requires_grad_() for t in (q_ref, k_ref, v_ref)
-        )
-        grad_out = torch.randn(shape)
-
-        block_mask = create_block_mask(causal, 1, 1, seq_len, seq_len, device=device)
-        out = flex_attention(q, k, v, score_mod=rel_bias, block_mask=block_mask)
-        out.backward(grad_out.to(device))
-
-        pos = torch.arange(seq_len)
-        scores = q_ref @ k_ref.transpose(-2, -1) * shape[-1] ** -0.5
-        scores = scores + 0.01 * (pos[:, None] - pos[None, :])
-        scores = scores.masked_fill(pos[:, None] < pos[None, :], float("-inf"))
-        out_ref = scores.softmax(dim=-1) @ v_ref
-        out_ref.backward(grad_out)
-
-        self.assertEqual(out.device, torch.device(device))
-        self.assertEqual(out.cpu(), out_ref, atol=1e-4, rtol=1e-4)
-        for t, t_ref in zip((q, k, v), (q_ref, k_ref, v_ref)):
-            self.assertEqual(t.grad.cpu(), t_ref.grad, atol=1e-4, rtol=1e-4)
-
-    def test_flex_attention_autocast(self, device):
-        q, k, v = (
-            torch.randn(1, 2, 128, 16, device=device, requires_grad=True)
-            for _ in range(3)
-        )
-        with torch.autocast(torch.device(device).type, dtype=torch.float16):
-            out = flex_attention(q, k, v)
-            out.sum().backward()
-        self.assertEqual(out.dtype, torch.float16)
-        self.assertEqual(q.grad.dtype, torch.float32)
-        self.assertEqual(out.cpu(), flex_attention(q.half(), k.half(), v.half()).cpu())
 
 
 class TestFactoryExtended(TestCase):
@@ -679,9 +632,6 @@ class TestCustomAutogradFunctions(TestCase):
         y = torch.ops.openreg.custom_autograd_fn_aliasing(x)
         self.assertEqual(x.shape, y.shape)
         self.assertFalse(y.requires_grad)
-
-
-instantiate_device_type_tests(TestFlexAttention, globals(), only_for="openreg")
 
 
 if __name__ == "__main__":

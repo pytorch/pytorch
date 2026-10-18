@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect a pull request's title, description and maintainer conversation.
+"""Collect a pull request's maintainer conversation for the hardened review.
 
 Runs in the trusted `prepare` job, which holds GITHUB_TOKEN; the review job has
 neither the token nor network access to the API. The file is handed over as a
@@ -29,8 +29,6 @@ from urllib.parse import quote
 PER_PAGE = 100
 MAX_PAGES = 30
 MAX_BODY = 4000
-# Of the description once JSON-escaped; leaves most of MAX_TOTAL_BYTES to comments.
-MAX_PR_BODY_BYTES = 40_000
 MAX_HUNK = 1500
 MAX_ITEMS = 200
 # Of the whole serialized file. One environment variable is limited to 128 KiB
@@ -101,19 +99,8 @@ def cap(text: str | None, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + " [truncated]"
 
 
-def cap_encoded(text: str | None, limit: int) -> str:
-    """Cut by its encoded size: an astral character escapes to 12 bytes."""
-    text, keep = text or "", len(text or "")
-    while len(dumps(text[:keep])) > limit:
-        keep = keep * 9 // 10
-    return text if keep == len(text) else text[:keep] + " [truncated]"
-
-
 def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
-    pull = api(f"repos/{repo}/pulls/{pr}")
-    author = human_login(pull)
-    body = cap_encoded(pull.get("body"), MAX_PR_BODY_BYTES)
-    head = {"pr_author": author, "title": pull.get("title") or "", "body": body}
+    author = human_login(api(f"repos/{repo}/pulls/{pr}"))
     sources = {
         "issue_comment": paginate(api, f"repos/{repo}/issues/{pr}/comments"),
         "review": paginate(api, f"repos/{repo}/pulls/{pr}/reviews"),
@@ -168,7 +155,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     kept: list[dict[str, Any]] = []
     # The widest envelope: `false` and the largest possible count; +1 per comma.
     envelope = {
-        **head,
+        "pr_author": author,
         "truncated": False,
         "omitted_items": len(items),
         "items": [],
@@ -182,7 +169,7 @@ def collect(api: Api, repo: str, pr: int) -> dict[str, Any]:
     kept.reverse()
     omitted = len(items) - len(kept)
     return {
-        **head,
+        "pr_author": author,
         "truncated": omitted > 0,
         "omitted_items": omitted,
         "items": kept,
