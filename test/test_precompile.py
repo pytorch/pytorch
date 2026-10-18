@@ -5185,7 +5185,9 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(summary.uncovered_frames, ("gen",), summary)
         self.assertFalse(summary.complete, summary)
         tracer = DynamoTracer(require_complete=False)
-        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+        with self.assertRaisesRegex(
+            PrecompileError, r"'gen': Dynamo gave up.*whatever require_complete"
+        ):
             with self._capture(gen, tracer=tracer, backend="eager") as cap:
                 next(cap(self.model, self.x2))
 
