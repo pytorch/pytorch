@@ -5618,6 +5618,10 @@ def _pickles_as_its_own_global(value: object) -> bool:
         return False
     try:
         cls = type(value)
+        if cls.__qualname__ != cls.__name__:
+            # GuardsStatePickler.reducer_override, which pickle tries first,
+            # refuses an instance of a nested or local class.
+            return False
         reduce = copyreg.dispatch_table.get(cls)
         if (
             reduce is None
