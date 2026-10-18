@@ -591,7 +591,7 @@ def _build_multigraph_forward():
         defaults = entry_binding.get("defaults") if is_entry else None
         kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
         # Capture ran a call its variants missed eagerly (see _multigraph_frames).
-        eager_fallback = frame.get("eager_fallback", False)
+        eager_fallback = frame["eager_fallback"]
 
         def _function(code, closure):
             f = types.FunctionType(code, scope, target.co_name, defaults, closure)

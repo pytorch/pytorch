@@ -317,6 +317,23 @@ class TestPackage(torch._inductor.test_case.TestCase):
         os.makedirs(path, exist_ok=True)
         return path
 
+    def count_backend_runs(self, fn, backends):
+        """Wrap the backends install() put in fn's module; the list grows by one
+        per run, so a served variant is told apart from an eager run."""
+        module = sys.modules[fn.__module__]
+        runs = []
+        for backend_id in backends:
+            installed = getattr(module, backend_id)
+
+            @torch._dynamo.disable
+            def run(*args, _installed=installed):
+                runs.append(1)
+                return _installed(*args)
+
+            self.addCleanup(setattr, module, backend_id, installed)
+            setattr(module, backend_id, run)
+        return runs
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -554,15 +571,38 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package, backends = ctx.load_package(_dispatch, self.path())
         compiled_fn = torch._dynamo.optimize(package=package)(_dispatch)
         package.install(backends)
+        runs = self.count_backend_runs(_dispatch, backends)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x, 0), x.sin())
+            self.assertEqual(len(runs), 1)
             self.assertEqual(compiled_fn(x, 1), x.sin())
+            self.assertEqual(len(runs), 1)
         package.uninstall()
         with (
             torch.compiler.set_stance("fail_on_recompile"),
             self.assertRaisesRegex(RuntimeError, "Detected recompile"),
         ):
             compiled_fn(x, 1)
+
+    def test_a_suppressed_user_error_is_an_eager_fallback(self):
+        def fn(x, branch):
+            if branch:
+                # Tracing this raises a UserError, which Dynamo suppresses and
+                # skips the frame for, as for Unsupported; eager raises TypeError.
+                try:
+                    torch._dynamo.decorators.override_optimization_hint(x, 1)
+                except TypeError:
+                    pass
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x, False)
+        self.assertEqual(compiled_fn(x, True), x.sin())
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
 
     def test_install_runs_a_miss_of_a_frame_its_backend_skipped_eagerly(self):
         # A backend that raises SkipFrame on the recompile is a fallback too.
@@ -594,9 +634,12 @@ print(eval(f"bbmod.{name}.{path}") is code)
         package, backends = ctx.load_package(fn, self.path())
         compiled_fn = torch._dynamo.optimize(package=package)(fn)
         package.install(backends)
+        runs = self.count_backend_runs(fn, backends)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), x.sin())
+            self.assertEqual(len(runs), 1)
             self.assertEqual(compiled_fn(x.double()), x.double().sin())
+            self.assertEqual(len(runs), 1)
         package.uninstall()
 
     def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
