@@ -150,7 +150,7 @@ bool is_uncastable_shell_type(ScalarType t) {
       isSubByteIntType(t);
 }
 
-void check_shell_type_cast(ScalarType dst, ScalarType src) {
+void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
   if (dst == src ||
       !(is_uncastable_shell_type(dst) || is_uncastable_shell_type(src))) {
     return;
@@ -246,7 +246,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return d.is_meta() || is_supported_device(d);
   };
   if (checks_shell_cast(self.device()) && checks_shell_cast(src.device())) {
-    check_shell_type_cast(self.scalar_type(), src.scalar_type());
+    check_shell_dtype_cast(src.scalar_type(), self.scalar_type());
   }
 
   // Copies into meta self are OK and just ignored (similar to inplace)

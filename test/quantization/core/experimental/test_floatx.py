@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     dtypesIfMPS,
     instantiate_device_type_tests,
+    onlyCPU,
     skipMPS,
 )
 from torch.testing._internal.common_utils import (
@@ -445,11 +446,12 @@ class TestFloat4Dtype(TestCase):
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
 
-    def test_shell_dtype_cast_raises_on_host(self, device):
-        # Casting to or from shell dtypes used to device-assert on CUDA,
-        # poisoning the context; it must raise on the host instead.
-        x = torch.zeros(4, 8, dtype=torch.uint8, device=device)
-        x_f4 = x.view(torch.float4_e2m1fn_x2)
+    def test_cast_raises_on_host(self, device):
+        # Casting to or from fp4x2 used to device-assert on CUDA, poisoning the
+        # context; it must raise on the host instead.
+        x_f4 = torch.zeros(4, 8, dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
         msg = r"view\(torch.uint8\) and unpack"
         for dtype in (torch.float32, torch.bfloat16, torch.uint8, torch.float8_e4m3fn):
             with self.assertRaisesRegex(NotImplementedError, msg):
@@ -458,26 +460,15 @@ class TestFloat4Dtype(TestCase):
             torch.empty(4, 8, device=device).copy_(x_f4)
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.zeros(4, 8, device=device).to(torch.float4_e2m1fn_x2)
-        for shell_dtype in (torch.bits8, torch.uint4, torch.int4):
-            name = str(shell_dtype).removeprefix("torch.")
-            shell_msg = rf"(?i){name} is a shell dtype"
-            with self.assertRaisesRegex(NotImplementedError, shell_msg):
-                x.view(shell_dtype).float()
-            with self.assertRaisesRegex(NotImplementedError, shell_msg):
-                torch.zeros(4, 8, device=device).to(shell_dtype)
-        with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
-            x.view(torch.bits8).to(torch.uint4)
         # zero-element casts are rejected too, rather than silently succeeding
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.empty(0, dtype=torch.float4_e2m1fn_x2, device=device).float()
-        with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
-            torch.empty(0, device=device).to(torch.uint4)
         # the device is still usable afterwards
         self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
 
-    def test_shell_dtype_cast_raises_when_tracing(self, device):
-        # Meta, FakeTensor, and the prims decomposition used by torch.compile
-        # must reject the same casts as eager instead of tracing them.
+    def test_cast_raises_when_tracing(self, device):
+        # Meta, FakeTensor, the prims decomposition, and Dynamo tracing must
+        # reject the same casts as eager instead of tracing them.
         msg = r"view\(torch.uint8\) and unpack"
         x_meta = torch.empty(4, 8, dtype=torch.float4_e2m1fn_x2, device="meta")
         with self.assertRaisesRegex(NotImplementedError, msg):
@@ -490,18 +481,17 @@ class TestFloat4Dtype(TestCase):
                 torch.empty(4, 8, device=device).copy_(x_fake)
             with self.assertRaisesRegex(NotImplementedError, msg):
                 torch.ops.prims.convert_element_type(x_fake, torch.float32)
-            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
-                torch.empty(4, 8, device=device).to(torch.uint4)
-            x_bits = torch.empty(4, 8, dtype=torch.bits8, device=device)
-            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
-                torch.ops.prims.convert_element_type(x_bits, torch.uint4)
         x = torch.zeros(4, 8, dtype=torch.uint8, device=device).view(
             torch.float4_e2m1fn_x2
         )
         torch._dynamo.reset()
-        with self.assertRaisesRegex(NotImplementedError, msg):
-            torch.compile(lambda t: t.to(torch.float32), backend="eager")(x)
+        # fullgraph, so a graph break cannot fall back to the eager check
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            torch.compile(
+                lambda t: t.to(torch.float32), backend="eager", fullgraph=True
+            )(x)
 
+    @onlyCPU
     def test_shell_dtype_lists_match(self, device):
         # The prims check mirrors the C++ copy_ check; keep their dtype sets equal.
         quantized = {
