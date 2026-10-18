@@ -221,6 +221,11 @@ static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }
 
+static void mse_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK(mps::supportedFloatingType(iter.common_dtype()), "mse_mps only supports floating types");
+  lib.exec_binary_kernel(iter, "mse", std::nullopt, std::nullopt, iter.common_dtype());
+}
+
 static void div_true_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "div_true");
 }
@@ -363,6 +368,7 @@ REGISTER_DISPATCH(complex_stub, &complex_mps_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_mps_kernel)
 REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_mps_kernel)
 REGISTER_DISPATCH(mul_stub, &mul_mps_kernel)
+REGISTER_DISPATCH(mse_stub, &mse_mps_kernel)
 REGISTER_DISPATCH(div_true_stub, &div_true_mps_kernel)
 REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)

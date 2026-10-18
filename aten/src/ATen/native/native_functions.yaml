@@ -11798,8 +11798,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_out
-    MPS: mse_loss_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_out
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   device_check: NoCheck   # TensorIterator
