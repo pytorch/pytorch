@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
-import builtins
 import collections.abc
 import contextlib
 import ctypes
@@ -14,7 +13,6 @@ import os
 import pickle
 import sys
 import time
-import traceback
 import types
 import warnings
 from collections.abc import Callable, Sequence
@@ -319,19 +317,6 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
-
-# Object collectives can serialize via torch.save/torch.load(weights_only=True)
-# by passing weights_only=True. Exceptions and stack summaries are commonly
-# transmitted for error propagation (e.g. torch.distributed.checkpoint), so
-# allowlist them.
-torch.serialization.add_safe_globals(
-    [
-        t
-        for t in vars(builtins).values()
-        if isinstance(t, type) and issubclass(t, BaseException)
-    ]
-    + [traceback.StackSummary, traceback.FrameSummary]
-)
 
 GroupName = NewType("GroupName", str)
 
@@ -1559,7 +1544,12 @@ class _WorldMeta(type):
 
 
 class group(metaclass=_WorldMeta):
-    """Group class. Placeholder."""
+    """
+    Namespace for the default process group.
+
+    ``group.WORLD`` is the default :class:`ProcessGroup` created by
+    :func:`init_process_group`, or ``None`` before initialization.
+    """
 
 
 class GroupMember(metaclass=_WorldMeta):
@@ -4083,12 +4073,12 @@ def broadcast(
     opts.rootTensor = 0
     opts.asyncOp = async_op
     opts.config = config
-    sm90_or_more = not (
+    sm90_or_more = (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
     )
     if tensor.is_complex():
         tensor = torch.view_as_real(tensor)
-    elif _is_fp8(tensor) and not sm90_or_more:
+    elif _is_fp8(tensor) and not sm90_or_more and tensor.device.type != "hpu":
         # FP8 is supported by NCCL on sm90+, use workaround for older GPUs
         tensor = tensor.view(torch.uint8)
     work = group.broadcast([tensor], opts)
@@ -6246,6 +6236,9 @@ def reduce_scatter_single(
             (ii) a stack of the output tensors along the primary dimension.
             For definition of "concatenation", see ``torch.cat()``.
             For definition of "stack", see ``torch.stack()``.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
@@ -7271,9 +7264,9 @@ def new_group(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams. For other available options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
-            (bool, optional): perform a group-local barrier at the end of the process group creation.
-            This is different in that non-member ranks don't need to call into API and don't
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+        use_local_synchronization (bool, optional): perform a group-local barrier
+            at the end of the process group creation. This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
@@ -7827,6 +7820,12 @@ def shrink_group(
     Notes:
         - Only non-excluded ranks should call this function; excluded ranks
           must not participate in the shrink operation.
+        - With ``SHRINK_DEFAULT``, the healthy parent group is destroyed normally.
+          With ``SHRINK_ABORT``, the parent group is aborted on surviving ranks.
+          Excluded ranks that remain alive must also abort the parent group
+          (e.g. via ``_abort_process_group``). For NCCL, destruction is an
+          intra-node collective; mixing abort and destroy on the same
+          communicator can hang with NCCL >= 2.31.2.
         - Shrinking the default group destroys all other process groups since
           rank reassignment makes them inconsistent.
     """
@@ -7853,7 +7852,9 @@ def shrink_group(
 
     # Step 6: Handle cleanup and creation of new process group
     target_group_info["pg_options_override"] = pg_options
-    return _finalize_shrunk_group(target_group_info, excluded_ranks_set, new_backend)
+    return _finalize_shrunk_group(
+        target_group_info, excluded_ranks_set, new_backend, shrink_flags
+    )
 
 
 def _validate_shrink_inputs(ranks_to_exclude: list[int], shrink_flags: int) -> None:
@@ -7999,6 +8000,7 @@ def _finalize_shrunk_group(
     group_info: _ShrinkGroupInfo,
     excluded_ranks_set: set[int],
     new_backend: C10DBackend,
+    shrink_flags: int,
 ) -> ProcessGroup:
     """Clean up old group and create new shrunk process group."""
     target_pg = group_info["process_group"]
@@ -8017,8 +8019,7 @@ def _finalize_shrunk_group(
         rank for rank in original_ranks if rank not in excluded_ranks_set
     ]
 
-    # Clean up the original group
-    _cleanup_original_group(target_pg, is_default_group)
+    _cleanup_original_group(target_pg, is_default_group, shrink_flags)
 
     # Create and configure the new process group
     new_pg = _create_shrunk_process_group(
@@ -8071,17 +8072,25 @@ def _extract_group_metadata(target_pg: ProcessGroup) -> _GroupMetadata:
     }
 
 
-def _cleanup_original_group(target_pg: ProcessGroup, is_default_group: bool) -> None:
+def _cleanup_original_group(
+    target_pg: ProcessGroup, is_default_group: bool, shrink_flags: int
+) -> None:
     """Clean up the original process group safely."""
     try:
-        destroy_process_group(target_pg)
+        # Excluded ranks abort the parent with SHRINK_ABORT. NCCL destroy is
+        # an intra-node collective, so surviving ranks must abort it too.
+        if shrink_flags & SHRINK_ABORT:
+            _abort_process_group(target_pg)
+        else:
+            destroy_process_group(target_pg)
     except Exception:
+        action = "abort" if shrink_flags & SHRINK_ABORT else "destroy"
         group_type = "default" if is_default_group else "non-default"
         logger.warning(
-            "Failed to destroy %s group during shrinking", group_type, exc_info=True
+            "Failed to %s %s group during shrinking", action, group_type, exc_info=True
         )
 
-    # Ensure global state cleanup even if destroy_process_group fails
+    # Ensure global state cleanup even if the destroy/abort above fails
     _cleanup_process_group_global_state(target_pg)
 
 
