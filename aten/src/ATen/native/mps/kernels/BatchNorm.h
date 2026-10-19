@@ -17,21 +17,21 @@ enum {
 
 // Input viewed as [outer, C, inner], each dim as (size, input stride, output
 // stride). outer spans outer_ndim dims, innermost first.
-template <typename idx_type_t = int64_t>
+template <typename index_t = int64_t>
 struct BatchNormLayout {
-  ::c10::metal::vec3<idx_type_t> channel;
-  ::c10::metal::vec3<idx_type_t> inner;
-  ::c10::metal::array<::c10::metal::vec3<idx_type_t>, ::c10::metal::max_ndim>
+  ::c10::metal::vec3<index_t> channel;
+  ::c10::metal::vec3<index_t> inner;
+  ::c10::metal::array<::c10::metal::vec3<index_t>, ::c10::metal::max_ndim>
       outer_dims;
-  idx_type_t outer_numel;
+  index_t outer_numel;
   int32_t outer_ndim;
 };
 
-template <typename idx_type_t = int64_t>
+template <typename index_t = int64_t>
 struct BatchNormStatsParams {
-  idx_type_t num_channels;
-  idx_type_t num_partials;
+  index_t num_channels;
+  index_t num_partials;
   float eps;
   float momentum;
-  ::c10::metal::array<idx_type_t, BN_NUM_PARAMS> strides;
+  ::c10::metal::array<index_t, BN_NUM_PARAMS> strides;
 };

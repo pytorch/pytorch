@@ -257,16 +257,16 @@ kernel void batch_norm_reduce(
   if (c < C && o0 < outer && r0 < inner) {
     const I first =
         cr + (STRIDED ? batch_norm_offset(layout, o0).x : o0 * C * inner);
-    const float k = float(x[first]);
+    const float shift = float(x[first]);
     float3 sum = 0;
     for (I o = o0; o < outer; o += tptg.y * ntg.y) {
       I i = cr + (STRIDED ? batch_norm_offset(layout, o).x : o * C * inner);
       for (I r = r0; r < inner; r += tptg.x * ntg.z, i += step) {
-        const float v = float(x[i]) - k;
+        const float v = float(x[i]) - shift;
         sum += float3(v, v * v, 1);
       }
     }
-    acc = float3(k + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
+    acc = float3(shift + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
   }
   threadgroup float3 buf[BN_MAX_THREADS];
   const uint tid = channels_last ? pos.y : pos.y * tptg.x + pos.x;
@@ -325,7 +325,7 @@ kernel void batch_norm_elemt(
     constant BatchNormLayout<>& layout [[buffer(3)]],
     uint3 pos [[thread_position_in_grid]],
     uint3 size [[threads_per_grid]]) {
-  device const float* k = stats + pos.y * BN_NUM_STATS;
+  device const float* s = stats + pos.y * BN_NUM_STATS;
   I o = pos.z;
   do {
     vec<I, 2> i = (o * size.y + pos.y) * size.x + pos.x;
@@ -334,7 +334,7 @@ kernel void batch_norm_elemt(
           pos.x * vec<I, 2>(layout.inner.yz);
     }
     out[i.y] = static_cast<T>(
-        (float(x[i.x]) - k[BN_MEAN]) * k[BN_SCALE] + k[BN_SHIFT]);
+        (float(x[i.x]) - s[BN_MEAN]) * s[BN_SCALE] + s[BN_SHIFT]);
     o += size.z;
   } while (is_same_v<I, ulong> && o < I(layout.outer_numel));
 }

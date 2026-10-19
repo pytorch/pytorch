@@ -155,13 +155,10 @@ static Tensor batch_norm_stats(const Tensor& x,
                                double eps,
                                double momentum) {
   const auto C = x.size(1);
+  const auto dtype = tensors[BN_SAVE_MEAN]->scalar_type();
   for (auto& t : tensors) {
     t = t.has_value() && t->defined() ? t : std::nullopt;
-  }
-  const auto first = std::ranges::find_if(tensors, [](const auto& t) { return t.has_value(); });
-  const auto dtype = first == tensors.end() ? kFloat : (*first)->scalar_type();
-  for (const auto& t : tensors) {
-    TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "batch_norm: weight, bias and running stats must share a dtype");
+    TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "weight, bias, running and saved stats must share a dtype");
   }
   BatchNormStatsParams<> params{.num_channels = C,
                                 .num_partials = part ? part->size(0) : 0,
