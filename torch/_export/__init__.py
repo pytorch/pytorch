@@ -175,7 +175,7 @@ def register_aoti_runner(
     runner_cls: type,
     takes_device: bool = True,
 ) -> None:
-    """Register an AOTI ModelContainerRunner for a custom device type."""
+    """Register AOTI ModelContainerRunner for custom device type."""
     _AOTI_RUNNER_REGISTER[device_type] = (runner_cls, takes_device)
 
 def aot_load(so_path: str, device: str) -> Callable:
