@@ -5847,6 +5847,16 @@ def tlx_only_hip_options() -> list[str]:
     return _tlx_registry_options("tlx_only_hip_options")
 
 
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP Triton compile options forwarded from kernel configs.
+
+    These options are also set by ordinary Triton templates, so they must be
+    forwarded even when TLX is off.
+    """
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
+
+
 def _round_up(x: int, y: int) -> int:
     """Round x up to the nearest multiple of y."""
     return ((x + y - 1) // y) * y
