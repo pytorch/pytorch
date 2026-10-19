@@ -200,4 +200,7 @@ redirects = {
     "elastic/generated/torch.distributed.run.run_script_path": "../../distributed/elastic/generated/torch.distributed.run.run_script_path.html",
     "rpc/distributed_autograd": "../distributed/rpc/distributed_autograd.html",
     "rpc/rref": "../distributed/rpc/rref.html",
+    # Redirects for documents moved from source/ to source/mtia/
+    "mtia.memory": "mtia/memory.html",
+    "mtia.mtia_graph": "mtia/mtia_graph.html",
 }
