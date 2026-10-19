@@ -7,6 +7,13 @@
 include(GoogleTest)
 set(CMAKE_CXX_STANDARD 20)
 
+# This is a temporary workaround for the issue with PTI exporting its own copy of std::filesystem.
+# This can be removed once PTI (part of oneAPI) version is updated to 1.2.1
+if(KINETO_BACKEND STREQUAL "xpu" AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_link_options("LINKER:--push-state,--no-as-needed" -lstdc++ "LINKER:--pop-state")
+endif()
+
 if(KINETO_BACKEND STREQUAL "xpu")
     set(XPU_XPUPTI_LIBRARY ${PTI_LIBRARY} ${SYCL_LIBRARY})
     add_subdirectory(xpupti)
