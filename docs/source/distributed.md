@@ -627,8 +627,8 @@ allocated from the backend's memory pool,
 `torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
 tensor's whole allocator segment, so all ranks must register matching
 segments; allocating the same sizes in the same order on every rank satisfies
-this. Pool memory is not enough for the source of
-{meth}`~torch.distributed.distributed_c10d.Window.put`: it must lie in a segment that a window has
+this. Unless the pool is registered with `symm=True` (see below), the source
+of {meth}`~torch.distributed.distributed_c10d.Window.put` must lie in a segment that a window has
 registered, e.g. a contiguous slice of this window's tensor.
 A window holds one tensor at a time; call
 {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another, and note
@@ -669,6 +669,8 @@ assert dist._supports_window()
 
 backend = dist.get_backend_impl(device=device)
 pool = torch.cuda.MemPool(backend.mem_allocator)
+# Collective: register the pool's segments as symmetric windows.
+backend.register_mem_pool(pool, symm=True)
 count = 1024
 with torch.cuda.use_mem_pool(pool):
     # One slot per rank plus a trailing slot used as the put source.
@@ -688,9 +690,12 @@ win.wait_signal(prev_rank, async_op=False)
 torch.cuda.synchronize()
 assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
 
-# Collective, stream-ordered (does not block the host). The segment stays
-# registered until it is freed, which must happen in the same order on all ranks.
+# Collective, stream-ordered (does not block the host).
 win.tensor_deregister()
+# Collective: tear down the segments' NCCL windows before freeing them.
+backend.deregister_mem_pool(pool)
+del win, src, buf, pool
+dist.destroy_process_group()
 ```
 
 {meth}`~torch.distributed.distributed_c10d.Window.put`, {meth}`~torch.distributed.distributed_c10d.Window.signal` and
