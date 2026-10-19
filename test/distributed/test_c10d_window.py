@@ -152,6 +152,7 @@ class AbstractWindowTest:
         # A window outside the symm pool, to check put's source validation
         # after deregister_mem_pool.
         other_pool = self._make_pool()
+        self.backend.register_mem_pool(other_pool)
         with torch.cuda.use_mem_pool(other_pool):
             other_buf = torch.zeros(1, device=self.device)
         other_win = dist._new_window(other_buf)
@@ -182,6 +183,7 @@ class AbstractWindowTest:
         with self.assertRaisesRegex(RuntimeError, unregistered):
             other_win.put(src, next_rank, 0, False)
         other_win.tensor_deregister()
+        self.backend.deregister_mem_pool(other_pool)
         del src, src_seg, pool, other_win, other_buf, other_pool
         torch.cuda.synchronize()
 
