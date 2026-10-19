@@ -26,6 +26,9 @@ namespace KINETO_NAMESPACE {
 // case, there will be 32 buffers contending for the mutex.
 constexpr size_t kBufSize(size_t{4} * 1024 * 1024);
 constexpr uint32_t kCuptiBufferRejectionMinVersion = 27;
+// Stop waiting for the previous teardown after this interval and continue the
+// trace without GPU activities.
+constexpr auto kTeardownTimeout = seconds(10);
 
 static inline bool cuptiTearDown_() {
   return isEnvVarSetToOne("TEARDOWN_CUPTI");
@@ -443,66 +446,140 @@ void CuptiActivityApi::disableCuptiActivities(
   externalCorrelationEnabled_.store(false, std::memory_order_relaxed);
 }
 
-void CuptiActivityApi::teardownContext() {
-  if (!tracingEnabled_) {
-    return;
-  }
-  if (tearingDown_) {
-    return;
-  }
-  if (cuptiTearDown_()) {
-    tearingDown_ = 1;
-    LOG(INFO) << "teardownCupti starting";
-
-    // PyTorch Profiler is synchronous, so teardown needs to be run async in
-    // this thread.
-    std::thread teardownThread([&] {
-      auto& cbapi = CuptiCallbackApi::singleton();
-      if (!cbapi.initSuccess()) {
-        cbapi.initCallbackApi();
-        if (!cbapi.initSuccess()) {
-          LOG(WARNING) << "CUPTI Callback failed to init, skipping teardown";
-          tearingDown_ = 0;
-          return;
-        }
+bool CuptiActivityApi::ensureReadyForTrace() {
+  const auto deadline = steady_clock::now() + kTeardownTimeout;
+  {
+    std::unique_lock<std::mutex> lock(teardownMutex_);
+    while (teardownState_ != TeardownState::Idle) {
+      auto expected = TeardownState::Pending;
+      // If finalization is pending, cancel it and notify the teardown thread.
+      if (teardownState_.compare_exchange_strong(
+              expected, TeardownState::Restoring)) {
+        LOG(INFO) << "Cancelling pending CUPTI teardown";
+        teardownCond_.notify_all();
       }
-      // Subscribe callbacks to call cuptiFinalize in the exit callback of these
-      // APIs
-      bool status = cbapi.enableCallbackDomain(CUPTI_CB_DOMAIN_RUNTIME_API);
-      status = status && cbapi.enableCallbackDomain(CUPTI_CB_DOMAIN_DRIVER_API);
-      if (!status) {
-        LOG(WARNING)
-            << "CUPTI Callback failed to enable for domain, skipping teardown";
-        tearingDown_ = 0;
+      // Wait for Idle before configure uses CUPTI. After cancellation, the
+      // teardown thread still has to disable the temporary domains and restore
+      // callbacks. If finalization started, cuptiFinalize() must return before
+      // the subscriber can be recreated.
+      if (!teardownCond_.wait_until(lock, deadline, [&] {
+            const auto state = teardownState_.load();
+            return state == TeardownState::Idle ||
+                state == TeardownState::Pending;
+          })) {
+        LOG(WARNING) << "Timed out waiting for CUPTI teardown";
+        return false;
+      }
+    }
+  }
+
+  // Finalization removes the CUPTI subscriber. Recreate it here when lazy
+  // reinitialization is enabled so configure can continue.
+  auto& cbapi = CuptiCallbackApi::singleton();
+  if (!tracingEnabled_ && !cbapi.initSuccess() && cuptiLazyInit_()) {
+    reenableCuptiCallbacks_(cbapi);
+  }
+  return true;
+}
+
+void CuptiActivityApi::teardownContext() {
+  if (!tracingEnabled_ || !cuptiTearDown_()) {
+    return;
+  }
+
+  auto expected = TeardownState::Idle;
+  if (!teardownState_.compare_exchange_strong(
+          expected, TeardownState::Preparing)) {
+    return;
+  }
+  LOG(INFO) << "teardownCupti starting";
+
+  // Finalization runs from a later runtime callback. Do not block the thread
+  // ending this trace while waiting for that callback.
+  std::thread teardownThread([&] {
+    auto finishTeardown = [&] {
+      // Changing the state to Idle allows a new trace to use CUPTI. Do it only
+      // after this thread has disabled the temporary domains and restored or
+      // recreated the callbacks.
+      {
+        std::lock_guard<std::mutex> lock(teardownMutex_);
+        teardownState_ = TeardownState::Idle;
+      }
+      teardownCond_.notify_all();
+    };
+
+    auto& cbapi = CuptiCallbackApi::singleton();
+    if (!cbapi.initSuccess()) {
+      cbapi.initCallbackApi();
+      if (!cbapi.initSuccess()) {
+        LOG(WARNING) << "CUPTI Callback failed to init, skipping teardown";
+        finishTeardown();
         return;
       }
+    }
 
-      // Force Flush before finalize
-      CUPTI_CALL(cuptiActivityFlushAll(CUPTI_ACTIVITY_FLAG_FLUSH_FORCED));
+    bool status = cbapi.enableCallbackDomain(CUPTI_CB_DOMAIN_RUNTIME_API);
+    status = status && cbapi.enableCallbackDomain(CUPTI_CB_DOMAIN_DRIVER_API);
+    if (!status) {
+      LOG(WARNING)
+          << "CUPTI Callback failed to enable for domain, skipping teardown";
+      finishTeardown();
+      return;
+    }
 
-      LOG(INFO) << "  CUPTI subscriber before finalize:"
-                << cbapi.getCuptiSubscriber();
-      teardownCupti_ = 1;
-      std::unique_lock<std::mutex> lck(finalizeMutex_);
-      finalizeCond_.wait(lck, [&] { return teardownCupti_ == 0; });
-      lck.unlock();
-      LOG(INFO) << "teardownCupti complete";
+    // Flush activity buffers before finalizing CUPTI.
+    CUPTI_CALL(cuptiActivityFlushAll(CUPTI_ACTIVITY_FLAG_FLUSH_FORCED));
 
-      teardownCupti_ = 0;
-      tracingEnabled_ = 0;
+    LOG(INFO) << "  CUPTI subscriber before finalize:"
+              << cbapi.getCuptiSubscriber();
+    {
+      // Change the state while holding teardownMutex_. Otherwise
+      // ensureReadyForTrace() could see Preparing and go to sleep after
+      // this thread sends the notification.
+      std::lock_guard<std::mutex> lock(teardownMutex_);
+      teardownState_ = TeardownState::Pending;
+    }
+    teardownCond_.notify_all();
 
-      // Remove the callbacks used specifically for cuptiFinalize
-      cbapi.disableCallbackDomain(CUPTI_CB_DOMAIN_RUNTIME_API);
-      cbapi.disableCallbackDomain(CUPTI_CB_DOMAIN_DRIVER_API);
+    {
+      // A new trace changes Pending to Restoring immediately. A callback
+      // changes it to Finalizing, then changes it to Restoring after
+      // cuptiFinalize() returns.
+      std::unique_lock<std::mutex> lock(teardownMutex_);
+      teardownCond_.wait(
+          lock, [&] { return teardownState_ == TeardownState::Restoring; });
+    }
 
-      // Re-init CUPTI Callbacks if Lazy Re-init is not enabled.
-      if (!cuptiLazyInit_()) {
-        reenableCuptiCallbacks_(cbapi);
+    // On cancellation, disable the runtime and driver domains added above.
+    // After finalization, the subscriber is gone, so these calls only remove
+    // those domains from enabledCallbacks_.
+    cbapi.disableCallbackDomain(CUPTI_CB_DOMAIN_RUNTIME_API);
+    cbapi.disableCallbackDomain(CUPTI_CB_DOMAIN_DRIVER_API);
+
+    // The callback marks its API uninitialized after finalization. If it is
+    // still initialized, a new trace cancelled teardown before finalization.
+    if (cbapi.initSuccess()) {
+      LOG(INFO) << "CUPTI teardown cancelled";
+      // Disabling a domain also disables its individual callbacks. Restore the
+      // callbacks that were enabled before teardown.
+      if (!cbapi.reenableCallbacks()) {
+        LOG(WARNING)
+            << "Failed to restore CUPTI callbacks after cancelling teardown";
       }
-      tearingDown_ = 0;
-    });
-    teardownThread.detach();
-  }
+      finishTeardown();
+      return;
+    }
+
+    tracingEnabled_ = 0;
+    LOG(INFO) << "teardownCupti complete";
+
+    // Without lazy reinitialization, recreate the subscriber before finishing.
+    if (!cuptiLazyInit_()) {
+      reenableCuptiCallbacks_(cbapi);
+    }
+    finishTeardown();
+  });
+  teardownThread.detach();
 }
 
 } // namespace KINETO_NAMESPACE
