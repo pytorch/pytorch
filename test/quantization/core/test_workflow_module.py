@@ -635,6 +635,10 @@ class _ReferenceHistogramObserver(HistogramObserver):
             start_bin = next_start_bin
             end_bin = next_end_bin
 
+        if self.consider_full_range and _compute_quantization_error(0, self.bins - 1, "L2") < norm_min:
+            start_bin = 0
+            end_bin = self.bins - 1
+
         new_min = self.min_val + bin_width * start_bin
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
@@ -700,10 +704,12 @@ class TestHistogramObserver(QuantizationTestCase):
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
-           reduce_range=st.booleans())
+           reduce_range=st.booleans(),
+           consider_full_range=st.booleans())
     @settings(max_examples=10)
-    def test_histogram_observer(self, qdtype, qscheme, reduce_range):
-        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+    def test_histogram_observer(self, qdtype, qscheme, reduce_range, consider_full_range):
+        flag_kwargs = {"consider_full_range": True} if consider_full_range else {}
+        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range, **flag_kwargs)
         # Calculate qparams should work for empty observers
         qparams = myobs.calculate_qparams()
         x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
@@ -717,19 +723,22 @@ class TestHistogramObserver(QuantizationTestCase):
 
         qparams = myobs.calculate_qparams()
 
+        # The default trims the top bin (range [2, 6]); consider_full_range keeps [2, 8].
+        symmetric_scale = 0.0627451 if consider_full_range else 0.0470588
+        affine_scale = 0.0313725 if consider_full_range else 0.0235294
         if reduce_range:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0470588 * 255 / 127
+                ref_scale = symmetric_scale * 255 / 127
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
-                ref_scale = 0.0235294 * 255 / 127
+                ref_scale = affine_scale * 255 / 127
                 ref_zero_point = -64 if qdtype is torch.qint8 else 0
         else:
             if qscheme == torch.per_tensor_symmetric:
-                ref_scale = 0.0470588
+                ref_scale = symmetric_scale
                 ref_zero_point = 0 if qdtype is torch.qint8 else 128
             else:
-                ref_scale = 0.0235294
+                ref_scale = affine_scale
                 ref_zero_point = -128 if qdtype is torch.qint8 else 0
 
         self.assertEqual(qparams[1].item(), ref_zero_point)
@@ -742,7 +751,7 @@ class TestHistogramObserver(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range, **flag_kwargs)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_val, loaded_obs.min_val)
@@ -783,11 +792,16 @@ class TestHistogramObserver(QuantizationTestCase):
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),
            qscheme=st.sampled_from([torch.per_tensor_affine, torch.per_tensor_symmetric]),
-           reduce_range=st.booleans())
-    def test_histogram_observer_against_reference(self, N, bins, dtype, qscheme, reduce_range):
+           reduce_range=st.booleans(),
+           consider_full_range=st.booleans())
+    def test_histogram_observer_against_reference(self, N, bins, dtype, qscheme, reduce_range, consider_full_range):
 
-        ref_obs = _ReferenceHistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
-        my_obs = HistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
+        ref_obs = _ReferenceHistogramObserver(
+            bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range, consider_full_range=consider_full_range
+        )
+        my_obs = HistogramObserver(
+            bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range, consider_full_range=consider_full_range
+        )
 
         for _ in range(10):
             X = torch.randn(N)
@@ -855,6 +869,111 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.min_val, 0.0)
         self.assertEqual(myobs.max_val, 9.0)
         self.assertEqual(myobs.histogram, [1., 0., 1., 2., 1., 0., 0., 1., 1., 1.])
+
+    def _chosen_and_full_quantization_error(self, obs):
+        new_min, new_max = obs._non_linear_param_search()
+        bin_width = (obs.max_val - obs.min_val) / obs.bins
+        start_bin = int(torch.round((new_min - obs.min_val) / bin_width))
+        end_bin = int(torch.round((new_max - obs.min_val) / bin_width)) - 1
+        chosen = obs._compute_quantization_error(start_bin, end_bin)
+        full = obs._compute_quantization_error(0, obs.bins - 1)
+        return new_min, new_max, chosen, full
+
+    @staticmethod
+    def _sparse_far_tail_input():
+        # A tail of exactly one quantile step (1e-5 of the elements) far from the
+        # bulk: clipping it costs far more than the coarser step of the full range.
+        g = torch.Generator().manual_seed(0)
+        n, n_zero, n_tail = 1_000_000, 640_000, 10
+        bulk = torch.empty(n - n_zero - n_tail).exponential_(4.0, generator=g)
+        tail = 35.0 + 105.0 * torch.rand(n_tail, generator=g)
+        return torch.cat([torch.zeros(n_zero), bulk, tail])
+
+    @staticmethod
+    def _int16_observer(**kwargs):
+        return HistogramObserver(
+            dtype=torch.int16, qscheme=torch.per_tensor_symmetric, quant_min=-32767, quant_max=32767, **kwargs
+        )
+
+    def test_histogram_observer_default_matches_reference(self):
+        g = torch.Generator().manual_seed(0)
+        symmetric = dict(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
+        cases = [
+            (dict(dtype=torch.quint8), torch.randn(1000, generator=g)),
+            (symmetric, torch.randn(256, generator=g).abs()),
+            (symmetric, torch.randn(256, generator=torch.Generator().manual_seed(3))),
+        ]
+        for kwargs, x in cases:
+            obs = HistogramObserver(**kwargs)
+            ref_obs = _ReferenceHistogramObserver(consider_full_range=False, **kwargs)
+            obs(x)
+            ref_obs(x)
+            self.assertEqual(obs._non_linear_param_search(), ref_obs._non_linear_param_search())
+        x = self._sparse_far_tail_input()
+        obs = self._int16_observer()
+        obs(x)
+        new_min, new_max, chosen, full = self._chosen_and_full_quantization_error(obs)
+        self.assertLess(new_max, x.max())
+        self.assertGreater(chosen, full)
+
+    def test_histogram_observer_keeps_sparse_far_tail(self):
+        x = self._sparse_far_tail_input()
+        obs = self._int16_observer(consider_full_range=True)
+        obs(x)
+        new_min, new_max, chosen, full = self._chosen_and_full_quantization_error(obs)
+        self.assertEqual(new_min, x.min())
+        self.assertEqual(new_max, x.max())
+        self.assertLessEqual(chosen, full)
+
+    def test_histogram_observer_still_clips_when_it_lowers_error(self):
+        g = torch.Generator().manual_seed(0)
+        x = torch.randn(1_000_000, generator=g)
+        obs = HistogramObserver(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, consider_full_range=True)
+        obs(x)
+        new_min, new_max, chosen, full = self._chosen_and_full_quantization_error(obs)
+        self.assertGreater(new_min, obs.min_val)
+        self.assertLess(new_max, obs.max_val)
+        self.assertLess(chosen, full)
+
+    def test_histogram_observer_consider_full_range_searches_past_first_trim(self):
+        # The first trim raises the error above the full range, but deeper trims lower it below.
+        x = torch.randn(256, generator=torch.Generator().manual_seed(3))
+        obs = HistogramObserver(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, consider_full_range=True)
+        obs(x)
+        new_min, new_max, chosen, full = self._chosen_and_full_quantization_error(obs)
+        self.assertGreater(obs._compute_quantization_error(0, obs.bins - 2), full)
+        self.assertLess(new_max, obs.max_val)
+        self.assertLess(chosen, full)
+
+    def test_histogram_observer_consider_full_range_serialization(self):
+        obs = default_histogram_observer.with_args(consider_full_range=True)()
+        self.assertTrue(obs.consider_full_range)
+        self.assertEqual(set(obs.state_dict()), set(HistogramObserver().state_dict()))
+        self.assertTrue(copy.deepcopy(obs).consider_full_range)
+
+        x = self._sparse_far_tail_input()
+        obs = self._int16_observer(consider_full_range=True)
+        obs(x)
+        state = obs.__dict__.copy()
+        del state["consider_full_range"]
+        old_pickle_obs = HistogramObserver.__new__(HistogramObserver)
+        old_pickle_obs.__setstate__(state)
+        self.assertFalse(old_pickle_obs.consider_full_range)
+        ref_obs = self._int16_observer()
+        ref_obs(x)
+        self.assertEqual(old_pickle_obs.calculate_qparams(), ref_obs.calculate_qparams())
+        self.assertNotEqual(obs.calculate_qparams(), ref_obs.calculate_qparams())
+
+    def test_histogram_observer_consider_full_range_scripted(self):
+        x = self._sparse_far_tail_input()
+        ranges = []
+        for consider_full_range in (False, True):
+            obs = self._int16_observer(consider_full_range=consider_full_range)
+            obs(x)
+            scripted = torch.jit.script(obs)
+            self.assertEqual(scripted._non_linear_param_search(), obs._non_linear_param_search())
+            ranges.append(scripted._non_linear_param_search())
+        self.assertNotEqual(ranges[0], ranges[1])
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
