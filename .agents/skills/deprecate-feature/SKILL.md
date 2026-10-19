@@ -46,7 +46,7 @@ def foo(...):
 
 To also get type-checker diagnostics, add `@typing_extensions.deprecated(msg, category=None)`. Do not pass a warning category to `@deprecated`: it warns on every call, independently of the once flag.
 
-C++: `TORCH_WARN_ONCE(...)`, not `TORCH_WARN`. It surfaces in Python as a `UserWarning`.
+C++: `TORCH_WARN_ONCE(...)`, which surfaces in Python as a `UserWarning`. Do not use `TORCH_WARN` (repeats) or `TORCH_WARN_DEPRECATION` (repeats, and maps to Python `DeprecationWarning`, which is hidden by default).
 
 Also:
 - Warn where the user opts into the deprecated behavior (the call or argument), not in hot internal paths.
