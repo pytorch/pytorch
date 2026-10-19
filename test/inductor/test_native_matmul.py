@@ -14,7 +14,10 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -306,7 +309,7 @@ class TestNativeMatmulRowReduction(TestCase):
             torch.randn(n, dtype=torch.float16),
             torch.randn(1, dtype=torch.float16),
         )
-        self.check(f, args, fused=True, tol=5e-1)
+        self.check(f, args, fused=k <= 512, tol=5e-1)
 
     def test_reduced_epilogue(self):
         def f(x, weight, scale):
@@ -509,6 +512,29 @@ class TestNativeMatmulRowReduction(TestCase):
             torch.randn(128, 16, dtype=torch.float16),
         )
         self.check(f, args, fused=False)
+
+
+class TestNativeMatmulRowReductionHeuristic(TestCase):
+    @parametrize("k", (511, 512, 513, 1024))
+    @parametrize("m,n", ((256, 128), (4096, 64)))
+    def test_matvec_k_limit(self, device, k, m, n):
+        def f(x, weight, z):
+            return (x @ weight) @ z
+
+        x = torch.ones(m, k, device=device, dtype=torch.float16)
+        weight = torch.full((k, n), 1 / k, device=device, dtype=torch.float16)
+        z = torch.ones(n, device=device, dtype=torch.float16)
+        metrics.reset()
+        torch._dynamo.reset()
+        with inductor_config.patch({"triton.native_matmul": True}):
+            actual, _ = run_and_get_code(torch.compile(f), x, weight, z)
+        self.assertEqual(actual, f(x, weight, z))
+        self.assertEqual(metrics.generated_kernel_count, 1 if k <= 512 else 2)
+
+
+instantiate_device_type_tests(
+    TestNativeMatmulRowReductionHeuristic, globals(), only_for=GPU_TYPE
+)
 
 
 if HAS_GPU:

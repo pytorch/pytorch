@@ -2889,6 +2889,7 @@ class SIMDScheduling(BaseScheduling):
 
     # Each program holds complete mm rows, so N is bounded by the X tile.
     MAX_NATIVE_MATMUL_ROW_SIZE = 128
+    MAX_NATIVE_MATMUL_ROW_REDUCTION_K = 512
 
     @staticmethod
     def _is_native_matmul_node(node: BaseSchedulerNode) -> bool:
@@ -2972,6 +2973,12 @@ class SIMDScheduling(BaseScheduling):
         mm_index = next(
             i for i, node in enumerate(nodes1) if self._is_native_matmul_node(node)
         )
+        _, reduce_ranges = nodes1[mm_index].get_ranges()
+        # Conservative profitability limit from H100 matmul/matvec measurements.
+        if not V.graph.sizevars.statically_known_leq(
+            sympy_product(reduce_ranges), self.MAX_NATIVE_MATMUL_ROW_REDUCTION_K
+        ):
+            return False
         on_tile = OrderedSet(
             name for sn in nodes1[mm_index:] for name in sn.get_buffer_names()
         )
