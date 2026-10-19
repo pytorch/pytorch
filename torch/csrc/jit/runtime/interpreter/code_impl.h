@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -98,6 +99,9 @@ struct CodeImpl {
       profile_function_table_;
 
   int register_size_ = 0;
+  // Peak register count observed across runs of this top-level Code; used
+  // to pre-reserve the per-run register vector.
+  std::atomic<size_t> register_peak_{0};
   size_t n_outputs;
   size_t n_inputs;
   TypePtr return_type_;
