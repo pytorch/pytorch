@@ -606,6 +606,8 @@ as they should never be created manually, but they are guaranteed to support two
 .. autoclass:: P2POp
 ```
 
+(distributed-one-sided)=
+
 ## One-sided communication (experimental)
 
 ```{warning}
@@ -624,9 +626,6 @@ symmetric memory (e.g. no NVLink or InfiniBand).
 
 With `nccl` and `nccl-lazy`:
 
-- **Initialization.** The communicator must exist before windows or the pool
-  are used: pass `device_id` to {func}`~torch.distributed.init_process_group`,
-  as in the example below, so the group initializes eagerly.
 - **Memory.** The window tensor must be contiguous and allocated from the
   backend's memory pool, `torch.cuda.MemPool(backend.mem_allocator)`.
   Registration covers the tensor's whole allocator segment, so all ranks must
