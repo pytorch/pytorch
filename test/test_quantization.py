@@ -148,5 +148,15 @@ try:
 except ImportError as e:
     log.warning(e)
 
+# Device-instantiated; the XPU variant only exists on a box that has an XPU.
+try:
+    from quantization.core.test_quantized_op import TestQuantizedMaxPool2dPT2EDeviceCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_quantized_op import TestQuantizedMaxPool2dPT2EDeviceXPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+
 if __name__ == '__main__':
     run_tests()
