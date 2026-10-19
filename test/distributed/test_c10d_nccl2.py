@@ -204,6 +204,28 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_retains_inputs_under_capture(self) -> None:
+        torch.cuda.set_device(self.device)
+        pg = dist.distributed_c10d._get_default_group()
+        # Warm up so the communicator exists before capture.
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            tensors = [torch.ones(4, device=self.device) for _ in range(2)]
+            refs = [weakref.ref(tensor) for tensor in tensors]
+            pg._start_coalescing(self.device)
+            for tensor in tensors:
+                dist.all_reduce(tensor, async_op=True)
+            window = pg._end_coalescing(self.device)
+            del tensors, tensor
+            # Capture drops the ops' works, so only the window holds the inputs.
+            self.assertTrue(all(ref() is not None for ref in refs))
+            window.wait()
+            self.assertEqual([ref() for ref in refs], [None, None])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_coalescing_window_future_result(self) -> None:
         pg = dist.distributed_c10d._get_default_group()
         tensors = [torch.ones(4, device=self.device) for _ in range(2)]

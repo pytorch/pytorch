@@ -1000,18 +1000,19 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   }
 
   // A fresh work rather than one of the ops' own, whose duration and
-  // completion must stay per op. Async ops ran on internal_stream_, which
-  // getOperationStream orders after the sync ops on the current stream, so
-  // this work completes after every op in the window. It is enqueued so the
-  // watchdog completes its future; no flight recorder entry maps to its
-  // completion key, so its completion is not recorded twice.
+  // completion must stay per op. It runs on internal_stream_ if any op ran
+  // off the current stream (async or on a side stream), so the current stream
+  // is not made to wait, and waits for every op issued on another stream, so
+  // it completes after every op in the window. It is enqueued so the watchdog
+  // completes its future; no flight recorder entry maps to its completion key,
+  // so its completion is not recorded twice.
   c10::cuda::CUDAGuard device_guard(device_);
-  bool async_op =
-      std::any_of(works.begin(), works.end(), [this](const auto& w) {
-        return internal_stream_ &&
-            w->state_->stream.stream() == internal_stream_->stream();
+  cudaStream_t current = at::cuda::getCurrentCUDAStream(device_.index());
+  bool off_current =
+      std::any_of(works.begin(), works.end(), [&](const auto& w) {
+        return internal_stream_ && w->state_->stream.stream() != current;
       });
-  cudaStream_t stream = getOperationStream(async_op);
+  cudaStream_t stream = getOperationStream(off_current);
   auto timeout = works.front()->getTimeout();
   for (const auto& w : works) {
     timeout = std::max(timeout, w->getTimeout());
@@ -1024,6 +1025,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   // the ops' works.
   work->retainInputs(works);
   work->recordStart("coalesced");
+  work->waitFor(works);
   work->recordEnd();
   enqueueWork(work, stream);
   return work;

@@ -287,6 +287,15 @@ void WorkNCCL::retainInputs(
   }
 }
 
+void WorkNCCL::waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works) {
+  for (const auto& work : works) {
+    if (work->state_->stream == state_->stream) {
+      continue;
+    }
+    work->state_->events->end->block(state_->stream);
+  }
+}
+
 void WorkNCCL::setSequenceNumber(uint64_t seq) {
   state_->seq = seq;
 }

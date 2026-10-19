@@ -566,7 +566,7 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
                 expected_value = rank_sum + i * self.world_size
                 self.assertEqual(output, torch.full_like(output, expected_value))
 
-    def _coalescing_window(self, async_op, p2p, signal_peer=None):
+    def _coalescing_window(self, async_op, p2p, side, signal_peer=None):
         pg = dist.distributed_c10d._get_default_group()
         send_peer = (self.rank + 1) % self.world_size
         recv_peer = (self.rank - 1) % self.world_size
@@ -576,9 +576,17 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         reduced = torch.full((4,), float(self.rank + 1), device=self.device)
         sent = torch.full((4,), float(self.rank), device=self.device)
         received = torch.empty_like(sent)
+        current = torch.cuda.current_stream(self.device)
+        stream = None
+        if side:
+            stream = torch.cuda.Stream(self.device)
+            stream.wait_stream(current)
+            current.synchronize()
         pg._start_coalescing(self.device)
-        dist.all_to_all_single(a2a_out, a2a_in, async_op=async_op)
-        dist.all_reduce(reduced, async_op=async_op)
+        # A window may span streams; sync ops run on the stream they are issued on.
+        with torch.cuda.stream(stream):
+            dist.all_to_all_single(a2a_out, a2a_in, async_op=async_op)
+            dist.all_reduce(reduced, async_op=async_op)
         if p2p:
             dist.isend(sent, send_peer)
             dist.irecv(received, recv_peer)
@@ -589,8 +597,13 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
             signal_peer()
             # The peers have not issued anything yet, so the window cannot be done.
             self.assertFalse(completed)
+            # Only wait() orders the current stream after side-stream ops.
+            if stream is not None:
+                self.assertTrue(current.query())
         if work is not None:
             work.wait()
+        elif stream is not None:
+            current.wait_stream(stream)
 
         ranks = torch.arange(self.world_size, device=self.device)
         self.assertEqual(a2a_out, ranks.repeat_interleave(4).float())
@@ -603,16 +616,16 @@ class AbstractCollectivesTest(CollectivesTestMixin, C10dBackendTestContinuous):
         if not self.supports_coalescing:
             self.skipTest(f"{self.backend_name} does not support coalescing")
         store = dist.distributed_c10d._get_default_store()
-        for async_op, p2p in itertools.product((False, True), repeat=2):
+        for async_op, p2p, side in itertools.product((False, True), repeat=3):
             # Warm up so NCCL connections exist and rank 0 can issue alone.
-            self._coalescing_window(async_op, p2p)
-            key = f"coalescing_window_rank0_issued_{async_op}_{p2p}"
+            self._coalescing_window(async_op, p2p, side)
+            key = f"coalescing_window_rank0_issued_{async_op}_{p2p}_{side}"
             if self.rank != 0:
                 store.wait([key])
-                self._coalescing_window(async_op, p2p)
+                self._coalescing_window(async_op, p2p, side)
             else:
                 self._coalescing_window(
-                    async_op, p2p, lambda key=key: store.set(key, "1")
+                    async_op, p2p, side, lambda key=key: store.set(key, "1")
                 )
 
     def test_float8_transport(self):

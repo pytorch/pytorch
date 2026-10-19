@@ -109,6 +109,9 @@ class WorkNCCL : public c10d::Work {
   // Keeps the works' input tensors alive until this work is waited on, without
   // taking them from the works.
   void retainInputs(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
+  // Orders this work's stream after the end of each of works issued on
+  // another stream.
+  void waitFor(const std::vector<c10::intrusive_ptr<WorkNCCL>>& works);
   // Per-process-group collective counter of the op this work tracks; set by
   // the backend's createWork().
   void setSequenceNumber(uint64_t seq);
