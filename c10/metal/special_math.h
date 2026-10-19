@@ -111,24 +111,29 @@ inline float erfinv(T y) {
 
   float x, z, num, dem; /*working variables */
 
-  float y_abs = ::metal::abs(static_cast<float>(y));
+  const auto yf = static_cast<float>(y);
+  float y_abs = ::metal::abs(yf);
   if (y_abs >= 1.0f) {
-    return y_abs > 1.0f ? NAN
-                        : ::metal::copysign(INFINITY, static_cast<float>(y));
+    return y_abs > 1.0f ? NAN : ::metal::copysign(INFINITY, yf);
   }
   if (y_abs <= 0.7f) {
-    z = y * y;
+    z = yf * yf;
     num = ((a[3] * z + a[2]) * z + a[1]) * z + a[0];
     dem = (((b[3] * z + b[2]) * z + b[1]) * z + b[0]) * z + 1.0f;
-    x = y * num / dem;
-  } else {
-    z = ::metal::sqrt(-1.0f * ::metal::log((1.0 - y_abs) / 2.0));
-    num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
-    dem = (d[1] * z + d[0]) * z + 1.0f;
-    x = ::metal::copysign(num, static_cast<float>(y)) / dem;
+    x = yf * num / dem;
+    // Two steps of Newton-Raphson correction
+    x -= (erf(x) - yf) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+    x -= (erf(x) - yf) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+    return x;
   }
-
-  return x;
+  z = ::metal::sqrt(-1.0f * ::metal::log((1.0f - y_abs) / 2.0f));
+  num = ((c[3] * z + c[2]) * z + c[1]) * z + c[0];
+  dem = (d[1] * z + d[0]) * z + 1.0f;
+  x = num / dem;
+  // Two steps of Newton-Raphson using erfc, to avoid cancellation in erf(x) - y
+  x += (erfc(x) - (1.0f - y_abs)) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+  x += (erfc(x) - (1.0f - y_abs)) / (M_2_SQRTPI_F * ::metal::exp(-x * x));
+  return ::metal::copysign(x, yf);
 }
 
 /*
