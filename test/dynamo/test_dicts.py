@@ -2702,7 +2702,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         obj = Obj(3)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(Obj(3)), opt_fn(obj))
-    
+
     def test_getitem_keyerror_guard_recompiles(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/201369
         # d[key] raising KeyError inside a try/except must still guard on
@@ -2727,7 +2727,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d = {"x": torch.ones(3)}
         self.assertEqual(opt_fn(d, t), fn(d, t))
         self.assertEqual(cnt.frame_count, 2)
-        
+
     def test_dunder_dict_getitem_guard_recompiles(self):
         class Obj:
             def __init__(self):
