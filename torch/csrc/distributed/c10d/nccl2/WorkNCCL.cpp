@@ -267,8 +267,8 @@ std::chrono::milliseconds WorkNCCL::getTimeout() const {
 }
 
 void WorkNCCL::setDurationStart(const WorkNCCL& first) {
-  std::lock_guard<std::mutex> lock(state_->durationMutex);
-  state_->durationStartEvents = first.state_->events;
+  std::scoped_lock lock(state_->durationMutex, first.state_->durationMutex);
+  state_->durationStartEvents = first.state_->durationStartEvents;
 }
 
 void WorkNCCL::setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children) {

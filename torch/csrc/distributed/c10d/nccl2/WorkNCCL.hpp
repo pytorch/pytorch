@@ -104,7 +104,7 @@ class WorkNCCL : public c10d::Work {
     outputs_ = std::move(outputs);
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
-  // Makes getDuration() measure from first's start event.
+  // Makes getDuration() measure from where first's duration starts.
   void setDurationStart(const WorkNCCL& first);
   // Keeps the works' input tensors alive until this work is waited on, without
   // taking them from the works.

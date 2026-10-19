@@ -226,6 +226,18 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_single_coalesced_op(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        tensors = [torch.ones(4, device=self.device) for _ in range(2)]
+        pg._start_coalescing(self.device)
+        dist.all_reduce_coalesced(tensors, async_op=True)
+        work = pg._end_coalescing(self.device)
+        # The window returns the op's coalesced work, not a combined one.
+        self.assertEqual(work.result(), tensors)
+        work.wait()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_coalescing_window_future_result(self) -> None:
         pg = dist.distributed_c10d._get_default_group()
         tensors = [torch.ones(4, device=self.device) for _ in range(2)]

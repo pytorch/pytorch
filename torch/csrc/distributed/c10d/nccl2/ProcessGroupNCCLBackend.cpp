@@ -109,17 +109,6 @@ class CompletedWork : public ::c10d::Work {
   std::vector<at::Tensor> outputs_;
 };
 
-c10::intrusive_ptr<WorkNCCL> coalesceWorks(
-    std::vector<c10::intrusive_ptr<WorkNCCL>> works,
-    std::vector<at::Tensor> outputs) {
-  TORCH_INTERNAL_ASSERT(!works.empty());
-  auto work = std::move(works.back());
-  works.pop_back();
-  work->setChildren(std::move(works));
-  work->setOutputs(std::move(outputs));
-  return work;
-}
-
 } // namespace
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -534,6 +523,24 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_sparse(
   C10_THROW_ERROR(
       Error,
       "NCCL does not support all_reduce with sparse tensors. Please use dense tensors instead.");
+}
+
+c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::coalesceWorks(
+    std::vector<c10::intrusive_ptr<WorkNCCL>> works,
+    std::vector<at::Tensor> outputs) {
+  TORCH_INTERNAL_ASSERT(!works.empty());
+  auto work = std::move(works.back());
+  works.pop_back();
+  // The coalesced work stands in for its per-tensor works in the coalescing
+  // window, so a window holding one *_coalesced op returns that op's work.
+  if (coalescing_batch_) {
+    std::erase_if(coalescing_works_, [&](const auto& w) {
+      return std::find(works.begin(), works.end(), w) != works.end();
+    });
+  }
+  work->setChildren(std::move(works));
+  work->setOutputs(std::move(outputs));
+  return work;
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(

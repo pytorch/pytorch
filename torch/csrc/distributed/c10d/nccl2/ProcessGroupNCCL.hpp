@@ -634,6 +634,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
+  // Folds a *_coalesced op's per-tensor works into the last one.
+  c10::intrusive_ptr<WorkNCCL> coalesceWorks(
+      std::vector<c10::intrusive_ptr<WorkNCCL>> works,
+      std::vector<at::Tensor> outputs);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
