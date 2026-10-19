@@ -145,10 +145,11 @@ class AbstractWindowTest:
         # to a symmetric window; deregister_mem_pool tears them down on every
         # rank before the pool frees them.
         self._init_backend()
-        # Probe with an unregistered pool: allocating from a symm=True pool
+        # Probe before register_mem_pool: allocating from a symm=True pool
         # raises, rather than skips, without a symmetric-memory transport.
-        self._probe_window_support(self._make_pool())
+        # Probing this pool keeps its window segment under deregister_mem_pool.
         pool = self._make_pool()
+        self._probe_window_support(pool)
         self.backend.register_mem_pool(pool, symm=True)
         try:
             with torch.cuda.use_mem_pool(pool):
