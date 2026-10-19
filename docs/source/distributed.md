@@ -622,15 +622,17 @@ when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation.
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
 
-With `nccl`, the window tensor must be allocated from the backend's memory
-pool, `torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
+With `nccl` and `nccl-lazy`, the window tensor must be contiguous and
+allocated from the backend's memory pool,
+`torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
 tensor's whole allocator segment, so all ranks must register matching
 segments; allocating the same sizes in the same order on every rank satisfies
 this. The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must lie in an already registered
-segment, e.g. a slice of a registered tensor.
+segment, e.g. a contiguous slice of a registered tensor.
 Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank, so the
 destination can wait for the data with a single {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`.
-{meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank, and
+{meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank and
+requires the default `owning=True` registration, and
 {meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
 
 The example below runs a ring: each rank writes its slice into the next rank's
@@ -676,10 +678,11 @@ assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
 win.tensor_deregister()
 ```
 
-All operations return a `Work` handle. With `async_op=False` the operation is
-enqueued on the current stream; with `async_op=True` it is enqueued on an
-internal stream ordered after the current stream, and `Work.wait()` makes the
-current stream wait for it.
+{meth}`~torch.distributed.distributed_c10d.Window.put`, {meth}`~torch.distributed.distributed_c10d.Window.signal` and
+{meth}`~torch.distributed.distributed_c10d.Window.wait_signal` return a `Work` handle. With `nccl` and
+`nccl-lazy`, `async_op=False` enqueues the operation on the current stream;
+`async_op=True` enqueues it on an internal stream ordered after the current
+stream, and `Work.wait()` makes the current stream wait for it.
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.distributed_c10d._supports_window

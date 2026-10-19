@@ -1410,7 +1410,8 @@ Args:
     dst_rank (int): Destination rank in the group.
     target_offset_nelems (int): Element offset into the destination window.
     async_op (bool): Whether this op should be an async op.
-    opts (torch._C._distributed_c10d.PutOptions, optional): Timeout and backend hints.
+    opts (PutOptions, optional): Options with ``timeout``
+        (``datetime.timedelta``) and backend ``hints`` (``dict[str, str]``).
 
 Returns:
     A ``Work`` handle.
@@ -1422,10 +1423,14 @@ Returns:
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Return a tensor view of ``rank``'s window memory. Backends may only support
-the local rank.
+the local rank, and may require the tensor to have been registered with
+``owning=True``.
 
 Args:
     rank (int): Rank whose window to map.
+
+Returns:
+    A ``torch.Tensor`` view of the window memory.
 )")
       .def(
           "signal",
@@ -1440,7 +1445,8 @@ Send a signal to ``peer_rank``.
 Args:
     peer_rank (int): Rank to signal.
     async_op (bool): Whether this op should be an async op.
-    opts (torch._C._distributed_c10d.SignalOptions, optional): Timeout and backend hints.
+    opts (SignalOptions, optional): Options with ``timeout``
+        (``datetime.timedelta``) and backend ``hints`` (``dict[str, str]``).
 
 Returns:
     A ``Work`` handle.
@@ -1459,7 +1465,8 @@ backends where :meth:`put` signals, by :meth:`put`.
 Args:
     peer_rank (int): Rank to wait on.
     async_op (bool): Whether this op should be an async op.
-    opts (torch._C._distributed_c10d.WaitSignalOptions, optional): Timeout and backend hints.
+    opts (WaitSignalOptions, optional): Options with ``timeout``
+        (``datetime.timedelta``) and backend ``hints`` (``dict[str, str]``).
 
 Returns:
     A ``Work`` handle.
@@ -1470,13 +1477,16 @@ Returns:
           py::arg("peer_rank"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Return the ``torch._C._distributed_c10d.WindowAttr`` of ``peer_rank``'s
-window. Its ``access_type`` is ``WindowAccessType.UNIFIED`` for a single
-coherent view of the window, or ``WindowAccessType.SEPARATE`` for separate copies that need explicit
-synchronization.
+Return the attributes of ``peer_rank``'s window.
 
 Args:
     peer_rank (int): Rank to query.
+
+Returns:
+    A ``WindowAttr`` whose ``access_type`` is ``WindowAccessType.UNIFIED``
+    for a single coherent view of the window, or
+    ``WindowAccessType.SEPARATE`` for separate copies that need explicit
+    synchronization.
 )");
 
   py::enum_<::c10d::HookOpName>(module, "HookOpName")
