@@ -1593,6 +1593,12 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
             backend.deregister_mem_pool(pool)
 
 
+class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
 class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
     """register_mem_pool(symm=True) with NCCL window registration disabled, so
     every NCCL_WIN_COLL_SYMMETRIC registration fails."""
