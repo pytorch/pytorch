@@ -18,7 +18,7 @@
 
 /* This file includes an abstract base class for an activity profiler
  * that can be implemented by multiple tracing agents in the application.
- * The high level Kineto profiler can co-ordinate start and end of tracing
+ * The high level Kineto profiler can coordinate start and end of tracing
  * and combine together events from multiple such activity profilers.
  */
 
@@ -97,6 +97,7 @@ class IActivityProfilerSession {
 
   virtual void processTrace(
       ActivityLogger& logger,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       [[maybe_unused]] getLinkedActivityCallback getLinkedActivity,
       [[maybe_unused]] int64_t startTime,
       [[maybe_unused]] int64_t endTime) {

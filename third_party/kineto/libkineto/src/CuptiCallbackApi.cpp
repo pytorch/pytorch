@@ -39,7 +39,7 @@ constexpr uint32_t MAX_CUPTI_CALLBACK_ID_ALL = 0xffffffff;
  *                     -> cb id n -> std::list of callbacks
  *   <callback domain1> |
  *                    ...
- *  CallbackTable is the finaly table type above
+ *  CallbackTable is the final table type above
  *  See type declrartions in header file.
  */
 
@@ -134,7 +134,7 @@ void CuptiCallbackApi::__callback_switchboard(
 
   // make a copy of the callback list so we avoid holding lock
   // in common case this should be just one func pointer copy
-  std::array<CuptiCallbackFn, MAX_CB_FNS_PER_CB> callbacks;
+  std::array<CuptiCallbackFn, MAX_CB_FNS_PER_CB> callbacks{};
   size_t num_cbs = 0;
   {
     ReaderLockGuard rl(callbackLock_);
@@ -166,7 +166,7 @@ void CuptiCallbackApi::initCallbackApi() {
       nullptr));
 
   // TODO: Remove temporarily to work around static initialization order issue
-  // betweent this and GLOG.
+  // between this and GLOG.
   // if (lastCuptiStatus_ != CUPTI_SUCCESS) {
   //   LOG(INFO) << "Failed cuptiSubscribe, status: " << lastCuptiStatus_;
   // }
@@ -177,7 +177,7 @@ void CuptiCallbackApi::initCallbackApi() {
 CuptiCallbackApi::CallbackList* CuptiCallbackApi::CallbackTable::lookup(
     CUpti_CallbackDomain domain,
     CuptiCallBackID cbid) {
-  size_t idx;
+  size_t idx = 0;
 
   switch (domain) {
     case CUPTI_CB_DOMAIN_RESOURCE:
