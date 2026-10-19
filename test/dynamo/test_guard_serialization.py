@@ -1464,6 +1464,8 @@ if isinstance(_generic_class_getitem, types.ClassMethodDescriptorType):
 
 @instantiate_parametrized_tests
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
     # directly rather than through a capture, so none of
     # TestGuardSerialization's setup applies.
@@ -5671,6 +5673,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertEqual(source, restored)
 
 
+@torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
