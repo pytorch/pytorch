@@ -55,7 +55,6 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
-from .object_protocol import python_constant_repr_impl
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -741,9 +740,6 @@ class GradModeVariable(ContextWrappingVariable):
 
     def python_type(self) -> type:
         return torch.set_grad_enabled
-
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return python_constant_repr_impl(self, tx)
 
 
 class InferenceModeVariable(ContextWrappingVariable):
