@@ -988,7 +988,7 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
             return [line.split(prefix, 1)[1].strip() for line in f if prefix in line]
 
     @requires_nccl()
-    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for commName")
+    @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
     @skip_if_lt_x_gpu(2)
     def test_comm_name(self) -> None:
         self._check_all_reduce()
@@ -1033,7 +1033,7 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
         dist.destroy_process_group(named)
 
     @requires_nccl()
-    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for commName")
+    @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
     @skip_if_lt_x_gpu(2)
     def test_lazy_comm_name(self) -> None:
         self._check_all_reduce()
@@ -1068,6 +1068,52 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
         self.assertCountEqual(names, expected)
         dist.destroy_process_group(user)
         dist.destroy_process_group(named)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_comm_name(self) -> None:
+        torch.cuda.set_device(self.device)
+        store = dist.distributed_c10d._get_default_store()
+        before = len(self._logged_comm_names())
+        cases = [
+            ("zzz_reconf", None, {}),
+            ("zzz_reconf_user", "zzz_user", {}),
+            # A commName hint wins over the Options' comm_name.
+            ("zzz_reconf_hint", "zzz_user", {"commName": "zzz_hint"}),
+        ]
+        for name, comm_name, hints in cases:
+            opts = dist.ProcessGroupNCCL2.Options()
+            opts.enable_reconfigure = True
+            opts.group_name = name
+            opts.group_desc = "zzz_rdesc"
+            if comm_name is not None:
+                opts.config.comm_name = comm_name
+            backend = dist.ProcessGroupNCCL2(
+                dist.PrefixStore(name, store), self.rank, self.world_size, opts
+            )
+            handles = dist.PrefixStore(f"{name}/handles", store)
+            handles.set(str(self.rank), backend.get_reconfigure_handle())
+            reconfigure_opts = ReconfigureOptions()
+            reconfigure_opts.uuid = 1
+            reconfigure_opts.handles = [
+                handles.get(str(rank)).decode() for rank in range(self.world_size)
+            ]
+            reconfigure_opts.timeout = timedelta(seconds=30)
+            reconfigure_opts.hints = hints
+            backend.reconfigure(reconfigure_opts).wait()
+            backend.shutdown()
+
+        self.assertCountEqual(
+            self._logged_comm_names()[before:],
+            ["zzz_rdesc:zzz_reconf", "zzz_user", "zzz_hint"],
+        )
 
 
 class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):

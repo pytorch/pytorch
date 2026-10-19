@@ -24,9 +24,10 @@ c10::intrusive_ptr<ProcessGroupNCCL> makePrimary(
 ProcessGroupNCCLLazy::PairFactory makePairFactory(
     c10::intrusive_ptr<::c10d::Store> store,
     c10::intrusive_ptr<ProcessGroupNCCL::Options> options) {
-  // Copy the desc now, before options is moved: the user's Options may be
-  // reused for another group.
-  return [desc = options->group_desc,
+  // Copy the desc now: the user's Options may be reused for another group. A
+  // separate statement, since init-captures run in unspecified order.
+  std::string desc = options->group_desc;
+  return [desc = std::move(desc),
           store = std::move(store),
           options = std::move(options)](
              int pair_rank, const std::string& pair_name) {
