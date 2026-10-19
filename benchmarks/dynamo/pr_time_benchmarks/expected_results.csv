@@ -10,11 +10,11 @@ add_loop_inductor,compile_time_instruction_count,23790000000,0.1
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,28490000000,0.1
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,27700000000,0.1
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,23240000000,0.1
+add_loop_inductor_gpu,compile_time_instruction_count,22550000000,0.1
 
 
 
@@ -78,7 +78,7 @@ mm_loop_inductor_gpu,compile_time_instruction_count,4214000000,0.1
 
 
 
-mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,6613000000,0.1
+mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,6478000000,0.1
 
 
 
@@ -98,7 +98,7 @@ diffusion_dit_regional_inductor,compile_time_instruction_count,3663000000,0.1
 
 
 
-diffusion_dit_hierarchical_inductor,compile_time_instruction_count,6809000000,0.1
+diffusion_dit_hierarchical_inductor,compile_time_instruction_count,6661000000,0.1
 
 
 
@@ -134,7 +134,7 @@ dtensor_dispatch_view,instruction_count,61550,0.1
 
 
 
-dtensor_dispatch_random,instruction_count,516200,0.1
+dtensor_dispatch_random,instruction_count,505000,0.1
 
 
 
@@ -142,11 +142,11 @@ dtensor_dispatch_custom_handler,instruction_count,35320,0.1
 
 
 
-nn_module_guard_eval,instruction_count,69640,0.1
+nn_module_guard_eval,instruction_count,63400,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,96320,0.1
+nn_module_guard_eval_dynamic,instruction_count,88500,0.1
 
 
 
@@ -154,15 +154,15 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_inductor,instruction_count,139700,0.1
+runtime_overhead_inductor,instruction_count,126400,0.1
 
 
 
-runtime_overhead_inductor_inference_mode,instruction_count,149700,0.1
+runtime_overhead_inductor_inference_mode,instruction_count,140100,0.1
 
 
 
-runtime_overhead_inductor_requires_grad,instruction_count,166600,0.1
+runtime_overhead_inductor_requires_grad,instruction_count,148900,0.1
 
 
 
@@ -170,15 +170,15 @@ runtime_overhead_inductor_requires_grad_backward,instruction_count,107500,0.1
 
 
 
-runtime_overhead_inductor_dynamic,instruction_count,137700,0.1
+runtime_overhead_inductor_dynamic,instruction_count,123500,0.1
 
 
 
-runtime_overhead_inductor_inference_mode_dynamic,instruction_count,147600,0.1
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,137900,0.1
 
 
 
-runtime_overhead_inductor_requires_grad_dynamic,instruction_count,167100,0.1
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,147500,0.1
 
 
 
@@ -186,7 +186,7 @@ runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,10830
 
 
 
-runtime_overhead_eager_cpu,instruction_count,104600,0.1
+runtime_overhead_eager_cpu,instruction_count,100400,0.1
 
 
 
@@ -194,4 +194,4 @@ unbind_split_flip_cat_iter40_batch128,instruction_count,210000000000,0.1
 
 
 
-disable_overhead,instruction_count,4985,0.1
+disable_overhead,instruction_count,5162,0.1
