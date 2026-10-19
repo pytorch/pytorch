@@ -5,7 +5,9 @@ description: Deprecate, freeze, or remove a PyTorch API or component and track i
 
 # Deprecating a Feature in PyTorch
 
-Use one tracking issue for the whole lifecycle of a deprecation, freeze, or removal. File it with the deprecation form (`.github/ISSUE_TEMPLATE/deprecation.yml`) and attach it as a sub-issue of the umbrella https://github.com/pytorch/pytorch/issues/201298. Report any unmet [Done checklist](#done-checklist) item as unfinished work.
+Use one tracking issue for the whole lifecycle of a deprecation, freeze, or removal. File it with the deprecation form (`.github/ISSUE_TEMPLATE/deprecation.yml`) and attach it as a sub-issue of the umbrella https://github.com/pytorch/pytorch/issues/201298. Report any unmet [Done checklist](#done-checklist) item to the user.
+
+This process is provisional and is being evaluated in practice. If the user says a step does not apply, skip it and note the skip; do not treat this skill as authoritative over the user or the wiki policy.
 
 ## Lifecycle
 
