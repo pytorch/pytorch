@@ -49,12 +49,6 @@ from ..source import AttrSource, Source
 from ..utils import format_source_range, istype
 
 
-# Stands in for the %p address object_repr/slot_tp_repr print: the real address
-# is runtime-only for objects created during tracing, and baking a sourced
-# object's address into the graph would need an ID_MATCH guard.
-REPR_ADDRESS_PLACEHOLDER = "0x..."
-
-
 _RICHCOMPARE_OPS = frozenset(
     {"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"}
 )
@@ -2857,31 +2851,43 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
-        """Default tp_repr: object_repr, "<module.qualname object at 0x...>".
+        """Mirrors CPython's tp_repr slot.
 
-        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6214-L6243
+        https://github.com/python/cpython/blob/v3.13.3/Objects/object.c#L745-L778
 
-        VT subclasses override this for types with their own tp_repr.
+        Called when type_implements_tp_repr returns True for this type.
+        Subclasses override to provide the actual repr implementation.
         """
-        py_type, addr = self.python_type(), REPR_ADDRESS_PLACEHOLDER
-        mod = getattr(py_type, "__module__", None)
-        if isinstance(mod, str) and mod != "builtins":
-            return VariableTracker.build(
-                tx, f"<{mod}.{py_type.__qualname__} object at {addr}>"
-            )
-        return VariableTracker.build(tx, f"<{py_type.__name__} object at {addr}>")
+        unimplemented(
+            gb_type="tp_repr_impl not implemented",
+            context=f"{type(self).__name__} has tp_repr slot but no tp_repr_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_repr C slot but "
+            "the corresponding VariableTracker doesn't implement tp_repr_impl.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def repr_recursive_sentinel(self) -> str:
+        """What repr() emits for this object when it contains itself.
+
+        Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
+        """
+        return "..."
 
     def tp_str_impl(
         self,
         tx: InstructionTranslatorBase,
     ) -> VariableTracker:
-        """Default tp_str: object_str, which calls Py_TYPE(self)->tp_repr.
-
-        https://github.com/python/cpython/blob/v3.13.3/Objects/typeobject.c#L6245-L6254
-
-        VT subclasses override this for types with their own tp_str.
+        """Dynamo hook for VariableTrackers with dedicated str behavior.
+        Subclasses override this for the per-type str result; generic_str()
+        handles dispatch and repr fallback.
         """
-        return self.tp_repr_impl(tx)
+        unimplemented(
+            gb_type="tp_str_impl not implemented",
+            context=f"{type(self).__name__} has no tp_str_impl override for {self.python_type_name()}",
+            explanation=f"Dynamo does not implement __str__ for {self.python_type_name()} "
+            f"in {type(self).__name__}.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def nb_int_impl(
         self,
