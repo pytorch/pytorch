@@ -538,14 +538,16 @@ class CountIteratorVariable(IteratorVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
-        cnt = tracked_repr(tx, self.item)
+        if not (self.item.is_python_constant() and self.step.is_python_constant()):
+            return super().tp_repr_impl(tx)
+        cnt = self.item.as_python_constant()
+        step = self.step.as_python_constant()
         # Suppress step in the repr when it is an integer equal to 1.
-        step = (
-            self.step.as_python_constant() if self.step.is_python_constant() else None
-        )
         if isinstance(step, int) and step == 1:
-            return ConstantVariable.create(f"count({cnt})")
-        return ConstantVariable.create(f"count({cnt}, {tracked_repr(tx, self.step)})")
+            result = f"count({cnt!r})"
+        else:
+            result = f"count({cnt!r}, {step!r})"
+        return ConstantVariable.create(result)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
