@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import threading
 from typing import Any
 
@@ -14,6 +15,8 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -268,6 +271,16 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
             check_sharded_parity(self, ref_model, model)
 
 
+def _finish_post_all_gather(
+    weight: torch.Tensor, out: torch.Tensor | None
+) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+    if out is None:
+        return weight, (weight,)
+    with _unsafe_preserve_version_counter(out):
+        out.copy_(weight)
+    return None
+
+
 class TestFullyShardAllGatherExtensionsMultiThread(
     TestFullyShardAllGatherExtensionsCommon, FSDPTestMultiThread
 ):
@@ -397,6 +410,142 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             raise AssertionError("Expected tls.ran_pre_all_gather to be True")
 
     @skip_if_lt_x_gpu(1)
+    def test_release_all_gather_outputs_after_post_all_gather(self):
+        self.run_subtests(
+            {"reshard_after_forward": [True, False]},
+            self._test_release_all_gather_outputs_after_post_all_gather,
+        )
+
+    def _test_release_all_gather_outputs_after_post_all_gather(
+        self, reshard_after_forward: bool
+    ):
+        tls = threading.local()
+        tls.num_post_all_gather_calls = 0
+
+        def fsdp_pre_all_gather(
+            self,
+            mesh: DeviceMesh,
+            outer_size: torch.Size,
+            outer_stride: tuple[int, ...],
+            module: nn.Module,
+            mp_policy: MixedPrecisionPolicy,
+        ) -> tuple[tuple[torch.Tensor, ...], Any]:
+            del mesh, outer_size, outer_stride, module, mp_policy
+            return (self,), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            self,
+            all_gather_outputs: tuple[torch.Tensor, ...],
+            metadata: Any,
+            param_dtype: torch.dtype,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
+            del self
+            if metadata is not None:
+                raise AssertionError(f"Expected metadata to be None, got {metadata}")
+            (tensor,) = all_gather_outputs
+            if tensor.dtype != param_dtype:
+                raise AssertionError(
+                    f"Expected tensor dtype {param_dtype}, got {tensor.dtype}"
+                )
+            tls.num_post_all_gather_calls += 1
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(tensor)
+                return None
+            transformed = tensor.clone()
+            return transformed, (transformed,)
+
+        def fsdp_should_release_all_gather_outputs_after_post_all_gather(
+            self,
+        ) -> bool:
+            del self
+            return True
+
+        test_device = self.device
+
+        class InspectLinear(nn.Linear):
+            def __init__(self) -> None:
+                super().__init__(8, 8, device=test_device)
+                self.storage_observations: list[
+                    tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]
+                ] = []
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                state = fully_shard.state(self)
+                param_group = state._fsdp_param_group
+                if param_group is None:
+                    raise AssertionError("Expected an FSDP parameter group")
+                fsdp_params = {
+                    fsdp_param._module_info.param_name: fsdp_param
+                    for fsdp_param in param_group.fsdp_params
+                }
+                weight = fsdp_params["weight"]
+                bias = fsdp_params["bias"]
+                self.storage_observations.append(
+                    (
+                        tuple(
+                            tensor.untyped_storage().size()
+                            for tensor in weight.all_gather_outputs
+                        ),
+                        tuple(
+                            tensor.untyped_storage().size()
+                            for tensor in weight._unsharded_inner_tensors
+                        ),
+                        tuple(
+                            tensor.untyped_storage().size()
+                            for tensor in bias.all_gather_outputs
+                        ),
+                    )
+                )
+                return super().forward(input)
+
+        model = InspectLinear()
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        local_weight.fsdp_should_release_all_gather_outputs_after_post_all_gather = (
+            fsdp_should_release_all_gather_outputs_after_post_all_gather.__get__(
+                local_weight
+            )
+        )
+
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            output = model(inp)
+            weight_outputs, weight_inner_tensors, bias_outputs = (
+                model.storage_observations[-1]
+            )
+            self.assertTrue(all(size == 0 for size in weight_outputs))
+            self.assertTrue(all(size > 0 for size in weight_inner_tensors))
+            self.assertTrue(all(size > 0 for size in bias_outputs))
+
+            output.sum().backward()
+            state = fully_shard.state(model)
+            param_group = state._fsdp_param_group
+            if param_group is None:
+                raise AssertionError("Expected an FSDP parameter group")
+            for fsdp_param in param_group.fsdp_params:
+                self.assertTrue(
+                    all(
+                        tensor.untyped_storage().size() == 0
+                        for tensor in fsdp_param.all_gather_outputs
+                    )
+                )
+                self.assertTrue(
+                    all(
+                        tensor.untyped_storage().size() == 0
+                        for tensor in fsdp_param._unsharded_inner_tensors
+                    )
+                )
+
+        expected_post_all_gather_calls = 4 if reshard_after_forward else 2
+        self.assertEqual(tls.num_post_all_gather_calls, expected_post_all_gather_calls)
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_outer_size_stride(self):
         """
         NOTE: We cannot easily test the incorrect case where the user-defined
@@ -485,6 +634,193 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         # Check that FSDP passes only the shard mesh to the pre-all-gather
         self.assertEqual(tls.mesh.ndim, 1)
         self.assertEqual(tls.mesh.size(), shard_size)
+
+    def _patch_extension(self, module: nn.Module, pre_fn, post_fn):
+        local_weight = module.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = pre_fn.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_byte_payload(self):
+        # A size-1 shard mesh skips the all-gather, so FSDP copies the payload
+        # directly, including a byte view into its typed cached output
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        byte_payload = False
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            if byte_payload:
+                return (local_tensor.view(torch.uint8),), outer_size
+            return (local_tensor,), outer_size
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            (weight,) = (t.view(metadata) for t in all_gather_outputs)
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return
+            return weight, (weight,)
+
+        model = nn.Linear(16, 8, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        local_weight = model.weight._local_tensor
+        local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
+        local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
+        inp = torch.randn((2, 16), device=device_type)
+        for iteration in range(2):
+            byte_payload = iteration == 1
+            output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output)
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_post_forward_reshard(self):
+        # Single payloads that can back the post-forward parameter reshard, but
+        # cannot be all-gathered again; others fail before any parameter reshards
+        payloads = {
+            # Each rank's (1, 8) shard of the (8, 8) weight
+            "one": lambda t: (t,),
+            "complex": lambda t: (t.to(torch.complex64),),  # Shard(1) of a (4, 8) one
+            "frozen_bytes": lambda t: (t.view(torch.uint8),),
+            "zero": lambda t: (),
+            "two": lambda t: (t, torch.ones_like(t)),
+            "half": lambda t: (t.view(-1)[:4],),
+            "bytes": lambda t: (t.view(torch.uint8),),
+            "int8": lambda t: (t.to(torch.int8),),
+            # A (7, 8) weight has post-forward shards of 4 and 3 rows
+            "uneven": lambda t: (t.new_ones(6),),
+        }
+
+        # The 1-argument hook is not checked for the padded size
+        def fsdp_pre_all_gather(local_tensor, mesh):
+            return payloads[payload](local_tensor), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            weight = torch.ones(rows, 8, device=device_type)
+            return _finish_post_all_gather(weight, out)
+
+        inp = torch.randn((2, 8), device=device_type)
+        all_gather_msg = (
+            "All-gathering the post-forward shard of 1.weight is not supported"
+        )
+        msgs = {
+            "one": all_gather_msg,
+            "complex": all_gather_msg,
+            "frozen_bytes": all_gather_msg,
+            "zero": "Resharding 1.weight to smaller mesh is not supported for all-gather extensions with 0 inputs yet",
+            "two": "Resharding 1.weight to smaller mesh is not supported for all-gather extensions with 2 inputs yet",
+            "half": "Resharding 1.weight to smaller mesh needs post-forward shards of up to 32 elements, but its all-gather extension output has 16 per rank",
+            "bytes": "Resharding 1.weight to smaller mesh needs a floating or complex all-gather extension output to require gradients, but its output has dtype torch.uint8",
+            "int8": "but its output has dtype torch.int8",
+            "uneven": "Resharding 1.weight to smaller mesh needs post-forward shards of up to 32 elements, but its all-gather extension output has 24 per rank",
+        }
+        for payload, msg in msgs.items():
+            rows = {"uneven": 7, "complex": 4}.get(payload, 8)
+            model = nn.Sequential(
+                nn.Linear(8, 8, bias=False, device=device_type),
+                nn.Linear(8, rows, bias=False, device=device_type),
+            )
+            model[1].weight.requires_grad_(payload != "frozen_bytes")
+            s = Shard(int(payload == "complex"))
+            fully_shard(model, reshard_after_forward=2, shard_placement_fn=lambda _: s)
+            self._patch_extension(model[1], fsdp_pre_all_gather, fsdp_post_all_gather)
+            fsdp_params = fully_shard.state(model)._fsdp_param_group.fsdp_params
+            with self.assertRaisesRegex(NotImplementedError, re.escape(msg)):
+                model(inp).sum().backward()
+            if msg != all_gather_msg:
+                states = [fsdp_param.sharded_state for fsdp_param in fsdp_params]
+                self.assertEqual(states, [ShardedState.UNSHARDED] * 2)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_smaller_payload(self):
+        # A size-1 shard mesh copies every payload, and Shard(0) payloads may shrink
+        # and fill a prefix of their output
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        num_tags, tags_dtype = 4, torch.bfloat16
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            tags = torch.arange(num_tags, device=local_tensor.device).bfloat16()
+            payloads = (tags.view(tags_dtype), local_tensor) if num_tags else (tags,)
+            return payloads, (outer_size, num_tags)
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            outer_size, num_rank_tags = metadata
+            tags, weight = all_gather_outputs
+            expected_tags = torch.arange(num_rank_tags, device=tags.device).bfloat16()
+            self.assertEqual(tags[:num_rank_tags], expected_tags)
+            return _finish_post_all_gather(weight.view(outer_size), out)
+
+        model = nn.Linear(8, 16, bias=False, device=device_type)
+        # Seeding is per process, not per thread
+        dist.broadcast(model.weight.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        # An input that requires grad saves the weight for backward, which all-gathers
+        # it again in place, so this also checks every output's version counter
+        inp = torch.randn((2, 8), device=device_type, requires_grad=True)
+        for num_tags in (4, 2):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
+        # A smaller byte payload of a typed output, a payload whose dtype and size
+        # change, or a dropped payload raises
+        for tags_dtype in (torch.uint8, torch.float16):
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                model(inp)
+        num_tags, tags_dtype = 0, torch.bfloat16
+        with self.assertRaisesRegex(ValueError, "zip"):
+            model(inp)
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_no_payloads(self):
+        # A size-1 shard mesh copies no payloads for an extension without any
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        weight = torch.ones((8, 8), device=device_type)
+
+        def fsdp_pre_all_gather(local_tensor, mesh):
+            return (), None
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            return _finish_post_all_gather(weight.clone(), out)
+
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        inp = torch.randn((2, 8), device=device_type)
+        for _ in range(2):
+            self.assertEqual(model(inp), inp @ weight.T)
 
 
 if __name__ == "__main__":

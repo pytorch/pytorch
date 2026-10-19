@@ -5,6 +5,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/TensorProperties.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
+#include <c10/util/DimVector.h>
 
 namespace at::native {
 
@@ -72,19 +73,71 @@ inline void check_grid_sampler_2d(
 // See NOTE [ grid_sampler Native Functions ].
 inline void check_grid_sampler_3d(
   const TensorBase& input,
-  const TensorBase& grid,
-  int64_t interpolation_mode
+  const TensorBase& grid
 ) {
   TORCH_CHECK(
     input.dim() == 5 && input.dim() == grid.dim(),
     "grid_sampler(): expected 5D input and grid with same number of "
     "dimensions, but got input with sizes ", input.sizes(),
     " and grid with sizes ", grid.sizes());
-  TORCH_CHECK(
-    !(input.dim() == 5 &&
-      static_cast<GridSamplerInterpolation>(interpolation_mode) ==
-        GridSamplerInterpolation::Bicubic),
-    "grid_sampler(): bicubic interpolation only supports 4D input");
+}
+
+// TODO: drop this overload once torch-xpu-ops stops calling it. torch-xpu-ops
+// passes the mode; in-tree backends call the overload above and refuse bicubic
+// themselves.
+// See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_3d(
+  const TensorBase& input,
+  const TensorBase& grid,
+  int64_t interpolation_mode
+) {
+  check_grid_sampler_3d(input, grid);
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    static_cast<GridSamplerInterpolation>(interpolation_mode) !=
+      GridSamplerInterpolation::Bicubic,
+    "grid_sampler(): bicubic interpolation with 5D input is not "
+    "implemented for ", input.device().type());
+}
+
+// See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_backward(
+  const TensorBase& input,
+  const TensorBase& grid,
+  const TensorBase& grad_output
+) {
+  c10::DimVector expected_grad_output_shape = {input.size(0), input.size(1)};
+  for (const auto i : c10::irange(1, grid.dim() - 1)) {
+    expected_grad_output_shape.push_back(grid.size(i));
+  }
+
+  // a mismatched grad_output tensor leads to out-of-bounds reads in the kernel
+  TORCH_CHECK_VALUE(
+    grad_output.sizes() == expected_grad_output_shape,
+    "grid_sampler(): expected grad_output to have sizes ",
+    expected_grad_output_shape,
+    " but got grad_output with sizes ", grad_output.sizes());
+}
+
+// See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_2d_backward(
+  const TensorBase& input,
+  const TensorBase& grid,
+  const TensorBase& grad_output
+) {
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_2d(input, grid);
+  check_grid_sampler_backward(input, grid, grad_output);
+}
+
+// See NOTE [ grid_sampler Native Functions ].
+inline void check_grid_sampler_3d_backward(
+  const TensorBase& input,
+  const TensorBase& grid,
+  const TensorBase& grad_output
+) {
+  check_grid_sampler_common(input, grid);
+  check_grid_sampler_3d(input, grid);
+  check_grid_sampler_backward(input, grid, grad_output);
 }
 
 // See NOTE [ grid_sampler Native Functions ].

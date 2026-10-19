@@ -7,6 +7,7 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
+#include <torch/headeronly/util/Exception.h>
 
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
@@ -335,19 +336,19 @@ class Vectorized<c10::complex<double>> {
   }
   Vectorized<c10::complex<double>> operator<(
       const Vectorized<c10::complex<double>>& /*unused*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator<=(
       const Vectorized<c10::complex<double>>& /*unused*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>(
       const Vectorized<c10::complex<double>>& /*unused*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>=(
       const Vectorized<c10::complex<double>>& /*unused*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    STD_TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<c10::complex<double>> eq(

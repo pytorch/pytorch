@@ -18,72 +18,27 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.api
-```
-
-```{eval-rst}
-.. autofunction:: get_env_variable_or_raise
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.distributed
-```
-
-```{eval-rst}
-.. autofunction:: get_free_port
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.log_level
-```
-
-```{eval-rst}
-.. autofunction:: get_log_level
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.elastic.utils.logging
-```
-
-```{eval-rst}
-.. autofunction:: get_logger
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.rendezvous
-```
-
-```{eval-rst}
-.. autofunction:: register_rendezvous_handler
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed.algorithms.model_averaging.utils
-```
-
-```{eval-rst}
-.. autofunction:: average_parameters
-```
-
-```{eval-rst}
-.. autofunction:: average_parameters_or_parameter_groups
-```
-
-```{eval-rst}
-.. autofunction:: get_params_to_average
-```
-
-```{eval-rst}
-.. currentmodule:: torch.distributed
-```
+(distributed-backends)=
 
 ## Backends
 
-`torch.distributed` supports four built-in backends, each with
-different capabilities. The table below shows which functions are available
-for use with a CPU or GPU for each backend. For NCCL, GPU refers to CUDA GPU
-while for XCCL to XPU GPU.
+`torch.distributed` ships the following backends. Backends are registered
+through the `torch.distributed.backends` entry point group and loaded on first use.
+
+- `gloo`: CPU and CUDA.
+- `nccl`: CUDA.
+- `nccl-lazy`: CUDA. Variant of `nccl` that runs collectives on one communicator and
+  creates a 2-rank communicator per point-to-point peer pair on first use.
+- `nccl-legacy`: CUDA. The legacy `ProcessGroupNCCL` implementation.
+- `mpi`: only when PyTorch is built with MPI.
+- `ucc`: CPU and CUDA; only when PyTorch is built with UCC.
+- `xccl`: Intel XPU.
+- `fake`: no-op backend for testing; registered by importing
+  `torch.testing._internal.distributed.fake_pg`.
+
+The table below shows which functions are available for use with a CPU or GPU
+for four of these backends. For NCCL, GPU refers to CUDA GPU while for XCCL to
+XPU GPU.
 
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
@@ -208,9 +163,49 @@ for some cloud providers, such as AWS or GCP.
 For a full list of NCCL environment variables, please refer to
 [NVIDIA NCCL's official documentation](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html)
 
-You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`
-and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
+You can tune NCCL communicators even further using `torch.distributed.ProcessGroupNCCL.NCCLConfig`,
+set through the `config` attribute of `torch.distributed.ProcessGroupNCCL.Options`.
+Pass the `Options` to {func}`torch.distributed.init_process_group` or
+{func}`torch.distributed.new_group` as `pg_options`.
+The same `Options` type is used by the `nccl`, `nccl-lazy` and `nccl-legacy`
+backends. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
+
+(nccl-collective-config)=
+
+### Per-collective NCCL configuration
+
+The `nccl` and `nccl-lazy` backends accept a keyword-only `config` on supported collective functions. This requires NCCL 2.31 or later and
+[nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
+
+```python
+from nccl.core import NCCLCollConfig
+import torch.distributed as dist
+
+dist.init_process_group("nccl")
+config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
+dist.all_reduce(tensor, config=config)
+```
+
+Supported functions: `broadcast`, `all_reduce`, `all_reduce_coalesced`, `reduce`,
+`all_gather`, `all_gather_single`, `all_gather_coalesced`, `gather_single`,
+`reduce_scatter`, `reduce_scatter_single` and `all_to_all_single`, plus the
+back-compat aliases `all_gather_into_tensor`, `gather_into_tensor` and
+`reduce_scatter_tensor`.
+
+Unset fields inherit NCCL or communicator defaults; a config with no set fields
+is treated as `None`. Config presence and values must be identical on every
+participating rank; mismatches can hang. Configurations within an NCCL group must
+agree on `cga_cluster_size`. Passing `None` preserves existing behavior and does
+not require nccl4py.
+
+Backends receive `config` as its attribute dictionary (`vars(config)`); a plain
+`dict` with the same keys is equivalent. `nccl-legacy`, `gloo` and the other built-in backends ignore it.
+`nccl` rejects vendor options and unsupported operations. `all_to_all_single`
+with a config requires even splits on every rank. External NCCL group scopes are unsupported.
+
+Supported synchronous calls can use `torch.compile` and `torch.export`.
+Configuration values are graph constants; changing them recompiles.
 
 (distributed-basics)=
 
@@ -382,6 +377,14 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that `init_method` does not have to be specified (or
 can be `env://`).
 
+### Custom initialization methods
+
+Other `init_method` URL schemes can be added by registering a rendezvous handler.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.rendezvous.register_rendezvous_handler
+```
+
 ### Improving initialization time
 
 - `TORCH_GLOO_LAZY_INIT` - establishes connections on demand rather than
@@ -423,6 +426,18 @@ check whether the process group has already been initialized use {func}`torch.di
 ```
 
 ```{eval-rst}
+.. autofunction:: set_debug_level
+```
+
+```{eval-rst}
+.. autofunction:: set_debug_level_from_env
+```
+
+```{eval-rst}
+.. autoclass:: DebugLevel
+```
+
+```{eval-rst}
 .. autofunction:: get_node_local_rank
 ```
 
@@ -432,6 +447,15 @@ check whether the process group has already been initialized use {func}`torch.di
 
 ```{eval-rst}
 .. autofunction:: set_timeout
+```
+
+### Experimental collective time estimation
+
+The context manager and the backend's `_supports_time_estimate` capability probe are
+experimental and may change without notice.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._time_estimator
 ```
 
 ### Fault-tolerant reconfiguration
@@ -454,11 +478,11 @@ process-launcher level.
 
 if {func}`destroy_process_group` is not called by all ranks in a pg within the timeout duration,
 especially when there are multiple process-groups in the application e.g. for N-D parallelism,
-hangs on exit are possible. This is because the destructor for ProcessGroupNCCL calls ncclCommAbort,
-which must be called collectively, but the order of calling ProcessGroupNCCL's destructor if called
+hangs on exit are possible. This is because the NCCL backends call ncclCommAbort in their destructor if the group was not shut down,
+which must be called collectively, but the order of calling the destructors if called
 by python's GC is not deterministic. Calling {func}`destroy_process_group` helps by ensuring
-ncclCommAbort is called in a consistent order across ranks, and avoids calling ncclCommAbort
-during ProcessGroupNCCL's destructor.
+communicators are torn down in a consistent order across ranks, and avoids calling ncclCommAbort
+during the destructor.
 
 ### Reinitialization
 
@@ -483,7 +507,23 @@ an opaque group handle that can be given as a `group` argument to all collective
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
 
 ```{eval-rst}
+.. autoclass:: ProcessGroup
+```
+
+```{eval-rst}
+.. autoclass:: group
+```
+
+```{eval-rst}
 .. autofunction:: new_group
+```
+
+```{eval-rst}
+.. autofunction:: new_subgroups
+```
+
+```{eval-rst}
+.. autofunction:: new_subgroups_by_enumeration
 ```
 
 ```{eval-rst}
@@ -720,6 +760,10 @@ if rank == 0:
 
 ```
 
+## Functional collectives
+
+Functional collectives return new tensors instead of mutating their inputs and are traceable by `torch.compile`. See {doc}`distributed/functional_collectives`.
+
 ## Distributed Key-Value Store
 
 The distributed package comes with a distributed key-value store, which can be
@@ -782,6 +826,20 @@ Please refer to the [profiler documentation](https://pytorch.org/docs/main/profi
 
 ## Optimization with Symmetric Memory
 
+### NCCL Symmetric Kernels
+
+NCCL 2.27 and later ship device kernels written specifically for symmetric,
+window-registered buffers, using low-latency, multimem/NVLS, and TMA algorithms
+rather than the generic ring/tree path. ``all_reduce``, ``all_gather_single``
+and ``reduce_scatter_single`` dispatch to them automatically once their buffers
+are registered — the call site does not change. When the buffers are not
+registered, or the op/dtype combination has no symmetric implementation, NCCL
+silently falls back to the regular path.
+
+For how to register buffers, the supported op/dtype matrix, and how to confirm
+the symmetric kernels actually ran, see
+[NCCL Symmetric Kernels](nccl-symmetric-kernels) in the Symmetric Memory documentation.
+
 ### Copy Engine Collectives
 
 When NCCL collective operations are performed on symmetric memory tensors with
@@ -802,16 +860,6 @@ changes to the collective call.
 
 For details on scope, supported domains, and version requirements, see
 [Higher-Precision Reduction](higher-precision-reduction) in the Symmetric Memory documentation.
-
-## Multi-GPU collective functions
-
-:::{warning}
-The multi-GPU functions (which stand for multiple GPUs per CPU thread) are
-deprecated. As of today, PyTorch Distributed's preferred programming model
-is one device per thread, as exemplified by the APIs in this document. If
-you are a backend developer and want to support multiple devices per thread,
-please contact PyTorch Distributed's maintainers.
-:::
 
 (object_collectives)=
 
@@ -854,26 +902,11 @@ Unpickling a tensor will implicitly activate a CUDA context if it is the first
 time a GPU is used by the process, which can waste significant amounts of GPU memory. This issue can be avoided by
 moving tensors to CPU before passing them as inputs to an object collective.
 
-## Third-party backends
+## Custom backends
 
-Besides the builtin GLOO/MPI/NCCL backends, PyTorch distributed supports
-third-party backends through a run-time register mechanism.
-For references on how to develop a third-party backend through C++ Extension,
-please refer to [Tutorials - Custom C++ and CUDA Extensions](https://pytorch.org/tutorials/advanced/cpp_extension.html) and
-`test/cpp_extensions/cpp_c10d_extension.cpp`. The capability of third-party
-backends are decided by their own implementations.
-
-The new backend derives from `c10d::ProcessGroup` and registers the backend
-name and the instantiating interface through {func}`torch.distributed.Backend.register_backend`
-when imported.
-
-When manually importing this backend and invoking {func}`torch.distributed.init_process_group`
-with the corresponding backend name, the `torch.distributed` package runs on
-the new backend.
-
-:::{warning}
-The support of third-party backend is experimental and subject to change.
-:::
+Besides the built-in backends listed under Backends, `torch.distributed` supports
+backends registered at run time, written in C++ or Python. See
+{doc}`distributed/custom_backends`.
 
 ## TorchComms backend
 
@@ -993,8 +1026,6 @@ can be used for multiprocess distributed training as well.
 For references on how to use it, please refer to [PyTorch example - ImageNet
 implementation](https://github.com/pytorch/examples/tree/master/imagenet)
 
-Note that this function requires Python 3.4 or higher.
-
 ## Debugging `torch.distributed` applications
 
 Debugging distributed applications can be challenging due to hard to understand hangs, crashes, or inconsistent behavior across ranks. `torch.distributed` provides
@@ -1005,7 +1036,7 @@ a suite of tools to help debug training applications in a self-serve fashion:
 It is extremely convenient to use python's debugger in a distributed environment, but because it does not work out of the box many people do not use it at all.
 PyTorch offers a customized wrapper around pdb that streamlines the process.
 
-`torch.distributed.breakpoint` makes this process easy. Internally, it customizes `pdb`'s breakpoint behavior in two ways but otherwise behaves as normal `pdb`.
+`torch.distributed.breakpoint` makes this process easy. Internally, it customizes `pdb`'s breakpoint behavior in three ways but otherwise behaves as normal `pdb`.
 1. Attaches the debugger only on one rank (specified by the user).
 2. Ensures all other ranks stop, by using a `torch.distributed.barrier()` that will release once the debugged rank issues a `continue`
 3. Reroutes stdin from the child process such that it connects to your terminal.
@@ -1224,9 +1255,20 @@ collective desynchronization checks will work for all applications that use `c10
 
 ### torch.distributed.debug HTTP Server
 
-The `torch.distributed.debug` module provides a HTTP server that can be used to debug distributed applications. The server can
-be started by calling {func}`torch.distributed.debug.start_debug_server`. This
-allows users to collect data across all workers at runtime.
+The `torch.distributed.debug` module provides an HTTP server that can be used
+to debug distributed applications. It lets you inspect live distributed
+training jobs across all ranks from a single browser tab — collecting stack
+traces, flight-recorder events, NCCL traces, profiler captures, wait-counter
+metrics, and TCPStore contents without restarting or redeploying your job.
+
+:::{warning}
+The debug server is intended for **trusted network environments only**. It is
+not designed to be secure and must not be exposed to the public internet.
+:::
+
+:::{note}
+This is an experimental feature and may change at any time.
+:::
 
 ```{eval-rst}
 .. automodule:: torch.distributed.debug
@@ -1237,6 +1279,470 @@ allows users to collect data across all workers at runtime.
     :member-order: bysource
 
 ```
+
+#### Architecture Overview
+
+The debug server has a **two-tier** architecture:
+
+```
+┌───────────────────────────────────┐
+│     Frontend Server (rank 0)      │
+│  HTTP server on a fixed port      │
+│  Renders HTML dashboards          │
+│  Fans out requests to all ranks   │
+└──────────┬────────────────────────┘
+           │  HTTP POST /handler/<endpoint>?<args>
+           ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ WorkerServer (0) │  │ WorkerServer (1) │  │ WorkerServer (N) │
+│ Per-rank C++     │  │ Per-rank C++     │  │ Per-rank C++     │
+│ HTTP server      │  │ HTTP server      │  │ HTTP server      │
+│ Exposes handlers │  │ Exposes handlers │  │ Exposes handlers │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+```
+
+- **WorkerServer** (`_WorkerServer`): A lightweight C++ HTTP server started on
+  every rank. It serves *handler* endpoints registered via `_register_handler()`
+  (Python) or `RegisterHandler` (C++). Each handler receives a `_Request` and
+  writes to a `_Response`.
+
+- **FrontendServer**: A Python HTTP server that starts only on **rank 0**. It
+  aggregates data from all worker servers and renders HTML dashboards using
+  Jinja2 templates.
+
+- **TCPStore**: Workers publish their addresses (hostname + port) to the
+  existing `TCPStore` so the frontend knows where to find each rank.
+
+#### Quick Start
+
+**Prerequisites**
+
+Install required dependencies (not bundled with PyTorch by default):
+
+```bash
+pip install jinja2 aiohttp tabulate
+```
+
+`aiohttp` is optional — the server falls back to `requests` + thread pool if
+`aiohttp` is unavailable.
+
+**Basic Usage**
+
+Call `start_debug_server()` **after** `dist.init_process_group()` on every rank:
+
+```python
+import torch
+import torch.distributed as dist
+from torch.distributed.debug import start_debug_server, stop_debug_server
+
+dist.init_process_group("nccl")
+
+# Start the debug server on all ranks.
+# The frontend (browser UI) is served on rank 0 at port 25999.
+start_debug_server(port=25999)
+
+# ... your training loop ...
+
+stop_debug_server()
+dist.destroy_process_group()
+```
+
+Then open `http://<rank0-hostname>:25999` in a browser.
+
+**Minimal torchrun Example**
+
+```python
+# train.py
+import torch
+import torch.distributed as dist
+from torch.distributed.debug import start_debug_server
+
+def main():
+    dist.init_process_group("nccl")
+    start_debug_server()
+
+    rank = dist.get_rank()
+    device = torch.device(f"cuda:{rank}")
+    model = torch.nn.Linear(10, 10).to(device)
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+
+    for _ in range(1000):
+        x = torch.randn(32, 10, device=device)
+        loss = model(x).sum()
+        loss.backward()
+
+    dist.destroy_process_group()
+
+if __name__ == "__main__":
+    main()
+```
+
+```bash
+torchrun --nproc-per-node=2 train.py
+# Open http://localhost:25999
+```
+
+For an end-to-end NCCL failure example, see
+{download}`verify_nccl2_flight_recorder.py <../../torch/distributed/examples/verify_nccl2_flight_recorder.py>`.
+The example deliberately hangs an NCCL collective and verifies that the c10d
+health check causes the debug server to write a Flight Recorder dump for every
+rank. Run it on a host with at least two GPUs:
+
+```bash
+torchrun --standalone --nproc-per-node=2 \
+  torch/distributed/examples/verify_nccl2_flight_recorder.py
+```
+
+#### Configuration Reference
+
+`start_debug_server()` accepts the following parameters:
+
+```{eval-rst}
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| Parameter         | Type                       | Default   | Description                                                           |
++===================+============================+===========+=======================================================================+
+| ``port``          | ``int``                    | ``25999`` | Port for the frontend HTTP server (rank 0 only).                      |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``worker_port``   | ``int``                    | ``0``     | Port for the per-rank worker server. ``0`` = ephemeral.               |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``start_method``  | ``str | None``             | ``None``  | Multiprocessing start method (``"fork"``, ``"spawn"``,                |
+|                   |                            |           | ``"forkserver"``). ``"spawn"`` recommended with CUDA.                 |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``dump_dir``      | ``str | None``             | ``None``  | Directory for periodic debug dumps. ``None`` disables dumping.        |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``dump_interval`` | ``float``                  | ``60.0``  | Seconds between periodic dumps.                                       |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``enabled_dumps`` | ``set[str] | None``        | ``None``  | Handler dump filenames to enable (e.g. ``{"stacks", "fr_trace"}``).   |
+|                   |                            |           | ``None`` = default set.                                               |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``handlers``      | ``list[DebugHandler]       | ``None``  | Custom handler list. ``None`` = all default handlers.                 |
+|                   | | None``                   |           |                                                                       |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+| ``fetch_timeout`` | ``float``                  | ``60.0``  | Timeout (seconds) when fetching data from workers.                    |
++-------------------+----------------------------+-----------+-----------------------------------------------------------------------+
+```
+
+**Environment Variables**
+
+The debug server reads these standard environment variables (set automatically
+by ``torchrun`` / TorchElastic):
+
+```{eval-rst}
++-------------------+------------------------------------------+
+| Variable          | Description                              |
++===================+==========================================+
+| ``RANK``          | Current process rank.                    |
++-------------------+------------------------------------------+
+| ``WORLD_SIZE``    | Total number of ranks.                   |
++-------------------+------------------------------------------+
+| ``MASTER_ADDR``   | Address of the TCPStore master.          |
++-------------------+------------------------------------------+
+| ``MASTER_PORT``   | Port of the TCPStore master.             |
++-------------------+------------------------------------------+
+```
+
+#### Frontend Endpoints (Browser UI)
+
+The frontend server (rank 0) exposes the following endpoints. Each one
+aggregates data from **all** worker ranks and renders an HTML page.
+
+**Home** ``/``
+  The landing page with navigation links to all other endpoints.
+
+**Python Stack Traces** ``/stacks``
+  Calls ``dump_traceback`` on every worker to collect Python stack traces using
+  ``faulthandler.dump_traceback()``. Useful for diagnosing hangs or deadlocks
+  without attaching a debugger. Displays a ``<pre>`` block per rank showing the
+  Python call stack of every thread.
+
+**py-spy Stack Traces** ``/pyspy_dump``
+  Calls ``pyspy_dump`` on every worker. Uses
+  `py-spy <https://github.com/benfred/py-spy>`_ to dump both Python and
+  optionally native (C/C++) stack traces. Accepts query parameters
+  ``native=1`` (include native frames) and ``subprocesses=1`` (include
+  subprocesses). ``nonblocking=1`` is added automatically.
+
+:::{note}
+``py-spy`` must be installed and the process must have ``SYS_PTRACE``
+capability.
+:::
+
+**FlightRecorder CPU** ``/fr_trace``
+  Fetches CPU-side flight recorder data from ``fr_trace_json`` on all workers,
+  parses it into structured tables (Groups, Memberships, Collectives, NCCL
+  Calls), and renders them as HTML tables.
+
+**FlightRecorder CPU JSON** ``/fr_trace_json``
+  Same data as ``/fr_trace`` but rendered as raw formatted JSON per rank.
+
+**FlightRecorder NCCL** ``/fr_trace_nccl``
+  Fetches NCCL-side flight recorder data from ``dump_nccl_trace_json`` (with
+  ``onlyactive=true``) on all workers and renders structured HTML tables.
+
+**FlightRecorder NCCL JSON** ``/fr_trace_nccl_json``
+  Same data as ``/fr_trace_nccl`` but rendered as raw formatted JSON per rank.
+
+**TorchComms FlightRecorder** ``/torchcomms_fr_trace``
+  Fetches TorchComms flight recorder data from ``torchcomms_fr_trace_json``
+  (with ``onlyactive=true``) on all workers. Renders the same structured tables
+  as the FlightRecorder views (Groups, Memberships, Collectives, NCCL Calls).
+
+**TorchComms FlightRecorder JSON** ``/torchcomms_fr_trace_json``
+  Same data as ``/torchcomms_fr_trace`` but rendered as raw formatted JSON.
+
+**c10d Health Check** ``/c10d_health_check``
+  Fetches the c10d health state from every rank. When any rank reports an
+  unhealthy backend, the server requests a Flight Recorder dump for that
+  backend from every worker.
+
+**torch.profiler** ``/profile``
+  Triggers ``torch.profiler.profile()`` on every worker for a configurable
+  duration, then returns the Chrome trace JSON. The frontend page provides a
+  **View** button per rank that opens the trace directly in
+  `Perfetto UI <https://ui.perfetto.dev/>`_ (no download required). Accepts
+  query parameter ``duration`` (profiling duration in seconds, default ``1``,
+  range 1–60).
+
+**Wait Counters** ``/wait_counters``
+  Fetches ``wait_counter_values`` from all workers and renders the JSON data.
+  Wait counters track time spent waiting in collective operations, useful for
+  identifying stragglers and load imbalance.
+
+**TCPStore Keys** ``/tcpstore``
+  Connects to the TCPStore and lists all keys with their values (truncated to
+  100 characters). Useful for inspecting the state of the distributed
+  key-value store.
+
+#### Worker-Level Endpoints (Per-Rank HTTP API)
+
+Each ``WorkerServer`` instance exposes handler endpoints at:
+
+```
+POST http://<worker-host>:<worker-port>/handler/<handler_name>?<params>
+```
+
+The built-in handlers are:
+
+**``ping``** — Simple health check. Returns ``"pong"`` (text/plain, 200).
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/ping  # @lint-ignore
+```
+
+**``dump_traceback``** — Python stack traces of all threads (text/plain). Uses
+``faulthandler.dump_traceback()`` to capture every thread's Python stack.
+Requires the GIL.
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/dump_traceback  # @lint-ignore
+```
+
+**``pyspy_dump``** — py-spy stack dump output (text/plain). Runs
+``py-spy dump --pid <pid>`` to capture stack traces without stopping the
+process. Accepts parameters ``native``, ``subprocesses``, and ``nonblocking``.
+
+```bash
+curl -X POST \
+  "http://worker-host:port/handler/pyspy_dump?nonblocking=1&native=1"  # @lint-ignore
+```
+
+**``fr_trace_json``** — CPU flight-recorder trace (application/json). Returns
+the flight-recorder ring buffer contents as JSON, including all recorded
+collective operations, their metadata, and timing information.
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/fr_trace_json  # @lint-ignore
+```
+
+**``fr_dump_file``** — Starts a Flight Recorder dump for one backend. The
+``backend`` query parameter selects the backend-specific recorder.
+
+```bash
+curl -X POST \
+  "http://worker-host:port/handler/fr_dump_file?backend=nccl2"  # @lint-ignore
+```
+
+**``c10d_health_check``** — Returns the process-wide c10d health state and the
+names of any unhealthy backends (application/json).
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/c10d_health_check  # @lint-ignore
+```
+
+**``dump_nccl_trace_json``** — NCCL flight-recorder trace (application/json).
+Only available when built with NCCL support. Accepts parameters
+``includecollectives`` (``true``/``false``, default ``true``) and
+``onlyactive`` (``true``/``false``, default ``false``).
+
+```bash
+curl -X POST \
+  "http://worker-host:port/handler/dump_nccl_trace_json?onlyactive=true"  # @lint-ignore
+```
+
+**``dump_nccl_trace_pickle``** — NCCL trace in pickle format
+(application/octet-stream). Useful for programmatic analysis. Accepts
+parameters ``includecollectives`` (default ``true``),
+``includestacktraces`` (default ``true``), and ``onlyactive`` (default
+``false``).
+
+```bash
+curl -X POST \
+  --output trace.pkl \
+  "http://worker-host:port/handler/dump_nccl_trace_pickle?onlyactive=true"  # @lint-ignore
+```
+
+**``torchcomms_fr_trace_json``** — TorchComms flight-recorder trace
+(application/json). Similar to ``dump_nccl_trace_json`` but for the
+TorchComms communication layer. Accepts parameter ``onlyactive``
+(``true``/``false``, default ``false``).
+
+```bash
+curl -X POST \
+  "http://worker-host:port/handler/torchcomms_fr_trace_json?onlyactive=true"  # @lint-ignore
+```
+
+**``torch_profile``** — Chrome trace JSON (application/json). Runs
+``torch.profiler.profile()`` for the specified duration and returns the
+Chrome trace format JSON. Requires parameter ``duration`` (seconds).
+
+```bash
+curl -X POST \
+  --output trace.json \
+  "http://worker-host:port/handler/torch_profile?duration=5"  # @lint-ignore
+# Open trace.json in chrome://tracing or https://ui.perfetto.dev
+```
+
+**``wait_counter_values``** — Wait counter values (application/json). Returns
+a JSON object with wait-counter metrics tracking time spent waiting in
+distributed collective operations.
+
+```bash
+curl -X POST \
+  http://worker-host:port/handler/wait_counter_values  # @lint-ignore
+```
+
+#### Periodic Dumping
+
+Enable periodic dumping to automatically save debug data to disk at regular
+intervals. This is useful for post-mortem analysis when a job hangs or crashes.
+
+```python
+start_debug_server(
+    dump_dir="/shared/nfs/debug_dumps",
+    dump_interval=120.0,  # dump every 2 minutes
+    enabled_dumps={"stacks", "fr_trace", "pyspy_dump", "wait_counters", "tcpstore"},
+)
+```
+
+Dump files are saved as ``<handler_name>_<timestamp>.txt`` (e.g.,
+``stacks_20250330_192000.txt``).
+
+Handlers that support dumping:
+
+```{eval-rst}
++------------------------------------+------------------------+---------------------------------------------------+
+| Handler                            | Dump filename          | Content                                           |
++====================================+========================+===================================================+
+| ``StacksHandler``                  | ``stacks``             | Python stack traces for all ranks.                |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``PySpyHandler``                   | ``pyspy_dump``         | py-spy stack dumps (nonblocking) for all ranks.   |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``FlightRecorderHandler``          | ``fr_trace``           | CPU + NCCL flight-recorder tables.                |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``TorchCommsFlightRecorderHandler``| ``torchcomms_fr_trace``| TorchComms flight-recorder tables.                |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``C10dHealthCheckHandler``         | ``c10d_health_check``  | c10d health and backend Flight Recorder dumps.    |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``WaitCountersHandler``            | ``wait_counters``      | Wait counter JSON for all ranks.                  |
++------------------------------------+------------------------+---------------------------------------------------+
+| ``TCPStoreHandler``                | ``tcpstore``           | All TCPStore key-value pairs.                     |
++------------------------------------+------------------------+---------------------------------------------------+
+```
+
+By default (when ``enabled_dumps=None``), ``"stacks"``, ``"fr_trace"``, and
+``"c10d_health_check"`` are enabled.
+
+#### Registering Custom Handlers
+
+You can extend the debug server with custom frontend handlers by subclassing
+{class}`~torch.distributed.debug._frontend.DebugHandler`:
+
+```python
+class DebugHandler(ABC):
+    fetch_timeout: float = _DEFAULT_FETCH_TIMEOUT
+
+    @abstractmethod
+    def routes(self) -> list[Route]: ...
+
+    @abstractmethod
+    def nav_links(self) -> list[NavLink]: ...
+
+    def templates(self) -> dict[str, str]:
+        return {}
+
+    def dump(self) -> str | None:
+        return None
+
+    def dump_filename(self) -> str:
+        return type(self).__name__.lower()
+```
+
+- ``routes()`` — URL paths and their request handlers.
+- ``nav_links()`` — links shown in the navigation bar.
+- ``templates()`` — optional Jinja2 templates for HTML rendering.
+- ``dump()`` / ``dump_filename()`` — optional support for periodic dumping.
+
+For a complete example, see
+`StacksHandler <https://github.com/pytorch/pytorch/blob/main/torch/distributed/debug/_debug_handlers.py>`_
+in ``torch/distributed/debug/_debug_handlers.py``.
+
+Pass custom handlers to ``start_debug_server``:
+
+```python
+from torch.distributed.debug._debug_handlers import default_handlers
+
+handlers = default_handlers() + [MyCustomHandler()]
+start_debug_server(handlers=handlers)
+```
+
+#### Debug Server Troubleshooting
+
+**``AssertionError: debug server already started``**
+  ``start_debug_server()`` was called twice. Ensure you only call it once per
+  process.
+
+**Workers fail to respond (408/503 errors)**
+  - Check that all ranks have started and registered their addresses in TCPStore.
+  - Increase ``fetch_timeout`` for large clusters or slow networks.
+  - Verify network connectivity between rank 0 and all worker hosts.
+
+**``ImportError: No module named 'jinja2'``**
+  Install the required dependencies: ``pip install jinja2 aiohttp tabulate``
+
+**py-spy returns errors**
+  - Ensure ``py-spy`` is installed: ``pip install py-spy``
+  - The process may need ``SYS_PTRACE`` capability. In Docker use
+    ``docker run --cap-add SYS_PTRACE ...``
+  - On Linux, you may need to set
+    ``echo 0 > /proc/sys/kernel/yama/ptrace_scope``
+
+**Perfetto UI popup blocked**
+  Allow popups for the debug server's origin in your browser settings. The
+  ``/profile`` page opens Perfetto UI in a new window using ``window.open()``.
+
+**Frontend server not reachable**
+  - Ensure port ``25999`` (or your custom port) is not blocked by a firewall.
+  - The frontend only starts on **rank 0**. Connect to the rank 0 host.
+  - Check the logs for ``Frontend server started on port <port>``.
+
+**``spawn`` start method required with CUDA**
+  If you see CUDA re-initialization errors, use
+  ``start_debug_server(start_method="spawn")`` to ensure the frontend server
+  process does not inherit CUDA state from the parent process.
 
 
 ## Logging
@@ -1283,6 +1789,81 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.breakpoint
+```
+
+## Watchdog (Experimental)
+
+The ``torch.distributed._watchdog`` module provides a pure-Python watchdog for
+detecting hung operations in Python-based distributed backends and related
+distributed primitives. It monitors both CPU-side hangs (e.g., a stuck
+rendezvous) and GPU-side hangs (e.g., a kernel that never completes) by running
+an asyncio event loop on a background daemon thread. By default, timeouts dump
+all thread stack traces and abort the process.
+
+:::{warning}
+This module is experimental and subject to change.
+:::
+
+Arguments passed to {func}`~torch.distributed._watchdog.init` override these environment variables:
+
+```{list-table}
+:header-rows: 1
+
+* - **Variable**
+  - **Description**
+* - ``TORCH_WATCHDOG_POLL_INTERVAL_SECS``
+  - Seconds between CUDA event polls. Default: ``1.0``.
+* - ``TORCH_WATCHDOG_HEALTH_INTERVAL_SECS``
+  - Seconds between health pings of the watchdog event loop. Default: ``30.0``.
+* - ``TORCH_WATCHDOG_STUCK_ACTION``
+  - Action when the event loop does not answer a health ping: ``log``, ``abort`` or ``exit``. Default: ``log``.
+```
+
+```{eval-rst}
+.. currentmodule:: torch.distributed._watchdog
+```
+
+```{eval-rst}
+.. autofunction:: init
+```
+
+```{eval-rst}
+.. autofunction:: shutdown
+```
+
+```{eval-rst}
+.. autofunction:: stream_timeout
+```
+
+```{eval-rst}
+.. autofunction:: cpu_timeout
+```
+
+```{eval-rst}
+.. autofunction:: op_timeout
+```
+
+## Read More
+
+```{toctree}
+:caption: torch.distributed submodules
+:maxdepth: 1
+
+distributed/custom_backends
+torch.distributed.tensor <distributed/tensor>
+torch.distributed.functional_collectives <distributed/functional_collectives>
+torch.distributed.algorithms.join <distributed/algorithms.join>
+torch.distributed.elastic <distributed/elastic>
+torch.distributed.fsdp <distributed/fsdp>
+torch.distributed.fsdp.fully_shard <distributed/fsdp.fully_shard>
+torch.distributed.tensor.parallel <distributed/tensor.parallel>
+torch.distributed.optim <distributed/optim>
+torch.distributed.pipelining <distributed/pipelining>
+torch.distributed._symmetric_memory <distributed/symmetric_memory>
+torch.distributed._transport <distributed/transport>
+torch.distributed.checkpoint <distributed/checkpoint>
+distributed/ddp_comm_hooks
+distributed/rpc
 ```
 
 % Distributed modules that are missing specific entries.

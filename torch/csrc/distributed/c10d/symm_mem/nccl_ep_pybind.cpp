@@ -26,6 +26,11 @@ PYBIND11_MODULE(_nccl_ep, m) {
   setenv("NCCL_HOME", NCCL_EP_JIT_HOME, /*overwrite=*/0);
 #endif
 
+  py::enum_<NcclEpLayout>(m, "Layout")
+      .value("FLAT", NcclEpLayout::Flat)
+      .value("EXPERT_MAJOR", NcclEpLayout::ExpertMajor)
+      .value("RANK_MAJOR", NcclEpLayout::RankMajor);
+
   py::class_<NcclEpGroup, c10::intrusive_ptr<NcclEpGroup>>(m, "_NcclEpGroup")
       .def_static(
           "create",
@@ -42,7 +47,8 @@ PYBIND11_MODULE(_nccl_ep, m) {
           &nccl_ep_create_handle,
           py::arg("group"),
           py::arg("topk_idx"),
-          py::arg("recv_expert_counter") = py::none())
+          py::arg("recv_expert_counter") = py::none(),
+          py::arg("layout"))
       .def("get_num_recv_tokens", &nccl_ep_handle_get_num_recv_tokens);
 
   m.def(

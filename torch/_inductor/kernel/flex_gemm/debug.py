@@ -12,21 +12,32 @@ from typing import Any, TYPE_CHECKING
 import torch
 from torch._inductor.kernel.gemm_epilogue import (
     NormalizedGetItem,
+    NormalizedNode,
     NormalizedPrepareSoftmax,
     NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
     NormalizedSqueeze,
+    NormalizedToBlocked,
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
 from torch._logging import LazyString, trace_structured
 
+from .constraints import FlexGemmOutputExpansion
+
 
 if TYPE_CHECKING:
     from torch._inductor import ir
-    from torch._inductor.heuristics.template.flex_gemm import GemmConfigKey
+    from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
     from torch._inductor.kernel.flex_gemm.fx_cutedsl_codegen import (
         FlexGemmEpilogueAnalysis,
     )
+    from torch._inductor.kernel.flex_gemm.output_layout import (
+        FlexGemmOutputStorageLayout,
+    )
+
+    from .constraints import FlexGemmLocalReduceGeometry, FlexGemmOutputTransform
 
 
 flex_gemm_log = logging.getLogger(__name__)
@@ -87,7 +98,7 @@ def format_flex_gemm_problem(
     *,
     alpha: float,
     beta: float,
-    tuned: bool,
+    autotune: bool,
     fast_math: bool,
     explicit_config: dict[str, Any] | None,
 ) -> str:
@@ -96,7 +107,7 @@ def format_flex_gemm_problem(
         f"gemm_op: {gemm_op}",
         "kernel_options:",
         "  backend: QUACK",
-        f"  tuned: {tuned}",
+        f"  autotune: {autotune}",
         f"  fast_math: {fast_math}",
         f"  config: {explicit_config!r}",
         f"alpha: {alpha}",
@@ -136,13 +147,28 @@ def _format_fx_tensor(node: torch.fx.Node) -> str:
     )
 
 
-def _format_geometry(geometry: Any) -> str:
+def _format_geometry(geometry: "FlexGemmLocalReduceGeometry") -> str:
     """Format grouped GEMM geometry in logical M/N terms."""
     axis = "M" if geometry.axis == 0 else "N"
     return f"axis={axis}, group={geometry.group}"
 
 
-def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
+def _format_output_transform(contraction: "FlexGemmOutputTransform | None") -> str:
+    """Format the lane transform applied to the main output."""
+    if contraction is None:
+        return "none"
+    layout = "chunked" if contraction.chunked else "interleaved"
+    if isinstance(contraction, FlexGemmOutputExpansion):
+        return f"N-axis, expansion, layout={layout}"
+    return f"N-axis, group={contraction.group}, layout={layout}"
+
+
+def _format_output_layout(layout: "FlexGemmOutputStorageLayout | None") -> str:
+    """Format a dense or caller-owned physical output layout."""
+    return "dense" if layout is None else layout.name
+
+
+def _format_normalized_dataflow(node: torch.fx.Node, normalized: NormalizedNode) -> str:
     """Render one normalized FX operation as compact dataflow."""
     match normalized:
         case NormalizedView(shape=shape):
@@ -159,9 +185,16 @@ def _format_normalized_dataflow(node: torch.fx.Node, normalized: Any) -> str:
             operation = "squeeze"
         case NormalizedGetItem(index=index):
             operation = f"getitem(index={index})"
+        case NormalizedSplit(split_size=split_size, dim=dim):
+            operation = f"split(size={split_size}, dim={dim})"
+        case NormalizedSelect(dim=dim, index=index):
+            operation = f"select(dim={dim}, index={index})"
+        case NormalizedToBlocked():
+            operation = "to_blocked"
         case NormalizedUnsupportedReduction():
             operation = f"unsupported_reduction({node.target})"
         case _:
+            # NormalizedDtypeView keeps its full dataclass repr for dtype details.
             return repr(normalized)
     return f"{normalized.source.name} -> {operation}"
 
@@ -172,6 +205,7 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
     lines = [
         "outputs:",
         f"  main: {_format_fx_tensor(outputs.output)}",
+        f"  output_transform: {_format_output_transform(outputs.output_transform)}",
     ]
     if outputs.aux_outputs:
         lines.append("  auxiliary:")
@@ -210,10 +244,11 @@ def format_flex_gemm_analysis(analysis: "FlexGemmEpilogueAnalysis") -> str:
             )
         )
         if store is not None:
+            layout = _format_output_layout(store.output_layout)
             lines.extend(
                 (
                     f"  returned_as: {store.node.name}",
-                    "  output_layout: dense",
+                    f"  output_layout: {layout}",
                 )
             )
 
@@ -231,10 +266,25 @@ def format_flex_gemm_analysis_details(
 ) -> str:
     """Render normalized nodes and recognizer records for deep debugging."""
     lines: list[str] = []
+    _append_items(
+        lines,
+        "fx_nodes",
+        (
+            f"{node.name}: {node.target}"
+            for node in analysis.local_reduce.graph.dependencies
+            if node.op == "call_function"
+        ),
+    )
+    lines.append("")
     for label, values in (
         ("normalized_nodes", analysis.local_reduce.graph.normalized_nodes),
-        ("grouped_tensors", analysis.local_reduce.grouped_tensors),
+        ("grouped_layouts", analysis.local_reduce.grouped_tensors),
         ("local_reduce_matches", analysis.local_reduce.matches),
+        (
+            "output_contraction_select_indices",
+            analysis.output_contraction_select_indices,
+        ),
+        ("output_contraction_layouts", analysis.output_contraction_layouts),
     ):
         _append_items(
             lines,
@@ -253,16 +303,18 @@ def _format_tensor_meta(meta: torch.Tensor) -> str:
 
 
 def format_flex_gemm_lowering_plan(
-    output_size: Sequence[Any],
+    logical_output_size: Sequence[Any],
     output_dtype: torch.dtype,
     capture_kinds: Sequence[tuple[str, str]],
     aux_metas: Sequence[torch.Tensor],
     local_reduce_metas: Sequence[torch.Tensor],
+    *,
+    local_reduce_layout: "FlexGemmOutputStorageLayout | None",
 ) -> str:
     """Render buffer allocation and runtime-ABI decisions."""
     lines = [
         "output_storage:",
-        f"  shape={tuple(output_size)}, dtype={output_dtype}",
+        f"  logical: shape={tuple(logical_output_size)}, dtype={output_dtype}",
         "",
     ]
     _append_items(
@@ -282,61 +334,28 @@ def format_flex_gemm_lowering_plan(
                 for index, meta in enumerate(local_reduce_metas)
             ),
         )
-        lines.append("  layout: dense")
+        lines.append(f"  layout: {_format_output_layout(local_reduce_layout)}")
+        if local_reduce_layout is not None:
+            lines.append("  initialization: zero-filled at runtime when padded")
     else:
         lines.append("local_reduction_storage: (none)")
     return "\n".join(lines)
 
 
-def format_flex_gemm_config_key(config_key: "GemmConfigKey") -> str:
-    """Render every config field so new GemmConfig fields remain visible."""
-    return "\n".join(
-        f"{name}: {'auto' if value is None else repr(value)}"
-        for name, value in config_key
-    )
-
-
 def format_flex_gemm_config_candidates(
-    config_keys: Sequence["GemmConfigKey"],
+    configs: "Sequence[QuackConfigKey]", *, autotune: bool
 ) -> str:
-    """Render every lowering-approved config for verbose diagnostics."""
-    lines: list[str] = []
-    for index, config_key in enumerate(config_keys):
-        _append_items(
-            lines,
-            f"candidate {index}",
-            format_flex_gemm_config_key(config_key).splitlines(),
-        )
-        lines.append("")
-    return "\n".join(lines).rstrip() if lines else "(none)"
-
-
-def format_flex_gemm_selection(
-    choice: "ir.ChoiceCaller | None",
-    config_key: "GemmConfigKey | None",
-    *,
-    candidate_count: int,
-    tuned: bool,
-) -> str:
-    """Render the search summary and selected FlexGEMM template."""
+    """Render the QuACK configs Inductor will benchmark or pin."""
     lines = [
-        "search:",
-        f"  mode: {'autotuned' if tuned else 'fixed'}",
-        f"  lowering_approved_candidates: {candidate_count}",
-        "",
-        "selected:",
+        f"mode: {'autotune' if autotune else 'default'}",
+        f"candidates: {len(configs)}",
     ]
-    if choice is None:
-        lines.append("  deferred to a multi-template buffer")
-    else:
-        lines.append(f"  template: {choice.name}")
-        lines.append("  config:")
-        lines.extend(
-            "    " + line
-            for line in (
-                ("(unavailable)",)
-                if config_key is None
-                else format_flex_gemm_config_key(config_key).splitlines()
+    for config in configs:
+        fields = dict(config)
+        lines.append(
+            "  tile=({tile_m}, {tile_n}) cluster=({cluster_m}, {cluster_n}) "
+            "swap_ab={swap_ab} dynamic_persistent={is_dynamic_persistent}".format(
+                **fields
             )
         )
     lines.extend(
@@ -347,7 +366,6 @@ def format_flex_gemm_selection(
             '  autotune timings: TORCH_LOGS="flex_gemm,autotuning"',
             '  generated kernel: TORCH_LOGS="flex_gemm,kernel_code"',
             '  final wrapper: TORCH_LOGS="flex_gemm,output_code"',
-            '  candidate failures: TORCH_LOGS="+inductor,flex_gemm"',
         )
     )
     return "\n".join(lines)

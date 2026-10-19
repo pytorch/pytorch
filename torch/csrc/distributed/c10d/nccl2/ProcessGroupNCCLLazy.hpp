@@ -35,6 +35,23 @@ class TORCH_API ProcessGroupNCCLLazy
   const std::string getBackendName() const override {
     return std::string(kBackendName);
   }
+
+  bool supportsReconfigure() const override {
+    return false;
+  }
+
+  ::c10d::ReconfigureHandle get_reconfigure_handle() const override {
+    return ::c10d::Backend::get_reconfigure_handle();
+  }
+
+  c10::intrusive_ptr<::c10d::Work> reconfigure(
+      const ::c10d::ReconfigureOptions& opts) override {
+    return ::c10d::Backend::reconfigure(opts);
+  }
+
+  void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override {
+    getPrimary()->addEphemeralTimeout(timeout);
+  }
 };
 
 } // namespace c10d::nccl2
