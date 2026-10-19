@@ -68,7 +68,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: lf,amd-dpx
+      check_experiments: lf
 
   # Build-only Hopper coverage: nothing in CI compiles for sm90 on CUDA 12.x
   # otherwise, so this catches 12.6-specific compile breaks against '9.0'.
@@ -122,6 +122,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-cuda13.2-py3.11-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -250,12 +251,14 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.12.7
+      # TODO: re-add { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-26" } once
+      # the macos-m2-26 fleet grows from 8 to 28 runners (pytorch-gha-infra#1558),
+      # see https://github.com/pytorch/test-infra/issues/8964
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
         ]}
     secrets: inherit
@@ -353,27 +356,27 @@ jobs:
       # sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 2, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 3, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 4, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 5, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 6, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 7, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "default", shard: 8, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "inductor-flydsl", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.2" },
+          { config: "default", shard: 1, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 2, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 3, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 4, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 5, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 6, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 7, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "default", shard: 8, num_shards: 8, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "inductor-flydsl", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.dpx.1" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.2" },
         ]}
       python-version: "3.11"
     secrets: inherit
 
   linux-noble-rocm-py3_11-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-noble-rocm-py3_11-build
       - target-determination
@@ -420,6 +423,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -472,6 +476,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      lf_runners: ${{ needs.get-label-type.outputs.lf-runners }}
       build-environment: linux-jammy-aarch64-py3.11
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
