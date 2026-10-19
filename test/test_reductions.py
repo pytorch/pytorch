@@ -553,6 +553,31 @@ class TestReductions(TestCase):
         self.assertEqual(expected, actual)
 
     @skipIfNoSciPy
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    def test_logsumexp_all_dims(self, device, dtype):
+        from scipy.special import logsumexp
+        a = torch.randn(3, 4, device=device, dtype=dtype)
+
+        actual = torch.logsumexp(a)
+        expected = logsumexp(a.cpu().numpy())
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertEqual(expected, actual)
+
+        actual_none = torch.logsumexp(a, dim=None)
+        self.assertEqual(actual, actual_none)
+
+        actual_explicit = a.logsumexp(list(range(a.ndim)))
+        self.assertEqual(actual, actual_explicit)
+
+        actual_keepdim = torch.logsumexp(a, keepdim=True)
+        self.assertEqual(actual_keepdim.shape, torch.Size([1, 1]))
+        self.assertEqual(expected, actual_keepdim.squeeze())
+
+        special_actual = torch.special.logsumexp(a)
+        self.assertEqual(actual, special_actual)
+
+    @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     @dtypesIfMPS(torch.complex64)
     def test_logcumsumexp_complex(self, device, dtype):
@@ -3508,10 +3533,7 @@ class TestReductions(TestCase):
                                  fn(master_input, dim=-2, keepdim=True).cpu().numpy(),
                                  msg=error_msg)
 
-                # logsumexp throws a type error when not specifying dim so test separately.
-                self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
-            else:
-                self.assertRaises(TypeError, lambda: fn(master_input))
+            self.assertEqual(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
 
     # Tests to ensure that any() and all() functions work with zero-dim tensors. Kept separate from
     # other tests for checking reduction with zero-dim tensors because these tests have significantly

@@ -1541,18 +1541,32 @@ Tensor nanmean(
   return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
+// Empty dim (the default) means reduce over all dimensions, matching amax/amin.
+static std::vector<int64_t> logsumexp_reduction_dims(
+    const Tensor& self,
+    IntArrayRef dims) {
+  if (!dims.empty() || self.dim() == 0) {
+    return dims.vec();
+  }
+  std::vector<int64_t> all(self.dim());
+  std::iota(all.begin(), all.end(), 0);
+  return all;
+}
+
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  auto dims_vec = logsumexp_reduction_dims(self, dims);
+  IntArrayRef effective_dims = dims_vec;
   // can't take max of empty tensor
   if (self.numel() != 0) {
     // For complex numbers, use the real part to calculate the max. Based on
     // https://scicomp.stackexchange.com/questions/34273/log-sum-exp-trick-for-signed-complex-numbers
-    auto maxes = at::amax(at::real(self), dims, true);
-    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
+    auto maxes = at::amax(at::real(self), effective_dims, true);
+    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, effective_dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
+    at::sum_out(result, (self - maxes).exp_(), effective_dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
-    at::sum_out(result, at::exp(self), dims, keepdim);
+    at::sum_out(result, at::exp(self), effective_dims, keepdim);
     result.log_();
   }
   return result;

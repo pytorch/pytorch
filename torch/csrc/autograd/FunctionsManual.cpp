@@ -1147,6 +1147,12 @@ Tensor logsumexp_backward(
     Tensor result,
     IntArrayRef dim,
     bool keepdim) {
+  std::vector<int64_t> dim_storage;
+  if (dim.empty() && self.dim() > 0) {
+    dim_storage.resize(self.dim());
+    std::iota(dim_storage.begin(), dim_storage.end(), 0);
+    dim = dim_storage;
+  }
   if (!keepdim && self.dim() != 0) {
     grad = unsqueeze_multiple(grad, dim, self.dim());
     result = unsqueeze_multiple(result, dim, self.dim());
@@ -7512,6 +7518,12 @@ Tensor logsumexp_jvp(
     const Tensor& self_t,
     IntArrayRef dim,
     bool keepdim) {
+  std::vector<int64_t> dim_storage;
+  if (dim.empty() && self_p.dim() > 0) {
+    dim_storage.resize(self_p.dim());
+    std::iota(dim_storage.begin(), dim_storage.end(), 0);
+    dim = dim_storage;
+  }
   // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {

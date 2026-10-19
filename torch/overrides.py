@@ -1214,7 +1214,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.special.log_ndtr: lambda input: -1,
         torch.special.log_softmax: lambda input, dim, dtype=None: -1,
         torch.special.logit: lambda input: -1,
-        torch.special.logsumexp: lambda input, dim, keepdim=False, out=None: -1,
+        torch.special.logsumexp: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.special.modified_bessel_i0: lambda input: -1,
         torch.special.modified_bessel_i1: lambda input: -1,
         torch.special.modified_bessel_k0: lambda input: -1,
