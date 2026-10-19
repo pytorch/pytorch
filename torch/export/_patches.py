@@ -68,8 +68,8 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     def body_fn(idx, out, hx, cx):
         # Extract the integer value from idx and constrain it for data-dependent indexing
         i = idx.item()
-        torch._check_is_size(i)
-        torch._check_is_size(i, max=precomputed_input.size(0) - 1)
+        torch._check(i >= 0)
+        torch._check(i <= precomputed_input.size(0) - 1)
         hx, cx = lstm_cell(
             precomputed_input[i], hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2
         )
@@ -178,8 +178,8 @@ def one_layer_while_loop_gru(inp, hidden, params, has_biases, reverse=False):
     def body_fn(idx, out, cur_hidden):
         # Extract the integer value from idx and constrain it for data-dependent indexing
         i = idx.item()
-        torch._check_is_size(i)
-        torch._check_is_size(i, max=precomputed_input.size(0) - 1)
+        torch._check(i >= 0)
+        torch._check(i <= precomputed_input.size(0) - 1)
         cur_hidden = gru_cell(
             precomputed_input[i], cur_hidden, None, None, hh_weight, hh_bias
         )
