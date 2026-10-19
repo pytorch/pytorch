@@ -233,6 +233,30 @@ namespace at::hip::detail {
 
 		using Strides = std::array<int64_t, 3>;
 
+		// dW (2D x 2D): GroupedGemmKernel skips groups with K == 0 (no tokens routed to the expert) and never writes their
+		// output, whose correct value is zero. Zeroes those groups only, so the output can be allocated uninitialized.
+		// One grid row per group; blocks of non-empty groups exit immediately.
+		template <typename OutputType>
+		__global__ void zero_empty_k_groups(
+				OutputType* output,     // base pointer of out (G, M, N)
+				const int32_t* offs,    // cumulative end offset of each group along K
+				int32_t M,
+				int32_t N,
+				int64_t group_stride,   // out.stride(0)
+				int64_t row_stride) {   // out.stride(1)
+			const int32_t group = blockIdx.y;
+			const int32_t start = group == 0 ? 0 : offs[group - 1];
+			if (offs[group] != start) {
+				return;
+			}
+			OutputType* group_out = output + group * group_stride;
+			const int64_t size = static_cast<int64_t>(M) * N;
+			for (int64_t i = blockIdx.x * static_cast<int64_t>(blockDim.x) + threadIdx.x; i < size;
+					i += static_cast<int64_t>(gridDim.x) * blockDim.x) {
+				group_out[(i / N) * row_stride + i % N] = ck_tile::type_convert<OutputType>(0.0f);
+			}
+		}
+
 		// Fills one ck_tile::GemmTransKernelArg per group on the device. 
 		// Basically extracts A, B, and output ptrs and strides for one GEMM and puts in in the corresponding entry in the group_args array.
 		// This is a kernel intended to be launched with one thread per group on the device so offs is never read on the host.
@@ -387,6 +411,12 @@ namespace at::hip::detail {
 					to_strides(mat_a.sizes()), to_strides(mat_b.sizes()),
 					a_row_major, b_row_major);
 			C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+			if (K < 0) {
+				zero_empty_k_groups<OutputType><<<dim3(64, group_count), 256, 0, stream>>>(
+						reinterpret_cast<OutputType*>(out.data_ptr()), offs->const_data_ptr<int32_t>(), M, N, out.stride(0), out.stride(1));
+				C10_CUDA_KERNEL_LAUNCH_CHECK();
+			}
 
 			// Instantiates and launches the kernel for one config, picking the layout types at runtime.
 			auto run_with_config = [&](auto config) {

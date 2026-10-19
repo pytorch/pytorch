@@ -11927,6 +11927,7 @@ _GROUPED_MM_CASES = [
     subtest(((16, 256), (32, 256), [64, 128, 192, 256], True), name="2d_2d_regular"),
     subtest(((24, 48), (69, 48), [17, 30, 38, 48], True), name="2d_2d_ragged"),
     subtest(((24, 40), (69, 32), [8, 20, 28], False), name="2d_2d_unequal_backing_k"),
+    subtest(((16, 256), (32, 256), [0, 128, 128, 256], False), name="2d_2d_zero_size"),
     subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
     subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
     subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
