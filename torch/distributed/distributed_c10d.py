@@ -51,8 +51,11 @@ from torch._C._distributed_c10d import (
     GatherOptions,
     get_debug_level,
     HealthCheckHook,
+    HookOpName,  # noqa: F401
     NanCheckHook,
+    PostHookArgs,  # noqa: F401
     PrefixStore,
+    PreHookArgs,  # noqa: F401
     ProcessGroup,
     PutOptions,  # noqa: F401
     ReconfigureOptions,
