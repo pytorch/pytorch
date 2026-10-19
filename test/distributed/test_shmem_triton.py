@@ -1019,9 +1019,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
 
         # Verify results
-        self.assertEqual(
-            dst, torch.tensor(expected, device=self.device, dtype=dtype)
-        )
+        self.assertEqual(dst, torch.tensor(expected, device=self.device, dtype=dtype))
 
     @requires_triton()
     @requires_h100()
@@ -1181,9 +1179,7 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         dist.barrier()
 
         # Verify results
-        self.assertEqual(
-            dst, torch.tensor(expected, device=self.device, dtype=dtype)
-        )
+        self.assertEqual(dst, torch.tensor(expected, device=self.device, dtype=dtype))
 
 
 if __name__ == "__main__":
