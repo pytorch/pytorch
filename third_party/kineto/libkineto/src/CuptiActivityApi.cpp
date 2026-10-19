@@ -379,11 +379,6 @@ void CuptiActivityApi::enableCuptiActivities(
       externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
     }
     if (activity == CUDA_SYNC) {
-#if CUDA_VERSION >= 12090
-      // CUDA event records supply source-stream correlation. CUDA 12.9+
-      // requires explicitly enabling them separately from synchronization.
-      CUPTI_CALL(cuptiActivityEnable(CUPTI_ACTIVITY_KIND_CUDA_EVENT));
-#endif
 #if CUDA_VERSION >= 13000
       CUPTI_CALL(cuptiActivityEnableCudaEventDeviceTimestamps(true));
 #endif
@@ -433,9 +428,6 @@ void CuptiActivityApi::disableCuptiActivities(
           cuptiActivityDisable(CUPTI_ACTIVITY_KIND_EXTERNAL_CORRELATION));
     }
     if (activity == CUDA_SYNC) {
-#if CUDA_VERSION >= 12090
-      CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_CUDA_EVENT));
-#endif
       CUPTI_CALL(cuptiActivityDisable(CUPTI_ACTIVITY_KIND_SYNCHRONIZATION));
     }
     if (activity == CUDA_RUNTIME) {
