@@ -1181,6 +1181,67 @@ main()
             handle.remove()
         self.assertEqual(param.grad, active * 2)
 
+    @parametrize("container", ["tensor", "dict", "object"])
+    def test_inputs_aliasing_nested_graph_break(self, container):
+        observed = []
+        input_lists = []
+
+        class SavedTensor:
+            pass
+
+        def get_tensor(payload):
+            if container == "tensor":
+                return payload
+            if container == "dict":
+                return payload["tensor"]
+            return payload.tensor
+
+        @torch._dynamo.disable
+        def record_payload(payload):
+            observed.append(get_tensor(payload))
+
+        def backward_helper(payload, grad):
+            record_payload(payload)
+            return 2 * grad * get_tensor(payload)
+
+        class MySquare(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x.square()
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                if container == "tensor":
+                    payload = x
+                elif container == "dict":
+                    payload = {"tensor": x}
+                else:
+                    payload = SavedTensor()
+                    payload.tensor = x
+                return backward_helper(payload, grad)
+
+        def compile_backward(gm):
+            opt_fn = make_compiler_fn(fullgraph=False)(gm)
+
+            def invoke(inputs, *args):
+                input_lists.append(inputs)
+                return opt_fn(inputs, *args)
+
+            return invoke
+
+        with compiled_autograd._enable(compile_backward):
+            for i in range(2):
+                x = (torch.arange(4.0) + i).requires_grad_()
+                (grad,) = torch.autograd.grad(MySquare.apply(x).sum(), x)
+                self.assertEqual(grad, 2 * x)
+                self.assertEqual(len(observed), i + 1)
+                self.assertIs(observed[-1], x)
+
+        self.assertEqual(input_lists, [[], []])
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
     def test_inputs_aliasing_bytecode_stack_restore(self):
         logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
