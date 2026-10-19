@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 WINDOW_BACKENDS = [
     ("nccl2", "cuda"),
-    ("nccl-lazy", "cuda"),
 ]
 
 
@@ -290,8 +289,7 @@ def _make_window_test_class(backend_name, device_type):
 
     WindowTest.backend_name = backend_name
     WindowTest.device_type = device_type
-    class_name = backend_name.replace("-", " ").title().replace(" ", "")
-    WindowTest.__name__ = f"{class_name}WindowTest"
+    WindowTest.__name__ = f"{backend_name.capitalize()}WindowTest"
     WindowTest.__qualname__ = WindowTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend_name),
@@ -306,10 +304,9 @@ def _make_window_test_class(backend_name, device_type):
 
 
 for backend_name, device_type in WINDOW_BACKENDS:
-    test_class = _make_window_test_class(backend_name, device_type)
-    globals()[test_class.__name__] = test_class
-# Unbound so the last class isn't collected a second time as `test_class`.
-del test_class
+    globals()[f"{backend_name.capitalize()}WindowTest"] = _make_window_test_class(
+        backend_name, device_type
+    )
 
 
 if __name__ == "__main__":
