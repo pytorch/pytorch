@@ -1193,10 +1193,6 @@ struct __align__(8) bf16x2x2 {
   __hip_bfloat162 vals[2];
 };
 
-struct __align__(16) bf16x2x4 {
-  __hip_bfloat162 vals[4];
-};
-
 struct __align__(16) bf16x2x4_u32 {
   VecT<short, 4> val[2];
 };
@@ -1210,8 +1206,9 @@ struct __align__(4) bf16x2x1_u32 {
 // instruction multiplies it; the loaders and the kernel are written once
 // against this interface. kTileLanes is the number of lanes holding distinct
 // A/B data of a tile; a lane holds 16 * 16 / kTileLanes values of each k-tile.
-// BWord is one dequantized int32 of packed int4 (8 bf16); the B operand of a
-// k-tile is built from the lane's BWords by bTile().
+// BWord is one int32 of packed int4 spread to 8 bf16; the B operand of a k-tile
+// is built from the lane's BWords by bTile(). kFactoredDequant selects how B is
+// scaled (see mmaDequant).
 
 // CDNA (gfx9) wave64: mfma_f32_16x16x16bf16_1k. 4 A/B values and 4 C values per
 // lane; one int32 of packed int4 covers two k-tiles.
@@ -1247,6 +1244,8 @@ struct RocmMmaCdna {
   // Workaround for ROCm compiler bug where __builtin_amdgcn_is_invocable
   // incorrectly reports mfma_f32_16x16x16bf16_1k as available on gfx908.
   // Targets without MFMA (gfx10, and amdgcnspirv run on such a GPU) end here.
+  static constexpr bool kFactoredDequant = true;
+
   static __device__ bool supported() {
 #if defined(__gfx908__)
     printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is not supported on gfx908\n");
@@ -1335,6 +1334,8 @@ struct RocmMmaGfx12 {
     c += r;
   }
 
+  static constexpr bool kFactoredDequant = true;
+
   static __device__ bool supported() {
     return true;
   }
@@ -1351,6 +1352,10 @@ struct RocmMmaGfx12 {
 // 16x16x32 WMMA takes a lane's operands of two consecutive k-tiles as values
 // 0-7 and 8-15, so one instruction covers the pair and cTmp[1] stays zero.
 struct RocmMmaGfx1250 : RocmMmaGfx12 {
+  // gfx1250 has a packed bf16 FMA and no v_dot2_f32_bf16, so dequantizing each
+  // B value before the multiply is cheaper than the factored form's row sums
+  static constexpr bool kFactoredDequant = false;
+
   static __device__ void mmaKTilePair(const ATile* a, const BWord* words, int kTile, CAccum cTmp[2]) {
     using BF16x16 = VecT<__bf16, 16>;
     const auto aPair = __builtin_shufflevector(a[kTile].val, a[kTile + 1].val, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
@@ -1406,6 +1411,8 @@ struct RocmMmaGfx11 {
     c += r;
   }
 
+  static constexpr bool kFactoredDequant = true;
+
   static __device__ bool supported() {
     return true;
   }
@@ -1441,51 +1448,20 @@ struct __align__(sizeof(T) * N) VectorType {
   T vals[N];
 };
 
-// from
-// https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h
-inline __device__ bf16x2x4 convert_i4x8_to_bf16x2x4(uint32_t source) {
-  bf16x2x4 result;
-  constexpr int kElements = 8;
-
-  uint32_t* h = reinterpret_cast<uint32_t*>(&result);
-  uint32_t const source_i4s = source;
-
-  // First, we extract the i4s and construct an intermediate fp16 number.
-  static constexpr uint32_t MASK = 0x000f000f;
-  static constexpr uint32_t I4s_TO_BF16s_MAGIC_NUM = 0x43004300;
-
-  // We don't have enough mantissa to remove as much shift overhead as FP16, so
-  // we must loop. No shift needed for first item.
-  uint32_t i4s = source_i4s;
-
-  // Plain C, not inline asm: the compiler's hazard recognizer cannot see into
-  // inline asm, and on gfx1250 an asm write to a register that a preceding
-  // WMMA is still reading corrupts that WMMA's operand.
-  h[0] = (i4s & MASK) | I4s_TO_BF16s_MAGIC_NUM;
-
+// Spreads the 8 int4 values q of a packed word into 8 bf16 of value 128 + q:
+// q becomes the low mantissa bits of bf16 128 (from
+// https://github.com/NVIDIA/FasterTransformer/blob/main/src/fastertransformer/cutlass_extensions/include/cutlass_extensions/interleaved_numeric_conversion.h).
+// Plain C, not inline asm: the compiler's hazard recognizer cannot see into
+// inline asm, and on gfx1250 an asm write to a register that a preceding WMMA
+// is still reading corrupts that WMMA's operand.
+inline __device__ VecT<uint32_t, 4> int4x8_to_bf16x8_biased(uint32_t packed) {
+  VecT<uint32_t, 4> h;
 #pragma unroll
-  for (int ii = 1; ii < kElements / 2; ++ii) {
-    i4s >>= 4; // or is it 8?
-    // (i4s & 0x000f000f) | 0x43004300
-    h[ii] = (i4s & MASK) | I4s_TO_BF16s_MAGIC_NUM;
+  for (int ii = 0; ii < 4; ++ii) {
+    h[ii] = ((packed >> (4 * ii)) & 0x000f000f) | 0x43004300;
   }
-
-  // This is the BF16 {-136, -136} represented as an integer.
-  auto BF16_BIAS = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0xC308}));
-  auto BF16_ONE = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0x3F80}));
-
-// Finally, we construct the output numbers.
-#pragma unroll
-  for (int ii = 0; ii < kElements / 2; ++ii) {
-    // Since this section is for Ampere+, we use bf16 fma to do the bias
-    // subtraction
-     result.vals[ii] = __hfma2(result.vals[ii], BF16_ONE, BF16_BIAS);
-  }
-
-  return result;
+  return h;
 }
-
-
 
 enum class KReductionType {
   // No k-reduction is needed between blocks as the number of k-tiles processed
@@ -1575,6 +1551,11 @@ struct BLayout_TC_int4 {
   // per lane for InnerKTiles k-tiles
   static constexpr int32_t kInt4PerLane = kKTileSize * kNTileSize / kTileLanes;
   static constexpr int32_t kInt32PerLane = InnerKTiles * kInt4PerLane / 8;
+  static constexpr int32_t kQGroupSize = QGroupSize;
+  // k-tiles of one q-group within KTiles consecutive k-tiles: a q-group larger
+  // than KTiles is handled in parts, which the factored dequant allows
+  template <int KTiles>
+  static constexpr int32_t kGroupKTiles = KTiles < QGroupSize / kKTileSize ? KTiles : QGroupSize / kKTileSize;
 
   template <int KTilesToLoad>
   static __device__ void load(
@@ -1595,7 +1576,8 @@ struct BLayout_TC_int4 {
       int32_t kTiles,
       int32_t kTileStart,
       int32_t laneId,
-      RocmMma::BWord out[KTilesToLoad / InnerKTiles][kInt32PerLane]) {
+      RocmMma::BWord out[KTilesToLoad / InnerKTiles][kInt32PerLane],
+      __hip_bfloat162 qScaleAndZero[KTilesToLoad / kGroupKTiles<KTilesToLoad>]) {
     if constexpr (kTileLanes < kWarpSize) {
       // Lanes beyond kTileLanes hold copies of the same B data
       laneId %= kTileLanes;
@@ -1644,19 +1626,10 @@ struct BLayout_TC_int4 {
       }
     }
 
-    // Load needed info for dequantization
-
+    // Load the scale and zero point of each q-group, for the lane's column
     static_assert(isPowerOf2(QGroupSize));
-    static_assert(isEvenDivisor(QGroupSize, kKTileSize));
     // smallest quantization group size is 32 (2 k-tiles are packed in an int32)
     static_assert(QGroupSize >= kKTileSize * 2);
-    constexpr int kKTilesPerQGroup = (QGroupSize / kKTileSize);
-    // a q-group could be larger than what we are handling in a single warp
-    constexpr int kNumQGroups = (KTilesToLoad / kKTilesPerQGroup) < 1
-        ? 1
-        : (KTilesToLoad / kKTilesPerQGroup);
-
-    __hip_bfloat162 qScaleAndZero[kNumQGroups];
     {
       int32_t laneN = nTile * kNTileSize + (laneId % kNTileSize);
       int32_t groupStart = (kTileStart * kKTileSize) / QGroupSize;
@@ -1668,63 +1641,111 @@ struct BLayout_TC_int4 {
           (groupStart * n + laneN) * 2;
 
 #pragma unroll
-      for (int i = 0; i < kNumQGroups; ++i) {
+      for (int i = 0; i < KTilesToLoad / kGroupKTiles<KTilesToLoad>; ++i) {
         qScaleAndZero[i] =
             *reinterpret_cast<const __hip_bfloat162*>(qInfoPtr + i * n * 2);
       }
     }
 
-    //
-    // De-quantize int4 values to bf16. Values are dequantized as truly int4
-    // [-8, 7] range; dequant = (bf16(int4_value) * bf16_scale) + bf16_zero
-    //
-    {
-      // FIXME: does this negatively affect register counts, or will nvcc
-      // move this expansion (and data loads above) closer to the point of use?
-      __hip_bfloat162 qScale[kNumQGroups];
-      __hip_bfloat162 qZero[kNumQGroups];
-
 #pragma unroll
-      for (int i = 0; i < kNumQGroups; ++i) {
-        qScale[i] = __bfloat162bfloat162(qScaleAndZero[i].x);
-        qZero[i] = __bfloat162bfloat162(qScaleAndZero[i].y);
-      }
-
+    for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
 #pragma unroll
-      for (int i = 0; i < KTilesToLoad / InnerKTiles; ++i) {
-#pragma unroll
-        for (int j = 0; j < kInt32PerLane; ++j) {
-          bf16x2x4 v = convert_i4x8_to_bf16x2x4(b_int4[i][j]);
-
-          int curKTile = i * InnerKTiles + j * 8 / kInt4PerLane;
-          int curQGroup = (curKTile * kKTileSize) / QGroupSize;
-
-          // The dequantized values in `v` for a given lane have the same n
-          // dimension (the B tensor core layout has all values in the same
-          // thread along the same n) but different k dimension, but all are
-          // guaranteed to occur within the same quantization group, so we need
-          // only load a single scale + zero to cover what this lane has
+      for (int j = 0; j < kInt32PerLane; ++j) {
+        auto h = int4x8_to_bf16x8_biased(b_int4[i][j]);
+        if constexpr (!RocmMma::kFactoredDequant) {
+          // Each value of the word is in the same q-group:
+          // ((128 + q) - 136) * scale + zero
+          const int curQGroup = ((i * InnerKTiles + j * 8 / kInt4PerLane) * kKTileSize) / QGroupSize;
+          const auto bias = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0xC308}));
+          const auto one = __bfloat162bfloat162(__hip_bfloat16(__hip_bfloat16_raw{0x3F80}));
+          const auto scale = __bfloat162bfloat162(qScaleAndZero[curQGroup].x);
+          const auto zero = __bfloat162bfloat162(qScaleAndZero[curQGroup].y);
+          __hip_bfloat162 v[4];
+          auto vWords = reinterpret_cast<uint32_t*>(v);
 #pragma unroll
           for (int k = 0; k < 4; ++k) {
-            v.vals[k] = __hfma2(v.vals[k], qScale[curQGroup], qZero[curQGroup]);
+            vWords[k] = h[k];
+            v[k] = __hfma2(__hfma2(v[k], one, bias), scale, zero);
+            h[k] = vWords[k];
           }
-
-          // type pun, the __hip_bfloat162 value in bf16x2x4 is a struct and
-          // can't be used as a 32-bit asm register argument for `mma`
-          static_assert(sizeof(bf16x2x4) == sizeof(out[0][0]));
-          // On Windows with ROCm, std::memcpy resolves to a __host__-only
-          // function and cannot be called from __device__ code. Use the raw
-          // memcpy which the HIP compiler provides as a __device__ builtin.
-#if defined(_WIN32)
-          memcpy(&out[i][j], &v, sizeof(RocmMma::BWord));
-#else
-          std::memcpy(&out[i][j], &v, sizeof(RocmMma::BWord));
-#endif
         }
+        out[i][j] = __builtin_bit_cast(RocmMma::BWord, h);
       }
     }
   }
 };
+
+// Multiplies KTiles k-tiles of A by B as loaded by BLayout::load and adds the
+// result to c. Without kFactoredDequant, B is already dequantized. Otherwise B
+// is bf16 128 + q, and for one q-group of the lane's column, with scale s and
+// zero point z,
+//   sum_k A (s (q - 8) + z) = s * sum_k A (128 + q) + (z - 136 s) * sum_k A
+// so the matrix-core products accumulate per q-group and s and z are applied
+// once per group in fp32. sum_k A is per row of A: the lanes holding a row
+// (lane % 16) add their k values, and each C value takes the sum of its row.
+template <typename BLayout, int KTiles>
+__device__ void mmaDequant(
+    const RocmMma::ATile* a,
+    const RocmMma::BWord b[][BLayout::kInt32PerLane],
+    const __hip_bfloat162* qScaleAndZero,
+    int32_t laneId,
+    RocmMma::CAccum& c) {
+  constexpr int kInnerKTiles = BLayout::kInnerKTiles;
+  constexpr int kGroupKTiles = BLayout::template kGroupKTiles<KTiles>;
+  static_assert(isEvenDivisor(kGroupKTiles, 2));
+  if constexpr (!RocmMma::kFactoredDequant) {
+#pragma unroll
+    for (int kt = 0; kt < KTiles; kt += 2) {
+      // We don't simply accumulate into `c` as this creates a too-strong
+      // execution dependency. Instead, we only periodically accumulate into `c`
+      RocmMma::CAccum cTmp[2] = {};
+      const int i = kt / kInnerKTiles;
+      RocmMma::mmaKTilePair(a + i * kInnerKTiles, b[i], kt % kInnerKTiles, cTmp);
+#pragma unroll
+      for (int k = 0; k < 2; ++k) {
+        RocmMma::accumulate(c, cTmp[k]);
+      }
+    }
+    return;
+  }
+#pragma unroll
+  for (int g = 0; g < KTiles / kGroupKTiles; ++g) {
+    // Two accumulators: a single one creates a too-strong execution dependency
+    RocmMma::CAccum cGroup[2] = {};
+    float rowSum = 0.0f;
+#pragma unroll
+    for (int kt = g * kGroupKTiles; kt < (g + 1) * kGroupKTiles; kt += 2) {
+      const int i = kt / kInnerKTiles;
+      RocmMma::mmaKTilePair(a + i * kInnerKTiles, b[i], kt % kInnerKTiles, cGroup);
+#pragma unroll
+      for (int t = 0; t < 2; ++t) {
+        const auto aBf16 = __builtin_bit_cast(VecT<__bf16, sizeof(a[0].val) / 2>, a[kt + t].val);
+#pragma unroll
+        for (int e = 0; e < sizeof(a[0].val) / 2; e += 2) {
+          if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fdot2_f32_bf16)) {
+            const VecT<__bf16, 2> pair = {aBf16[e], aBf16[e + 1]};
+            const VecT<__bf16, 2> ones = {__bf16(1.0f), __bf16(1.0f)};
+            rowSum = __builtin_amdgcn_fdot2_f32_bf16(pair, ones, rowSum, false);
+          } else {
+            rowSum += float(aBf16[e]) + float(aBf16[e + 1]);
+          }
+        }
+      }
+    }
+    RocmMma::accumulate(cGroup[0], cGroup[1]);
+#pragma unroll
+    for (int lanes = BLayout::kMTileSize; lanes < kTileLanes; lanes *= 2) {
+      rowSum += __shfl_xor(rowSum, lanes);
+    }
+    const float s = __bfloat162float(qScaleAndZero[g].x);
+    const float zBiased = fmaf(-136.0f, s, __bfloat162float(qScaleAndZero[g].y));
+#pragma unroll
+    for (int j = 0; j < RocmMma::kCValues; ++j) {
+      const float r = __shfl(rowSum, RocmMma::cRowBase(laneId) + j * RocmMma::kCRowStride);
+      c[j] += fmaf(s, cGroup[0][j], zBiased * r);
+    }
+  }
+}
 
 template <
     typename ALayout,
@@ -1808,10 +1829,10 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         A, m, k, mTiles, mTile, kTiles, kTileBase, laneId, a);
 
     //
-    // Load data from B and de-quantize as needed
-    // Each k-tile is bf16x2x2
+    // Load data from B, as bf16 128 + q, and its scale and zero point
     //
     RocmMma::BWord b[KTilesPerIteration / kInnerKTiles][BLayout::kInt32PerLane];
+    __hip_bfloat162 qsz[KTilesPerIteration / BLayout::template kGroupKTiles<KTilesPerIteration>];
     BLayout::template load<KTilesPerIteration>(
         B,
         B_quantizationInfo,
@@ -1822,31 +1843,10 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         kTiles,
         kTileBase,
         laneId,
-        b);
+        b,
+        qsz);
 
-    //
-    // Now, perform the matrix multiplication
-    //
-
-    // We accumulate across k-tiles here
-#pragma unroll
-    for (int i = 0; i < KTilesPerIteration / kInnerKTiles; ++i) {
-      static_assert(isEvenDivisor(kInnerKTiles, 2) && kInnerKTiles >= 2);
-#pragma unroll
-      for (int j = 0; j < kInnerKTiles / 2; ++j) {
-        // We don't simply accumulate into `c` as this creates a too-strong
-        // execution dependency. Instead, we only periodically accumulate into
-        // `c`
-        RocmMma::CAccum cTmp[2] = {};
-
-        RocmMma::mmaKTilePair(a + i * kInnerKTiles, b[i], j * 2, cTmp);
-
-#pragma unroll
-        for (int k = 0; k < 2; ++k) {
-          RocmMma::accumulate(c, cTmp[k]);
-        }
-      }
-    }
+    mmaDequant<BLayout, KTilesPerIteration>(a, b, qsz, laneId, c);
   } // for all tiles under kTilesLimit
 
   // Now, there could be a remainder of 1 to KTilesPerIteration - 1 k-tiles
@@ -1865,6 +1865,7 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         A, m, k, mTiles, mTile, kTiles, kTileBaseRemaining, laneId, a);
 
     RocmMma::BWord b[1][BLayout::kInt32PerLane];
+    __hip_bfloat162 qsz[kInnerKTiles / BLayout::template kGroupKTiles<kInnerKTiles>];
     BLayout::template load<kInnerKTiles>(
         B,
         B_quantizationInfo,
@@ -1875,22 +1876,10 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         kTiles,
         kTileBaseRemaining,
         laneId,
-        b);
+        b,
+        qsz);
 
-#pragma unroll
-    for (int j = 0; j < kInnerKTiles / 2; ++j) {
-      // We don't simply accumulate into `c` as this creates a too-strong
-      // execution dependency. Instead, we only periodically accumulate into
-      // `c`
-      RocmMma::CAccum cTmp[2] = {};
-
-      RocmMma::mmaKTilePair(a, b[0], j * 2, cTmp);
-
-#pragma unroll
-      for (int k = 0; k < 2; ++k) {
-        RocmMma::accumulate(c, cTmp[k]);
-      }
-    }
+    mmaDequant<BLayout, kInnerKTiles>(a, b, qsz, laneId, c);
   }
 
   //
