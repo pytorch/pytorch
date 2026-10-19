@@ -4,9 +4,11 @@
 
 import ctypes
 import gc
+import glob
 import json
 import os
 import pickle
+import re
 import subprocess
 import sys
 import tempfile
@@ -1018,6 +1020,183 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
+    # NCCLX telemetry joins on commName, so nccl2 must keep a user-supplied one
+    # and otherwise default to stock ProcessGroupNCCL's "<desc>:<name>".
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # NCCL logs each config field it is handed under NCCL_DEBUG_SUBSYS=ENV.
+        cls.nccl_debug_file = f"{rdvz_file}.nccl_debug.{rank}"
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "ENV"
+        os.environ["NCCL_DEBUG_FILE"] = cls.nccl_debug_file
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        try:
+            super().tearDownClass()
+        finally:
+            if cls.rdvz_file is not None:
+                for path in glob.glob(f"{cls.rdvz_file}.nccl_debug.*"):
+                    os.remove(path)
+
+    def _logged_comm_names(self) -> list[str]:
+        prefix = "Comm config Comm name set to "
+        with open(self.nccl_debug_file) as f:
+            return [line.split(prefix, 1)[1].strip() for line in f if prefix in line]
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
+    @skip_if_lt_x_gpu(2)
+    def test_comm_name(self) -> None:
+        self._check_all_reduce()
+        before = len(self._logged_comm_names())
+        ranks = list(range(self.world_size))
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.comm_name = "zzz_user"
+        user = dist.new_group(ranks, pg_options=opts)
+        named = dist.new_group(ranks, group_desc="zzz_new")
+        default_child = self.pg.split_group(
+            ranks, group_name="zzz_split", group_desc="zzz_desc"
+        )
+        user_child = self.pg.split_group(ranks, opts=opts, group_name="zzz_user_split")
+        # Splitting a split child clones its options; it must not inherit the
+        # child's generated name.
+        grandchild = default_child.split_group(
+            ranks, group_name="zzz_grand", group_desc="zzz_gdesc"
+        )
+        for group in (user, named, default_child, user_child, grandchild):
+            dist.all_reduce(torch.ones(1, device=self.device), group=group)
+
+        names = self._logged_comm_names()
+        self.assertIn("default_pg:0", names[:before])
+        self.assertCountEqual(
+            names[before:],
+            [
+                "zzz_user",
+                f"zzz_new:{named.group_name}",
+                "zzz_desc:zzz_split",
+                "zzz_user",
+                "zzz_gdesc:zzz_grand",
+            ],
+        )
+        self.assertIsNone(
+            default_child._get_backend(self.device).options.config.comm_name
+        )
+        self.assertEqual(
+            user_child._get_backend(self.device).options.config.comm_name,
+            "zzz_user",
+        )
+        dist.destroy_process_group(user)
+        dist.destroy_process_group(named)
+        # ProcessGroup.split_group children are not registered with dist.
+        for group in (grandchild, default_child, user_child):
+            group.shutdown()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_comm_name(self) -> None:
+        group = dist.new_group(device_id=self.device, group_desc="zzz_shrink")
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        before = len(self._logged_comm_names())
+        shrunk = dist.shrink_group(excluded, group=group)
+        # Like stock, the shrunk comm keeps the group's name.
+        self.assertEqual(
+            self._logged_comm_names()[before:], [f"zzz_shrink:{group.group_name}"]
+        )
+        dist.destroy_process_group(shrunk)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
+    @skip_if_lt_x_gpu(2)
+    def test_lazy_comm_name(self) -> None:
+        self._check_all_reduce()
+        before = len(self._logged_comm_names())
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.comm_name = "zzz_user"
+        user = dist.new_group(backend="nccl-lazy", pg_options=opts, group_desc="zzz_l")
+        named = dist.new_group(backend="nccl-lazy", group_desc="zzz_named")
+        expected = ["zzz_user", f"zzz_named:{named.group_name}"]
+        for group in (user, named):
+            dist.all_reduce(torch.ones(1, device=self.device), group=group)
+            if self.rank > 1:
+                continue
+            # Pair comms are named by their pair, not the group's comm_name.
+            t = torch.ones(1, device=self.device)
+            if self.rank == 0:
+                dist.send(t, 1, group=group)
+            else:
+                dist.recv(t, 0, group=group)
+            torch.cuda.synchronize()
+        if self.rank <= 1:
+            expected += [
+                f"zzz_l:{user.group_name}/p2p-0-1-",
+                f"zzz_named:{named.group_name}/p2p-0-1-",
+            ]
+
+        # The pair suffix counts attempts across all groups in the process.
+        names = [
+            re.sub(r"(/p2p-\d+-\d+-)\d+$", r"\1", n)
+            for n in self._logged_comm_names()[before:]
+        ]
+        self.assertCountEqual(names, expected)
+        dist.destroy_process_group(user)
+        dist.destroy_process_group(named)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for reconfigure")
+    @unittest.skipIf(
+        TEST_WITH_ROCM
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() < (2, 30, 7),
+        "nccl2 reconfigure requires RCCL 2.30.7 or later",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reconfigure_comm_name(self) -> None:
+        torch.cuda.set_device(self.device)
+        store = dist.distributed_c10d._get_default_store()
+        before = len(self._logged_comm_names())
+        cases = [
+            ("zzz_reconf", None, {}),
+            ("zzz_reconf_user", "zzz_user", {}),
+            # A commName hint wins over the Options' comm_name.
+            ("zzz_reconf_hint", "zzz_user", {"commName": "zzz_hint"}),
+        ]
+        for name, comm_name, hints in cases:
+            opts = dist.ProcessGroupNCCL2.Options()
+            opts.enable_reconfigure = True
+            opts.group_name = name
+            opts.group_desc = "zzz_rdesc"
+            if comm_name is not None:
+                opts.config.comm_name = comm_name
+            backend = dist.ProcessGroupNCCL2(
+                dist.PrefixStore(name, store), self.rank, self.world_size, opts
+            )
+            handles = dist.PrefixStore(f"{name}/handles", store)
+            handles.set(str(self.rank), backend.get_reconfigure_handle())
+            reconfigure_opts = ReconfigureOptions()
+            reconfigure_opts.uuid = 1
+            reconfigure_opts.handles = [
+                handles.get(str(rank)).decode() for rank in range(self.world_size)
+            ]
+            reconfigure_opts.timeout = timedelta(seconds=30)
+            reconfigure_opts.hints = hints
+            backend.reconfigure(reconfigure_opts).wait()
+            backend.shutdown()
+
+        self.assertCountEqual(
+            self._logged_comm_names()[before:],
+            ["zzz_rdesc:zzz_reconf", "zzz_user", "zzz_hint"],
+        )
+
+
 class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def opts(cls, high_priority_stream=False):
@@ -1977,9 +2156,8 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         child_options = child._get_backend(self.device).options
         self.assertEqual(child_options.global_ranks_in_group, halves)
         if hasattr(child_options.config, "comm_name"):
-            # split() points config.commName at the group_name string for the
-            # ncclCommSplit call; storing that pointer left the child holding
-            # one that outlives its string.
+            # The generated name stays out of the child's Options so that
+            # splitting the child computes its own.
             self.assertIsNone(child_options.config.comm_name)
 
         # Splitting the child again must map its ranks through the parent's map
