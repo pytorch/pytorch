@@ -1462,6 +1462,15 @@ class TestPatternMatcher(TestCase):
             # triton_heuristics.reduction( or .persistent_reduction(
             self.assertEqual("reduction(" not in code, folds, msg=str(kwargs))
 
+        # A 0-dim where summed with keepdim=True is not a one-hot sum.
+        def scalar_sum(a, b, x):
+            return torch.where(a == b, x, 0.0).sum(0, keepdim=True)
+
+        a, b = torch.tensor(1, device=GPU_TYPE), torch.tensor(1, device=GPU_TYPE)
+        x = torch.tensor(2.0, device=GPU_TYPE)
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(scalar_sum)(a, b, x), scalar_sum(a, b, x))
+
     def test_splitwithsizes_cat(self):
         # Good case
         def fn(a):

@@ -171,9 +171,7 @@ class TestScatterOpt(TestCase):
         The full+scatter -> pointwise rewrite must preserve the const tensor's
         dtype. torch.where with Python scalar branches promotes to the default
         float dtype (float32), so for a low-precision const tensor (e.g. f16)
-        the rewrite previously produced a float32 result. This is exactly the
-        pattern emitted by nll_loss_backward / cross_entropy backward on f16
-        inputs.
+        the rewrite previously produced a float32 result.
         """
         M, N = 1024, 2048
 
@@ -204,12 +202,6 @@ class TestScatterOpt(TestCase):
         """
         The cross-entropy backward is pointwise (nll_loss_backward decomposes to
         a one-hot select, so there is no full+scatter left to match).
-
-        Perf data on an A100 GPU:
-        Without the scatter optimization:
-          ms=47.340, peak_mem=10.524 GB
-        With the scatter optimization:
-          ms=42.768, peak_mem=7.227 GB
         """
         B, T, D, V = 32, 1024, 768, 50257
         if not DO_PERF_TEST:
