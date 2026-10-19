@@ -618,7 +618,7 @@ A window exposes a tensor on every rank of a group for one-sided (RMA) writes:
 a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed_c10d.Window.put` without the peer
 posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
 {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
-windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
+windows when PyTorch is built against, and runs with, NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
 when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation.
 {func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
@@ -650,7 +650,7 @@ With `nccl` and `nccl-lazy`:
   bookkeeping; the segment stays registered with NCCL until the allocator
   frees it, and every rank must free its segments in the same order or
   teardown can hang. To avoid this, register the pool with
-  `backend.register_mem_pool(pool)` and tear down in this order on every rank:
+  `backend.register_mem_pool` (either `symm` value) and tear down in this order on every rank:
   synchronize outstanding window work, call `tensor_deregister` on every
   window backed by the pool, call `backend.deregister_mem_pool(pool)`, free
   the tensors and pool, then call

@@ -153,6 +153,28 @@ class AbstractWindowTest:
         torch.cuda.synchronize()
         win.tensor_deregister()
 
+    def test_signal_shared_across_windows(self):
+        # Signal counts are per process group, so a put on one window
+        # satisfies a wait on another.
+        self._init_backend()
+        pool = self._make_pool()
+        self._probe_window_support(pool)
+        with torch.cuda.use_mem_pool(pool):
+            buf_a = torch.zeros(self.world_size, device=self.device)
+            buf_b = torch.zeros(1, device=self.device)
+        win_a = dist._new_window(buf_a)
+        win_b = dist._new_window(buf_b)
+        next_rank = (self.rank + 1) % self.world_size
+        prev_rank = (self.rank - 1) % self.world_size
+        src = buf_a[self.rank : self.rank + 1]
+        src.fill_(float(self.rank))
+        win_a.put(src, next_rank, self.rank, False)
+        win_b.wait_signal(prev_rank, False)
+        torch.cuda.synchronize()
+        self.assertEqual(buf_a[prev_rank].item(), prev_rank)
+        win_b.tensor_deregister()
+        win_a.tensor_deregister()
+
     def test_symmetric_mem_pool_teardown(self):
         # register_mem_pool(symm=True) gives the pool's existing and new
         # segments symmetric windows; deregister_mem_pool tears them down.
@@ -246,7 +268,7 @@ class AbstractWindowTest:
         win = dist._new_window(win_buf)
         dist.barrier()
         attr = win.get_attr((self.rank + 1) % self.world_size)
-        self.assertIsInstance(attr.access_type, WindowAccessType)
+        self.assertEqual(attr.access_type, WindowAccessType.SEPARATE)
         win.tensor_deregister()
 
     def test_register_errors(self):
