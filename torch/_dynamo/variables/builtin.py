@@ -418,6 +418,36 @@ def populate_builtin_to_tensor_fn_map() -> None:
                     BUILTIN_TO_TENSOR_RFN_MAP[op] = most_recent_func
 
 
+def _zero_arg_super_args(
+    tx: "InstructionTranslatorBase",
+) -> tuple[VariableTracker, VariableTracker]:
+    """The (type, obj) that a zero-argument super() call in tx's frame binds.
+
+    Mirrors CPython's super_init_without_args: the __class__ cell and the
+    frame's first argument. A resume function reorders its arguments, so the
+    first argument's name comes from the code it resumes.
+    """
+    from ..bytecode_transformation import create_instruction
+    from ..resume_execution import ContinueExecutionCache
+
+    code = tx.f_code
+    orig_code = code
+    if code in ContinueExecutionCache.generated_code_metadata:
+        orig_code = ContinueExecutionCache.generated_code_metadata[code].code
+    if not orig_code.co_argcount:
+        raise_observed_exception(RuntimeError, tx, args=["super(): no arguments"])
+    if "__class__" not in code.co_freevars:
+        raise_observed_exception(
+            RuntimeError, tx, args=["super(): __class__ cell not found"]
+        )
+    tx.LOAD_DEREF(create_instruction("LOAD_DEREF", argval="__class__"))
+    cls = tx.pop()
+    first_arg = orig_code.co_varnames[0]
+    opname = "LOAD_DEREF" if first_arg in tx.cell_and_freevars() else "LOAD_FAST"
+    getattr(tx, opname)(create_instruction(opname, argval=first_arg))
+    return cls, tx.pop()
+
+
 class BaseBuiltinVariable(VariableTracker):
     """
     Common base class for all builtin variable trackers (BuiltinVariable,
@@ -2989,8 +3019,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         return generic_issubclass(tx, left_ty, right_ty)
 
     def call_super(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        a: VariableTracker | None = None,
+        b: VariableTracker | None = None,
     ) -> VariableTracker:
+        if a is None and b is None:
+            return variables.SuperVariable(*_zero_arg_super_args(tx))
+        if a is None or b is None:
+            raise_args_mismatch(tx, "super", expect="0 or 2 args", actual="1 arg")
         return variables.SuperVariable(a, b)
 
     def call_classmethod(
