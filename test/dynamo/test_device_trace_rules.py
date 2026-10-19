@@ -2,9 +2,10 @@
 
 import torch
 from torch._dynamo.device_interface import (
-    device_interfaces,
     DeviceInterface,
+    device_interfaces,
     register_interface_for_device,
+    registered_stream_context_cls,
 )
 from torch._dynamo.device_trace_rules import registered_device_trace_fns
 from torch._dynamo.test_case import run_tests, TestCase
@@ -27,6 +28,10 @@ def _fake_set_stream(stream):
 
 def _fake_default_stream(device=None):
     return device
+
+
+def _unspecified_stream(stream):
+    return stream
 
 
 def _index_only_current_stream(device=None):
@@ -124,6 +129,67 @@ class TestDeviceTraceRules(TestCase):
 
         register_interface_for_device("fakemissingctx", WithContextInterface)
         self.assertTrue(_is_device_stream_context(LateContext()))
+
+    def test_missing_stream_context_compiles_direct_stream(self) -> None:
+        class MissingContextInterface(DeviceInterface):
+            stream = staticmethod(_unspecified_stream)
+
+        register_interface_for_device("fakemissingctx", MissingContextInterface)
+        stream = torch.Stream(device="cpu")
+
+        def fn(x):
+            context = _unspecified_stream(stream)
+            is_cuda = isinstance(context, torch.cuda.StreamContext)
+            with context:
+                return x + 1, is_cuda
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
+        self.assertEqual(result, (torch.ones(2) + 1, False))
+
+    def test_same_key_stream_context_can_be_replaced(self) -> None:
+        class FirstContext:
+            pass
+
+        class SecondContext:
+            pass
+
+        class FirstInterface(DeviceInterface):
+            StreamContext = FirstContext
+            stream = staticmethod(_unspecified_stream)
+
+        class SecondInterface(DeviceInterface):
+            StreamContext = SecondContext
+            stream = staticmethod(_unspecified_stream)
+
+        register_interface_for_device("fakereplace", FirstInterface)
+        self.addCleanup(self._drop_registered_key, "fakereplace")
+        register_interface_for_device("fakereplace", SecondInterface)
+        self.assertIs(registered_stream_context_cls(_unspecified_stream), SecondContext)
+
+    def test_current_stream_device_mismatch_graph_breaks(self) -> None:
+        def other_current_stream(device=None):
+            return torch.Stream(device="cpu")
+
+        class MissingContextInterface(DeviceInterface):
+            stream = staticmethod(_unspecified_stream)
+
+        class OtherInterface(DeviceInterface):
+            current_stream = staticmethod(other_current_stream)
+
+        register_interface_for_device("fakemissingctx", MissingContextInterface)
+        self.addCleanup(self._drop_registered_key, "fakemissingctx")
+        register_interface_for_device("fakeother", OtherInterface)
+        self.addCleanup(self._drop_registered_key, "fakeother")
+        stream = torch.Stream(device="cpu")
+
+        def fn(x):
+            with _unspecified_stream(stream):
+                other_current_stream()
+                return x + 1
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(2))
+        self.assertIn("current_stream device mismatch", str(ctx.exception))
 
     def test_conflicting_stream_context_is_rejected(self) -> None:
         class FirstContext:

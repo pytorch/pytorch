@@ -324,6 +324,14 @@ class SymbolicStreamState:
             return id(stream.peek_value())
         return id(stream.value)
 
+    def tracked_device_type(self) -> str | None:
+        if not self.cur_stream_stack:
+            return None
+        stream = self.cur_stream_stack[-1]
+        if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+            return stream.peek_value().device.type
+        return stream.value.device.type
+
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
     """A stream() context with its concrete Python type."""

@@ -60,6 +60,8 @@ from ..create_parameter_op import (
 )
 from ..device_interface import (
     DeviceInterface,
+    _UnspecifiedStreamContext,
+    get_device_type_for_current_stream,
     get_registered_device_interfaces,
     registered_stream_context_cls,
 )
@@ -67,6 +69,7 @@ from ..exc import (
     raise_observed_exception,
     raise_type_error,
     unimplemented,
+    Unsupported,
     UserError,
     UserErrorType,
 )
@@ -2006,7 +2009,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> StreamContextVariable:
             context_cls = registered_stream_context_cls(self.value)
             if context_cls is None:
-                context_cls = torch.cuda.StreamContext
+                context_cls = _UnspecifiedStreamContext
             return StreamContextVariable.create(tx, stream, context_cls=context_cls)
 
         @register(torch.from_numpy)
@@ -3011,11 +3014,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = torch.device(as_python_device(kwargs["device"]))
+                    arg = as_python_device(kwargs["device"])
                 elif args:
-                    device = torch.device(as_python_device(args[0]))
+                    arg = as_python_device(args[0])
                 else:
-                    device = None
+                    arg = None
+                device = torch.device(arg) if arg is not None else None
+
+                if isinstance(arg, (str, torch.device)):
+                    requested_type = torch.device(arg).type
+                elif self.value is torch.accelerator.current_stream:
+                    accelerator = torch.accelerator.current_accelerator()
+                    requested_type = accelerator.type if accelerator is not None else None
+                else:
+                    requested_type = get_device_type_for_current_stream(self.value)
+                tracked_type = tx.symbolic_stream_state.tracked_device_type()
+                if requested_type and tracked_type and requested_type != tracked_type:
+                    unimplemented(
+                        gb_type="current_stream device mismatch",
+                        context=f"requested={requested_type}, tracking={tracked_type}",
+                        explanation=(
+                            f"Dynamo stream mismatch: Requested '{requested_type}' stream, "
+                            f"but SymbolicStreamState is tracking '{tracked_type}'. "
+                            "Dynamo only tracks streams of the default accelerator "
+                            "(plus stream contexts entered during tracing). "
+                            "Please ensure you are using the default accelerator."
+                        ),
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
 
                 stream_var = tx.symbolic_stream_state.cur_stream(device)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
@@ -3030,6 +3056,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         source=stream_var.source,
                     )
                 return stream_var
+            except Unsupported:
+                raise
             except Exception as e:
                 unimplemented(
                     gb_type="bad device argument to torch.accelerator.current_stream",

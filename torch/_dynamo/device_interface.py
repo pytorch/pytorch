@@ -868,6 +868,10 @@ class TpuInterface(DeviceInterface):
             return 0
 
 
+class _UnspecifiedStreamContext:
+    pass
+
+
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -879,7 +883,9 @@ def _real_stream_context_cls(device_interface: type[DeviceInterface]) -> type | 
     return None
 
 
-def _validate_stream_context(device_interface: type[DeviceInterface]) -> None:
+def _validate_stream_context(
+    device: str, device_interface: type[DeviceInterface]
+) -> None:
     """Reject two real context classes for one stream function.
 
     A backend may override stream and leave StreamContext unset. Registration
@@ -892,7 +898,9 @@ def _validate_stream_context(device_interface: type[DeviceInterface]) -> None:
     if context_cls is None:
         return
 
-    for existing_interface in device_interfaces.values():
+    for existing_device, existing_interface in device_interfaces.items():
+        if existing_device == device:
+            continue
         if getattr(existing_interface, "stream", None) is not stream_fn:
             continue
         existing_context_cls = _real_stream_context_cls(existing_interface)
@@ -920,7 +928,7 @@ def register_interface_for_device(
     """
     if isinstance(device, torch.device):
         device = device.type
-    _validate_stream_context(device_interface)
+    _validate_stream_context(device, device_interface)
     device_interfaces[device] = device_interface
     from .variables.user_defined import UserDefinedClassVariable
 
@@ -944,6 +952,13 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
     if not _device_initialized:
         init_device_reg()
     return device_interfaces.items()
+
+
+def get_device_type_for_current_stream(current_stream_fn: Any) -> str | None:
+    for device, interface in device_interfaces.items():
+        if getattr(interface, "current_stream", None) is current_stream_fn:
+            return device.split(":")[0]
+    return None
 
 
 def registered_stream_context_cls(stream_fn: object) -> type | None:
