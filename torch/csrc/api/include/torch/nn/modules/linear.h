@@ -36,9 +36,8 @@ TORCH_MODULE(Identity);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Adds a learnable bias to the last dimension of the input.
-/// See https://pytorch.org/docs/main/generated/torch.nn.Bias.html to learn
-/// about the exact behavior of this module.
+/// Adds a learnable bias to the last dimension of the input, matching the
+/// Python `torch.nn.Bias` module.
 ///
 /// See the documentation for `torch::nn::BiasOptions` class to learn what
 /// constructor arguments are supported for this module.
