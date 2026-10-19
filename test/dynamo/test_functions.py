@@ -56,6 +56,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 T = TypeVar("T")
 
 d = torch.ones(10, 10)
@@ -6235,7 +6239,7 @@ class GraphModule(torch.nn.Module):
         def f1():
             mod1 = torch.get_device_module()
             mod2 = torch.get_device_module("cpu")
-            mod3 = torch.get_device_module(torch.device("cpu"))
+            mod3 = torch.get_device_module(torch.device(device_type))
             return mod1, mod2, mod3
 
         self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
