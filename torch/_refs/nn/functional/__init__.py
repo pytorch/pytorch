@@ -542,23 +542,30 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
-    limit = torch.finfo(a.dtype).max
-    message = lambda: (  # noqa: E731
-        f"lambda must be in range [0, {limit}] for input dtype {a.dtype}, but found {lambd}"
+    torch._check(
+        0 <= lambd <= torch.finfo(a.dtype).max,
+        lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
-    # Two checks so that a symbolic lambd is not specialized by a chained comparison
-    torch._check(lambd >= 0, message)
-    torch._check(lambd <= limit, message)
     if a.dtype in (torch.bfloat16, torch.float16):
         lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
-    # Match the CUDA kernel and the CPU vectorized path: NaN propagates and the
-    # dead zone is +0. (The CPU scalar path and MPS compute a * 0, which is -0.0
-    # for negative inputs.)
-    # This decomposition is not registered for Autograd, so the backward is
-    # softshrink_backward rather than the derivative of these wheres, whose
-    # accumulation would turn a -0.0 gradient into +0.0.
+    # Match the eager kernels' NaN and signed-zero results. This decomposition
+    # is not registered for Autograd, so the backward is softshrink_backward
+    # rather than the derivative of these wheres, whose accumulation would turn
+    # a -0.0 gradient into +0.0.
+    if a.device.type == "mps":
+        # The MPS kernel computes a * 0: NaN propagates, and the dead zone is
+        # -0.0 for negative inputs
+        return torch.where(
+            a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, a * 0)
+        )
+    # The CUDA kernel returns NaN as is and +0 in the dead zone. The CPU
+    # vectorized path also returns +0, but computes NaN as a - lambd, which
+    # quiets a signaling NaN. (The CPU scalar path, used for loop tails and
+    # non-vectorizable layouts, computes a * 0 like MPS, so CPU eager is not
+    # consistent itself.)
     result = torch.where(a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, 0))
-    return torch.where(torch.isnan(a), a, result)
+    nan = a - lambd if a.device.type == "cpu" else a
+    return torch.where(torch.isnan(a), nan, result)
 
 
 # Losses

@@ -22,6 +22,7 @@ from torch._subclasses import FakeTensorMode
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -1238,12 +1239,14 @@ class DecompOneOffTests(TestCase):
     @skipIfCrossRef
     def test_softshrink_backward_lambd_range(self, device):
         # Like the kernel, reject finite lambd outside the computation dtype's
-        # range, but accept inf and nan.
+        # range, but accept inf and nan. (Long enough for the CPU kernel to take
+        # its vectorized path, which the decomposition matches.)
         from torch._decomp.decompositions import softshrink_backward
 
         for dtype in (torch.float16, torch.bfloat16, torch.float32):
-            grad = torch.ones(3, device=device, dtype=dtype)
             x = torch.tensor([0.0, 1.0, float("nan")], device=device, dtype=dtype)
+            x = x.repeat(64)
+            grad = torch.ones_like(x)
             limit = torch.finfo(dtype).max
             for lambd in (limit, -limit, float("inf"), float("nan")):
                 self.assertEqual(
@@ -1258,22 +1261,64 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
-    def test_softshrink_backward_symint_lambd(self, device):
-        # An integer lambd stays symbolic, and is still range-checked
+    def test_softshrink_backward_symbolic_lambd(self, device):
+        # A symbolic lambd is not specialized, and is still range-checked
         from torch._dynamo.testing import CompileCounterWithBackend
 
         def fn(grad, x, lambd):
             return torch.ops.aten.softshrink_backward(grad, x, lambd)
 
-        counter = CompileCounterWithBackend("aot_eager_decomp_partition")
-        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
         grad = torch.ones(4, device=device, dtype=torch.float16)
         x = torch.tensor([0.0, 3.0, -3.0, 2000.0], device=device, dtype=torch.float16)
-        for lambd in (1, 2, 1024):
-            self.assertEqual(compiled(grad, x, lambd), fn(grad, x, lambd))
-        self.assertEqual(counter.frame_count, 1)
-        with self.assertRaisesRegex(RuntimeError, "overflow"):
-            compiled(grad, x, 70000)
+        for lambds in ((1, 2, 1024), (0.5, 1.5, 1024.5)):
+            torch._dynamo.reset()
+            counter = CompileCounterWithBackend("aot_eager_decomp_partition")
+            with torch._dynamo.config.patch(specialize_float=False):
+                compiled = torch.compile(
+                    fn, backend=counter, fullgraph=True, dynamic=True
+                )
+                for lambd in lambds:
+                    self.assertEqual(compiled(grad, x, lambd), fn(grad, x, lambd))
+                self.assertEqual(counter.frame_count, 1)
+                with self.assertRaisesRegex(RuntimeError, "overflow"):
+                    compiled(grad, x, type(lambds[0])(70000))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_softshrink_matches_kernel_bitwise(self, device, dtype):
+        # NaN and signed zeros differ between backends. The input is long and
+        # contiguous so that the CPU kernel takes its vectorized path.
+        from torch._decomp.decompositions import softshrink_backward
+        from torch._refs.nn.functional import softshrink
+
+        lambd = 0.3
+        bits = torch.int16 if dtype.itemsize == 2 else torch.int32
+        snan = 0x7F81 if dtype.itemsize == 2 else 0x7F800001
+        x = torch.cat(
+            (
+                torch.tensor(
+                    [-1.0, -lambd, -0.25, -0.0, 0.0, 0.25, lambd, 1.0, float("nan")],
+                    device=device,
+                    dtype=dtype,
+                ),
+                torch.tensor([snan], device=device, dtype=bits).view(dtype),
+            )
+        ).repeat(64)
+        grad = torch.tensor([1.5, -0.0], device=device, dtype=dtype).repeat(320)
+        self.assertEqual(
+            softshrink(x, lambd).view(bits),
+            torch.ops.aten.softshrink(x, lambd).view(bits),
+        )
+        self.assertEqual(
+            softshrink_backward(grad, x, lambd).view(bits),
+            torch.ops.aten.softshrink_backward(grad, x, lambd).view(bits),
+        )
+        # With mixed dtypes, lambd is compared in the common dtype
+        self.assertEqual(
+            softshrink_backward(grad.float(), x, lambd),
+            torch.ops.aten.softshrink_backward(grad.float(), x, lambd),
+        )
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef

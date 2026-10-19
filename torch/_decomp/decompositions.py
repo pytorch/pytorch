@@ -245,22 +245,24 @@ def threshold_backward(grad_output: Tensor, self: Tensor, threshold: float):
 @register_decomposition(aten.softshrink_backward)
 @out_wrapper("grad_input")
 def softshrink_backward(grad_output: Tensor, self: Tensor, lambd: float) -> Tensor:
-    # Like the ATen kernel, compute in the common dtype and compare against
-    # lambd rounded to it
+    # Like the ATen kernel, compute in the common dtype. The comparisons round
+    # lambd to it, as the kernel's lambd.to<scalar_t>() does.
     dtype = torch.result_type(grad_output, self)
     grad_output, self = grad_output.to(dtype), self.to(dtype)
-    # The kernel's lambd.to<scalar_t>() rejects finite values out of range
+    # lambd.to<scalar_t>() also rejects finite values out of range
     limit = torch.finfo(dtype).max
     message = lambda: f"value cannot be converted to type {dtype} without overflow"  # noqa: E731
-    if isinstance(lambd, torch.SymInt):
-        # An int is finite. Two checks so that lambd is not specialized.
-        torch._check(lambd <= limit, message)
+    if isinstance(lambd, (torch.SymInt, torch.SymFloat)):
+        # math.isfinite would specialize lambd. Dynamo specializes inf and nan,
+        # so bounds suffice, except that an unbacked non-finite lambd (e.g.
+        # from .item()) can be rejected.
         torch._check(lambd >= -limit, message)
-    elif not isinstance(lambd, torch.SymFloat):
-        # A symbolic float was already range-checked by the forward
+        torch._check(lambd <= limit, message)
+    else:
         torch._check(not (math.isfinite(lambd) and abs(lambd) > limit), message)
-    if dtype in (torch.bfloat16, torch.float16):
-        lambd = torch.scalar_tensor(lambd, dtype=dtype, device=self.device)  # type: ignore[assignment]
+    if self.device.type == "cpu":
+        # Like the CPU vectorized path (but not the scalar path), NaN gets 0
+        return torch.where((self < -lambd) | (self > lambd), grad_output, 0)
     return torch.where((self >= -lambd) & (self <= lambd), 0, grad_output)
 
 
