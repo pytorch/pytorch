@@ -2300,7 +2300,9 @@ class TritonTemplateKernel(TritonKernel):
         )
         if plan is not None:
             if not TritonScheduling._template_local_reduction_tile_is_compatible(
-                self.template_local_reduction_tile, plan.block
+                self.template_local_reduction_tile,
+                plan.block,
+                self.output_node.get_size(),
             ):
                 raise CantSplit(
                     self.template_local_reduction_tile,

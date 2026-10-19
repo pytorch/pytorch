@@ -7331,6 +7331,23 @@ class Scheduler:
                     and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
                 )
 
+            def can_fuse_with_registers(choice, compiled, matmul_ms, epilogue_ms):
+                choice.precompile()
+                if not (compiled.launchers and choice.n_regs):
+                    raise AssertionError(
+                        "expected compiled.launchers and choice.n_regs to be set"
+                    )
+                kernel = compiled.launchers[0]
+                return _fuse_epilogue(
+                    matmul_ms,
+                    epilogue_ms,
+                    choice.n_regs,
+                    kernel.n_regs,
+                    kernel.n_spills,
+                    choice.bmreq.num_warps,
+                    DeviceProperties.create(device),
+                )
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             hint_override_fused_timings: dict[int, dict[ir.ChoiceCaller, float]] = {}
             if not has_atomic_add:
@@ -7339,6 +7356,11 @@ class Scheduler:
                         tuple[Any, LambdaFuture | None, ModuleType]
                     ] = []
                     choice_timings = multi_node.choice_timings(hint_override)
+                    hint_min_choice, hint_min_time = min(
+                        choice_timings.items(),
+                        key=operator.itemgetter(1),
+                        default=(None, float("inf")),
+                    )
                     for choice, _ in sorted(choice_timings.items(), key=lambda x: x[1]):
                         if not isinstance(
                             choice,
@@ -7375,9 +7397,13 @@ class Scheduler:
                     ms_fused_choice: TritonTemplateCallerBase | None = None
                     new_timings = {}
                     for choice, future, mod_fused in future_choices:
+                        compiled = None
                         try:
                             if future is not None:
-                                future.result()
+                                compiled = future.result()
+                            elif reduction_epilogue is not None:
+                                compiled = mod_fused.triton_
+                                compiled.precompile()
                         except Exception as e:
                             if fusion_log.isEnabledFor(logging.DEBUG):
                                 fusion_log.debug(
@@ -7385,6 +7411,26 @@ class Scheduler:
                                     "prologue" if not epilogue_fusion else "epilogue",
                                     e,
                                 )
+                            continue
+                        if reduction_epilogue is not None:
+                            hint_epilogue_ms = node2._get_estimated_runtime()
+                            hint_fused_epilogue_ms = _estimate_fused_epilogue_runtime(
+                                node1, node2, hint_epilogue_ms
+                            )
+                            fusible_choice = (
+                                hint_min_choice == choice
+                                or hint_epilogue_ms + hint_min_time
+                                > choice_timings[choice] + hint_fused_epilogue_ms
+                            )
+                            if (
+                                compiled
+                                and fusible_choice
+                                and can_fuse_with_registers(
+                                    choice, compiled, hint_min_time, hint_epilogue_ms
+                                )
+                            ):
+                                ms_fused_choice = choice
+                                break
                             continue
                         with multi_node.swap_as_triton_caller(choice):
                             ms_fused, path = self.benchmark_codegened_module(
@@ -7403,11 +7449,14 @@ class Scheduler:
                         hint_override_best_fusion_choice[hint_override] = (
                             ms_fused_choice
                         )
-                        hint_override_fused_timings[hint_override] = new_timings
+                        if reduction_epilogue is None:
+                            hint_override_fused_timings[hint_override] = new_timings
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            bench_epilogue = (
+                config.benchmark_epilogue_fusion and reduction_epilogue is None
+            )
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -7662,31 +7711,13 @@ class Scheduler:
                             # Triton's n_regs/n_spills heuristic doesn't apply.
                             ms_fused_choice = choice
                             break
-                        elif res and fusible_choice:
-                            choice.precompile()
-                            # pyrefly: ignore [missing-attribute]
-                            if not (res.launchers and choice.n_regs):
-                                raise AssertionError(
-                                    "expected res.launchers and choice.n_regs to be set"
-                                )
-                            # pyrefly: ignore [bad-index]
-                            compiled_kernel = res.launchers[0]
-                            # pyrefly: ignore [missing-attribute]
-                            fused_n_regs = compiled_kernel.n_regs
-                            # pyrefly: ignore [missing-attribute]
-                            fused_n_spills = compiled_kernel.n_spills
-                            should_fuse_epilogue = _fuse_epilogue(
-                                ms1,
-                                ms2,
-                                choice.n_regs,
-                                fused_n_regs,
-                                fused_n_spills,
-                                choice.bmreq.num_warps,
-                                DeviceProperties.create(device),
-                            )
-                            if should_fuse_epilogue:
-                                ms_fused_choice = choice
-                                break
+                        elif (
+                            res
+                            and fusible_choice
+                            and can_fuse_with_registers(choice, res, ms1, ms2)
+                        ):
+                            ms_fused_choice = choice
+                            break
 
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)

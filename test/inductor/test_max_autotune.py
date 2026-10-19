@@ -259,6 +259,74 @@ class TestMaxAutotune(TestCase):
         has_datacenter_blackwell_tma_device(),
         "Hopper persistent TMA template is shadowed on Blackwell",
     )
+    def test_persistent_tma_block_local_reduction_oversized_tile_fallback(self):
+        def f(a, b):
+            return (a @ b).view(1, 1, 2, 128).sum((1, 3))
+
+        a = torch.randn(1, 16, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(16, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with config.patch(
+            {
+                "benchmark_epilogue_fusion": False,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check_not("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
+    @parametrize("hints", ([], [64]))
+    def test_persistent_tma_block_local_reduction_uses_static_heuristic(self, hints):
+        def f(a, b):
+            return (a @ b).view(2, 128, 2, 128).sum((1, 3))
+
+        a = torch.randn(256, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device=GPU_TYPE, dtype=torch.bfloat16)
+        with (
+            config.patch(
+                {
+                    "benchmark_epilogue_fusion": True,
+                    "multi_kernel_hints": hints,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": "1",
+                    "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+                }
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_codegened_module",
+                side_effect=AssertionError("unexpected fusion benchmark"),
+            ),
+            mock.patch.object(
+                Scheduler,
+                "benchmark_fused_nodes",
+                side_effect=AssertionError("unexpected fusion benchmark"),
+            ),
+        ):
+            actual, code = run_and_get_code(torch.compile(f), a, b)
+
+        self.assertEqual(actual, f(a, b))
+        FileCheck().check("block_local_").run(code[0])
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(),
+        "Hopper persistent TMA template is shadowed on Blackwell",
+    )
     @parametrize("groups", ((2, 2), (3, 2)))
     def test_persistent_tma_block_local_reduction_indexed_input(self, groups):
         groups_m, groups_n = groups
@@ -5985,6 +6053,11 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 (192, 128), (128, 128)
             )
         )
+        self.assertFalse(
+            TritonScheduling._template_local_reduction_tile_is_compatible(
+                (16, 128), (1, 16), (1, 10256)
+            )
+        )
 
     def test_template_local_reduction_plan_cache(self):
         from torch._inductor import ir
@@ -6129,8 +6202,17 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
 
         self.assertEqual(actual, f(a, b))
         self.assertEqual(set(selected_callers), {None, 64})
+        self.assertEqual(
+            selected_callers[None].template_local_reduction_tile, (128, 128)
+        )
+        self.assertNotEqual(
+            selected_callers[64].template_local_reduction_tile, (128, 128)
+        )
         for choice in selected_callers.values():
-            self.assertEqual(choice.template_local_reduction_tile, (128, 128))
+            self.assertIn(
+                choice.template_local_reduction_tile,
+                ((128, 128), (128, 256), (256, 128), (256, 256)),
+            )
         FileCheck().check("block_local_").run(code[0])
 
     @unittest.skipIf(

@@ -8600,20 +8600,37 @@ class TritonScheduling(SIMDScheduling):
         return isinstance(
             choice, ir.TritonTemplateCallerBase
         ) and TritonScheduling._template_local_reduction_tile_is_compatible(
-            choice.template_local_reduction_tile, block
+            choice.template_local_reduction_tile, block, choice.layout.size
         )
 
     @staticmethod
     def _template_local_reduction_tile_is_compatible(
-        tile: tuple[int, int] | None, block: tuple[int, int]
+        tile: tuple[int, int] | None,
+        block: tuple[int, int],
+        output_size: Sequence[sympy.Expr] | None = None,
     ) -> bool:
-        return tile is not None and all(
-            tile_size >= block_size
-            and tile_size % block_size == 0
-            and V.graph.sizevars.statically_known_power_of_2(
-                sympy.Integer(tile_size // block_size)
+        def tile_fits_output(tile_size: int, size: sympy.Expr) -> bool:
+            if isinstance(size, (int, sympy.Integer)):
+                return tile_size <= size
+            return V.graph.sizevars.statically_known_leq(tile_size, size)
+
+        return (
+            tile is not None
+            and (
+                output_size is None
+                or all(
+                    tile_fits_output(tile_size, size)
+                    for tile_size, size in zip(tile, output_size)
+                )
             )
-            for tile_size, block_size in zip(tile, block)
+            and all(
+                tile_size >= block_size
+                and tile_size % block_size == 0
+                and V.graph.sizevars.statically_known_power_of_2(
+                    sympy.Integer(tile_size // block_size)
+                )
+                for tile_size, block_size in zip(tile, block)
+            )
         )
 
     @staticmethod
@@ -8874,7 +8891,9 @@ class TritonScheduling(SIMDScheduling):
             )
         else:
             tile_is_compatible = self._template_local_reduction_tile_is_compatible(
-                template.template_local_reduction_tile, plan.block
+                template.template_local_reduction_tile,
+                plan.block,
+                template.get_size(),
             )
         if not tile_is_compatible:
             return None
