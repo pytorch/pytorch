@@ -389,6 +389,35 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
             [{"knob": 0.5}, {"knob": 0.25}, {"knob": 0.75}],
         )
 
+    def test_annotate_guards_on_dictionary_keys(self):
+        executed_graphs = []
+
+        def fn(x, annotation):
+            with fx_traceback.annotate(annotation):
+                return torch.sin(x), annotation
+
+        def backend(gm, _):
+            def run(*args):
+                executed_graphs.append(gm)
+                return gm.forward(*args)
+
+            return run
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        x = torch.randn(3)
+        for annotation in ({"stage": 0}, {}, {"stage": 0}, {}, {"stage": 0}):
+            out, alias = opt_fn(x, annotation)
+            self.assertEqual(out, x.sin())
+            self.assertIs(alias, annotation)
+            metadata = self._custom_meta_by_target(executed_graphs[-1:], (torch.sin,))
+            self.assertEqual(metadata[0] or {}, annotation)
+            self.assertIsNone(fx_traceback._get_current_annotation())
+
+        self.assertIsNot(executed_graphs[0], executed_graphs[1])
+        self.assertIs(executed_graphs[0], executed_graphs[2])
+        self.assertIs(executed_graphs[1], executed_graphs[3])
+        self.assertIs(executed_graphs[0], executed_graphs[4])
+
     def test_annotate_dynamic_int_is_unsupported(self):
         def fn(x):
             with fx_traceback.annotate({"seq_len": x.shape[0]}):
