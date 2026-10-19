@@ -34,9 +34,10 @@ tensor. Build on that contract:
 
 - If the feature creates a replacement allocation for existing data (a
   materialized copy, say), allocate it on the original allocation stream, so
-  the same rule protects it. Get the stream from the allocator (for example
-  `Allocator::allocation_stream_info` where available) rather than assuming
-  the current stream.
+  the same rule protects it. Get the stream from the allocator rather than
+  assuming the current stream. `c10::Allocator` has no public query for it
+  today (`Allocator::allocation_stream_info` is proposed in #200800, not
+  landed); until one exists, take the fallback below.
 - If work runs on another stream, order it in both directions: the working
   stream waits for the allocation stream before starting, and the allocation
   stream waits for the work afterwards.

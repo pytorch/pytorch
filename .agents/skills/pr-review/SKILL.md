@@ -138,10 +138,10 @@ The `feature-design` skill ([../feature-design/SKILL.md](../feature-design/SKILL
 In PR review, what exactly are we looking for when we're trying to evaluate design?  In order of subtlety:
 
 - Some PRs flagrantly violate design principles, because the implementor was hyperfocused on just fixing a bug or getting a feature done in the least lines of code possible.  If by simply being prompted to think about design you can identify a problem, this is worth bringing up.
-- PyTorch can be thought of encoding a "design philosophy" (recorded as the feature design skill, but to be complemented by what the code actually does), where there is no single right trade off but PyTorch has some rules where by we tend to prefer making certain tradeoffs.  Our understanding if what tradeoffs are correct evolves over time as our understanding improves and as the world changes, but in general for a given local fix we want to abide by the existing philosophy.  Features that make tradeoffs that, while valid, are very different from how the library currently works, are suspect.
+- PyTorch can be thought of as encoding a "design philosophy" (recorded as the feature design skill, but to be complemented by what the code actually does), where there is no single right trade off but PyTorch has some rules whereby we tend to prefer making certain tradeoffs.  Our understanding of what tradeoffs are correct evolves over time as our understanding improves and as the world changes, but in general for a given local fix we want to abide by the existing philosophy.  Features that make tradeoffs that, while valid, are very different from how the library currently works, are suspect.
 - We should always be on the lookout for strict Pareto improvements: sometimes there is a free lunch and we just need to discover it.  (Be wary of free lunches that come from an increase in code complexity though!)
 
-If the scenario shows an actual defect (wrong results, a race, a crash), it is a regular finding in the section for its consequence, not Design Discussion.
+If a concrete scenario shows an actual defect (wrong results, a race, a crash), it is a regular finding in the section for its consequence, not Design Discussion.
 
 ## Directory Review Guides (`REVIEW.md`)
 

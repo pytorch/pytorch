@@ -11,12 +11,13 @@ on:
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
-      # Both skill directories are under contract here: the suite asserts the
+      # The skill directories are under contract here: the suite asserts the
       # rubric names no severity the sanitizer would drop, and the rubric
-      # delegates to pr-review. Without these a skill-only change skips the
-      # one check that would catch it.
+      # delegates to pr-review, which delegates to feature-design. Without
+      # these a skill-only change skips the one check that would catch it.
       - ".agents/skills/pr-review-readiness/**"
       - ".agents/skills/pr-review/**"
+      - ".agents/skills/feature-design/**"
   pull_request:
     paths:
       - "scripts/pr_review/**"
@@ -24,12 +25,13 @@ on:
       - ".github/workflows/hardened-pr-review.yml"
       - ".github/workflows/hardened-pr-review-run.yml"
       - ".github/workflows/pr-review-scripts-test.yml"
-      # Both skill directories are under contract here: the suite asserts the
+      # The skill directories are under contract here: the suite asserts the
       # rubric names no severity the sanitizer would drop, and the rubric
-      # delegates to pr-review. Without these a skill-only change skips the
-      # one check that would catch it.
+      # delegates to pr-review, which delegates to feature-design. Without
+      # these a skill-only change skips the one check that would catch it.
       - ".agents/skills/pr-review-readiness/**"
       - ".agents/skills/pr-review/**"
+      - ".agents/skills/feature-design/**"
 
 permissions:
   contents: read
