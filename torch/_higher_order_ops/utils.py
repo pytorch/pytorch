@@ -1139,11 +1139,15 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: tuple[Any, ...] | list[Any]):
-    allowed_types = (torch.Tensor, int, torch.SymInt)
-    if not all(
-        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
-    ):
+def validate_subgraph_args_types(
+    lifted_args: tuple[Any, ...] | list[Any],
+    extra_allowed_types: tuple[type, ...] = (),
+):
+    # Proxy: symbolic re-tracing replays calls with proxies, e.g. when a
+    # cached GraphModule is unpickled (_deserialize_graph_module).
+    allowed_types = (torch.Tensor, int, torch.SymInt, torch.fx.Proxy)
+    allowed_types += extra_allowed_types
+    if not all(isinstance(arg, allowed_types) for arg in lifted_args):
         raise AssertionError(
             f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
         )
