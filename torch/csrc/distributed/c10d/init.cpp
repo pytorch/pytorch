@@ -1423,7 +1423,10 @@ Args:
           R"(
 Forget the registered tensor so another can be registered. This is
 collective. Backends may keep the underlying memory registered until it is
-freed; with NCCL, every rank must then free it in the same order.
+freed; with NCCL, every rank must then free it in the same order. To avoid
+that, register the pool with ``register_mem_pool`` and, on every rank,
+synchronize, call this, call ``deregister_mem_pool``, then free the memory
+and call ``destroy_process_group``.
 )")
       .def(
           "put",
