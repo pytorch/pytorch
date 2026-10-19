@@ -22975,6 +22975,48 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_row_broadcast_pointwise_uses_2d_tiling(self):
+            # Per-row operands of a pointwise kernel over long rows should be
+            # loaded once per block row ([rows, cols] tiling) rather than
+            # gathered per element from a flattened index, when they are at least
+            # as many as the inputs streamed along the row.
+            def normalize(x, mean, rstd):
+                return ((x.float() - mean) * rstd).to(x.dtype)
+
+            x = torch.randn(64, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+            mean = torch.randn(64, 1, device=GPU_TYPE)
+            rstd = torch.rand(64, 1, device=GPU_TYPE)
+            result, code = run_and_get_code(torch.compile(normalize), x, mean, rstd)
+            self.assertEqual(result, normalize(x, mean, rstd))
+            self.assertIn("ynumel", " ".join(code))
+
+            # Short rows and rows that are not a multiple of 16 bytes (1025 fp32
+            # elements) keep the flat 1D kernel.
+            for shape in [(64, 512), (64, 1025)]:
+                x32 = torch.randn(shape, device=GPU_TYPE)
+                torch._dynamo.reset()
+                result, code = run_and_get_code(
+                    torch.compile(normalize), x32, mean, rstd
+                )
+                self.assertEqual(result, normalize(x32, mean, rstd))
+                self.assertNotIn("ynumel", " ".join(code))
+
+            # Tiling is disabled with max_tiles=1.
+            torch._dynamo.reset()
+            with config.patch({"triton.max_tiles": 1}):
+                _, code = run_and_get_code(torch.compile(normalize), x, mean, rstd)
+            self.assertNotIn("ynumel", " ".join(code))
+
+            # A per-row read of a buffer that is also streamed does not count, so
+            # x * x[:, :1] keeps the flat 1D kernel.
+            def scale_by_first(x):
+                return x * x[:, :1]
+
+            torch._dynamo.reset()
+            result, code = run_and_get_code(torch.compile(scale_by_first), x)
+            self.assertEqual(result, scale_by_first(x))
+            self.assertNotIn("ynumel", " ".join(code))
+
         def test_size_one_innermost_reduction_dim_stays_unsplit(self):
             # A read that is contiguous along one reduction var and constant along
             # another (a size-1 or broadcast innermost dim) still votes INNER, so
