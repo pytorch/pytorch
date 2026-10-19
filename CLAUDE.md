@@ -36,7 +36,10 @@ When asked to review a PR, always use the /pr-review skill.
 # Deprecations
 
 Any change that deprecates, freezes, or removes a public API or component MUST
-follow the /deprecate-feature skill. The change is not complete until:
+follow the /deprecate-feature skill, which implements the
+[backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy).
+The wiki policy is the source of truth for warning periods. The change is not
+complete until:
 
 - the warning names the start version, the removal version (at least two
   releases later), and its tracking issue URL;

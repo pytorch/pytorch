@@ -9,6 +9,7 @@ body:
     value: >
       One issue per deprecated API or frozen component. After filing, attach this issue as a sub-issue of the
       umbrella [#201298](https://github.com/pytorch/pytorch/issues/201298).
+      Warning periods follow the [backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy).
       See [AI-Assisted Development](https://github.com/pytorch/pytorch/blob/main/AI_POLICY.md) policy.
 - type: input
   id: api

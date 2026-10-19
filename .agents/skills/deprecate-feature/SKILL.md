@@ -11,7 +11,7 @@ The work is not done until every item in the [Done checklist](#done-checklist) h
 
 ## Lifecycle
 
-This follows the [backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) for stable components. Prototype and beta components may break without a deprecation period.
+This follows the [backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) for stable components; if this skill and the wiki disagree, follow the wiki. Prototype and beta components may break without a deprecation period.
 
 1. **Deprecate (release N).** Warn on use, point to the replacement, update docs, and stop using the API inside PyTorch itself.
 2. **Keep warning for at least two releases** (and 180 days of nightlies). The earliest removal target is N+2.
