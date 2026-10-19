@@ -740,6 +740,11 @@ class DummyDDP(nn.Module):
         return self.module(*args, **kwargs)
 
 
+# Each new group adds NCCL communicators that hold /dev/shm until the processes
+# exit, so share one size-1 expert group per parent group across model builds.
+_MOE_EXPERT_GROUPS: dict[dist.ProcessGroup, dist.ProcessGroup] = {}
+
+
 class MixtureOfExperts(NestedWrappedModule):
     def __init__(
         self,
@@ -780,10 +785,11 @@ class MixtureOfExperts(NestedWrappedModule):
 
         if wrap_fsdp:
             # we create a process group of size 1 for the expert params
-            expert_group = torch.distributed.new_group(
-                [group.rank()]
-            )  # world size 1 means no shard
-            expert = FSDP(expert, expert_group, **fsdp_kwargs)  # type: ignore[assignment]
+            if group not in _MOE_EXPERT_GROUPS:
+                _MOE_EXPERT_GROUPS[group] = torch.distributed.new_group(
+                    [group.rank()]
+                )  # world size 1 means no shard
+            expert = FSDP(expert, _MOE_EXPERT_GROUPS[group], **fsdp_kwargs)  # type: ignore[assignment]
             shared = FSDP(shared, group, **fsdp_kwargs)  # type: ignore[assignment]
 
         self.module = nn.Sequential(
