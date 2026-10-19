@@ -650,9 +650,9 @@ def _checkpoint_impl(
     if torch.compiler._is_non_strict_tracing():
         from torch._functorch import config as functorch_config
 
-        if functorch_config.share_checkpoint_recompute:
+        if functorch_config.deterministic_recompute:
             raise NotImplementedError(
-                "share_checkpoint_recompute does not support non-strict train-step "
+                "deterministic_recompute does not support non-strict train-step "
                 "tracing: the recompute is traced as separate ops, so it can't be "
                 "shared with the forward. Disable the flag."
             )

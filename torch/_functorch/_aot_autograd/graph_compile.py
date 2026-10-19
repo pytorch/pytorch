@@ -63,9 +63,11 @@ from .autograd_cache import (
 )
 from .codegen import aggregate_runtime_wrapper_sources
 from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
+from .deterministic_recompute import deterministic_recompute
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
+    _should_disable_saved_tensors_hooks,
     AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -93,7 +95,6 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
-from .share_checkpoint_recompute import share_checkpoint_recompute
 from .subclass_utils import (
     compute_inner_input_info_from_subclass_meta,
     compute_inner_mutated_inp_indices_from_subclass_meta,
@@ -1042,6 +1043,11 @@ def run_joint_graph_passes_on_hops(
                 ) from e
             else:
                 raise
+
+        if config.deterministic_recompute:
+            deterministic_recompute(
+                new_fw_hop_gm, new_bw_hop_gm, num_fw_outputs, prefix=f"{identifier}_"
+            )
 
         # Save the new forward and backward graph modules
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
@@ -2020,8 +2026,8 @@ def _partition_joint_graph_into_fw_bw(
         num_fwd_outputs=num_inner_fwd_outputs,
         static_lifetime_input_indices=fw_metadata.static_input_indices,
     )
-    if config.share_checkpoint_recompute:
-        share_checkpoint_recompute(fw_module, bw_module, num_inner_fwd_outputs)
+    if config.deterministic_recompute:
+        deterministic_recompute(fw_module, bw_module, num_inner_fwd_outputs)
 
     rng_states = [
         n
@@ -2310,6 +2316,9 @@ def _aot_stage2a_partition(
                 )
             )
 
+            fw_metadata.disable_saved_tensors_hooks = (
+                _should_disable_saved_tensors_hooks()
+            )
             maybe_inline_graph_saved_tensors_hooks(
                 fw_module,
                 bw_module,
