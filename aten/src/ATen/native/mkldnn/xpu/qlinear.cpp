@@ -1,5 +1,9 @@
 #include <torch/library.h>
 
+#include <ATen/BlasBackend.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/ceil_div.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/mkldnn/xpu/qlinear.h>
 #include <c10/core/ScalarType.h>
@@ -7,6 +11,187 @@
 using namespace at::native::onednn;
 
 namespace at::native::xpu {
+
+namespace {
+
+using at::blas::ScalingType;
+using at::blas::SwizzleType;
+using at::native::scaled::convert_int_to_enum;
+
+Tensor& _woq_scaled_gemm(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_b,
+    const ScalingType scaling_choice_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  at::native::onednn::scaled_matmul(
+      mat_a,
+      mat_b,
+      out,
+      /*scale_a*/ std::nullopt,
+      scale_b,
+      /*scaling_choice_a*/ std::nullopt,
+      scaling_choice_b,
+      bias,
+      /*scale_result*/ std::nullopt,
+      /*use_fast_accum*/ false);
+  return out;
+}
+
+Tensor& _woq_scaled_tensorwise(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == at::kFloat8_e4m3fn ||
+          mat_b.scalar_type() == at::kFloat8_e5m2,
+      "woq_scaled_mm: TensorWise recipe requires mat_b to be fp8 "
+      "(Float8_e4m3fn or Float8_e5m2), got ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_b.numel() == 1 && scale_b.scalar_type() == kFloat,
+      "woq_scaled_mm: TensorWise scale_b must be a float32, got "
+      "dtype ",
+      scale_b.scalar_type(),
+      " and shape ",
+      scale_b.sizes());
+
+  return _woq_scaled_gemm(
+      mat_a, mat_b, scale_b, ScalingType::TensorWise, bias, out);
+}
+
+Tensor& _woq_scaled_rowwise(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  const int64_t N = mat_b.size(1);
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == at::kFloat8_e4m3fn ||
+          mat_b.scalar_type() == at::kFloat8_e5m2,
+      "woq_scaled_mm: RowWise recipe requires mat_b to be fp8 "
+      "(Float8_e4m3fn or Float8_e5m2), got ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_b.numel() == N && scale_b.scalar_type() == kFloat,
+      "woq_scaled_mm: RowWise scale_b must have ",
+      N,
+      " float32, got ",
+      scale_b.numel(),
+      " of dtype ",
+      scale_b.scalar_type());
+
+  return _woq_scaled_gemm(
+      mat_a, mat_b, scale_b, ScalingType::RowWise, bias, out);
+}
+
+Tensor& _woq_scaled_block128x128(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  const int64_t K = mat_a.size(-1);
+  const int64_t N = mat_b.size(1);
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == at::kFloat8_e4m3fn,
+      "woq_scaled_mm: BlockWise128x128 recipe requires mat_b to be "
+      "Float8_e4m3fn, got ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == ceil_div<int64_t>(N, 128) &&
+          scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+          (scale_b.scalar_type() == kFloat ||
+           scale_b.scalar_type() == kFloat8_e8m0fnu),
+      "woq_scaled_mm: BlockWise128x128 scale_b must be float32 or "
+      "float8_e8m0fnu with shape ",
+      ceil_div<int64_t>(N, 128),
+      " x ",
+      ceil_div<int64_t>(K, 128),
+      ", got dtype ",
+      scale_b.scalar_type(),
+      " and shape ",
+      scale_b.sizes());
+
+  Tensor sb = scale_b.t();
+  sb = sb.scalar_type() == kFloat8_e8m0fnu ? sb.to(kFloat) : sb;
+  sb = sb.is_contiguous() ? sb : sb.contiguous();
+
+  return _woq_scaled_gemm(
+      mat_a, mat_b, sb, ScalingType::BlockWise128x128, bias, out);
+}
+
+Tensor& _woq_scaled_mxfp8(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  const int64_t K = mat_a.size(-1);
+  const int64_t N = mat_b.size(1);
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == at::kFloat8_e4m3fn,
+      "woq_scaled_mm: BlockWise1x32 (MXFP8) recipe requires mat_b to be "
+      "Float8_e4m3fn, got ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 32) &&
+          scale_b.scalar_type() == kFloat8_e8m0fnu,
+      "woq_scaled_mm: BlockWise1x32 scale_b must be float8_e8m0fnu with "
+      "shape ",
+      N,
+      " x ",
+      ceil_div<int64_t>(K, 32),
+      ", got dtype ",
+      scale_b.scalar_type(),
+      " and shape ",
+      scale_b.sizes());
+
+  Tensor sb = scale_b.t();
+  sb = sb.is_contiguous() ? sb : sb.contiguous();
+
+  return _woq_scaled_gemm(
+      mat_a, mat_b, sb, ScalingType::BlockWise1x32, bias, out);
+}
+
+Tensor& _woq_scaled_mxfp4(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    Tensor& out) {
+  const int64_t K = mat_a.size(-1);
+  const int64_t N = mat_b.size(1);
+  TORCH_CHECK_VALUE(
+      mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2,
+      "woq_scaled_mm: BlockWise1x32 (MXFP4) recipe requires mat_b to be "
+      "Float4_e2m1fn_x2, got ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 32) &&
+          scale_b.scalar_type() == kFloat8_e8m0fnu,
+      "woq_scaled_mm: BlockWise1x32 scale_b must be float8_e8m0fnu with "
+      "shape ",
+      N,
+      " x ",
+      ceil_div<int64_t>(K, 32),
+      ", got dtype ",
+      scale_b.scalar_type(),
+      " and shape ",
+      scale_b.sizes());
+
+  Tensor sb = scale_b.t();
+  sb = sb.is_contiguous() ? sb : sb.contiguous();
+
+  return _woq_scaled_gemm(
+      mat_a, mat_b, sb, ScalingType::BlockWise1x32, bias, out);
+}
+
+} // namespace
 
 inline c10::ScalarType QLinearOnednnXPU::qlinear_decide_out_dtype(
     const at::Tensor& act,
@@ -256,6 +441,161 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
   return weight_transposed;
 }
 
+// Weight-only-quantization (WOQ) _scaled_mm: computes `mat_a @ mat_b + bias`
+// while applying scaling to `mat_b` only (`mat_a` stays full precision). Scales
+// are applicable when `mat_b` is of Float8 or Float4 type.
+//  Arguments:
+//    - `mat_a`: the activation, must be 2D [M, K], can be type
+//    `torch.bfloat16`, `torch.float16`, or `torch.float32`
+//    - `mat_b`: the weight, must be 2D [K, N], can be type
+//    `torch.float8_e4m3fn`, `torch.float8_e5m2`, or `torch.float4_e2m1fn_x2`
+//    - `scale_b_list`: a single-element list with the inverse scale of
+//    `mat_b`, whose shape/strides/dtype depend on the scaling scheme. For
+//    the block-wise recipes (BlockWise128x128 and BlockWise1x32/MXFP8/
+//    MXFP4), `scale_b_list[0]` is N-major -- shaped
+//    [N//block_n, K//block_k] -- and must be N-contiguous
+//    - `scale_recipe_b`: a single-element list with an integer
+//    corresponding to a `ScalingType` enum describing the scaling scheme
+//    used for `scale_b_list[0]`
+//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum
+//    describing the swizzling scheme for `scale_b_list[0]`.
+//        Not supported for XPU for now.
+//    - `bias`: the bias, can be type `torch.bfloat16`, `torch.float16`, or
+//    `torch.float32`
+Tensor QLinearOnednnXPU::woq_scaled_mm(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const at::ITensorListRef& scale_b_list,
+    at::IntArrayRef scale_recipe_b,
+    at::IntArrayRef swizzle_b,
+    const std::optional<Tensor>& bias) {
+  TORCH_CHECK(
+      mat_a.dim() == 2,
+      "woq_scaled_mm: mat_a must be 2D [M, K], got dim ",
+      mat_a.dim());
+  TORCH_CHECK(
+      mat_b.dim() == 2,
+      "woq_scaled_mm: mat_b must be 2D [K, N], got dim ",
+      mat_b.dim());
+
+  const int64_t M = mat_a.size(0);
+  const int64_t K = mat_a.size(1);
+  const int64_t N = mat_b.size(1);
+  Tensor out = at::empty({M, N}, mat_a.options());
+
+  if (M == 0 || K == 0 || N == 0) {
+    if (K == 0) {
+      out.zero_();
+    }
+    return out;
+  }
+
+  TORCH_CHECK(
+      mat_a.scalar_type() == at::kBFloat16 ||
+          mat_a.scalar_type() == at::kHalf || mat_a.scalar_type() == at::kFloat,
+      "woq_scaled_mm: mat_a must be bfloat16, half or float, got ",
+      mat_a.scalar_type());
+  const bool is_fp4 = mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2;
+  TORCH_CHECK(
+      is_fp4 || mat_b.scalar_type() == at::kFloat8_e4m3fn ||
+          mat_b.scalar_type() == at::kFloat8_e5m2,
+      "woq_scaled_mm: mat_b must be Float8_e4m3fn, Float8_e5m2 or "
+      "Float4_e2m1fn_x2 (packed), got ",
+      mat_b.scalar_type());
+
+  std::vector<Tensor> scale_b(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_b_ref(scale_b);
+
+  const int64_t K_multiplier = is_fp4 ? 2 : 1;
+  TORCH_CHECK(
+      mat_b.size(0) * K_multiplier == K,
+      "woq_scaled_mm: mat_b's contraction dim (",
+      mat_b.size(0) * K_multiplier,
+      ") must match mat_a's trailing dim (",
+      K,
+      ")");
+
+  if (bias.has_value()) {
+    TORCH_CHECK_VALUE(
+        bias->scalar_type() == kFloat ||
+            bias->scalar_type() == c10::ScalarType::BFloat16 ||
+            bias->scalar_type() == c10::ScalarType::Half,
+        "Bias must be Float32 or BFloat16 or Half, but got ",
+        bias->scalar_type());
+  }
+  {
+    auto bias_ = bias.has_value() ? *bias : Tensor();
+    std::vector<TensorArg> targs{
+        {out, "out", 0},
+        {mat_a, "mat_a", 1},
+        {mat_b, "mat_b", 2},
+        {bias_, "bias", 3},
+        {scale_b[0], "scale_b", 4}};
+    checkAllSameGPU(__func__, targs);
+  }
+
+  std::optional<Tensor> bias_opt = bias.has_value()
+      ? std::optional<Tensor>{*bias}
+      : std::optional<Tensor>{std::nullopt};
+
+  std::vector<int64_t> scale_recipe_b_vec(
+      scale_recipe_b.begin(), scale_recipe_b.end());
+  std::vector<int64_t> swizzle_b_vec(swizzle_b.begin(), swizzle_b.end());
+  auto scale_recipe_b_enum =
+      convert_int_to_enum<ScalingType>(scale_recipe_b_vec);
+  auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b_vec);
+
+  TORCH_CHECK_VALUE(
+      swizzle_b_enum.empty() ||
+          swizzle_b_enum.size() == scale_recipe_b_enum.size(),
+      "swizzle_b must be empty or match the number of scale_recipe_b "
+      "entries, got ",
+      swizzle_b_enum.size());
+  for (auto s : swizzle_b_enum) {
+    TORCH_CHECK_VALUE(
+        s == SwizzleType::NO_SWIZZLE,
+        "For XPU WOQ gemm, scale_b swizzle entries must all be NO_SWIZZLE");
+  }
+
+  Tensor mat_a_ = mat_a.is_contiguous() ? mat_a : mat_a.contiguous();
+  ScalingType scaling_choice_b = scale_recipe_b_enum[0];
+
+  switch (scaling_choice_b) {
+    case ScalingType::TensorWise:
+      _woq_scaled_tensorwise(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      break;
+    case ScalingType::RowWise:
+      _woq_scaled_rowwise(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      break;
+    case ScalingType::BlockWise128x128:
+      _woq_scaled_block128x128(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      break;
+    case ScalingType::BlockWise1x32:
+      if (mat_b.scalar_type() == at::kFloat8_e4m3fn) {
+        _woq_scaled_mxfp8(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      } else if (mat_b.scalar_type() == c10::ScalarType::Float4_e2m1fn_x2) {
+        _woq_scaled_mxfp4(mat_a_, mat_b, scale_b_ref[0], bias_opt, out);
+      } else {
+        TORCH_CHECK_VALUE(
+            false,
+            "woq_scaled_mm: BlockWise1x32 recipe requires mat_b to be "
+            "Float8_e4m3fn (MXFP8) or Float4_e2m1fn_x2 (MXFP4, packed), "
+            "got ",
+            mat_b.scalar_type());
+      }
+      break;
+    default:
+      TORCH_CHECK_VALUE(
+          false,
+          "woq_scaled_mm: unsupported scale_recipe_b ",
+          static_cast<int64_t>(scaling_choice_b),
+          "; only TensorWise, RowWise, BlockWise128x128 and BlockWise1x32 "
+          "are supported");
+  }
+
+  return out;
+}
+
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
@@ -272,6 +612,9 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.binary_tensor"),
       TORCH_FN(QLinearOnednnXPU::q_linear_pointwise_binary_tensor));
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::woq_scaled_mm"),
+      TORCH_FN(QLinearOnednnXPU::woq_scaled_mm));
 }
 
 } // namespace at::native::xpu
