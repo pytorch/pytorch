@@ -58,7 +58,7 @@ from ..create_parameter_op import (
     new_parameter_placeholder,
     tracable_create_parameter,
 )
-from ..device_interface import get_registered_device_interfaces
+from ..device_interface import DeviceInterface, get_registered_device_interfaces
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
@@ -2000,7 +2000,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_device_interface_stream(
             self, tx: "InstructionTranslatorBase", stream: "StreamVariable"
         ) -> StreamContextVariable:
-            return StreamContextVariable.create(tx, stream)
+            ctx_type = None
+            for _, device_interface in get_registered_device_interfaces():
+                if device_interface.stream is self.value:
+                    if (
+                        device_interface.StreamContext
+                        is not DeviceInterface.StreamContext
+                    ):
+                        ctx_type = device_interface.StreamContext
+                    break
+            return StreamContextVariable.create(
+                tx, stream, stream_context_type=ctx_type
+            )
 
         @register(torch.from_numpy)
         def handle_from_numpy(
