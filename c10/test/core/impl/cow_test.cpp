@@ -50,22 +50,12 @@ TEST_F(ContextTest, Basic) {
 
   context.increment_refcount();
 
-  {
-    // This is in a sub-scope because this call to decrement_refcount
-    // is expected to give us a shared lock.
-    auto result = context.decrement_refcount();
-    ASSERT_THAT(
-        std::holds_alternative<cow::COWDeleterContext::NotLastReference>(
-            result),
-        testing::IsTrue());
-    ASSERT_THAT(delete_count(), testing::Eq(0));
-  }
+  ASSERT_THAT(context.decrement_refcount().get(), testing::IsNull());
+  ASSERT_THAT(delete_count(), testing::Eq(0));
 
   {
     auto result = context.decrement_refcount();
-    ASSERT_THAT(
-        std::holds_alternative<cow::COWDeleterContext::LastReference>(result),
-        testing::IsTrue());
+    ASSERT_THAT(result.get(), testing::NotNull());
     // Result holds the DeleteTracker.
     ASSERT_THAT(delete_count(), testing::Eq(0));
   }
@@ -306,17 +296,8 @@ TEST(materialize_test, allocation_failure_keeps_storage_valid) {
 }
 
 TEST(lazy_clone_storage_test, cuda_without_allocator_is_rejected) {
-  auto* bytes = new std::byte[4];
   StorageImpl storage(
-      {},
-      4,
-      DataPtr(
-          bytes,
-          bytes,
-          +[](void* ptr) { delete[] static_cast<std::byte*>(ptr); },
-          Device(DeviceType::CUDA, 0)),
-      nullptr,
-      false);
+      {}, 4, DataPtr(nullptr, Device(DeviceType::CUDA, 0)), nullptr, false);
   EXPECT_THAT(
       [&] { cow::lazy_clone_storage(storage); },
       testing::ThrowsMessage<c10::Error>(
@@ -348,6 +329,8 @@ TEST(materialize_test, read_does_not_materialize_cow) {
   ASSERT_THAT(new_storage, testing::NotNull());
   ASSERT_TRUE(new_storage->has_materializer());
 
+  cow::record_done(original_storage);
+  cow::record_done(*new_storage);
   // Read-only access should NOT trigger COW materialization.
   (void)new_storage->data();
   ASSERT_TRUE(new_storage->has_materializer());
@@ -355,17 +338,6 @@ TEST(materialize_test, read_does_not_materialize_cow) {
 
   // Data should still be shared.
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
-}
-
-TEST(materialize_test, completion_is_noop_on_cpu) {
-  StorageImpl source({}, 4, GetCPUAllocator(), false);
-  auto clone = cow::lazy_clone_storage(source);
-  cow::record_done(source);
-  cow::record_done(*clone);
-  ASSERT_TRUE(source.has_materializer());
-  ASSERT_TRUE(clone->has_materializer());
-  ASSERT_EQ(source.data(), clone->data());
-  ASSERT_NE(source.mutable_data(), clone->data());
 }
 
 TEST(materialize_test, set_data_ptr_materializes) {

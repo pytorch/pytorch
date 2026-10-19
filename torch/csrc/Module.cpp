@@ -3595,27 +3595,24 @@ Call this whenever a new thread is created in order to propagate values from
       },
       py::arg("tensor"),
       R"doc(
-Record an asynchronous completion boundary for this storage's CUDA COW uses.
+Record completion of earlier CUDA COW uses on the current stream without blocking the CPU.
 
-First make the current stream wait for all earlier uses through this tensor,
-its storage aliases (including views), and saved pointers. Include uses before
-the first lazy clone and copies made during materialization. Serialize this
-call with all other host accesses to the storage and its aliases; GPU stream
-waits do not provide host-thread exclusion.
+First join all earlier uses through this tensor, storage aliases (including views),
+and saved pointers onto the current stream. Include uses before the first lazy clone
+and materializing copies. Serialize this call with all host accesses to that storage;
+GPU waits do not serialize host threads. Missing a use can cause data corruption.
 
-The call records completion events and releases the old COW allocation retained
-after materialization. It does not change the tensor's values or current pointer,
-and it does not block the CPU. Independent lazy clones have their own completion
-state: completing ``x`` does not complete ``x._lazy_clone()``.
+Completion releases the old reference retained after materialization, allowing siblings
+to steal it. The current reference, values, and pointer are unchanged. Independent lazy
+clones have separate completion state; sharing alone preserves source completion.
 
-For a current COW reference, later data access, including ``const_data_ptr()``,
-invalidates the completion marker. Do not reuse saved pointers covered by this
-call; obtain a fresh pointer first. After new uses, complete again or join them
-back onto the allocation stream before releasing the storage.
+Later data access, including ``const_data_ptr()``, cancels current-reference completion.
+Obtain fresh pointers before new work; never reuse pointers covered by this call.
+After new uses, complete again or join them back onto the allocation stream before
+storage release. Renewal preserves the previous completion's dependencies.
 
-Completion must occur in the same capture as the COW context, or outside capture
-if the context was created outside capture. It has no effect on CPU storage or
-storage without a current or retained COW reference.
+Completion must stay within the context's capture, or outside capture for an eager
+context. It has no effect on CPU storage or storage without COW references.
 
 Args:
     tensor (Tensor): Tensor whose storage's earlier COW uses are complete on
@@ -3623,6 +3620,8 @@ Args:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> import torch
     >>> x = torch.ones(1024, device="cuda")
     >>> y = x._lazy_clone()
     >>> x.add_(1)  # Materializes x; its storage retains the old allocation.

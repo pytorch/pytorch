@@ -29,8 +29,8 @@ C10_API bool is_cow_data_ptr(const c10::DataPtr& data_ptr);
 // MaterializeFn for COW storages. Copies shared data on write.
 C10_API void materialize_cow(StorageImpl* storage);
 
-// Called on every read or write data-pointer access to COW storage. Invalidates
-// prior CUDA completion and rejects access from a different graph capture.
+// Called on CUDA COW data-pointer access. Invalidates prior completion and
+// rejects access from a different graph capture.
 C10_API void check_cow_read(const StorageImpl* storage);
 
 // Record completion of this storage's current and retained CUDA COW uses on the

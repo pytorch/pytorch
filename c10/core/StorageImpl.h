@@ -29,6 +29,7 @@ struct C10_API StorageExtraMeta {
 };
 
 namespace impl::cow {
+C10_API bool has_simple_data_ptr(const StorageImpl& storage);
 C10_API void materialize_cow(StorageImpl* storage);
 C10_API void check_cow_read(const StorageImpl* storage);
 C10_API void record_done(StorageImpl& storage);
@@ -219,13 +220,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const void* data() const {
-    if (C10_UNLIKELY(has_immutable_data_ptr_check_)) {
-      if (throw_on_immutable_data_ptr_) {
-        throw_data_ptr_access_error();
-      }
-      impl::cow::check_cow_read(this);
-    }
-    return data_ptr_.get();
+    return data_ptr().get();
   }
 
   void* mutable_data() {
@@ -385,6 +380,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
  protected:
+  friend bool c10::impl::cow::has_simple_data_ptr(const StorageImpl&);
   friend void c10::impl::cow::materialize_cow(StorageImpl*);
   friend void c10::impl::cow::check_cow_read(const StorageImpl*);
   friend void c10::impl::cow::record_done(StorageImpl&);
@@ -403,7 +399,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  private:
   void refresh_has_data_ptr_check() {
     has_immutable_data_ptr_check_ = throw_on_immutable_data_ptr_ ||
-        materialize_fn_ == &impl::cow::materialize_cow;
+        (materialize_fn_ == &impl::cow::materialize_cow &&
+         data_ptr_.device().is_cuda());
     has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
         throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
         throw_on_immutable_data_ptr_;

@@ -25,10 +25,9 @@ auto cow::COWDeleterContext::increment_refcount() -> void {
 }
 
 auto cow::COWDeleterContext::decrement_refcount(
-    std::unique_ptr<COWCompletion> completion)
-    -> std::variant<NotLastReference, LastReference> {
+    std::unique_ptr<COWCompletion> completion) -> LastReference {
   if (stream_) {
-    std::unique_lock lock(mutex_);
+    std::lock_guard lock(mutex_);
     if (completion) {
       completion->next = std::move(completions_);
       completions_ = std::move(completion);
@@ -36,21 +35,16 @@ auto cow::COWDeleterContext::decrement_refcount(
       needs_stream_wait_ = true;
     }
   }
-  // Take the lock before publishing the decrement: another reference can
-  // otherwise delete the context before this thread acquires its lock.
-  std::shared_lock shared_lock(mutex_);
+  // Publish dependencies and unlock before the decrement can delete us.
   auto refcount = --refcount_;
   TORCH_INTERNAL_ASSERT(refcount >= 0, refcount);
   if (refcount == 0) {
-    shared_lock.unlock();
-    std::unique_lock lock(mutex_);
     auto result = std::move(data_);
-    lock.unlock();
     delete this;
-    return {std::move(result)};
+    return result;
   }
 
-  return shared_lock;
+  return {nullptr, nullptr};
 }
 
 void cow::COWDeleterContext::wait_for_completion(Stream stream) {
@@ -81,9 +75,7 @@ cow::COWReference::~COWReference() {
   }
 }
 
-auto cow::COWReference::release() -> std::variant<
-    COWDeleterContext::NotLastReference,
-    COWDeleterContext::LastReference> {
+auto cow::COWReference::release() -> COWDeleterContext::LastReference {
   auto* context = std::exchange(ctx, nullptr);
   return context->decrement_refcount(
       completed ? std::move(completion) : nullptr);

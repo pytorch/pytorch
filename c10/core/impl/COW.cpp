@@ -28,7 +28,6 @@ at::DataPtr copy_data_ptr(const at::DataPtr& data_ptr) {
 }
 
 c10::intrusive_ptr<StorageImpl> eager_clone(StorageImpl& storage) {
-  c10::DeviceGuard guard(storage.device());
   return make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
@@ -41,7 +40,7 @@ c10::intrusive_ptr<StorageImpl> eager_clone(StorageImpl& storage) {
 } // namespace
 
 bool has_simple_data_ptr(const c10::StorageImpl& storage) {
-  const auto& data_ptr = storage.data_ptr();
+  const auto& data_ptr = storage.data_ptr_;
   const auto* allocator = storage.allocator();
   return allocator != nullptr ? allocator->is_simple_data_ptr(data_ptr)
                               : data_ptr.get_context() == data_ptr.get();
@@ -53,9 +52,6 @@ bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
 
 void check_cow_read(const StorageImpl* storage) {
   const auto& data_ptr = storage->data_ptr_;
-  if (!data_ptr.device().is_cuda()) {
-    return;
-  }
   c10::DeviceGuard guard(data_ptr.device());
   auto* ref = data_ptr.cast_context<COWReference>(cow_deleter);
   TORCH_INTERNAL_ASSERT(ref != nullptr);
@@ -86,7 +82,10 @@ void record_done(StorageImpl& storage) {
 }
 
 c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
-  const auto& data_ptr = storage.data_ptr();
+  if (storage.throw_on_immutable_data_ptr()) {
+    storage.data_ptr();
+  }
+  const auto& data_ptr = storage.data_ptr_;
   const bool simple = has_simple_data_ptr(storage);
   if (!simple && !is_cow_data_ptr(data_ptr)) {
     return nullptr;
@@ -136,7 +135,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     }
   }
 
-  std::optional<DataPtr> new_data_ptr;
   if (simple) {
     auto ref = std::make_unique<COWReference>();
     ref->ctx = new COWDeleterContext(
@@ -148,12 +146,10 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
     storage.set_materializer(&materialize_cow);
   }
   TORCH_INTERNAL_ASSERT(storage.has_materializer());
-  new_data_ptr = copy_data_ptr(data_ptr);
-
   auto result = make_storage_impl(
       StorageImpl::use_byte_size_t(),
       storage.sym_nbytes(),
-      std::move(*new_data_ptr),
+      copy_data_ptr(data_ptr),
       storage.allocator(),
       storage.resizable(),
       storage.device_type());
@@ -180,7 +176,8 @@ void materialize_cow(StorageImpl* storage) {
       ctx->wait_for_completion(stream);
     } else {
       TORCH_CHECK(
-          capture_id == ctx->capture_id(),
+          capture_id == ctx->capture_id() &&
+              impl->getStreamCaptureId(*ctx->stream()) == ctx->capture_id(),
           "Cannot materialize shared COW storage across CUDA graph capture "
           "boundaries; resolve the lazy clone before capture ends");
       auto& retired = storage->get_extra_meta().cow_retired_data;
@@ -198,9 +195,8 @@ void materialize_cow(StorageImpl* storage) {
     copy = storage->allocator()->clone(data_ptr.get(), storage->nbytes());
   }
 
-  auto result = ref->release();
+  auto data = ref->release();
   if (!copy) {
-    auto data = std::get<COWDeleterContext::LastReference>(std::move(result));
     TORCH_INTERNAL_ASSERT(data.get() == data_ptr.get());
     auto* ptr = data.release();
     copy = DataPtr(ptr, ptr, data.get_deleter(), data_ptr.device());

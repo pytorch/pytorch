@@ -8,9 +8,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
-#include <shared_mutex>
-#include <variant>
 
 namespace c10::impl::cow {
 
@@ -51,31 +50,18 @@ class C10_API COWDeleterContext {
   // Increments the current refcount.
   void increment_refcount();
 
-  // See README-cow.md in this directory to understand the locking
-  // strategy.
-
-  // Represents a reference to the context.
-  //
-  // This is returned by decrement_refcount to allow the caller to
-  // copy the data under the shared lock.
-  using NotLastReference = std::shared_lock<std::shared_mutex>;
-
-  // Represents the last reference to the context.
-  //
-  // Returned for the last reference. CUDA materialization must establish
-  // completion dependencies before taking ownership.
   using LastReference = std::unique_ptr<void, DeleterFnPtr>;
 
-  // Decrements the refcount, returning a handle indicating what to
-  // do with it.
-  std::variant<NotLastReference, LastReference> decrement_refcount(
+  // Returns ownership on the last release, otherwise null. CUDA callers
+  // must establish completion dependencies before taking ownership.
+  LastReference decrement_refcount(
       std::unique_ptr<COWCompletion> completion = nullptr);
 
  private:
   // Destroyed by decrement_refcount() when the last reference is released.
   ~COWDeleterContext();
 
-  std::shared_mutex mutex_;
+  std::mutex mutex_;
   std::unique_ptr<void, DeleterFnPtr> data_;
   std::atomic<std::int64_t> refcount_ = 1;
   // CUDA allocation/reuse stream; nullopt for CPU and other synchronous
@@ -93,10 +79,7 @@ struct C10_API COWReference {
   ~COWReference();
 
   void record_done();
-  std::variant<
-      COWDeleterContext::NotLastReference,
-      COWDeleterContext::LastReference>
-  release();
+  COWDeleterContext::LastReference release();
 
   COWDeleterContext* ctx;
   std::atomic<bool> completed = false;
