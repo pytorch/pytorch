@@ -31,7 +31,7 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
@@ -77,6 +77,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -835,6 +836,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     ],
                 )
             if isinstance(annotation, variables.ConstDictVariable):
+                if annotation.source and not is_constant_source(annotation.source):
+                    annotation.install_dict_keys_match_guard()
                 annotation_dict = {
                     k.vt.as_python_constant(): annotation_constant(v)
                     for k, v in annotation.items.items()
@@ -3054,11 +3057,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            device = None
+            device_arg = None
             if kwargs and "device" in kwargs:
-                device = torch.device(as_python_device(kwargs["device"]))
+                device_arg = as_python_device(kwargs["device"])
             elif args:
-                device = torch.device(as_python_device(args[0]))
+                device_arg = as_python_device(args[0])
+            # An explicit None means "current device", same as no argument.
+            device = None if device_arg is None else torch.device(device_arg)
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -3481,7 +3486,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
             from .constant import ConstantVariable
-            from .dicts import ConstDictVariable
+            from .dicts import ConstDictVariable, OrderedDictVariable
             from .lists import BaseListVariable
             from .tensor import _contains_graph_intermediate, TensorVariable
 
@@ -3550,6 +3555,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "Or restructure your code so autograd.grad() and compiled_autograd don't overlap.",
                     ],
                 )
+
+            inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
+            inputs_mapping_keys = None
+            result_type = (
+                OrderedDictVariable
+                if isinstance(inputs_var, OrderedDictVariable)
+                else ConstDictVariable
+            )
+            if (
+                isinstance(inputs_var, variables.MappingProxyVariable)
+                and inputs_var.source
+            ):
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            if inputs_var is not None and issubclass(inputs_var.python_type(), Mapping):
+                if isinstance(inputs_var, OrderedDictVariable) and inputs_var.source:
+                    install_guard(
+                        inputs_var.source.make_guard(
+                            GuardBuilder.ORDERED_DICT_KEYS_MATCH
+                        )
+                    )
+                keys_and_values = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.unpack_mapping_keys_and_values),
+                    [inputs_var],
+                    {},
+                )
+                keys, inputs_as_tuple = keys_and_values.unpack_var_sequence(tx)
+                inputs_mapping_keys = keys.unpack_var_sequence(tx)  # key VTs for `zip`
+                if len(args) >= 2:
+                    args = (args[0], inputs_as_tuple, *args[2:])
+                else:
+                    kwargs = {**kwargs, "inputs": inputs_as_tuple}
 
             # Check for external GradientEdge objects in outputs and inputs args
             # if there is it will be a graph break
@@ -3684,16 +3727,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
 
-            # Convert dict inputs to tuple for the FX graph. The engine
-            # always operates on flat tuples; we reconstruct the dict after.
-            inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
-            if isinstance(inputs_var, ConstDictVariable):
-                inputs_as_tuple = TupleVariable(list(inputs_var.items.values()))
-                if len(args) >= 2:
-                    args = (args[0], inputs_as_tuple, *args[2:])
-                else:
-                    kwargs = {**kwargs, "inputs": inputs_as_tuple}
-
             with (
                 torch.fx.traceback.preserve_node_meta(),
                 torch.fx.traceback._set_autograd_backward(),
@@ -3705,15 +3738,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             result = wrap_fx_proxy(tx=tx, proxy=proxy)
 
-            if isinstance(inputs_var, ConstDictVariable):
+            if inputs_mapping_keys is not None:
                 if not isinstance(result, BaseListVariable):
                     raise AssertionError(
                         f"Expected BaseListVariable from autograd.grad with dict inputs, "
                         f"got {type(result)}"
                     )
-                keys: list[VariableTracker] = [k.vt for k in inputs_var.items]
-                items = dict(zip(keys, result.items, strict=True))
-                return ConstDictVariable(items)
+                items = dict(zip(inputs_mapping_keys, result.items, strict=True))
+                return result_type(items)
             return result
 
         @register(torch._functorch.eager_transforms._set_tensor_requires_grad)
@@ -3894,18 +3926,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         if self.is_tensor_method():
+            from .tensor import TensorVariable
+
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
-            if args and args[0].is_tensor():
+            if args and isinstance(args[0], TensorVariable):
                 tensor_var = args[0]
                 # Check if input tensor and inplace_view op specifically
-                if tensor_var.source is not None and hasattr(torch.ops.aten, name):
+                if name.endswith("_") and hasattr(torch.ops.aten, name):
                     fn = getattr(torch.ops.aten, name)
                     if (
                         hasattr(fn, "overloads")
                         and hasattr(fn, fn.overloads()[0])
                         and torch.Tag.inplace_view
                         in getattr(fn, fn.overloads()[0]).tags
+                        and tensor_var.graph_input_source(tx) is not None
                     ):
                         unimplemented(
                             gb_type="Inplace op on input tensor",

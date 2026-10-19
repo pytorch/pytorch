@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     skipIfWindows,
+    TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIf,
@@ -493,6 +494,29 @@ class TestLibtorchAgnostic(TestCase):
         result = stable_op(out, a, b, torch.float32)
         self.assertEqual(out, torch_op(a, b, out_dtype=torch.float32))
         self.assertEqual(id(result), id(out))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_flip(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = torch.arange(24, device=device).reshape(2, 3, 4)
+        dims = [-1, 0]
+        result = libtorch_agnostic.ops.my_flip(t, dims)
+        self.assertEqual(result, torch.flip(t, dims))
+
+    @skipIfWindows(msg="TemporaryFileName cannot unlink a memory-mapped file")
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_from_file(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        data = bytearray(range(256))
+        with TemporaryFileName() as path:
+            Path(path).write_bytes(data)
+            result = libtorch_agnostic.ops.my_from_file(
+                path, shared=False, size=len(data), dtype=torch.uint8
+            )
+            self.assertEqual(result, torch.frombuffer(data, dtype=torch.uint8))
 
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the

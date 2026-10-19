@@ -2003,6 +2003,7 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
         raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
+    utils.check_shell_dtype_cast(a.dtype, dtype)
 
     # dtype conversion preserves dense strides
     if torch._prims_common.is_non_overlapping_and_dense_or_false(a):

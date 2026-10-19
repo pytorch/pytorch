@@ -26,6 +26,7 @@ from copy import deepcopy
 from functools import partial, reduce
 from itertools import product
 from operator import mul
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import torch
@@ -2774,26 +2775,59 @@ class TestAutograd(TestCase):
             lambda: torch.autograd.backward(fn(), gradient, inputs=[]),
         )
 
-    def test_grad_dict_inputs(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_grad_dict_inputs(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        z = x**2 + y * x + y**2
+        z = x**2 + y * x + 2 * y**2
 
-        inputs = {"x": x, "y": y}
+        inputs = mapping_cls(OrderedDict([("x", x), ("y", y)]))
         result = torch.autograd.grad(z.sum(), inputs)
-        self.assertIsInstance(result, dict)
-        self.assertEqual(set(result.keys()), {"x", "y"})
+        # Result type is OrderedDict if input is an OrderedDict, otherwise (any other mapping type)
+        # the result type is always a dict.
+        self.assertIs(type(result), OrderedDict if mapping_cls is OrderedDict else dict)
+        self.assertEqual(list(result), ["x", "y"])
         self.assertEqual(result["x"], 2 * x + y)
-        self.assertEqual(result["y"], x + 2 * y)
+        self.assertEqual(result["y"], x + 4 * y)
 
-    def test_grad_dict_inputs_ordered_dict(self):
-        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        z = x**2 + y * x + y**2
+    def test_grad_mapping_items_snapshot(self):
+        class Inputs(collections.abc.Mapping):
+            def __init__(self, x, y):
+                self.data = {"x": x, "y": y}
+                self.calls = 0
 
-        inputs = OrderedDict([("x", x), ("y", y)])
-        with self.assertRaisesRegex(TypeError, "must be a dict"):
-            torch.autograd.grad(z.sum(), inputs)
+            def __iter__(self):
+                return iter(self.data)
+
+            def __len__(self):
+                return len(self.data)
+
+            def __getitem__(self, key):
+                return self.data[key]
+
+            def values(self):
+                return reversed(self.data.values())
+
+            def items(self):
+                self.calls += 1
+                return self.data.items()
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(7.0, requires_grad=True)
+        inputs = Inputs(x, y)
+        result = torch.autograd.grad(2 * x + 3 * y, inputs)
+        self.assertIs(type(result), dict)
+        self.assertEqual(list(result), ["x", "y"])
+        self.assertEqual(result, {"x": torch.tensor(2.0), "y": torch.tensor(3.0)})
+        self.assertEqual(inputs.calls, 1)
 
     def test_grad_dict_inputs_materialize_grads(self):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
@@ -2832,46 +2866,83 @@ class TestAutograd(TestCase):
         self.assertIsInstance(result2, dict)
         self.assertEqual(result2["x"], 6 * x)
 
-    def test_grad_dict_inputs_empty(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_grad_dict_inputs_empty(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         z = x**2
-        inputs: dict[str, torch.Tensor] = {}
+        inputs = mapping_cls({})
         self.assertRaisesRegex(
             RuntimeError,
             "cannot be empty",
             lambda: torch.autograd.grad(z.sum(), inputs),
         )
 
-    def test_backward_dict_inputs(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_backward_dict_inputs(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        z = x**2 + y * x + y**2
+        z = x**2 + y * x + 2 * y**2
 
         gradient = torch.ones(2, 2, dtype=torch.double)
-        inputs = {"x": x, "y": y}
+        inputs = mapping_cls(OrderedDict([("x", x), ("y", y)]))
         torch.autograd.backward(z, gradient, inputs=inputs)
         self.assertEqual(x.grad, 2 * x + y)
-        self.assertEqual(y.grad, x + 2 * y)
+        self.assertEqual(y.grad, x + 4 * y)
 
-    def test_backward_dict_inputs_tensor_backward(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_backward_dict_inputs_tensor_backward(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         y = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        z = (x**2 + y * x + y**2).sum()
+        z = (x**2 + y * x + 2 * y**2).sum()
 
-        inputs = {"x": x, "y": y}
+        inputs = mapping_cls(OrderedDict([("x", x), ("y", y)]))
         z.backward(inputs=inputs)
         self.assertEqual(x.grad, 2 * x + y)
-        self.assertEqual(y.grad, x + 2 * y)
+        self.assertEqual(y.grad, x + 4 * y)
 
-    def test_backward_dict_inputs_empty(self):
+    @parametrize(
+        "mapping_cls",
+        [
+            dict,
+            OrderedDict,
+            partial(defaultdict, None),
+            MappingProxyType,
+        ],
+    )
+    def test_backward_dict_inputs_empty(self, mapping_cls):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         z = x**2
 
         gradient = torch.ones(2, 2, dtype=torch.double)
+        inputs = mapping_cls({})
         self.assertRaisesRegex(
             RuntimeError,
             "cannot be empty",
-            lambda: torch.autograd.backward(z, gradient, inputs={}),
+            lambda: torch.autograd.backward(z, gradient, inputs=inputs),
         )
 
     @skipIfTorchDynamo("compiled autograd does not support is_grads_batched with vmap")
@@ -17841,19 +17912,34 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
     # a selective activation checkpoint (SAC) region interacts with the tensors
     # SAC decides to save. Historically SAC held those tensors outside the
     # autograd graph, so an ambient hook (e.g. save_on_cpu) never saw them.
-    # The respect_saved_tensors_hooks arg of checkpoint() opts into routing them
-    # through the hook; the default (legacy) leaves them untouched and warns.
-    # These tests pin both behaviors so the eventual default flip is explicit.
+    # The respect_saved_tensors_hooks arg of checkpoint() chooses whether to
+    # route them through the hook; leaving it unset while a user hook is in
+    # scope is an error until the default flips. These tests pin all three.
     hw_classification = HardwareClassification.GENERIC
 
-    def test_hook_outer_sac_inner_default_bypasses(self):
-        # Legacy default: the ambient hook is blind to the MUST_SAVE mm output.
-        # A FutureWarning fires because a user hook is in scope.
-        packed, fw = self._run(respects=None, capture_warning=True)
-        self.assertNotIn(self.MM_SHAPE, packed)
-        self.assertTrue(
-            any("selective activation checkpoint" in str(w.message) for w in fw)
+    def test_hook_outer_sac_inner_default_raises(self):
+        # Unset: SAC saving a tensor while a user hook is in scope is an error,
+        # forcing an explicit choice. There is no escape hatch.
+        with self.assertRaisesRegex(RuntimeError, "respect_saved_tensors_hooks=True"):
+            self._run(respects=None)
+
+    def test_default_no_error_without_sac_save(self):
+        # The error only fires when SAC actually saves a tensor under a user
+        # hook: a recompute-everything policy under a hook, or a saving policy
+        # with hooks only around backward, is fine with the arg unset.
+        x = torch.randn(*self.INPUT_SHAPE, requires_grad=True)
+        recompute_all = functools.partial(
+            create_selective_checkpoint_contexts, lambda *a, **k: False
         )
+        with self.RecordingHooks():
+            out = checkpoint(self._fn, x, use_reentrant=False, context_fn=recompute_all)
+        out.backward()
+
+        out = checkpoint(
+            self._fn, x, use_reentrant=False, context_fn=self._mm_save_context_fn()
+        )
+        with self.RecordingHooks():
+            out.backward()
 
     def test_hook_outer_sac_inner_opt_in_routes(self):
         # Opt-in: the MUST_SAVE mm output now flows through the ambient hook.
@@ -17942,7 +18028,7 @@ class TestSACAmbientSavedTensorsHooks(_TestSACAmbientSavedTensorsHooksBase):
 
     def test_plain_checkpoint_no_warning(self):
         # Plain (non-selective) checkpoint caches nothing via SAC, so an ambient
-        # hook is unaffected and no FutureWarning about SAC should fire.
+        # hook is unaffected and no error or warning about SAC should fire.
         packed = []
 
         def pack(t):
