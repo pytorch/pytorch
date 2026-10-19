@@ -1374,7 +1374,9 @@ implement a subset of these methods; unsupported methods raise
 Register ``tensor`` as this rank's window memory.
 
 This is collective: every rank in the group must call it, in the same order
-relative to other collectives. Ranks may register tensors of different sizes.
+relative to other collectives. Backends may register more than ``tensor``
+itself (e.g. its whole allocation), in which case ranks must register
+matching allocations.
 
 Args:
     tensor (torch.Tensor): Tensor to expose to peers.
@@ -1403,11 +1405,12 @@ Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
 
 Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
-        and fit within its window.
+        and fit within its window. Backends may require it to reside in
+        memory that is already registered with the window.
     dst_rank (int): Destination rank in the group.
     target_offset_nelems (int): Element offset into the destination window.
     async_op (bool): Whether this op should be an async op.
-    opts (PutOptions, optional): Timeout and backend hints.
+    opts (torch._C._distributed_c10d.PutOptions, optional): Timeout and backend hints.
 
 Returns:
     A ``Work`` handle.
@@ -1437,7 +1440,7 @@ Send a signal to ``peer_rank``.
 Args:
     peer_rank (int): Rank to signal.
     async_op (bool): Whether this op should be an async op.
-    opts (SignalOptions, optional): Timeout and backend hints.
+    opts (torch._C._distributed_c10d.SignalOptions, optional): Timeout and backend hints.
 
 Returns:
     A ``Work`` handle.
@@ -1456,7 +1459,7 @@ backends where :meth:`put` signals, by :meth:`put`.
 Args:
     peer_rank (int): Rank to wait on.
     async_op (bool): Whether this op should be an async op.
-    opts (WaitSignalOptions, optional): Timeout and backend hints.
+    opts (torch._C._distributed_c10d.WaitSignalOptions, optional): Timeout and backend hints.
 
 Returns:
     A ``Work`` handle.
@@ -1467,9 +1470,9 @@ Returns:
           py::arg("peer_rank"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Return the ``WindowAttr`` of ``peer_rank``'s window. Its ``access_type`` is
-``WindowAccessType.UNIFIED`` for a single coherent view of the window, or
-``WindowAccessType.SEPARATE`` for separate copies that need explicit
+Return the ``torch._C._distributed_c10d.WindowAttr`` of ``peer_rank``'s
+window. Its ``access_type`` is ``WindowAccessType.UNIFIED`` for a single
+coherent view of the window, or ``WindowAccessType.SEPARATE`` for separate copies that need explicit
 synchronization.
 
 Args:

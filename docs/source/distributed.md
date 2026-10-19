@@ -616,17 +616,25 @@ A window exposes a tensor on every rank of a group for one-sided (RMA) writes:
 a rank can write into a peer's tensor with {meth}`Window.put` without the peer
 posting a matching receive. Peers synchronize with {meth}`Window.signal` and
 {meth}`Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
-windows with NCCL 2.29 or later; use {func}`_supports_window` to check.
+windows with NCCL 2.29 or later; `nccl-legacy` does not.
+{func}`_supports_window` only checks the backend and NCCL version:
+registration can still fail if no transport between the ranks supports
+symmetric memory (e.g. no NVLink or InfiniBand).
 
-With `nccl`, both the window tensor and the source of {meth}`Window.put` must
-be allocated from the backend's memory pool, `torch.cuda.MemPool(backend.mem_allocator)`.
+With `nccl`, the window tensor must be allocated from the backend's memory
+pool, `torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
+tensor's whole allocator segment, so all ranks must register matching
+segments; allocating the same sizes in the same order on every rank satisfies
+this. The source of {meth}`Window.put` must lie in an already registered
+segment, e.g. a slice of a registered tensor.
 Each {meth}`Window.put` also signals the destination rank, so the
 destination can wait for the data with a single {meth}`Window.wait_signal`.
 {meth}`Window.map_remote_tensor` only supports the local rank, and
 {meth}`Window.get_attr` always reports `SEPARATE`.
 
 The example below runs a ring: each rank writes its slice into the next rank's
-window and waits for the previous rank's slice to arrive in its own.
+window and waits for the previous rank's slice to arrive in its own. The
+source is the last slot of the registered buffer.
 
 ```python
 import os
@@ -635,20 +643,24 @@ import torch
 import torch.distributed as dist
 
 local_rank = int(os.environ["LOCAL_RANK"])
-dist.init_process_group("nccl", device_id=torch.device("cuda", local_rank))
-rank, world_size = dist.get_rank(), dist.get_world_size()
 device = torch.device("cuda", local_rank)
+# MemPool and use_mem_pool use the current device.
+torch.cuda.set_device(device)
+dist.init_process_group("nccl", device_id=device)
+rank, world_size = dist.get_rank(), dist.get_world_size()
 assert dist._supports_window()
 
 backend = dist.get_backend_impl(device=device)
 pool = torch.cuda.MemPool(backend.mem_allocator)
 count = 1024
 with torch.cuda.use_mem_pool(pool):
-    src = torch.full((count,), rank, dtype=torch.float, device=device)
-    buf = torch.zeros(count * world_size, dtype=torch.float, device=device)
+    # One slot per rank plus a trailing slot used as the put source.
+    buf = torch.zeros(count * (world_size + 1), dtype=torch.float, device=device)
 
 # Collective: every rank registers its buffer.
 win = dist._new_window(buf)
+src = buf[world_size * count :]
+src.fill_(rank)
 
 next_rank = (rank + 1) % world_size
 prev_rank = (rank - 1) % world_size
