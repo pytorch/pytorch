@@ -620,6 +620,9 @@ windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
 when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation. With
 `TORCH_DISTRIBUTED_DEBUG=DETAIL` and Gloo available, groups are wrapped in a
 debug wrapper that does not forward windows, so no backend supports them.
+With `TORCH_DISTRIBUTED_USE_TORCHCOMMS=1` (or `dist_config.use_torchcomms`),
+groups use the torchcomms backend, which supports windows only if the
+underlying torchcomms backend does.
 {func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
