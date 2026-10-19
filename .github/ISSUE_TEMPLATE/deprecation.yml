@@ -39,14 +39,17 @@ body:
   id: removal-target
   attributes:
     label: Removal target
-    description: At least two releases after "Deprecated in", e.g. `2.17`. Use `none` for a frozen component with no removal plan.
+    description: >
+      Release where the old API or behavior stops working: at least two releases after "Deprecated in" (e.g. `2.18`).
+      For a silent behavior change, this is when the old behavior starts to error; the new behavior ships two releases later.
+      Use `none` for a frozen component with no removal plan.
   validations:
     required: true
 - type: input
   id: next-step
   attributes:
     label: Next step
-    description: Next action and target release, e.g. `remove in 2.18`, `error in 2.17`. Use `none` for a frozen component with no planned action. Used to assign milestones.
+    description: Next action and target release, e.g. `remove in 2.18`, `error in 2.18`. Use `none` for a frozen component with no planned action. Used to assign milestones.
   validations:
     required: true
 - type: textarea
