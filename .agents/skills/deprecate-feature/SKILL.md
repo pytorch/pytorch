@@ -50,7 +50,7 @@ C++: prefer `TORCH_WARN_ONCE(...)` (once per process, surfaces as `UserWarning`)
 
 Also:
 - Warn where the user opts into the deprecated behavior (the call or argument), not in hot internal paths.
-- Add `.. deprecated:: 2.16` to the docstring.
+- Add `.. deprecated:: <N>` to the docstring, using the same start version as the warning.
 - Test that the warning fires with the expected text (reset the once flag in the test), and silence it in other tests that still exercise the old path.
 - Label the PR `topic: deprecation` so it lands in the release notes.
 
