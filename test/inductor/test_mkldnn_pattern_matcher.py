@@ -8,6 +8,10 @@ import torch
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.fx_passes.quantization import (
+    register_woq_int8pack_fusion_device,
+    unregister_woq_int8pack_fusion_device,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     is_mkldnn_bf16_supported,
@@ -1945,6 +1949,43 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                     "specialize_float": True,
                 }
             )
+        )
+
+
+class TestWoqFusionDeviceRegistry(TestPatternMatcherBase):
+    """The WOQ int8pack fusion allowlist is registry-driven (compile-level)."""
+
+    def test_int8pack_fusion_gated_by_device_registry(self):
+        class M(torch.nn.Module):
+            def forward(self, x, weight, scales):
+                return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+
+        x = torch.randn(1, 1, 256, dtype=torch.bfloat16)
+        w = torch.randint(-128, 127, (12, 256), dtype=torch.int8)
+        s = torch.randn(12, dtype=torch.bfloat16)
+
+        def matcher_check(expected_count):
+            self.assertEqual(counters["inductor"]["woq_matcher_count"], expected_count)
+
+        # cpu is on the default allowlist: the fusion fires.
+        self._test_common(
+            M().eval(), (x, w, s), lambda: matcher_check(1), atol=0.001, rtol=0.07
+        )
+
+        # Unregistering cpu disables the fusion. The FX graph cache is
+        # disabled for the recompiles because the registry is deliberately
+        # not part of the cache key (see register_woq_int8pack_fusion_device).
+        self.ctx_stack.enter_context(config.patch({"fx_graph_cache": False}))
+        unregister_woq_int8pack_fusion_device("cpu")
+        self.addCleanup(register_woq_int8pack_fusion_device, "cpu")
+        self._test_common(
+            M().eval(), (x, w, s), lambda: matcher_check(0), atol=0.001, rtol=0.07
+        )
+
+        # Re-registering restores the fusion.
+        register_woq_int8pack_fusion_device("cpu")
+        self._test_common(
+            M().eval(), (x, w, s), lambda: matcher_check(1), atol=0.001, rtol=0.07
         )
 
 
