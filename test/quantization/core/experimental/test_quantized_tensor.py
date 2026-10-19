@@ -1,14 +1,22 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-import unittest
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import quantize_APoT
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    run_tests,
+)
 
-class TestQuantizedTensor(unittest.TestCase):
+
+class TestQuantizedTensor(TestCase):
     r""" Tests int_repr on APoTQuantizer with random tensor2quantize
     and hard-coded values
     """
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_int_repr(self):
         # generate tensor with random fp values
         tensor2quantize = torch.tensor([0, 0.0215, 0.1692, 0.385, 1, 0.0391])
@@ -37,5 +45,6 @@ class TestQuantizedTensor(unittest.TestCase):
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor_data))
 
+
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
