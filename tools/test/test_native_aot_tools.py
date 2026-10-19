@@ -736,7 +736,7 @@ class TestArch(unittest.TestCase):
             self.assertIsNone(export._detected_arch())
 
     def test_archs_from_cuda_arch_list(self):
-        # These expectations come from top-k's ARCHS plus the compatibility rules,
+        # These expectations come from the declaration plus the compatibility rules,
         # not from suffixes in the build's supported-device list.
         f = export.archs_from_cuda_arch_list
         cases = (
@@ -751,9 +751,12 @@ class TestArch(unittest.TestCase):
             ("10.0;10.0a", ["sm_100f"]),
             ("10.0a;9.0", ["sm_100f", "sm_90"]),
         )
-        for arch_list, targets in cases:
-            with self.subTest(arch_list=arch_list):
-                self.assertEqual(f(arch_list), targets)
+        with tempfile.TemporaryDirectory() as ops:
+            _write_fake_decl(ops)
+            with mock.patch.object(export, "OPS_DIR", ops):
+                for arch_list, targets in cases:
+                    with self.subTest(arch_list=arch_list):
+                        self.assertEqual(f(arch_list), targets)
 
     def test_build_arch_parser_does_not_choose_op_targets(self):
         f = export.build_arches_from_cuda_arch_list
