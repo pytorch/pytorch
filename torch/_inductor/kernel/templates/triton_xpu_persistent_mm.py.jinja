@@ -9,9 +9,9 @@
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
 
-    # BMG persistent GEMM: GROUP_M-swizzled persistent tile loop, 2D block IO via
-    # tensor descriptors. The inner stride is the literal 1 so the backend can
-    # prove contiguity; a non-constexpr unit stride falls back to SLM staging.
+    # Persistent GEMM: GROUP_M-swizzled persistent tile loop, 2D block IO via
+    # tensor descriptors. Triton requires the last stride to be the constexpr 1,
+    # so it is written literally rather than via stride_ak / stride_bn.
     a_desc = tl.make_tensor_descriptor(
         base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
@@ -60,3 +60,6 @@
         idx_n = rn[None, :]
         mask = (idx_m < M) & (idx_n < N)
         {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=8, val_shape=("BLOCK_M", "BLOCK_N"))}}
+        # Operands never pass through SLM, so nothing else keeps the warps of a WG on the same tile.
+        if TILE_BARRIER:
+            tl.debug_barrier()

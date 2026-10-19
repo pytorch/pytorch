@@ -9,9 +9,9 @@
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
 
-    # BMG small-M GEMM: non-persistent 2D grid (pid_m, pid_n), 2D block IO via
-    # tensor descriptors. The inner stride is the literal 1 so the backend can
-    # prove contiguity; a non-constexpr unit stride falls back to SLM staging.
+    # Small-M GEMM: non-persistent 2D grid (pid_m, pid_n), 2D block IO via
+    # tensor descriptors. Triton requires the last stride to be the constexpr 1,
+    # so it is written literally rather than via stride_ak / stride_bn.
     a_desc = tl.make_tensor_descriptor(
         base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],

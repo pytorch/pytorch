@@ -73,11 +73,11 @@ from ..utils import (
     use_flydsl_gemm_template,
     use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
-    use_triton_bmg_template,
     use_triton_scaling_template,
     use_triton_tdm_template,
     use_triton_template,
     use_triton_tma_template,
+    use_triton_xpu_template,
 )
 from .decompose_k import decompose_k_subgraph_template
 from .mm_common import (
@@ -147,18 +147,18 @@ persistent_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_mm"),
 )
 
-# Intel BMG (Xe2): persistent GROUP_M-swizzled GEMM with 2D block IO
-bmg_persistent_mm_template = TritonTemplate(
-    name="mm_bmg_persistent",
+# Intel XPU: persistent GROUP_M-swizzled GEMM with 2D block IO
+xpu_persistent_mm_template = TritonTemplate(
+    name="mm_xpu_persistent",
     grid=persistent_mm_grid,
-    source=load_kernel_template("triton_bmg_persistent_mm"),
+    source=load_kernel_template("triton_xpu_persistent_mm"),
 )
 
-# Intel BMG (Xe2): non-persistent 2D-grid GEMM for small M
-bmg_tiled2d_mm_template = TritonTemplate(
-    name="mm_bmg_tiled2d",
+# Intel XPU: non-persistent 2D-grid GEMM for small M
+xpu_tiled2d_mm_template = TritonTemplate(
+    name="mm_xpu_tiled2d",
     grid=mm_grid_2d,
-    source=load_kernel_template("triton_bmg_tiled2d_mm"),
+    source=load_kernel_template("triton_xpu_tiled2d_mm"),
 )
 
 
@@ -702,9 +702,9 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if keep_triton_mm:
             templates_to_use.append(mm_template)
 
-            if use_triton_bmg_template(layout):
-                templates_to_use.append(bmg_persistent_mm_template)
-                templates_to_use.append(bmg_tiled2d_mm_template)
+            if use_triton_xpu_template(layout):
+                templates_to_use.append(xpu_persistent_mm_template)
+                templates_to_use.append(xpu_tiled2d_mm_template)
 
             if use_triton_blackwell_tma_template(
                 mat1, mat2, output_layout=layout, add_guards=True
