@@ -174,6 +174,29 @@ user_stack=None)
         self.assertTrue(guard(None))
         self.assertTrue(guard.check_verbose(None).result)
 
+    def test_saved_tensors_hooks_guard_invalidation(self):
+        def fn(x):
+            return x.sin()
+
+        pack = torch.fx.symbolic_trace(lambda x: x * 2)
+        unpack = torch.fx.symbolic_trace(lambda x: x / 2)
+        pack_ref, unpack_ref = weakref.ref(pack), weakref.ref(unpack)
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(3, requires_grad=True)
+            )
+
+        (entry,) = _debug_get_cache_entry_list(fn)
+        del pack, unpack
+        gc.collect()
+
+        self.assertIsNone(pack_ref())
+        self.assertIsNone(unpack_ref())
+        self.assertIsInstance(
+            entry.guard_manager, torch._dynamo.guards.DeletedGuardManagerWrapper
+        )
+
     def test_global_state_reason(self):
         with torch.enable_grad():
             guards = GlobalStateGuard()

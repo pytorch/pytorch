@@ -2977,7 +2977,11 @@ class GuardBuilder(GuardBuilderBase):
 
             return tuple(map(id, hooks))
 
-        guard_hooks_ids = hooks_ids_fn(get_hooks())
+        hooks = get_hooks()
+        guard_hooks_ids = hooks_ids_fn(hooks)
+        if guard_hooks_ids is not None:
+            for hook in hooks:
+                self.id_ref(hook, "saved_tensors_hooks")
         if self.save_guards:
             self.saved_tensors_hooks_fingerprint = _saved_tensors_hooks_fingerprint(
                 get_hooks()
