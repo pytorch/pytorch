@@ -4,7 +4,6 @@ import sys
 from typing import Any
 
 
-_registered_device_trace_fns: set[Any] = set()
 _DEVICE_TRACE_RULE_METHODS = (
     "stream",
     "current_stream",
@@ -13,26 +12,38 @@ _DEVICE_TRACE_RULE_METHODS = (
 )
 
 
-def register_device_trace_rules(interface: type) -> None:
-    """Mark one backend's stream runtime functions as in-graph.
+def registered_device_trace_fns() -> tuple[Any, ...]:
+    """Stream-runtime callables overridden on the current device registry.
 
-    Out-of-tree backends are not in the static torch name lists. Registration
-    records the interface's overridden stream methods so lookup treats them
-    like torch.cuda.stream / current_stream / set_stream. Handlers are rebuilt
-    on the next trace.
+    Indexed keys such as ``npu:0`` stay in the scan. A backend may register
+    only that key. Each function object is returned once. Replacing an
+    interface drops callables that are no longer on the registry.
     """
-    from .device_interface import DeviceInterface
+    from .device_interface import DeviceInterface, get_registered_device_interfaces
 
-    added = False
-    for name in _DEVICE_TRACE_RULE_METHODS:
-        fn = getattr(interface, name, None)
-        base = getattr(DeviceInterface, name, None)
-        if fn is None or fn is base or not callable(fn):
-            continue
-        if fn not in _registered_device_trace_fns:
-            _registered_device_trace_fns.add(fn)
-            added = True
-    if not added:
+    found: list[Any] = []
+    seen: set[Any] = set()
+    for _, interface in get_registered_device_interfaces():
+        for name in _DEVICE_TRACE_RULE_METHODS:
+            fn = getattr(interface, name, None)
+            base = getattr(DeviceInterface, name, None)
+            if fn is None or fn is base or not callable(fn):
+                continue
+            if fn in seen:
+                continue
+            seen.add(fn)
+            found.append(fn)
+    return tuple(found)
+
+
+def register_device_trace_rules(interface: type) -> None:
+    """Invalidate Dynamo maps after a DeviceInterface registration.
+
+    Lookup reads ``registered_device_trace_fns()`` from the live registry, so
+    a replaced interface loses its previous callables on the next trace.
+    ``interface`` is the class just stored by ``register_interface_for_device``.
+    """
+    if not isinstance(interface, type):
         return
     # trace_rules imports inductor, and that import registers the in-tree
     # interfaces. This function runs before trace_rules has finished loading,

@@ -58,7 +58,11 @@ from ..create_parameter_op import (
     new_parameter_placeholder,
     tracable_create_parameter,
 )
-from ..device_interface import DeviceInterface, get_registered_device_interfaces
+from ..device_interface import (
+    DeviceInterface,
+    get_registered_device_interfaces,
+    registered_stream_context_cls,
+)
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
@@ -2000,7 +2004,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_device_interface_stream(
             self, tx: "InstructionTranslatorBase", stream: "StreamVariable"
         ) -> StreamContextVariable:
-            return StreamContextVariable.create(tx, stream)
+            context_cls = registered_stream_context_cls(self.value)
+            if context_cls is None:
+                context_cls = torch.cuda.StreamContext
+            return StreamContextVariable.create(tx, stream, context_cls=context_cls)
 
         @register(torch.from_numpy)
         def handle_from_numpy(

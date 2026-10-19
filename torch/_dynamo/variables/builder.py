@@ -917,29 +917,24 @@ def _is_dim_dynamic_from_source_dynamism(
 
 
 def _is_device_stream_context(value: object) -> bool:
-    """Match a stream() context from CUDA or a registered DeviceInterface.
+    """Match a pre-created stream() context from CUDA or a registered interface.
 
-    Pre-created ``ctx = device.stream(s); with ctx`` is the only way into
-    VariableBuilder. ``with device.stream(s)`` is a call and does not get here.
-    Out-of-tree contexts are separate classes. They match when that class is
-    named StreamContext and lives in the same module as the registered
-    ``stream`` function. No return annotation is required.
+    ``with device.stream(s)`` is a call and does not get here. A backend names
+    its context class on ``DeviceInterface.StreamContext``. Indexed keys such
+    as ``npu:0`` are included.
     """
     if isinstance(value, torch.cuda.StreamContext):
         return True
-    cls = type(value)
-    if cls.__name__ != "StreamContext":
-        return False
 
     from ..device_interface import DeviceInterface, get_registered_device_interfaces
 
-    for key, interface in get_registered_device_interfaces():
-        if ":" in key:
-            continue
-        fn = getattr(interface, "stream", None)
-        if fn is None or fn is DeviceInterface.stream or not callable(fn):
-            continue
-        if getattr(fn, "__module__", None) == cls.__module__:
+    for _, interface in get_registered_device_interfaces():
+        ctx_cls = getattr(interface, "StreamContext", None)
+        if (
+            isinstance(ctx_cls, type)
+            and ctx_cls is not DeviceInterface.StreamContext
+            and isinstance(value, ctx_cls)
+        ):
             return True
     return False
 
@@ -1749,7 +1744,9 @@ class VariableBuilder:
             stream_source = AttrSource(self.source, "stream")
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             # type: ignore[arg-type]
-            return StreamContextVariable.create(self.tx, stream_var)
+            return StreamContextVariable.create(
+                self.tx, stream_var, context_cls=type(value)
+            )
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             if isinstance(self.source, CurrentStreamSource):

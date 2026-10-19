@@ -49,7 +49,7 @@ from torch._environment import is_fbcode
 from torch.utils import _config_module
 
 from . import config
-from .device_trace_rules import _registered_device_trace_fns
+from .device_trace_rules import registered_device_trace_fns
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
@@ -3125,7 +3125,7 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     )
                 else:
                     d[obj] = v
-    for obj in _registered_device_trace_fns:
+    for obj in registered_device_trace_fns():
         existing = d.get(obj)
         if existing is not None and existing is not TorchInGraphFunctionVariable:
             raise AssertionError(

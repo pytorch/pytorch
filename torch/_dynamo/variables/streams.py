@@ -326,7 +326,7 @@ class SymbolicStreamState:
 
 
 class StreamContextVariable(FxTracebackAnnotateVariable):
-    """This represents torch.cuda.StreamContext"""
+    """A stream() context with its concrete Python type."""
 
     # Re-entering only the stream annotation would not restore the stream.
     _reenter_after_graph_break = False
@@ -335,15 +335,23 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
+        context_cls: type,
         **kwargs: dict[str, Any],
     ) -> "StreamContextVariable":
         return StreamContextVariable(
             stream_to_enter,
+            context_cls=context_cls,
             **kwargs,
         )
 
-    def __init__(self, stream: Optional["StreamVariable"], **kwargs: Any) -> None:
+    def __init__(
+        self,
+        stream: Optional["StreamVariable"],
+        context_cls: type,
+        **kwargs: Any,
+    ) -> None:
         self.stream = stream
+        self.context_cls = context_cls
         super().__init__(
             annotation={"stream": self.get_stream().user_object_index},
             initial_values=None,
@@ -367,7 +375,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return super().exit(tx, *args)
 
     def python_type(self) -> type:
-        return torch.cuda.StreamContext
+        return self.context_cls
 
     def supports_graph_breaks(self) -> bool:
         return True
@@ -417,7 +425,10 @@ class StreamVariable(StreamContextVariable):
         self.current_device = current_device
 
         self.user_object_index = user_object_index
-        super().__init__(None, **kwargs)
+        context_cls = type(value)
+        if not issubclass(context_cls, self._cpython_type):
+            context_cls = self._cpython_type
+        super().__init__(None, context_cls=context_cls, **kwargs)
 
     def python_type(self) -> type:
         # A current stream's example value is a plain torch.Stream; any other value
