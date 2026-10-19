@@ -10,7 +10,6 @@ This process is provisional; we are evaluating it in practice. Human judgment wi
 The [BC policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) is the source of truth:
 - Read release N from `version.txt`.
 - Warn for at least two releases (180 days for nightly users); earliest removal is N+2.
-- For silent behavior changes, error for two more releases (180 days for nightly users) before enabling the new behavior.
 
 ## Deprecate or freeze
 
