@@ -11428,6 +11428,11 @@ class InvokeSubgraph(ExternKernel):
                 device = operand.get_device()
                 break
         if device is None:
+            # A subgraph that reads no tensors (e.g. one that only builds an
+            # arange) has no operands to take the device from, but its outputs
+            # carry it.
+            device = next(filter(None, (out.get_device() for out in outputs)), None)
+        if device is None:
             raise AssertionError("Expected device is not None")
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,

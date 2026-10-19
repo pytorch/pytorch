@@ -7551,6 +7551,27 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    def test_graph_module_pickle_roundtrip(self):
+        # Unpickling a GraphModule re-traces it symbolically, replaying each
+        # HOP call with Proxy operands.
+        import pickle
+
+        def f_cond(x, pred):
+            return cond(pred, torch.sin, torch.cos, [x])
+
+        def f_while(i, x):
+            return while_loop(lambda i, x: i < 3, lambda i, x: (i + 1, x.sin()), (i, x))
+
+        x = torch.randn(4)
+        for f, args, hop in [
+            (f_cond, (x, torch.tensor(True)), torch.ops.higher_order.cond),
+            (f_while, (torch.tensor(0), x), torch.ops.higher_order.while_loop),
+        ]:
+            gm = pickle.loads(pickle.dumps(make_fx(f)(*args)))
+            hop_nodes = gm.graph.find_nodes(op="call_function", target=hop)
+            self.assertEqual(len(hop_nodes), 1)
+            self.assertEqual(gm(*args), f(*args))
+
     def test_switch_traced_mismatched_output_structure(self):
         from torch._higher_order_ops.switch import switch_op
 
