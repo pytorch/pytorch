@@ -116,13 +116,9 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
       }
       const bool capture_local =
           capture_id != 0 && allocation->capture_id == capture_id;
-      if (allocation->private_pool && !capture_local) {
+      if (!capture_local && (allocation->private_pool || capture_id != 0)) {
         return eager_clone(storage);
       }
-      TORCH_CHECK(
-          !capture_id || capture_local,
-          "Cannot lazily clone a CUDA graph input during capture; omit "
-          "_lazy_clone() for read-only use or use clone() for independent storage");
       const bool same_stream =
           impl->getStreamNativeHandle(allocation->stream) ==
           impl->getStreamNativeHandle(*stream);

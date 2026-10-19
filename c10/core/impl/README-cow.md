@@ -76,13 +76,13 @@ completed sibling remains until the context dies. Completion covers aliases, not
 
 ### Capture boundaries
 
-Both streams must be outside capture or belong to the same active capture. Check this before
-allocation, copying, or completion. Events become graph dependencies and copies run on every replay.
+Shared COW materialization and completion require both streams to be outside capture or in the same
+capture. Events become graph dependencies and copies run on every replay.
 
 | Situation | Behavior |
 | --- | --- |
 | Existing COW tensor used as graph input | Reject even read-only access. Materialize before capture. |
-| External graph input lazily cloned during capture | Reject creating a COW context. Omit the lazy clone for reads, or use `clone()`. Allocators without metadata still eagerly copy. |
+| External non-COW graph input lazily cloned during capture | Immediately copy on the capturing stream; the copy runs on every replay. |
 | Allocation and COW context created in this capture | Sharing, shared materialization, and completion are permitted within it. |
 | Shared COW output materialized after capture | Reject; materialize during capture or release other references (including retained ones) first. |
 | Unique COW output materialized after capture | Steal without changing the graph's address. Use a fresh stream wait, not captured completion events. The caller orders graph replay and external uses. |

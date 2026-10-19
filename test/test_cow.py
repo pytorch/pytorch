@@ -441,7 +441,7 @@ class TestCOW(TestCase):
                     self.assertEqual(z, torch.full_like(z, i + 21))
 
     @parametrize("same_stream", [False, True])
-    def test_lazy_clone_graph_input_rejected(self, device, same_stream):
+    def test_lazy_clone_graph_input_uses_eager_copy(self, device, same_stream):
         a = torch.cuda.Stream(device=device)
         current = torch.cuda.current_stream(device)
         with torch.cuda.stream(a if same_stream else current):
@@ -450,15 +450,13 @@ class TestCOW(TestCase):
         a.wait_stream(current)
         with torch.cuda.stream(a):
             with _capture(a) as graph:
-                with self.assertRaisesRegex(
-                    RuntimeError, "Cannot lazily clone a CUDA graph input"
-                ):
-                    inp._lazy_clone()
-                readonly = inp * 2
-                out = inp.clone()
+                out = inp._lazy_clone()
+                readonly = out * 2
                 out.add_(1)
             self.assertFalse(torch._C._is_cow_tensor(inp))
+            self.assertFalse(torch._C._is_cow_tensor(out))
             self.assertEqual(inp.data_ptr(), ptr)
+            self.assertNotEqual(out.data_ptr(), ptr)
             for value in [3, 7]:
                 inp.fill_(value)
                 graph.replay()
