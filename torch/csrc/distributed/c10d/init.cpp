@@ -1534,7 +1534,11 @@ Returns:
     synchronization.
 )");
 
-  py::enum_<::c10d::HookOpName>(module, "HookOpName")
+  py::enum_<::c10d::HookOpName>(module, "HookOpName", R"(
+The operation a pre/post hook is firing for. Values mostly follow the
+dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
+distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
+``recv`` from any source reports ``RECV``.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1561,21 +1565,57 @@ Returns:
       .value("ALLTOALL_BASE", ::c10d::HookOpName::ALLTOALL_BASE)
       .value("UNKNOWN", ::c10d::HookOpName::UNKNOWN);
 
-  py::class_<::c10d::PreHookArgs>(module, "PreHookArgs")
+  py::class_<::c10d::PreHookArgs>(
+      module,
+      "PreHookArgs",
+      "Arguments passed to a pre-hook, see ``ProcessGroup.register_pre_hook``.")
       .def(py::init<>())
-      .def_readwrite("name", &::c10d::PreHookArgs::name)
-      .def_readwrite("async_op", &::c10d::PreHookArgs::async_op)
-      .def_readwrite("input_tensors", &::c10d::PreHookArgs::input_tensors)
-      .def_readwrite("output_tensors", &::c10d::PreHookArgs::output_tensors)
-      .def_readwrite("root", &::c10d::PreHookArgs::root)
-      .def_readwrite("op_id", &::c10d::PreHookArgs::op_id);
+      .def_readwrite(
+          "name",
+          &::c10d::PreHookArgs::name,
+          "The ``HookOpName`` of the operation.")
+      .def_readwrite(
+          "async_op",
+          &::c10d::PreHookArgs::async_op,
+          "Whether the operation is asynchronous.")
+      .def_readwrite(
+          "input_tensors",
+          &::c10d::PreHookArgs::input_tensors,
+          "Tensors the operation reads; nested lists are flattened. For in-place operations such as ``allreduce`` and ``broadcast`` these are also the tensors written.")
+      .def_readwrite(
+          "output_tensors",
+          &::c10d::PreHookArgs::output_tensors,
+          "Tensors the operation writes into, separate from ``input_tensors``; nested lists are flattened. Empty for in-place operations.")
+      .def_readwrite(
+          "root",
+          &::c10d::PreHookArgs::root,
+          "Root or peer rank in the group, or -1 if the operation has none.")
+      .def_readwrite(
+          "op_id",
+          &::c10d::PreHookArgs::op_id,
+          "Identifies the operation; the matching post-hook gets the same ``op_id``.");
 
-  py::class_<::c10d::PostHookArgs>(module, "PostHookArgs")
+  py::class_<::c10d::PostHookArgs>(
+      module,
+      "PostHookArgs",
+      "Arguments passed to a post-hook, see ``ProcessGroup.register_post_hook``.")
       .def(py::init<>())
-      .def_readwrite("name", &::c10d::PostHookArgs::name)
-      .def_readwrite("async_op", &::c10d::PostHookArgs::async_op)
-      .def_readwrite("work", &::c10d::PostHookArgs::work)
-      .def_readwrite("op_id", &::c10d::PostHookArgs::op_id);
+      .def_readwrite(
+          "name",
+          &::c10d::PostHookArgs::name,
+          "The ``HookOpName`` of the operation.")
+      .def_readwrite(
+          "async_op",
+          &::c10d::PostHookArgs::async_op,
+          "Whether the operation is asynchronous.")
+      .def_readwrite(
+          "work",
+          &::c10d::PostHookArgs::work,
+          "``Work`` handle of the issued operation; may be ``None``.")
+      .def_readwrite(
+          "op_id",
+          &::c10d::PostHookArgs::op_id,
+          "Same ``op_id`` as the matching pre-hook call.");
 
   py::class_<::c10d::DistributedBackendOptions>(
       module, "_DistributedBackendOptions")
@@ -3271,41 +3311,82 @@ Arguments:
           .def_property_readonly(
               "supports_abort_hooks",
               &::c10d::ProcessGroup::supportsAbortHooks,
-              "(test whether the process group supports abort hooks)")
+              "Whether ``register_abort_hook`` is supported by the default backend.")
           .def(
               "register_abort_hook",
               &::c10d::ProcessGroup::registerAbortHook,
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register an abort hook, called before abort on timeout/error")
+              R"(
+Register ``hook``, a callable taking no arguments, to run before the backend
+aborts on a timeout or error, e.g. to capture debug state. Only some backends
+support abort hooks (see ``supports_abort_hooks``); others raise.
+
+A single failure may run the hook more than once, possibly concurrently from
+different threads, so it must be idempotent. A hook that should only run once
+must block on later calls until the first one finishes rather than return
+early, since the process may be terminated once it returns. Hooks run in no
+particular order, typically on a background thread; exceptions they raise are
+logged and ignored.
+
+Args:
+    hook_id (int): Identifier for ``unregister_abort_hook``. Registering an
+        existing id keeps the existing hook; unregister it first to replace it.
+    hook (Callable[[], None]): The hook.
+)")
           .def(
               "unregister_abort_hook",
               &::c10d::ProcessGroup::unregisterAbortHook,
-              py::arg("hook_id"))
+              py::arg("hook_id"),
+              "Remove the abort hook registered with ``hook_id``.")
           .def_property_readonly(
               "supports_completion_hooks",
               &::c10d::ProcessGroup::supportsCompletionHooks,
-              "(test whether the process group supports completion hooks)")
+              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register a pre-hook, called before each collective is issued")
+              R"(
+Register ``hook`` to be called with a ``PreHookArgs`` before each operation
+issued through this process group, on the issuing thread, for every backend.
+Hooks run in ``hook_id`` order. If a hook raises, the exception propagates to
+the caller, the remaining hooks are skipped and the operation is not issued.
+Register hooks during setup, not concurrently with operations.
+
+Args:
+    hook_id (int): Identifier for ``unregister_pre_hook``. Registering an
+        existing id replaces its hook.
+    hook (Callable[[PreHookArgs], None]): The hook.
+)")
           .def(
               "unregister_pre_hook",
               &::c10d::ProcessGroup::unregisterPreHook,
-              py::arg("hook_id"))
+              py::arg("hook_id"),
+              "Remove the pre-hook registered with ``hook_id``.")
           .def(
               "register_post_hook",
               &::c10d::ProcessGroup::registerPostHook,
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register a post-hook, called after each collective is issued")
+              R"(
+Register ``hook`` to be called with a ``PostHookArgs`` after each operation
+issued through this process group is issued, not when it completes; wait on
+``PostHookArgs.work`` to observe completion. If a hook raises, the operation
+has already been issued but its ``Work`` is not returned to the caller.
+Otherwise behaves like ``register_pre_hook``.
+
+Args:
+    hook_id (int): Identifier for ``unregister_post_hook``. Registering an
+        existing id replaces its hook.
+    hook (Callable[[PostHookArgs], None]): The hook.
+)")
           .def(
               "unregister_post_hook",
               &::c10d::ProcessGroup::unregisterPostHook,
-              py::arg("hook_id"))
+              py::arg("hook_id"),
+              "Remove the post-hook registered with ``hook_id``.")
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
           })
@@ -3466,21 +3547,38 @@ Unsupported backends ignore this call. This API is experimental and subject to c
           .def_property_readonly(
               "supports_abort_hooks",
               BACKEND_VIRTUAL_PROPERTY(supportsAbortHooks),
-              "(test whether the backend supports abort hooks)")
+              "Whether ``register_abort_hook`` is supported.")
           .def(
               "register_abort_hook",
               &::c10d::Backend::registerAbortHook,
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register an abort hook, called before abort on timeout/error")
+              R"(
+Register ``hook``, a callable taking no arguments, to run before the backend
+aborts on a timeout or error, e.g. to capture debug state. Only some backends
+support abort hooks (see ``supports_abort_hooks``); others raise.
+
+A single failure may run the hook more than once, possibly concurrently from
+different threads, so it must be idempotent. A hook that should only run once
+must block on later calls until the first one finishes rather than return
+early, since the process may be terminated once it returns. Hooks run in no
+particular order, typically on a background thread; exceptions they raise are
+logged and ignored.
+
+Args:
+    hook_id (int): Identifier for ``unregister_abort_hook``. Registering an
+        existing id keeps the existing hook; unregister it first to replace it.
+    hook (Callable[[], None]): The hook.
+)")
           .def(
               "unregister_abort_hook",
               &::c10d::Backend::unregisterAbortHook,
-              py::arg("hook_id"))
+              py::arg("hook_id"),
+              "Remove the abort hook registered with ``hook_id``.")
           .def_property_readonly(
               "supports_completion_hooks",
               &::c10d::Backend::supportsCompletionHooks,
-              "(test whether the backend supports completion hooks)")
+              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -5318,7 +5416,15 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   py::class_<
       ::c10d::FlightRecorderHook,
-      std::shared_ptr<::c10d::FlightRecorderHook>>(module, "FlightRecorderHook")
+      std::shared_ptr<::c10d::FlightRecorderHook>>(
+      module,
+      "FlightRecorderHook",
+      R"(
+Records the operations of a process group into the flight recorder using
+pre/post hooks, for backends without a native flight recorder. Attached
+automatically to new process groups unless the buffer size
+(``TORCH_FR_BUFFER_SIZE``, or ``TORCH_NCCL_TRACE_BUFFER_SIZE``) is 0 or
+every backend of the group records natively.)")
       .def_static(
           "attach",
           &::c10d::FlightRecorderHook::attach,
@@ -5336,10 +5442,17 @@ dump file and is published as the group's membership. Leave it empty only
 for a backend that fills in Options::global_ranks_in_group itself -- a
 group with no mapping from either source publishes none rather than
 fabricating 0..size-1, which would collide the dump files of a subgroup.)")
-      .def("remove", &::c10d::FlightRecorderHook::remove);
+      .def(
+          "remove",
+          &::c10d::FlightRecorderHook::remove,
+          "Detach the hook from its process group.");
 
   py::class_<::c10d::NanCheckHook, std::shared_ptr<::c10d::NanCheckHook>>(
-      module, "NanCheckHook")
+      module,
+      "NanCheckHook",
+      R"(
+Checks the inputs of a process group's operations for NaNs using pre-hooks.
+Attached automatically to new process groups when ``TORCH_DIST_NAN_CHECK=1``.)")
       .def_static(
           "attach",
           &::c10d::NanCheckHook::attach,
@@ -5352,9 +5465,18 @@ TORCH_NCCL_NAN_CHECK). Receive buffers are not checked. On CPU a NaN raises
 a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
-      .def("remove", &::c10d::NanCheckHook::remove);
+      .def(
+          "remove",
+          &::c10d::NanCheckHook::remove,
+          "Detach the hook from its process group.");
 
-  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+  py::class_<::c10d::HealthCheckHook>(
+      module,
+      "HealthCheckHook",
+      R"(
+Marks a backend unhealthy in the ``/c10d_health_check`` debug server endpoint
+when the backend aborts, using abort hooks. Attached automatically to new
+process groups.)")
       .def_static(
           "attach",
           &::c10d::HealthCheckHook::attach,
