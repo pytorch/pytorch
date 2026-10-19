@@ -820,10 +820,9 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
             if w[0] == "DELETE" or (w[0] == "PUT" and not w[1].endswith("/dismissals"))
         ]
         self.assertLess(dismissal, cleanup[0])
-        # 41 (no comments) is folded once dismissed; the backfill, whose
-        # budget also pays for its listings, stops short of all 240 writes.
-        self.assertLessEqual(len(cleanup), 1 + post_review.MAX_BACKFILL)
-        self.assertGreater(len(cleanup), post_review.MAX_BACKFILL // 2)
+        # 41 (no comments) is folded once dismissed; the backfill then spends
+        # exactly its write budget, not all 240 writes.
+        self.assertEqual(len(cleanup), 1 + post_review.MAX_BACKFILL)
         # A later run picks up where this one stopped.
         before = len(gh.comments)
         go(gh, row(verdict="ready_for_human_review", findings=[]))
@@ -882,9 +881,9 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
         listings = [
             c for c in gh.calls if c[0] == "GET" and "/pulls/1/comments" in c[1]
         ]
-        # Discussion links, each of the clean path's two hide_earlier passes,
-        # and one for the whole backfill, not one per hidden review.
-        self.assertEqual(len(listings), 4)
+        # One for discussion links and one for the whole backfill: not one per
+        # hidden review, and none for hide_earlier with nothing to take down.
+        self.assertEqual(len(listings), 2)
         self.assertEqual(len(deleted(gh)), 15)
 
     def test_a_reply_on_a_page_before_a_failed_page_is_remembered(self):
@@ -926,6 +925,48 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
         go(gh)
         self.assertIsNone(gh.deadline)
         self.assertEqual(deleted(gh), [30])
+
+    def test_a_comment_someone_reacted_to_is_kept(self):
+        reacted = {**comment(50, 5), "reactions": {"total_count": 1}}
+        gh = FakeGitHub(reviews=[old_review(5)], comments=[reacted, comment(52, 5)])
+        go(gh)
+        self.assertEqual(deleted(gh), [52])
+
+    def test_the_backfill_stops_when_its_clock_runs_out(self):
+        hidden, comments = [], []
+        for rid in (1, 2, 3):
+            r = old_review(rid)
+            r["minimized"] = True
+            hidden.append(r)
+            comments += [comment(rid * 100 + i, rid) for i in range(3)]
+
+        class ClockRunsOut(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if method != "GET" and len(self.writes("DELETE")) == 3:
+                    self.deadline = 0.0  # the first hidden review is done
+                if self.deadline is not None and self.deadline <= 0.0:
+                    raise post_review.OutOfTime()
+                return super().request(method, path, body)
+
+        gh = ClockRunsOut(reviews=hidden, comments=comments)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            go(gh)
+        self.assertEqual(deleted(gh), [300, 301, 302])
+        self.assertEqual(folds(gh), [3])
+        self.assertNotIn("could not delete", out.getvalue())
+        self.assertNotIn("could not fold", out.getvalue())
+        self.assertIn("stopped tidying earlier reviews", out.getvalue())
+        self.assertIsNone(gh.deadline)
+
+    def test_graphql_retry_waits_honour_the_clock(self):
+        gh = GitHub("token", "o/r")
+        gh.deadline = post_review.time.monotonic() + 0.5
+        with mock.patch.object(gh, "request", return_value={"errors": [{}]}):
+            with mock.patch("post_review._sleep") as sleep:
+                with self.assertRaises(post_review.OutOfTime):
+                    gh.graphql("query", {})
+        sleep.assert_not_called()
 
     def test_failed_backfill_deletes_still_spend_the_budget(self):
         class NoDelete(FakeGitHub):

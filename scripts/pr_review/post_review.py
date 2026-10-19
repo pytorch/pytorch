@@ -95,6 +95,13 @@ class GitHubError(Exception):
         self.retry_after = retry_after
 
 
+class OutOfTime(GitHubError):
+    """`GitHub.deadline` passed; the step stops rather than skipping a call."""
+
+    def __init__(self):
+        super().__init__(0, "out of time for this step")
+
+
 def _retry_after(headers) -> int | None:
     """The wait a rate-limit response asks for, or None if it is not one."""
     if headers is None:
@@ -135,7 +142,7 @@ class GitHub:
             idempotent = method in ("GET", "PUT", "DELETE")
         for attempt in range(RETRIES if idempotent else 1):
             if self.deadline is not None and time.monotonic() > self.deadline:
-                raise GitHubError(0, "out of time for this step")
+                raise OutOfTime()
             try:
                 return self._once(method, path, body)
             except GitHubError as exc:
@@ -190,6 +197,11 @@ class GitHub:
                 return out.get("data") or {}
             if attempt == RETRIES - 1:
                 raise GitHubError(200, json.dumps((out or {}).get("errors"))[:500])
+            if (
+                self.deadline is not None
+                and time.monotonic() + 2**attempt > self.deadline
+            ):
+                raise OutOfTime()
             _sleep(2**attempt)
         return {}
 
@@ -459,6 +471,8 @@ def pr_comments(gh: GitHub, pr: int) -> list[dict] | None:
             if len(batch) < 100:
                 return comments
             page += 1
+    except OutOfTime:
+        raise
     except GitHubError as exc:
         warn(f"could not list the PR's inline comments: {exc}")
         return None
@@ -611,8 +625,15 @@ def fold(
             f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}",
             {"body": folded(review, reason)},
         )
+    except OutOfTime:
+        raise
     except GitHubError as exc:
         warn(f"could not fold review {review['id']}: {exc}")
+
+
+def reacted(comment: dict) -> bool:
+    """Whether anyone reacted to the comment: feedback that deleting it would lose."""
+    return bool((comment.get("reactions") or {}).get("total_count"))
 
 
 class Budget:
@@ -639,8 +660,10 @@ def delete_unreplied(
     """Delete review `rid`'s inline comments nobody replied to.
 
     Returns the ids of the comments kept, or None if the PR's comments could
-    not be listed. Replies stay, and so does the comment they answer; a reply
-    any listing in this run saw protects its comment. With `refresh` the
+    not be listed. Replies stay, and so does a comment someone answered or
+    reacted to; a reply any listing in this run saw protects its comment. A
+    reply still pending in someone's unsubmitted review is invisible to the
+    API and protects nothing. With `refresh` the
     comments are listed again just before deleting, which narrows the window
     for a reply landing first but cannot close it. Each delete spends `budget`.
     """
@@ -656,18 +679,20 @@ def delete_unreplied(
     if comments is None:
         return None
     roots = roots_of(comments)
-    if all(c["id"] in gh.replies_seen for c in roots):
+    if all(c["id"] in gh.replies_seen or reacted(c) for c in roots):
         return {c["id"] for c in roots}
     fresh = pr_comments(gh, pr) if refresh else comments
     if fresh is None:
         return None
     kept: set[int] = set()
     for c in roots_of(fresh):
-        if c["id"] in gh.replies_seen or not budget.take():
+        if c["id"] in gh.replies_seen or reacted(c) or not budget.take():
             kept.add(c["id"])
             continue
         try:
             gh.request("DELETE", f"/repos/{gh.repo}/pulls/comments/{c['id']}")
+        except OutOfTime:
+            raise
         except GitHubError as exc:
             if exc.status != 404:  # an overlapping run deleted it first
                 warn(f"could not delete comment {c['id']} of review {rid}: {exc}")
@@ -960,11 +985,10 @@ def hide_earlier(gh, pr, author, new):
     now = next((r for r in listing if r.get("id") == new["id"]), new)
     replaced = now.get("state") == "CHANGES_REQUESTED"
     visible, _ = earlier_reviews(gh, pr, author, new["id"], listing)
-    comments = pr_comments(gh, pr)
+    visible = [r for r in visible if r.get("state") != "CHANGES_REQUESTED" or replaced]
+    comments = pr_comments(gh, pr) if visible else None
     # Newest first; one failure does not stop the rest.
     for old in sorted(visible, key=lambda r: r["id"], reverse=True):
-        if old.get("state") == "CHANGES_REQUESTED" and not replaced:
-            continue
         try:
             take_down(gh, pr, old, comments)
         except GitHubError as exc:
