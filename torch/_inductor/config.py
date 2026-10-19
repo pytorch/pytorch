@@ -2494,8 +2494,8 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
-    # Intel BMG (Xe2) mm templates (bmg_persistent, bmg_tiled2d) for BF16/FP16.
-    enable_bmg_mm_templates = os.environ.get("ENABLE_BMG_MM_TEMPLATES", "1") == "1"
+    # Intel XPU mm templates (xpu_persistent, xpu_tiled2d) for BF16/FP16.
+    enable_xpu_mm_templates = os.environ.get("ENABLE_XPU_MM_TEMPLATES", "1") == "1"
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"

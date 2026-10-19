@@ -2924,9 +2924,10 @@ def _tma_descriptor_max_offset_fits_in_int32(
     )
 
 
-def use_triton_bmg_template(layout: Layout) -> bool:
-    """BF16/FP16 mm on Intel BMG (Xe2) with the BMG templates enabled."""
-    if not config.triton.enable_bmg_mm_templates:
+def use_triton_xpu_template(layout: Layout) -> bool:
+    """BF16/FP16 mm on Intel XPU with the XPU mm templates enabled.
+    Only Xe2 has tuned configs so far; other archs keep the default templates."""
+    if not config.triton.enable_xpu_mm_templates:
         return False
     if layout.device.type != "xpu" or layout.dtype not in (
         torch.bfloat16,
