@@ -606,6 +606,135 @@ as they should never be created manually, but they are guaranteed to support two
 .. autoclass:: P2POp
 ```
 
+(distributed-one-sided)=
+
+## One-sided communication (experimental)
+
+```{warning}
+The window API is experimental and may change without notice.
+```
+
+A window exposes a tensor on every rank of a group for one-sided (RMA) writes:
+a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed_c10d.Window.put` without the peer
+posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
+{meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
+windows when PyTorch is built against, and runs with, NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
+when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation.
+{func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
+registration can still fail if no transport between the ranks supports
+symmetric memory (e.g. no NVLink or InfiniBand).
+
+With `nccl` and `nccl-lazy`:
+
+- **Memory.** The window tensor must be contiguous and allocated from the
+  backend's memory pool, `torch.cuda.MemPool(backend.mem_allocator)`.
+  Registration covers the tensor's whole allocator segment, so all ranks must
+  register matching segments; allocating the same sizes in the same order on
+  every rank satisfies this.
+- **Put sources.** The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie
+  in an allocator segment that has a window on the same process group, e.g. a slice of this window's
+  tensor. `backend.register_mem_pool(pool, symm=True)` gives every segment the
+  pool allocates afterwards a symmetric window, so any tensor allocated from
+  the pool after the call is a valid source. Each new segment is then
+  registered collectively, so all ranks must allocate the same sizes in the
+  same order, and allocation raises if no transport supports symmetric memory.
+  Segments that already exist are upgraded too, but without such a transport
+  they only log a warning and are not valid sources.
+- **Registration.** A window holds one tensor at a time; call
+  {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another.
+  {func}`~torch.distributed.distributed_c10d._new_window` with a tensor
+  already registers it.
+- **Signals.** Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank; see
+  {meth}`~torch.distributed.distributed_c10d.Window.wait_signal` for how signals are counted.
+- **Teardown.** {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's
+  bookkeeping; the segment stays registered with NCCL until the allocator
+  frees it, and every rank must free its segments in the same order or
+  teardown can hang. To avoid this, register the pool with
+  `backend.register_mem_pool` (either `symm` value) and tear down in this order on every rank:
+  synchronize outstanding window work, call `tensor_deregister` on every
+  window backed by the pool, call `backend.deregister_mem_pool(pool)`, free
+  the tensors and pool, then call
+  {func}`~torch.distributed.distributed_c10d.destroy_process_group`. Deregistering the pool
+  tears down its segment windows immediately, so windows backed by it must not
+  be used afterwards.
+- **Limitations.** {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local
+  rank and requires the default `owning=True` registration, and
+  {meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
+
+The example below runs a ring: each rank writes its slice into the next rank's
+window and waits for the previous rank's slice to arrive in its own. The
+source is the last slot of the registered buffer.
+
+```python
+import os
+
+import torch
+import torch.distributed as dist
+
+local_rank = int(os.environ["LOCAL_RANK"])
+device = torch.device("cuda", local_rank)
+# MemPool and use_mem_pool use the current device.
+torch.cuda.set_device(device)
+dist.init_process_group("nccl", device_id=device)
+rank, world_size = dist.get_rank(), dist.get_world_size()
+assert dist._supports_window()
+
+backend = dist.get_backend_impl(device=device)
+pool = torch.cuda.MemPool(backend.mem_allocator)
+# Each segment later allocated from the pool becomes a symmetric window.
+backend.register_mem_pool(pool, symm=True)
+count = 1024
+with torch.cuda.use_mem_pool(pool):
+    # Collective: a new segment is registered on every rank, so all ranks must
+    # allocate the same sizes in the same order.
+    # One slot per rank plus a trailing slot used as the put source.
+    buf = torch.zeros(count * (world_size + 1), dtype=torch.float, device=device)
+
+# Collective: every rank registers its buffer.
+win = dist._new_window(buf)
+src = buf[world_size * count :]
+src.fill_(rank)
+
+next_rank = (rank + 1) % world_size
+prev_rank = (rank - 1) % world_size
+# Write src into slot `rank` of the next rank's buffer and signal it.
+win.put(src, next_rank, rank * count, async_op=False)
+# Wait until the previous rank's put has landed in this rank's buffer.
+win.wait_signal(prev_rank, async_op=False)
+torch.cuda.synchronize()
+assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
+
+# Collective, stream-ordered (does not block the host).
+win.tensor_deregister()
+# Collective: tear down the segments' NCCL windows before freeing them.
+backend.deregister_mem_pool(pool)
+del win, src, buf, pool
+dist.destroy_process_group()
+```
+
+{meth}`~torch.distributed.distributed_c10d.Window.put`, {meth}`~torch.distributed.distributed_c10d.Window.signal` and
+{meth}`~torch.distributed.distributed_c10d.Window.wait_signal` return a `Work` handle. With `nccl` and
+`nccl-lazy`, `async_op=False` enqueues the operation on the current stream;
+`async_op=True` enqueues it on an internal stream ordered after the current
+stream, and `Work.wait()` makes the current stream wait for it.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._supports_window
+.. autofunction:: torch.distributed.distributed_c10d._new_window
+
+.. autoclass:: torch.distributed.distributed_c10d.Window
+    :members:
+.. autoclass:: torch.distributed.distributed_c10d.PutOptions
+    :members:
+.. autoclass:: torch.distributed.distributed_c10d.SignalOptions
+    :members:
+.. autoclass:: torch.distributed.distributed_c10d.WaitSignalOptions
+    :members:
+.. autoclass:: torch.distributed.distributed_c10d.WindowAttr
+    :members:
+.. autoclass:: torch.distributed.distributed_c10d.WindowAccessType
+```
+
 ## Synchronous and asynchronous collective operations
 
 Every collective operation function supports the following two kinds of operations,

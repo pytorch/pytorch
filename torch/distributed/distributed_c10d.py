@@ -54,13 +54,18 @@ from torch._C._distributed_c10d import (
     NanCheckHook,
     PrefixStore,
     ProcessGroup,
+    PutOptions,  # noqa: F401
     ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    SignalOptions,  # noqa: F401
     Store,
+    WaitSignalOptions,  # noqa: F401
     Window,
+    WindowAccessType,  # noqa: F401
+    WindowAttr,  # noqa: F401
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
