@@ -22975,6 +22975,55 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_size_one_innermost_reduction_dim_stays_unsplit(self):
+            # A read that is contiguous along one reduction var and constant along
+            # another (a size-1 or broadcast innermost dim) still votes INNER, so
+            # these stay one unsplit kernel.
+            def fn(x):
+                return x.sum((1, 2))
+
+            def broadcast_sum(x):
+                return x[:, :, None].expand(4096, 8, 32).sum((1, 2))
+
+            for f, x in [
+                (fn, torch.randn(64, 4096, 1, device=GPU_TYPE)),
+                (broadcast_sum, torch.randn(4096, 8, device=GPU_TYPE)),
+            ]:
+                torch._dynamo.reset()
+                result, code = run_and_get_code(torch.compile(f), x)
+                self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
+                self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
+        def test_small_strided_read_keeps_outer_reduction(self):
+            # Only reads constant across the whole reduction abstain from the
+            # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
+            # including a small-dtype one (guards against weighting votes by
+            # itemsize).
+            def fn(x, mask):
+                return (x * mask.t()).sum(1)
+
+            x = torch.randn(1024, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
+
+        def test_small_broadcast_read_does_not_split_inner_reduction(self):
+            # The per-group mask is constant along the innermost reduction var, so
+            # it must not outvote the contiguous rows being reduced: this stays an
+            # unsplit inner reduction (one kernel).
+            def fn(x, mask):
+                masked = x.view(4096, 8, 32).masked_fill(
+                    mask.unsqueeze(-1), float("-inf")
+                )
+                return masked.flatten(1).amax(-1)
+
+            x = torch.randn(4096, 256, device=GPU_TYPE)
+            mask = torch.rand(4096, 8, device=GPU_TYPE) < 0.5
+            result, code = run_and_get_code(torch.compile(fn), x, mask)
+            self.assertEqual(result, fn(x, mask))
+            self.assertEqual(" ".join(code).count("@triton.jit"), 1)
+
         @config.patch({"triton.decompose_sort_ops": True})
         def test_topk_decompose_sort_ops(self):
             def fn(a):
