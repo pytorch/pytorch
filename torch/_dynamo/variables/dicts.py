@@ -73,7 +73,6 @@ from .object_protocol import (
     generic_richcompare_bool,
     mro_lookup,
     python_constant_repr_impl,
-    repr_guard,
 )
 
 
@@ -208,14 +207,10 @@ class ConstDictVariable(VariableTracker):
         }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
-        with repr_guard(self) as recursive:
-            if recursive:
-                return VariableTracker.build(tx, "{...}")
-            items = [
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in self.items.items()
-            ]
+        items = [
+            f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
+            for key, value in self.items.items()
+        ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
@@ -975,14 +970,10 @@ class OrderedDictVariable(ConstDictVariable):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
-        # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
-        with repr_guard(self) as recursive:
-            if recursive:
-                return VariableTracker.build(tx, "...")
-            items = [
-                (tracked_repr(tx, key.vt), tracked_repr(tx, value))
-                for key, value in self.items.items()
-            ]
+        items = [
+            (tracked_repr(tx, key.vt), tracked_repr(tx, value))
+            for key, value in self.items.items()
+        ]
         return VariableTracker.build(tx, self._ordered_dict_repr(items))
 
     def nb_or_impl(
@@ -1253,19 +1244,15 @@ class DictViewVariable(VariableTracker):
     }
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5741-L5765
-        with repr_guard(self) as recursive:
-            if recursive:
-                return VariableTracker.build(tx, "...")
-            if self.kv == "keys":
-                items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-            elif self.kv == "values":
-                items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-            else:  # items
-                items = ", ".join(
-                    f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-                    for key, value in self.view_items
-                )
+        if self.kv == "keys":
+            items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
+        elif self.kv == "values":
+            items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
+        else:  # items
+            items = ", ".join(
+                f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
+                for key, value in self.view_items
+            )
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def dict_view_reversed(
