@@ -217,6 +217,15 @@ class DeviceInterface:
         """
         return cls.Stream is not DeviceInterface.Stream
 
+    @staticmethod
+    def allow_tf32() -> bool:
+        """Whether the backend permits MM templates to set ALLOW_TF32.
+
+        CUDA applies an additional shape threshold at the call site. bmm,
+        tl.dot input precision, and device TFLOPS do not use this method.
+        """
+        return False
+
     @classmethod
     def get_multi_processor_count(cls, device: torch.types.Device = None) -> int:
         """Return the number of compute units, used for occupancy /
@@ -438,6 +447,10 @@ class CudaInterface(DeviceInterface):
     @staticmethod
     def is_graph_capture_supported(device: torch.types.Device = None) -> bool:
         return True
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
@@ -686,6 +699,10 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_triton_capable(device: torch.types.Device = None) -> bool:
         return True
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return bool(torch.backends.mkldnn.allow_tf32)
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
