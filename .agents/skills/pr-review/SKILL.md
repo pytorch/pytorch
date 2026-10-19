@@ -117,9 +117,9 @@ A single line of code can have deep cross-cutting implications: a missing device
 
 1. **Only report problems** — The review output must contain only issues, concerns, and actionable suggestions. Do NOT mention things that are done correctly, do NOT praise good decisions, do NOT explain why something is fine. If a section has no problems, omit it entirely. The reader's time is precious — every sentence must point to something that needs fixing or further discussion.
 2. **Investigate, don't guess** — When uncertain whether a checklist item applies, spawn a sub-agent to read the relevant code. A reviewer who guesses wrong provides negative value.
-3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components.
+3. **Review the design, not just the implementation** — A PR can have perfectly correct implementation of a bad design. Question side-channel communication, on/off private flags, and demand concrete interface documentation for new contracts between components. For design-bearing PRs, also check the design against the `feature-design` skill (see "Design Principles" below).
 4. **Focus on what CI cannot check** — Don't comment on formatting, linting, type errors, or CI failures. Focus on design quality, interface correctness, thread safety, BC implications, test adequacy, and pattern adherence.
-5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time.
+5. **Everything is a must-fix** — There are no "nits." If it's worth mentioning, it's worth fixing. Every inconsistency degrades the codebase over time. The one exception is a tension with a design principle that has no demonstrated defect behind it: that goes under Design Discussion, which is not a must-fix (see "Design Principles" below).
 6. **Be specific and actionable** — Reference file paths and line numbers. Name the function/class/file the author should use.
 7. **Match the immediate context** — Read how similar features are already implemented in the same file. Pattern mismatches within a file are always wrong.
 8. **Assume competence** — The author knows PyTorch; explain only non-obvious context.
@@ -130,6 +130,18 @@ A single line of code can have deep cross-cutting implications: a missing device
 The review checklist is large. You cannot hold the full context of every infrastructure system in your head. **Spawn sub-agents** to investigate whether checklist items apply: read surrounding code, infrastructure the PR should be using, or tests that should exist. Spawn them in parallel for independent areas. A typical medium PR should spawn 3-8 sub-agents.
 
 Sub-agents overlap on purpose. Expect the same defect back from two or three of them in different words; that signals importance, not multiplicity. Reconcile in Step 4, before spending verification agents on it.
+
+## Design Principles
+
+The `feature-design` skill ([../feature-design/SKILL.md](../feature-design/SKILL.md)) collects generic design principles, plus situation-specific guidance in separate files (for example, CUDA streams, the caching allocator, and CUDA graph capture). Read it when the PR is design-bearing: it adds a feature, a new contract with users or between components, deferred or asynchronous behavior, or a new mode, or it reworks how an existing subsystem behaves. Skip it for local bug fixes and refactors. Read a situation file only when its "applies when" scope matches the PR.
+
+In PR review, what exactly are we looking for when we're trying to evaluate design?  In order of subtlety:
+
+- Some PRs flagrantly violate design principles, because the implementor was hyperfocused on just fixing a bug or getting a feature done in the least lines of code possible.  If by simply being prompted to think about design you can identify a problem, this is worth bringing up.
+- PyTorch can be thought of encoding a "design philosophy" (recorded as the feature design skill, but to be complemented by what the code actually does), where there is no single right trade off but PyTorch has some rules where by we tend to prefer making certain tradeoffs.  Our understanding if what tradeoffs are correct evolves over time as our understanding improves and as the world changes, but in general for a given local fix we want to abide by the existing philosophy.  Features that make tradeoffs that, while valid, are very different from how the library currently works, are suspect.
+- We should always be on the lookout for strict Pareto improvements: sometimes there is a free lunch and we just need to discover it.  (Be wary of free lunches that come from an increase in code complexity though!)
+
+If the scenario shows an actual defect (wrong results, a race, a crash), it is a regular finding in the section for its consequence, not Design Discussion.
 
 ## Directory Review Guides (`REVIEW.md`)
 
@@ -161,6 +173,7 @@ Before reviewing, build understanding of what the PR touches and why:
 4. Spawn sub-agents to read the unchanged code surrounding each significantly changed file to understand existing patterns and infrastructure
 5. List the `REVIEW.md` files that apply to each changed file (see "Directory Review Guides" above); leave reading them to sub-agents unless you review or fact-check a file yourself
 6. For a PR, list the maintainer comments and whether each is addressed (see "Maintainer Comments" above)
+7. Decide whether the PR is design-bearing (see "Design Principles" above). If it is, read the `feature-design` skill and any situation file whose scope applies, or give their paths to a sub-agent that reviews the design
 
 ### Step 2: Deep Review
 
@@ -212,6 +225,9 @@ The Summary section is the one exception: it should briefly state what the PR do
 ### Summary
 What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the overall verdict.
 
+### Design Discussion
+[Tensions with `feature-design` principles that have no demonstrated defect: name the principle, give the concrete scenario, the cost of the alternative, and the question for the author. Not must-fix.]
+
 ### Code Quality
 [Problems only]
 
@@ -239,7 +255,7 @@ What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the over
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
-Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**. So does an unaddressed maintainer comment.
+Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**. So does an unaddressed maintainer comment. Design Discussion items never require **Request Changes** by themselves; use **Needs Discussion** if one is significant and the PR doesn't justify it.
 
 [Brief justification — focus on what blocks approval, if anything]
 ```
@@ -253,11 +269,12 @@ Missing tests (new functionality without tests, bug fixes without regression tes
 5. **Infrastructure** — a missing or incorrect hook into an existing PyTorch subsystem
 6. **Testing** — the defect is *only* absent or inadequate coverage
 7. **Performance**
-8. **Code Quality** — everything else
+8. **Design Discussion** — a tension with a `feature-design` principle, with no demonstrated defect (a demonstrated defect goes in the section for its consequence above)
+9. **Code Quality** — everything else
 
 State the finding's full consequence once, in its assigned section. When it genuinely spans categories, say so inline in that one bullet ("this is also a BC break for out-of-tree backends") rather than adding a second bullet under the other section.
 
-This precedence governs the eight finding sections only. Summary and Recommendation are not finding buckets — see their rules in the template above. Neither is Specific Comments — see its rules below.
+This precedence governs the nine finding sections only. Summary and Recommendation are not finding buckets — see their rules in the template above. Neither is Specific Comments — see its rules below.
 
 Do not invent sections outside this template. File a finding by its *consequence*, not its file type: a docstring that misstates operator semantics is API Design, not documentation. Where [review-checklist.md](review-checklist.md) groups or names a topic differently — e.g. it nests API Design under Code Quality, calls its infrastructure section "PyTorch Infrastructure", and has no Backward Compatibility section at all (that lives in [bc-guidelines.md](bc-guidelines.md)) — that organizes the checklist, not the output; this precedence wins.
 
@@ -265,7 +282,7 @@ Do not invent sections outside this template. File a finding by its *consequence
 
 **Only include this section if the user requests a "detailed" or "in depth" review.**
 
-**Do not repeat observations already made in other sections.** This section is for points too localized to carry their own categorized finding — single-line naming, wording, or stale-comment notes. Anything with a behavioral or interface consequence belongs in one of the eight sections above.
+**Do not repeat observations already made in other sections.** This section is for points too localized to carry their own categorized finding — single-line naming, wording, or stale-comment notes. Anything with a behavioral or interface consequence belongs in one of the nine sections above.
 
 When requested, add file-specific feedback with line references:
 
