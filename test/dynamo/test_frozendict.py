@@ -13,6 +13,7 @@ from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.variables.builder import SourcelessBuilder
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     runWithoutCompiledAutograd,
@@ -38,6 +39,8 @@ parametrize_pytree_module = parametrize(
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class FrozenDictTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("mapping_input", [False, True])
     @parametrize("key_error", ["unhashable", "custom", "subclass"])
     def test_constructor_key_type_errors(self, mapping_input, key_error):
@@ -978,6 +981,8 @@ class FrozenDictTests(torch._dynamo.test_case.TestCase):
 @unittest.skipIf(not torch._has_frozendict, "requires builtins.frozendict")
 @instantiate_parametrized_tests
 class FrozenDictSubclassTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("copy", [False, True])
     def test_constructor_preserves_key_comparisons(self, copy):
         class Key:

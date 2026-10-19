@@ -1507,7 +1507,9 @@ class TestConverterDevice(_ConverterTestMixin, TestCase):
 
 
 instantiate_device_type_tests(
-    TestConverterDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+    TestConverterDevice,
+    globals(),
+    allow_xpu=True,
 )
 
 

@@ -92,29 +92,10 @@ struct GpuActivity : public RocprofActivity<rocprofAsyncRow> {
         break;
       case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
       default:
-        // Kernels dispatched to implement a HIP memset/memcpy API call are
-        // memsets/memcpies, not kernels.
-        switch (activity_.internalApi) {
-          case RocLogger::RuntimeInternalMemset:
-            type_ = ActivityType::GPU_MEMSET;
-            break;
-          case RocLogger::RuntimeInternalMemcpy:
-            type_ = ActivityType::GPU_MEMCPY;
-            break;
-          default:
-            type_ = ActivityType::CONCURRENT_KERNEL;
-            break;
-        }
+        type_ = ActivityType::CONCURRENT_KERNEL;
         break;
     }
   }
-  // A dispatch retyped as a memcpy reports the copy direction strings.
-  uint32_t memcpyKindDomain() const {
-    return activity_.internalApi == RocLogger::RuntimeInternalMemcpy
-        ? static_cast<uint32_t>(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
-        : activity_.domain;
-  }
-
   int64_t correlationId() const override {
     return activity_.id;
   }
@@ -136,7 +117,7 @@ struct GpuActivity : public RocprofActivity<rocprofAsyncRow> {
   void visitTypedMetadata(ITypedMetadataVisitor& visitor) const override;
 
   // Add small buffer to fix visual error created by
-  // https://github.com/ROCm/rocprof/issues/105 Once this is resolved we can
+  // https://github.com/ROCm/roctracer/issues/105 Once this is resolved we can
   // use ifdef to handle having this buffer or not based on version
   int64_t timestamp() const override {
     return activity_.begin + 1;
