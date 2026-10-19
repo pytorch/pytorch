@@ -174,6 +174,14 @@ try:
 except ImportError as e:
     log.warning(e)
 try:
+    from quantization.core.test_workflow_module import TestFusedObsFakeQuantModuleAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestFusedObsFakeQuantModuleAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
     from quantization.core.test_workflow_module import TestDistributedCudaOnlyCUDA  # noqa: F401
 except ImportError as e:
     log.warning(e)
