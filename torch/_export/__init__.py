@@ -154,29 +154,51 @@ def aot_compile(
         raise AssertionError(f"expected str or list, got {type(so_path)}")
     return so_path
 
-_AOTI_RUNNER_REGISTER: dict[str, tuple[type, bool]] = {
-    "cpu": (torch._C._aoti.AOTIModelContainerRunnerCpu, False),
+_AOTI_RUNNER_REGISTER: dict[str, tuple[str | Callable, bool]] = {
+    "cpu": ("AOTIModelContainerRunnerCpu", False),
+    "cuda": ("AOTIModelContainerRunnerCuda", True),
+    "xpu": ("AOTIModelContainerRunnerXpu", True),
+    "mps": ("AOTIModelContainerRunnerMps", False),
 }
-
-# The runner classes for the optional devices are only compiled into builds
-# with the corresponding device support, so look them up by name.
-for _device, _runner_cls_name, _takes_device in (
-    ("cuda", "AOTIModelContainerRunnerCuda", True),
-    ("xpu", "AOTIModelContainerRunnerXpu", True),
-    ("mps", "AOTIModelContainerRunnerMps", False),
-):
-    _runner_cls = getattr(torch._C._aoti, _runner_cls_name, None)
-    if _runner_cls is not None:
-        _AOTI_RUNNER_REGISTER[_device] = (_runner_cls, _takes_device)
-del _device, _runner_cls_name, _runner_cls, _takes_device
 
 def register_aoti_runner(
     device_type: str,
-    runner_cls: type,
+    runner_cls: str | Callable,
     takes_device: bool = True,
 ) -> None:
     """Register AOTI ModelContainerRunner for custom device type."""
     _AOTI_RUNNER_REGISTER[device_type] = (runner_cls, takes_device)
+
+def _init_aoti_runner_registry() -> None:
+    private_backend = torch._C._get_privateuse1_backend_name()
+    if private_backend != "privateuseone":
+        from torch.utils.backend_registration import _get_custom_mod_func
+        try:
+            _AOTI_RUNNER_REGISTER[private_backend] = (
+                _get_custom_mod_func("AOTIModelContainerRunner"),
+                True,
+            )
+        except RuntimeError:
+            pass
+
+def _get_aoti_runner(so_path: str, num_threads: int, device_type: str):
+    _init_aoti_runner_registry()
+    runner_entry, takes_device = _AOTI_RUNNER_REGISTER.get(device_type, (None, False))
+    runner_cls = (
+        getattr(torch._C._aoti, runner_entry, None)
+        if isinstance(runner_entry, str)
+        else runner_entry
+    )
+    if runner_cls is None:
+        raise RuntimeError(
+            f"AOTI runner for device type '{device_type}' is not available: the "
+            f"device is not registered, or its runner class is not compiled into "
+            f"this build. Registered devices: {list(_AOTI_RUNNER_REGISTER.keys())}. "
+            f"Use register_aoti_runner to register a custom runner."
+        )
+    if takes_device:
+        return runner_cls(so_path, num_threads, device_type)
+    return runner_cls(so_path, num_threads)
 
 def aot_load(so_path: str, device: str) -> Callable:
     """
@@ -189,34 +211,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         A callable
     """
     aot_compile_warning()
-
-    def _init_aoti_runner_registry() -> None:
-        private_backend = torch._C._get_privateuse1_backend_name()
-        if private_backend != "privateuseone":
-            from torch.utils.backend_registration import _get_custom_mod_func
-            try:
-                _AOTI_RUNNER_REGISTER[private_backend] = (
-                    _get_custom_mod_func("AOTIModelContainerRunner"),
-                    True,
-                )
-            except RuntimeError:
-                pass
-
-    def _get_aoti_runner(device_type: str):
-        _init_aoti_runner_registry()
-        entry = _AOTI_RUNNER_REGISTER.get(device_type)
-        if entry is None:
-            raise RuntimeError(
-                f"AOTI runner not registered for device type '{device_type}'. "
-                f"Registered devices: {list(_AOTI_RUNNER_REGISTER.keys())}. "
-                f"Use register_aoti_runner to register a custom runner."
-            )
-        runner_cls, takes_device = entry
-        if takes_device:
-            return runner_cls(so_path, 1, device)
-        return runner_cls(so_path, 1)
-
-    runner = _get_aoti_runner(device)
+    runner = _get_aoti_runner(so_path, 1, device)
 
     def optimized(*args, **kwargs):
         call_spec = runner.get_call_spec()
