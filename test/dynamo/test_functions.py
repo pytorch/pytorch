@@ -6231,6 +6231,59 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_torch_get_device_module(self):
+        def f1():
+            mod1 = torch.get_device_module()
+            mod2 = torch.get_device_module("cpu")
+            mod3 = torch.get_device_module(torch.device("cpu"))
+            return mod1, mod2, mod3
+
+        self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f2():
+            torch.get_device_module(foo="cpu")
+
+        with self.assertRaises(Unsupported):
+            f2()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f3():
+            torch.get_device_module("cpu", device="cpu")
+
+        with self.assertRaises(Unsupported):
+            f3()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f4():
+            torch.get_device_module("asdf")
+
+        with self.assertRaises(Unsupported):
+            f4()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f5():
+            return torch.get_device_module()
+
+        f5()
+        old_get_device_module = torch.get_device_module
+
+        def new_get_device_module(requested_device=None):
+            if requested_device:
+                return old_get_device_module(requested_device)
+            return torch.cpu
+
+        with patch("torch.get_device_module", new_get_device_module):
+            self.assertEqual(f5(), torch.cpu)
+
+        @torch.compile(backend="eager")
+        def f6():
+            mod = torch.get_device_module()
+            mod.synchronize()
+            return mod
+
+        f6()
+
     def test_torch_source(self):
         global torch
 
@@ -7264,7 +7317,7 @@ class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
 class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_torch_get_device_module(self, device):
+    def test_torch_get_device_module_accelerator(self, device):
         def f1():
             mod1 = torch.get_device_module()
             mod2 = torch.get_device_module("cpu")
@@ -7273,44 +7326,24 @@ class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def f2():
-            torch.get_device_module(foo="cpu")
-
-        with self.assertRaises(Unsupported):
-            f2()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f3():
-            torch.get_device_module("cpu", device="cpu")
-
-        with self.assertRaises(Unsupported):
-            f3()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def f4():
-            torch.get_device_module("asdf")
-
-        with self.assertRaises(Unsupported):
-            f4()
-
         # test for changing torch.get_device_module() (super rare case due to lru_cache)
         @torch.compile(backend="eager", fullgraph=True)
         def f5():
             return torch.get_device_module()
 
         f5()
+        device_type = torch.device(device).type
         new_device = (
             "cpu"
-            if torch._C._get_accelerator() == torch.device(device)
-            else device
+            if torch._C._get_accelerator().type == device_type
+            else device_type
         )
 
         old_get_device_module = torch.get_device_module
 
-        def new_get_device_module(device=None):
-            if device:
-                return old_get_device_module(device)
+        def new_get_device_module(requested_device=None):
+            if requested_device:
+                return old_get_device_module(requested_device)
             return getattr(torch, new_device)
 
         # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
