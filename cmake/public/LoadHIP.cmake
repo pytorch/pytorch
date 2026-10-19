@@ -40,6 +40,13 @@ else()
   endif()
 
   if(NOT EXISTS ${ROCM_PATH})
+    if(_USE_ROCM_EXPLICITLY_SET AND USE_ROCM)
+      message(FATAL_ERROR
+        "PyTorch: ROCm was explicitly requested (USE_ROCM=1) but cannot be found. "
+        "Set the ROCM_PATH environment variable to a ROCm installation, make "
+        "rocm-sdk available on PATH, or install ROCm to ${ROCM_PATH}. "
+        "If you want to build without ROCm, please set USE_ROCM=0.")
+    endif()
     message(STATUS
         "ROCM_PATH environment variable is not set and ${ROCM_PATH} does not exist.\n"
         "Building without ROCm support.")
