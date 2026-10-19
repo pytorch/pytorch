@@ -2117,6 +2117,7 @@ def native_batch_norm_helper(
     computation_dtype = utils.get_computation_dtype(input.dtype)
     new_running_mean = running_mean
     new_running_var = running_var
+    is_input_float16 = input.dtype == torch.float16
     if training:
         computation_dtype = utils.get_computation_dtype(input.dtype)
         input_acc = input.to(dtype=computation_dtype)
@@ -2153,7 +2154,7 @@ def native_batch_norm_helper(
         running_var = running_var.to(dtype=computation_dtype, copy=True)
         new_running_var = running_var
         mean = running_mean
-        if running_var.device.type == "xpu":
+        if running_var.device.type == "xpu" and is_input_float16:
             # fixes: https://github.com/intel/torch-xpu-ops/issues/5060
             invstd = 1 / torch.sqrt(running_var + eps)
         else:
