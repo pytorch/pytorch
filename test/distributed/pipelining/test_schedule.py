@@ -2386,10 +2386,11 @@ class TestSchedulePlan(TestCase):
                 pending.remove((send_type, action.stage_index, action.microbatch_index))
         return peak, len(pending)
 
-    def test_send_budget_caps_forward_and_backward_sends(self):
+    @parametrize("budget", [1, 2, 4])
+    def test_send_budget_caps_forward_and_backward_sends(self, budget):
         uncapped = self._wait_send_schedule()
         capped = _add_wait_send_budget(
-            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=4
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=budget
         )
 
         self.assertTrue(
@@ -2402,8 +2403,24 @@ class TestSchedulePlan(TestCase):
         for rank, actions in capped.items():
             peak, remaining = self._outstanding_sends(actions)
             _, uncapped_remaining = self._outstanding_sends(uncapped[rank])
-            self.assertLessEqual(peak, 4)
+            self.assertLessEqual(peak, budget)
             self.assertLessEqual(remaining, uncapped_remaining)
+        _simulate_comms_compute(capped, lambda stage: stage, num_stages=4)
+
+    def test_send_budget_handles_noncontiguous_rank_ids(self):
+        ranks = (5, 13, 29, 47)
+        uncapped = self._wait_send_schedule()
+        expected = _add_wait_send_budget(
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=2
+        )
+        actual = _add_wait_send_budget(
+            {ranks[rank]: actions for rank, actions in uncapped.items()},
+            stage_to_rank=lambda stage: ranks[stage],
+            max_outstanding_sends=2,
+        )
+        self.assertEqual(
+            actual, {ranks[rank]: actions for rank, actions in expected.items()}
+        )
 
     def test_send_budget_preserves_non_wait_actions(self):
         uncapped = self._wait_send_schedule()

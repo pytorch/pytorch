@@ -2157,6 +2157,11 @@ def _add_wait_send_budget(
     the pass moves a pending wait to that point if doing so cannot create a
     cycle. It prefers waits whose receive must already be posted. A safe wait
     for an independent receive may stall.
+
+    Rank-local action order makes a node's ancestors a prefix on each rank.
+    Vector clocks record each prefix's last index, making reachability queries
+    constant-time. Clocks are initialized topologically and propagated only
+    when a moved wait adds a new dependency.
     """
     _validate_send_waits(comm_actions)
     ranks = sorted(comm_actions)
@@ -2236,6 +2241,10 @@ def _add_wait_send_budget(
     edges: dict[tuple[int, int], Counter[tuple[int, int]]] = {
         node: Counter() for node in nodes
     }
+    rank_indices = {rank: index for index, rank in enumerate(ranks)}
+    ancestor_clocks = {node: [-1] * len(ranks) for node in nodes}
+    for node in nodes:
+        ancestor_clocks[node][rank_indices[node[0]]] = node[1]
 
     def add_edge(source: tuple[int, int], target: tuple[int, int]) -> None:
         edges[source][target] += 1
@@ -2246,19 +2255,18 @@ def _add_wait_send_budget(
             del edges[source][target]
 
     def is_reachable(source: tuple[int, int], target: tuple[int, int]) -> bool:
-        """Return whether the current dependency graph has a path to target."""
-        if source == target:
-            return True
-        pending = list(edges[source])
-        visited = {source}
-        while pending:
-            node = pending.pop()
-            if node == target:
-                return True
-            if node not in visited:
-                visited.add(node)
-                pending.extend(edges[node])
-        return False
+        """Test membership in target's source-rank ancestor prefix."""
+        return ancestor_clocks[target][rank_indices[source[0]]] >= source[1]
+
+    def inherit_ancestors(source: tuple[int, int], target: tuple[int, int]) -> bool:
+        """Merge an edge's ancestor prefixes; report whether target changed."""
+        changed = False
+        target_clock = ancestor_clocks[target]
+        for index, value in enumerate(ancestor_clocks[source]):
+            if value > target_clock[index]:
+                target_clock[index] = value
+                changed = True
+        return changed
 
     for rank in ranks:
         for source, target in zip(rank_nodes[rank], rank_nodes[rank][1:]):
@@ -2279,6 +2287,7 @@ def _add_wait_send_budget(
         node = queue.popleft()
         num_walked += 1
         for successor in edges[node]:
+            inherit_ancestors(node, successor)
             in_degree[successor] -= 1
             if in_degree[successor] == 0:
                 queue.append(successor)
@@ -2296,21 +2305,30 @@ def _add_wait_send_budget(
     ) -> tuple[bool, bool]:
         """Return whether moving this wait is safe and non-stalling."""
         recv_node = matching_recv[send_key]
-        old_before_node = wait_before[send_key]
-        if old_before_node is not None:
-            remove_edge(recv_node, old_before_node)
+        # A pending wait lies later on this rank. Its old edge cannot help
+        # either query reach the earlier position in an acyclic graph.
         unsafe = is_reachable(before_node, recv_node)
         non_stalling = not unsafe and is_reachable(recv_node, before_node)
-        if old_before_node is not None:
-            add_edge(recv_node, old_before_node)
         return not unsafe, non_stalling
 
     def move_wait(send_key: _SendKey, before_node: tuple[int, int]) -> None:
         recv_node = matching_recv[send_key]
         old_before_node = wait_before[send_key]
+        add_edge(recv_node, before_node)
+        if inherit_ancestors(recv_node, before_node):
+            pending = deque([before_node])
+            queued = {before_node}
+            while pending:
+                node = pending.popleft()
+                queued.remove(node)
+                for successor in edges[node]:
+                    if inherit_ancestors(node, successor) and successor not in queued:
+                        pending.append(successor)
+                        queued.add(successor)
+        # The new wait precedes the old one, so rank-local order now implies
+        # the old edge. Removing it does not invalidate ancestor prefixes.
         if old_before_node is not None:
             remove_edge(recv_node, old_before_node)
-        add_edge(recv_node, before_node)
         wait_before[send_key] = before_node
         moved_waits.add(send_key)
 
