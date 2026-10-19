@@ -1844,6 +1844,15 @@ class InstructionTranslatorBase(
 
         if (
             not self.stack
+            # Entry RESUME does no user work; defer to the next unprotected instruction.
+            and not (
+                inst.opname == "RESUME"
+                and inst.arg == 0
+                and not self.block_stack
+                and inst.exn_tab_entry is None
+                and self.instruction_pointer < len(self.instructions)
+                and self.next_instruction.exn_tab_entry is None
+            )
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
         ):
@@ -5361,10 +5370,14 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
-        if self.output.count_calls() > 1:
-            # perf optimization only
-            self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
-            return True
+        calls = 0
+        for node in self.output.graph.nodes:
+            if "call" in node.op:
+                calls += 1
+                if calls > 1:
+                    # perf optimization only
+                    self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
+                    return True
         return False
 
     def format_frame_summary(
