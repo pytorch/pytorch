@@ -48,6 +48,9 @@ from ..source import (
     TypeSource,
 )
 from ..utils import (
+    dict_items,
+    dict_keys,
+    dict_values,
     get_type_mro_no_user_code,
     iter_mro_static_attrs,
     iter_mro_static_dicts,
@@ -2467,6 +2470,39 @@ def object_generic_getattr(
     getattr_result = obj.call_getattr_fallback(tx, name)
     if getattr_result is not None:
         return getattr_result
+
+    # Mapping construction probes iterable inputs for keys(). Fixed-layout
+    # iterables cannot have extra attributes unless __getattr__ supplies them.
+    # Before Python 3.15, builtins can expose distinct wrappers for the same slot.
+    if (
+        (obj.tp_iter is not None or obj.tp_as_sequence.sq_item is not None)
+        and not py_type.__dictoffset__
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+        and any(
+            mro_lookup(py_type, "__getattribute__") is cls.__getattribute__
+            for cls in (
+                object,
+                list,
+                tuple,
+                dict,
+                dict_keys,
+                dict_values,
+                dict_items,
+                set,
+                frozenset,
+                int,
+                str,
+                bytes,
+                range,
+                types.GeneratorType,
+            )
+        )
+    ):
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{py_type.__name__}' object has no attribute '{name}'"],
+        )
 
     # Step 7: Attribute not found -- signal to caller to fall back.
     raise _UnhandledDescriptorError(
