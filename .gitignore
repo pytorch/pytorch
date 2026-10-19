@@ -41,7 +41,6 @@ docs/cpp/build
 docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/generated/
-docs/source/distributed/elastic/generated/
 log
 usage_log.txt
 usage_log*

@@ -48,5 +48,5 @@ serve:
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 clean:
-	@echo "Removing everything under 'build' and generated sources.."
-	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(SOURCEDIR)/generated $(SOURCEDIR)/distributed/elastic/generated $(BUILDDIR)/auto_gen_aten_op_list.csv
+	@echo "Removing everything under 'build' and 'source/generated'.."
+	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(SOURCEDIR)/generated $(BUILDDIR)/auto_gen_aten_op_list.csv
