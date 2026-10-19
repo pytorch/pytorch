@@ -7314,8 +7314,8 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
 
 
-class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class FunctionCUDATests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.CUDA
 
     @onlyCUDA
     def test_get_device_properties_tensor_device(self, device):
@@ -7329,6 +7329,13 @@ class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(
             self, fn=fn, nargs=1, expected_frame_count=1
         )
+
+
+instantiate_device_type_tests(FunctionCUDATests, globals(), only_for="cuda")
+
+
+class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
     def test_device_manual_seed(self, device):
