@@ -1598,6 +1598,41 @@ class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
     def backend_str(cls) -> str:
         return "nccl-lazy"
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_with_pair_comms(self) -> None:
+        # Once a pair comm exists the allocator hook registers new pool segments
+        # with it too; only the primary holds the pool registration.
+        backend = self._backend()
+        nxt = (self.rank + 1) % self.world_size
+        prev = (self.rank - 1) % self.world_size
+
+        def ring(send_t: torch.Tensor, recv_t: torch.Tensor) -> None:
+            if self.rank % 2 == 0:
+                dist.send(send_t, nxt)
+                dist.recv(recv_t, prev)
+            else:
+                dist.recv(recv_t, prev)
+                dist.send(send_t, nxt)
+            torch.cuda.synchronize()
+
+        ring(torch.zeros(1, device=self.device), torch.empty(1, device=self.device))
+        self.assertGreater(backend._num_active_channels(), 0)
+        for symm in (False, True):
+            pool = torch.cuda.MemPool(backend.mem_allocator)
+            backend.register_mem_pool(pool, symm=symm)
+            try:
+                tensor = self._pool_tensor(pool)
+                recv_t = self._pool_tensor(pool)
+                ring(tensor, recv_t)
+                self.assertEqual(recv_t, torch.full_like(recv_t, float(prev)))
+                dist.all_reduce(tensor)
+                torch.cuda.synchronize()
+                self.assertEqual(tensor, torch.full_like(tensor, self._all_reduced))
+            finally:
+                backend.deregister_mem_pool(pool)
+            del tensor, recv_t, pool
+
 
 class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
     """register_mem_pool(symm=True) with NCCL window registration disabled, so
