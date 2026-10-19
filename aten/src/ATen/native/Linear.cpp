@@ -20,6 +20,7 @@
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/addmm.h>
+#include <ATen/ops/bias_native.h>
 #include <ATen/ops/bilinear_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/dot.h>
@@ -922,6 +923,16 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
+}
+
+Tensor bias(const Tensor& input, const Tensor& bias) {
+  TORCH_CHECK(bias.dim() == 1, "bias: expected bias to be 1D, but got ", bias.dim(), "D");
+  TORCH_CHECK(input.dim() >= 1, "bias: expected input to have at least 1 dimension");
+  TORCH_SYM_CHECK(
+      input.sym_size(-1).sym_eq(bias.sym_size(0)),
+      "bias: expected the last dimension of input (", input.sym_size(-1),
+      ") to match the size of bias (", bias.sym_size(0), ")");
+  return input.add(bias);
 }
 
 }  // namespace at::native

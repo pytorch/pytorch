@@ -279,6 +279,7 @@ Global Hooks For Module
     :template: classtemplate.rst
 
     nn.Identity
+    nn.Bias
     nn.Linear
     nn.Bilinear
     nn.LazyLinear
