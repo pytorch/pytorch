@@ -617,47 +617,47 @@ a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed
 posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
 {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
 windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
-when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation. With
-`TORCH_DISTRIBUTED_DEBUG=DETAIL` and Gloo available, groups are wrapped in a
-debug wrapper that does not forward windows, so no backend supports them.
-With `TORCH_DISTRIBUTED_USE_TORCHCOMMS=1` (or `dist_config.use_torchcomms`),
-groups use the torchcomms backend, which supports windows only if the
-underlying torchcomms backend does.
+when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation.
 {func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
 
-With `nccl` and `nccl-lazy`, the window tensor must be contiguous and
-allocated from the backend's memory pool,
-`torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
-tensor's whole allocator segment, so all ranks must register matching
-segments; allocating the same sizes in the same order on every rank satisfies
-this. The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie in an
-allocator segment that has a window, e.g. a slice of this window's tensor.
-`backend.register_mem_pool(pool, symm=True)` gives every segment the pool
-allocates afterwards a symmetric window, so any tensor allocated from the pool
-after the call is a valid source;
-each new segment is then registered collectively, so all ranks must allocate
-the same sizes in the same order, and allocation raises if no transport
-supports symmetric memory. Segments that already exist are upgraded too, but
-without such a transport they only log a warning and are not valid sources.
-A window holds one tensor at a time; call
-{meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another, and note
-that {func}`~torch.distributed.distributed_c10d._new_window` with a tensor already registers it.
-Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank. Signals
-are counted: each {meth}`~torch.distributed.distributed_c10d.Window.wait_signal` consumes one signal from
-the peer, so call it once per `put` or
-{meth}`~torch.distributed.distributed_c10d.Window.signal` from that peer. A `signal` and a `put` from the
-same peer are indistinguishable, so after a `signal` followed by a `put` the
-first `wait_signal` can return before the put's data arrives.
-{meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's bookkeeping;
-the segment stays registered with NCCL until the allocator frees it, and
-every rank must free its segments in the same order or teardown can hang.
-Registering the pool with `backend.register_mem_pool(pool)` and calling
-`backend.deregister_mem_pool(pool)` on every rank before freeing avoids this.
-{meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank and
-requires the default `owning=True` registration, and
-{meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
+With `nccl` and `nccl-lazy`:
+
+- **Memory.** The window tensor must be contiguous and allocated from the
+  backend's memory pool, `torch.cuda.MemPool(backend.mem_allocator)`.
+  Registration covers the tensor's whole allocator segment, so all ranks must
+  register matching segments; allocating the same sizes in the same order on
+  every rank satisfies this.
+- **Put sources.** The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie
+  in an allocator segment that has a window, e.g. a slice of this window's
+  tensor. `backend.register_mem_pool(pool, symm=True)` gives every segment the
+  pool allocates afterwards a symmetric window, so any tensor allocated from
+  the pool after the call is a valid source. Each new segment is then
+  registered collectively, so all ranks must allocate the same sizes in the
+  same order, and allocation raises if no transport supports symmetric memory.
+  Segments that already exist are upgraded too, but without such a transport
+  they only log a warning and are not valid sources.
+- **Registration.** A window holds one tensor at a time; call
+  {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another.
+  {func}`~torch.distributed.distributed_c10d._new_window` with a tensor
+  already registers it.
+- **Signals.** Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank; see
+  {meth}`~torch.distributed.distributed_c10d.Window.wait_signal` for how signals are counted.
+- **Teardown.** {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's
+  bookkeeping; the segment stays registered with NCCL until the allocator
+  frees it, and every rank must free its segments in the same order or
+  teardown can hang. To avoid this, register the pool with
+  `backend.register_mem_pool(pool)` and tear down in this order on every rank:
+  synchronize outstanding window work, call `tensor_deregister` on every
+  window backed by the pool, call `backend.deregister_mem_pool(pool)`, free
+  the tensors and pool, then call
+  {func}`~torch.distributed.distributed_c10d.destroy_process_group`. Deregistering the pool
+  tears down its segment windows immediately, so windows backed by it must not
+  be used afterwards.
+- **Limitations.** {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local
+  rank and requires the default `owning=True` registration, and
+  {meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
 
 The example below runs a ring: each rank writes its slice into the next rank's
 window and waits for the previous rank's slice to arrive in its own. The
