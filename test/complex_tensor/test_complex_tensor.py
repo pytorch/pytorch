@@ -100,15 +100,21 @@ SKIPS = {
 }
 
 EXTRA_KWARGS = {
-    Descriptor(op=aten.asinh, dtype=torch.complex64, variant=Variant.Op): {
+    Descriptor(
+        op=aten.asinh, dtype=torch.complex64, variant=Variant.Op | Variant.OpInterleaved
+    ): {
         "rtol": 2e-5,
         "atol": 5e-5,
     },
-    Descriptor(op=aten.tanh, dtype=torch.complex64, variant=Variant.Op): {
+    Descriptor(
+        op=aten.tanh, dtype=torch.complex64, variant=Variant.Op | Variant.OpInterleaved
+    ): {
         "rtol": 1e-4,
         "atol": 1e-5,
     },
-    Descriptor(op=aten.pow, dtype=torch.complex64, variant=Variant.Op): {
+    Descriptor(
+        op=aten.pow, dtype=torch.complex64, variant=Variant.Op | Variant.OpInterleaved
+    ): {
         "rtol": 2e-2,
         "atol": 2e-6,
     },
@@ -146,6 +152,18 @@ class TestComplexTensor(TestCase):
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
+
+    @ops(
+        implemented_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_consistency_interleaved(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.OpInterleaved)
+
+    @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
+    def test_maybe_error_interleaved(self, device, dtype, op: OpInfo):
+        self.check_consistency(device, dtype, op, Variant.OpInterleaved)
 
 
 class TestComplexTensorGeneric(TestCase):
@@ -230,8 +248,6 @@ class TestComplexTensorGeneric(TestCase):
 
         with self.assertRaises(TypeError):
             InterleavedComplexTensor(torch.randn(3))
-        with self.assertRaises(RuntimeError):
-            InterleavedComplexTensor(torch.randn(3, dtype=torch.complex64).conj())
 
 
 @unMarkDynamoStrictTest

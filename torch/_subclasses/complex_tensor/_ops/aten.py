@@ -5,7 +5,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 from .common import (
     _get_func_name,
     COMPLEX_TO_REAL,
@@ -92,7 +92,6 @@ SIMPLE_OPS_LIST = [
     aten.diagonal,
     aten.expand,
     aten.unsqueeze,
-    aten.unsqueeze_,
     aten.mean,
     aten.sum,
     aten.clone,
@@ -117,10 +116,42 @@ SIMPLE_OPS_LIST = [
 for simple_op in SIMPLE_OPS_LIST:
     globals()[_get_func_name(simple_op)] = register_simple(simple_op)
 
+
+def register_inplace_view(op: OpType) -> Callable[..., Any]:
+    """Register an in-place view op, which must also update the wrapper's own metadata."""
+
+    def impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> ComplexTensor:
+        re = op(self.re, *args, **kwargs)
+        op(self.im, *args, **kwargs)
+        # Autograd returns `self` for in-place ops, so its sizes/strides must match `re`'s.
+        python_key = torch._C.DispatchKeySet(torch._C.DispatchKey.Python)
+        with torch._C._ExcludeDispatchKeyGuard(python_key):
+            aten.as_strided_(self, re.shape, re.stride(), re.storage_offset())
+        return self
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
+INPLACE_VIEW_OPS = [
+    aten.unsqueeze_,
+    aten.squeeze_,
+    aten.transpose_,
+    aten.t_,
+    aten.as_strided_,
+]
+
+for inplace_view_op in INPLACE_VIEW_OPS:
+    globals()[_get_func_name(inplace_view_op)] = register_inplace_view(inplace_view_op)
+
+del inplace_view_op
+
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [
     aten.col2im,
-    aten.alias,
     aten.lift_fresh,
     aten._unsafe_view,
     aten.index,
@@ -141,13 +172,7 @@ for simple_op in SIMPLE_FORCE_TESTED_OPS:
 
 del simple_op
 
-INDUCTOR_OPS = [
-    aten.stft,
-    aten.istft,
-]
-INDUCTOR_OPS.extend(
-    getattr(aten, op) for op in aten if op.startswith(("fft_", "_fft_"))
-)
+INDUCTOR_OPS = [getattr(aten, op) for op in aten if op.startswith(("fft_", "_fft_"))]
 
 for inductor_op in INDUCTOR_OPS:
     globals()[_get_func_name(inductor_op)] = register_force_test(
@@ -226,6 +251,19 @@ def reciprocal_impl(self: ComplexTensor) -> ComplexTensor:
         aten.div(self_r, den).to(out_dt),
         aten.div(-self_i, den).to(out_dt),
     )
+
+
+@register_complex(aten.alias)
+def alias_impl(
+    self: ComplexTensor | InterleavedComplexTensor,
+) -> ComplexTensor | InterleavedComplexTensor:
+    if isinstance(self, InterleavedComplexTensor):
+        out = InterleavedComplexTensor(self._data)
+        torch._C._set_neg(out, self.is_neg())
+        torch._C._set_conj(out, self.is_conj())
+        return out
+
+    return ComplexTensor(aten.alias(self.re), aten.alias(self.im))
 
 
 # reductions
@@ -826,24 +864,46 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
+    if isinstance(self, InterleavedComplexTensor):
+        out = aten.alias(self)
+        torch._C._set_conj(out, not self.is_conj())
+
     return ComplexTensor(aten.alias(self.re), -self.im)
 
 
 @register_complex(aten._neg_view)
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
+    if isinstance(self, InterleavedComplexTensor):
+        out = aten.alias(self)
+        torch._C._set_neg(out, not self.is_neg())
+
     return ComplexTensor(-self.re, -self.im)
 
 
 @register_complex(aten.resolve_conj)
-def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
+def resolve_conj_impl(self: ComplexTensor) -> InterleavedComplexTensor | ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
+    if isinstance(self, InterleavedComplexTensor):
+        conj = self.is_conj()
+        if not conj:
+            return aten.alias(self)
+
+        data = torch.stack((self.re, self.im))
+        return InterleavedComplexTensor(data)
     return self
 
 
 @register_complex(aten.resolve_neg)
-def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
+def resolve_neg_impl(self: ComplexTensor) -> InterleavedComplexTensor | ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
+    if isinstance(self, InterleavedComplexTensor):
+        neg = self.is_neg()
+        if not neg:
+            return aten.alias(self)
+
+        return InterleavedComplexTensor(-self._data)
+
     return self
 
 

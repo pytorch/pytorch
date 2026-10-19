@@ -55,6 +55,16 @@ def _maybe_unwrap(value: Any) -> Any:
     return value
 
 
+def _unwrap_output(value: Any, meta: Any) -> Any:
+    """Unwrap a graph output, restoring the strides recorded in the original graph."""
+    if not isinstance(value, ComplexTensor) or not isinstance(meta, Tensor):
+        return _maybe_unwrap(value)
+    # ComplexTensor parts are contiguous; rebuild the layout `meta` promises.
+    real = torch.stack([value.re, value.im], dim=-1)
+    real_strides = [2 * s for s in meta.stride()] + [1]
+    return torch.view_as_complex(torch.ops.prims.copy_strided(real, real_strides))
+
+
 def _view_base(node: Any) -> Any:
     while (
         isinstance(node, fx.Node)
@@ -114,6 +124,10 @@ class _ComplexInterpreter(fx.Interpreter):
             raw = self.raw_inputs[id(args[0])]
             raw.copy_(_maybe_unwrap(args[1]), *args[2:], **kwargs)
             return args[0]
+        if isinstance(target, torch._ops.HigherOrderOperator):
+            # HOP subgraphs are not decomposed; run them on plain complex tensors.
+            args, kwargs = pytree.tree_map(_maybe_unwrap, (args, kwargs))
+            return super().call_function(target, args, kwargs)
         with WrapComplexMode():
             return super().call_function(target, args, kwargs)
 
@@ -127,6 +141,8 @@ def decompose_complex_in_graph(
         return gm
 
     interleaved = _needs_interleaved(gm)
+    out_nodes, out_spec = pytree.tree_flatten(gm.graph.output_node().args[0])
+    out_metas = [getattr(n, "meta", {}).get("val") for n in out_nodes]
 
     def wrapper(*args: Any) -> Any:
         wrapped = tuple(
@@ -138,7 +154,14 @@ def decompose_complex_in_graph(
             if isinstance(w, InterleavedComplexTensor)
         }
         result = _ComplexInterpreter(gm, raw_inputs).run(*wrapped)
-        return pytree.tree_map(_maybe_unwrap, result)
+        flat_result = pytree.tree_leaves(result)
+        pairs = zip(flat_result, out_metas, strict=True)
+        return pytree.tree_unflatten([_unwrap_output(v, m) for v, m in pairs], out_spec)
 
     with fx_traceback.preserve_node_meta():
-        return make_fx(wrapper, decomposition_table=decompositions)(*flat_args)
+        out = make_fx(wrapper, decomposition_table=decompositions)(*flat_args)
+    # Tracing subclass construction records unused metadata queries (e.g. `aten.is_pinned`)
+    # that Inductor has no lowering for.
+    out.graph.eliminate_dead_code()
+    out.recompile()
+    return out

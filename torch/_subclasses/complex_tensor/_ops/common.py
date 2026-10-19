@@ -4,7 +4,7 @@ from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
-from torch._decomp import get_decompositions
+from torch._decomp import decomposition_table
 from torch._ops import OpOverload, OpOverloadPacket
 from torch._refs import is_complex as _is_complex
 from torch.types import Number
@@ -124,7 +124,11 @@ def register_force_test(
     return register_complex(op, func_impl)
 
 
-DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
+DECOMPOSITIONS = {
+    op: fn
+    for op, fn in decomposition_table.items()
+    if isinstance(op, OpOverload) and op.namespace == "aten"
+}
 
 
 def lookup_complex(
@@ -241,6 +245,10 @@ def register_binary_nonlinear(
     def impl(
         a: ComplexTensor, b: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
+        if isinstance(a, torch.Tensor):
+            a = torch.resolve_conj(torch.resolve_neg(a))
+        if isinstance(b, torch.Tensor):
+            b = torch.resolve_conj(torch.resolve_neg(b))
         out_dt, (a, b) = promote_tensors(a, b)
         a_r, a_i = split_complex_arg(a)
         b_r, b_i = split_complex_arg(b)
@@ -312,20 +320,24 @@ def register_inductor(
     return register_complex(op, impl)
 
 
-def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
+def _as_complex_tensor(
+    arg: Tensor | Any, interleaved: bool = False
+) -> Tensor | ComplexTensor | InterleavedComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
         not isinstance(arg, ComplexTensor | InterleavedComplexTensor)
         and isinstance(arg, Tensor)
         and arg.dtype in COMPLEX_TO_REAL
     ):
+        if interleaved:
+            return InterleavedComplexTensor(arg)
         return ComplexTensor.from_interleaved(arg)
     return arg
 
 
 def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     """Convert a ComplexTensor to a Tensor with a complex dtype. Pass other arguments as-is."""
-    if isinstance(arg, ComplexTensor):
+    if isinstance(arg, ComplexTensor | InterleavedComplexTensor):
         return arg.as_interleaved()
     return arg
 
