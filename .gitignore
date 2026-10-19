@@ -40,7 +40,6 @@ docs/src/**/*
 docs/cpp/build
 docs/cpp/source/html/
 docs/cpp/source/latex/
-docs/source/compile/generated/
 docs/source/generated/
 docs/source/distributed/elastic/generated/
 log
