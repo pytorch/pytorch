@@ -669,10 +669,12 @@ assert dist._supports_window()
 
 backend = dist.get_backend_impl(device=device)
 pool = torch.cuda.MemPool(backend.mem_allocator)
-# Collective: register the pool's segments as symmetric windows.
+# Each segment later allocated from the pool becomes a symmetric window.
 backend.register_mem_pool(pool, symm=True)
 count = 1024
 with torch.cuda.use_mem_pool(pool):
+    # Collective: a new segment is registered on every rank, so all ranks must
+    # allocate the same sizes in the same order.
     # One slot per rank plus a trailing slot used as the put source.
     buf = torch.zeros(count * (world_size + 1), dtype=torch.float, device=device)
 
