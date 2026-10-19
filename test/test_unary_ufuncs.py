@@ -596,6 +596,19 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.signbit(y), exp)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_softshrink_signed_zero(self, device, dtype):
+        # The dead zone is +0 and NaN propagates, whether the CPU kernel takes
+        # its vectorized path (contiguous) or its scalar path (strided, tail)
+        x = torch.tensor([-0.25, -0.0, 0.0, 0.25], device=device, dtype=dtype)
+        x = x.repeat(16)
+        for name, inp in (("contiguous", x), ("strided", x[::2]), ("short", x[:3])):
+            with self.subTest(layout=name):
+                result = torch.nn.functional.softshrink(inp, 0.5)
+                self.assertFalse(torch.signbit(result).any())
+        nan = torch.tensor([float("nan")] * 3, device=device, dtype=dtype)
+        self.assertTrue(torch.nn.functional.softshrink(nan, 0.5).isnan().all())
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     def test_clamp_signed_zero(self, device, dtype):
         x = torch.tensor([-0.0, 0.0], device=device, dtype=dtype)
         exp = torch.signbit(x)

@@ -1258,6 +1258,25 @@ class DecompOneOffTests(TestCase):
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_softshrink_backward_symint_lambd(self, device):
+        # An integer lambd stays symbolic, and is still range-checked
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        def fn(grad, x, lambd):
+            return torch.ops.aten.softshrink_backward(grad, x, lambd)
+
+        counter = CompileCounterWithBackend("aot_eager_decomp_partition")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        grad = torch.ones(4, device=device, dtype=torch.float16)
+        x = torch.tensor([0.0, 3.0, -3.0, 2000.0], device=device, dtype=torch.float16)
+        for lambd in (1, 2, 1024):
+            self.assertEqual(compiled(grad, x, lambd), fn(grad, x, lambd))
+        self.assertEqual(counter.frame_count, 1)
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            compiled(grad, x, 70000)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_contiguous_softmax(self, device):
         size = (2, 4, 3, 3)
         stride = (9, 18, 3, 1)

@@ -10,6 +10,7 @@
 #include <functional>
 
 #include <ATen/Dispatch.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cpu/vec/functional.h>
@@ -647,8 +648,12 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t {
+        // Like the vectorized path: NaN propagates and the dead zone is +0
+        if (at::_isnan(a)) {
+          return a;
+        }
         return float(a) > lambd_val ? a - lambd_val
-                : (float(a) < -lambd_val ? a + lambd_val : float(a) * float(0));
+                : (float(a) < -lambd_val ? a + lambd_val : 0.f);
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
@@ -668,7 +673,11 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t {
-        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : a * scalar_t(0));
+        // Like the vectorized path: NaN propagates and the dead zone is +0
+        if (at::_isnan(a)) {
+          return a;
+        }
+        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<scalar_t> self_val_t0, self_val_t1;
