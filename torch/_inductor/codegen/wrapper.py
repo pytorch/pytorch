@@ -17,7 +17,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from enum import Enum
-from itertools import chain, count
+from itertools import chain, count, takewhile
 from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import sympy
@@ -33,6 +33,7 @@ from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch._logging import trace_structured
+from torch.fx.experimental._size_hinting import consistent_hints, ConsistentHintState
 from torch.fx.experimental.proxy_tensor import (
     _coor_check_current_accelerator,
     _coor_current_accelerator,
@@ -1175,6 +1176,15 @@ class ExitDeviceContextManagerLine(WrapperLine):
         if not V.graph.cpp_wrapper:
             code.do_unindent()
             if self.prev_device_var is not None:
+                # Unlike a device_guard() body, which always holds set_device(),
+                # the try body can be empty, e.g. when every kernel is elided.
+                # Deferred lines may render as nothing, so only plain lines count.
+                try_line = f"{code.prefix()}try:"
+                lines = reversed(code.get_lines_ref())
+                body = takewhile(lambda li: li != try_line, lines)
+                if not any(isinstance(li, str) and li for li in body):
+                    with code.indent():
+                        code.writeline("pass")
                 code.writeline("finally:")
                 with code.indent():
                     code.writeline(f"{MAYBE_EXCHANGE_DEVICE}({self.prev_device_var})")
@@ -2209,6 +2219,9 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_storage_cache: dict[str, AutotuneStorage] = {}
         self.kernel_autotune_tmp_arg_idx: int = 0
         self.kernel_autotune_storage_idx: int = 0
+        # Values chosen for unbacked symbols in the autotune block, so all
+        # example values agree; created on first use.
+        self.kernel_autotune_hint_state: ConsistentHintState | None = None
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
@@ -5135,6 +5148,32 @@ class PythonWrapperCodegen(CodeGen):
         Tensor arguments use shared backing storage when ``storage_arg`` is
         provided; unsupported arguments retain independent allocation.
         """
+        # Example values must agree with each other: a view must fit its
+        # backing storage and scalars must match tensor shapes.
+        if self.kernel_autotune_hint_state is None:
+            self.kernel_autotune_hint_state = ConsistentHintState(
+                V.graph.sizevars.shape_env
+            )
+        with consistent_hints(self.kernel_autotune_hint_state):
+            return self._generate_example_arg_value(
+                arg,
+                arg_type,
+                raw_arg,
+                kernel_name=kernel_name,
+                storage_cache=storage_cache,
+                storage_arg=storage_arg,
+            )
+
+    def _generate_example_arg_value(
+        self,
+        arg,
+        arg_type,
+        raw_arg=None,
+        *,
+        kernel_name: str | None = None,
+        storage_cache: dict[str, AutotuneStorage] | None = None,
+        storage_arg: AutotuneStorageArg | None = None,
+    ):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
