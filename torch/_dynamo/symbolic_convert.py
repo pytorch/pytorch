@@ -504,7 +504,8 @@ class BlockStackEntry:
     with_context: ContextWrappingVariable | GenericContextWrappingVariable | None = None
 
     def can_restore(self) -> bool:
-        return self.with_context is not None
+        ctx = self.with_context
+        return ctx is not None and ctx.supports_graph_breaks()
 
     def resume_fn(self) -> ReenterWith:
         if self.stack_index is None:
