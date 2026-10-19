@@ -1418,7 +1418,9 @@ def local_scalar_dense(
 def nonzero_numpy(
     fake_mode: FakeTensorMode, func: OpOverload, arg: FakeTensor
 ) -> list[FakeTensor]:
-    return torch.ops.aten.nonzero.default(arg).unbind(1)
+    # Match eager, which returns a 1-tuple for a 0-dim input like numpy does.
+    nonzero_arg = arg.unsqueeze(0) if arg.dim() == 0 else arg
+    return torch.ops.aten.nonzero.default(nonzero_arg).unbind(1)
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
@@ -2330,11 +2332,7 @@ def bincount(
         return inputs.new_empty(new_size, dtype=torch.int64)  # type: ignore[return]
 
     if weights.device.type == "mps":
-        dtype = (
-            weights.dtype
-            if weights.dtype in (torch.float32, torch.int32, torch.float16)
-            else torch.int32
-        )
+        dtype = torch.float32
     else:
         dtype = weights.dtype if weights.dtype == torch.float32 else torch.float64
     return weights.new_empty(new_size, dtype=dtype)  # type: ignore[return]

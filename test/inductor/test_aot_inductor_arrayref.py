@@ -348,15 +348,6 @@ LITE_MODE_TEST_FAILURES = {
     "test_deconv_freezing": fail_stack_allocation(),
     "test_freezing": fail_stack_allocation(),
     "test_linear_freezing": fail_stack_allocation(),
-    # Mismatch between tensors consumed and num of input tensor
-    "test_const_graph_no_autotune_at_compile_time": fail_stack_allocation(),
-    "test_constant_folding": fail_stack_allocation(),
-    # The fbcode proxy executor hits a CHECK here that aborts the process
-    "test_constant_folding_with_update": fail_stack_allocation(is_skip=True),
-    # segfault
-    "test_update_inactive_constant_buffer_with_interleaved_folded_constants": fail_stack_allocation(
-        is_skip=True
-    ),
     # Runtime assert is not emitted
     "test_aoti_runtime_asserts_backed_symint": fail_stack_allocation(),
     # Profiler and debug printer instrumentation is not emitted for fallbacks
