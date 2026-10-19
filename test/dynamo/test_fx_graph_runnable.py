@@ -178,6 +178,7 @@ class FxGraphRunnableTestBase:
     def tearDown(self):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
+        super().tearDown()
 
     def _get_payload(self):
         payload = self.buffer.getvalue().strip()
@@ -525,7 +526,7 @@ class FxGraphRunnableTest(FxGraphRunnableTestBase, TestCase):
 
 
 @mock.patch.dict(os.environ, {"TRITON_ALLOW_NON_CONSTEXPR_GLOBALS": "1"})
-class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
+class FxGraphRunnableTritonTest(FxGraphRunnableTestBase, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @unittest.skipUnless(has_triton(), "Triton not available")
@@ -635,7 +636,7 @@ class FxGraphRunnableTritonCudaTest(FxGraphRunnableTestBase, TestCase):
 
 
 instantiate_device_type_tests(
-    FxGraphRunnableTritonCudaTest,
+    FxGraphRunnableTritonTest,
     globals(),
     except_for="cpu",
     allow_xpu=True,
