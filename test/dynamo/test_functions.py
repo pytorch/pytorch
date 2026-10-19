@@ -45,7 +45,6 @@ from torch.nn import functional as F
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -7318,11 +7317,6 @@ class GraphModule(torch.nn.Module):
 class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @skipIf(
-        True,
-        "requires cuda",
-        device_type=("cpu", "mps", "xpu", "hpu", "mtia", "meta"),
-    )
     def test_get_device_properties_tensor_device(self, device):
         def fn(a):
             x = a.to(device)
@@ -7336,7 +7330,7 @@ class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
         )
 
 
-instantiate_device_type_tests(FunctionTestsCudaOnly, globals())
+instantiate_device_type_tests(FunctionTestsCudaOnly, globals(), only_for="cuda")
 
 
 class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
