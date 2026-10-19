@@ -4651,6 +4651,22 @@ Returns:
             self.getPrimary()->performNocolorSplit(device);
           })
       .def(
+          "register_mem_pool",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
+             at::cuda::MemPool* pool,
+             bool symm) { self.getPrimary()->registerMemPool(pool, symm); },
+          py::arg("pool"),
+          py::arg("symm") = false,
+          R"(Register ``pool``'s segments with the primary communicator.)")
+      .def(
+          "deregister_mem_pool",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
+             at::cuda::MemPool* pool) {
+            self.getPrimary()->deregisterMemPool(pool);
+          },
+          py::arg("pool"),
+          R"(Deregister ``pool`` from the primary communicator.)")
+      .def(
           "_comm_ptr",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
             return self.getPrimary()->getCommPtr();

@@ -642,7 +642,7 @@ first `wait_signal` can return before the put's data arrives.
 {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's bookkeeping;
 the segment stays registered with NCCL until the allocator frees it, and
 every rank must free its segments in the same order or teardown can hang.
-With `nccl`, registering the pool with
+Registering the pool with
 `backend.register_mem_pool(pool, symm=True)` and calling
 `backend.deregister_mem_pool(pool)` on every rank before freeing avoids this.
 {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank and
