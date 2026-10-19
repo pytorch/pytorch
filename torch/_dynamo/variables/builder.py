@@ -916,6 +916,34 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
+def _is_device_stream_context(value: object) -> bool:
+    """Match a stream() context from CUDA or a registered DeviceInterface.
+
+    Pre-created ``ctx = device.stream(s); with ctx`` is the only way into
+    VariableBuilder. ``with device.stream(s)`` is a call and does not get here.
+    Out-of-tree contexts are separate classes. They match when that class is
+    named StreamContext and lives in the same module as the registered
+    ``stream`` function. No return annotation is required.
+    """
+    if isinstance(value, torch.cuda.StreamContext):
+        return True
+    cls = type(value)
+    if cls.__name__ != "StreamContext":
+        return False
+
+    from ..device_interface import DeviceInterface, get_registered_device_interfaces
+
+    for key, interface in get_registered_device_interfaces():
+        if ":" in key:
+            continue
+        fn = getattr(interface, "stream", None)
+        if fn is None or fn is DeviceInterface.stream or not callable(fn):
+            continue
+        if getattr(fn, "__module__", None) == cls.__module__:
+            return True
+    return False
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1716,7 +1744,7 @@ class VariableBuilder:
                 )
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
-        elif isinstance(value, torch.cuda.StreamContext):
+        elif _is_device_stream_context(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             stream_source = AttrSource(self.source, "stream")
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)

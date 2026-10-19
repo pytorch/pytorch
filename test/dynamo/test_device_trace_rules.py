@@ -126,6 +126,29 @@ class TestDeviceTraceRules(TestCase):
         self.assertNotIn(torch.mtia.set_stream, handlers)
         self.assertIs(lookup(torch.cuda.default_stream), TorchInGraphFunctionVariable)
 
+    def test_precreated_stream_context_uses_registered_module(self) -> None:
+        from torch._dynamo.variables.builder import _is_device_stream_context
+
+        class StreamContext:
+            def __init__(self) -> None:
+                self.stream = None
+
+        def ctx_stream(s):
+            return StreamContext()
+
+        class CtxInterface(DeviceInterface):
+            pass
+
+        CtxInterface.stream = staticmethod(ctx_stream)
+
+        self.assertFalse(_is_device_stream_context(StreamContext()))
+        register_interface_for_device("fakectx", CtxInterface)
+        self.addCleanup(device_interfaces.pop, "fakectx", None)
+        self.assertTrue(_is_device_stream_context(StreamContext()))
+        self.assertTrue(_is_device_stream_context(torch.cuda.StreamContext(None)))
+        self.assertTrue(_is_device_stream_context(torch.xpu.StreamContext(None)))
+        self.assertFalse(_is_device_stream_context(1))
+
 
 if __name__ == "__main__":
     run_tests()
