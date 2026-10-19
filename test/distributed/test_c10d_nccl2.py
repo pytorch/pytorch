@@ -1602,7 +1602,9 @@ class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
     @skip_if_lt_x_gpu(2)
     def test_register_mem_pool_with_pair_comms(self) -> None:
         # Once a pair comm exists the allocator hook registers new pool segments
-        # with it too; only the primary holds the pool registration.
+        # with it too; only the primary holds the pool registration. Allocating
+        # before register_mem_pool lets symm=True warn instead of raising when
+        # symmetric memory is unsupported.
         backend = self._backend()
         nxt = (self.rank + 1) % self.world_size
         prev = (self.rank - 1) % self.world_size
@@ -1620,10 +1622,10 @@ class ProcessGroupNCCLLazyMemPoolTest(ProcessGroupNCCL2MemPoolTest):
         self.assertGreater(backend._num_active_channels(), 0)
         for symm in (False, True):
             pool = torch.cuda.MemPool(backend.mem_allocator)
+            tensor = self._pool_tensor(pool)
+            recv_t = self._pool_tensor(pool)
             backend.register_mem_pool(pool, symm=symm)
             try:
-                tensor = self._pool_tensor(pool)
-                recv_t = self._pool_tensor(pool)
                 ring(tensor, recv_t)
                 self.assertEqual(recv_t, torch.full_like(recv_t, float(prev)))
                 dist.all_reduce(tensor)
