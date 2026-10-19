@@ -184,6 +184,10 @@ static void add_mps_kernel(TensorIteratorBase& iter, const Scalar& alpha) {
 }
 
 static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()) || isComplexType(iter.common_dtype()),
+                              "\"lerp_mps\" not implemented for '",
+                              iter.common_dtype(),
+                              "'");
   // Narrowing the weight to a low-precision dtype would overflow for weights outside its
   // range and lose accuracy inside it, so hand it over at opmath precision.
   lib.exec_binary_kernel(iter, "lerp_alpha", weight, at::toOpMathType(iter.common_dtype()));
@@ -195,6 +199,10 @@ static void lerp_tensor_mps_kernel(at::TensorIteratorBase& iter) {
   // other backends to cast while loading. `exec_ternary_kernel` picks the cast flavor for
   // anything that disagrees with the common dtype.
   const auto common_dtype = iter.common_dtype();
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(common_dtype) || isComplexType(common_dtype),
+                              "\"lerp_mps\" not implemented for '",
+                              common_dtype,
+                              "'");
 
   // Mirror the CUDA kernel: read a CPU scalar weight on the host, drop it from the iterator
   // and let the scalar-weight path cast it to the compute dtype. `lerp_alpha` is instantiated

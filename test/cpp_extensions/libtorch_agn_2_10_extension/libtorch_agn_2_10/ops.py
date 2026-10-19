@@ -834,6 +834,97 @@ def my_masked_select(self, mask) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_masked_select.default(self, mask)
 
 
+def my_mm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out.default(out, self, mat2)
+
+
+def my_bmm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out.default(out, self, mat2)
+
+
+def my_mm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_bmm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_flip(self, dims) -> Tensor:
+    """
+    Reverses the order of elements along the given dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - dimensions to flip, negative values are wrapped
+
+    Returns: Tensor - a new tensor with the given dimensions reversed
+    """
+    return torch.ops.libtorch_agn_2_10.my_flip.default(self, dims)
+
+
+def my_from_file(filename, shared=None, size=0, dtype=None) -> Tensor:
+    """
+    Creates a CPU tensor backed by the contents of a file.
+
+    Args:
+        filename: str - path of the file to read
+        shared: bool or None - whether the mapping is shared with the file
+        size: int or None - number of elements to read from the file
+        dtype: ScalarType or None - data type of the tensor elements
+
+    Returns: Tensor - a tensor holding the file contents
+    """
+    op = torch.ops.libtorch_agn_2_10.my_from_file.default
+    return op(filename, shared, size, dtype)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

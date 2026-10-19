@@ -999,9 +999,15 @@ def is_node_realized(node: torch.fx.Node) -> bool:
 def count_flops_fx(node: torch.fx.Node) -> int | None:
     if not countable_fx(node) or isinstance(node.target, str):
         return None
-    with FakeTensorMode(allow_non_fake_inputs=True):
-        success, args, kwargs = get_fake_args_kwargs(node)
-
+    success, args, kwargs = get_fake_args_kwargs(node)
+    fake_mode = torch._guards.detect_fake_mode((args, kwargs)) if success else None
+    # Cost estimation must not specialize the graph's symbolic shapes.
+    guards_ctx = (
+        fake_mode.shape_env.suppress_guards()
+        if fake_mode is not None and fake_mode.shape_env is not None
+        else contextlib.nullcontext()
+    )
+    with guards_ctx, FakeTensorMode(allow_non_fake_inputs=True):
         if success:
             # flex_attention HOPs have registered formulas, but invoking them
             # here can require tracing-only context, e.g. TransformGetItemToIndex.
