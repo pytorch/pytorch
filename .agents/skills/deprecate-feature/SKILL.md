@@ -11,9 +11,12 @@ The work is not done until every item in the [Done checklist](#done-checklist) h
 
 ## Lifecycle
 
+This follows the [backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) for stable components. Prototype and beta components may break without a deprecation period.
+
 1. **Deprecate (release N).** Warn on use, point to the replacement, update docs, and stop using the API inside PyTorch itself.
-2. **Keep warning for at least two releases.** The earliest removal target is N+2.
-3. **Remove (release >= N+2).** Delete the code, its tests, and its docs. For a behavior change (rather than a plain removal), turn the warning into an error for one release before enabling the new behavior so programs do not silently change results.
+2. **Keep warning for at least two releases** (and 180 days of nightlies). The earliest removal target is N+2.
+3. **Remove (release >= N+2).** Delete the code, its tests, and its docs.
+4. **Silent behavior changes** (e.g. changing a default) must be made loud first: after the warning period, the old behavior raises an error for another two releases (N+2 to N+4) before the new behavior is enabled.
 
 Release N is the release that will ship the change: read `version.txt` (e.g. `2.15.0a0` means the change ships in 2.15, so the earliest removal is 2.17).
 
@@ -33,7 +36,13 @@ def foo(...): ...
 
 For a deprecated argument or behavior inside a function, use `warnings.warn(msg, FutureWarning, stacklevel=2)` so the warning points at user code.
 
-C++: `TORCH_WARN_ONCE(...)` (or `TORCH_WARN_DEPRECATION(...)`) with the same message shape.
+C++: `TORCH_WARN_ONCE(...)` with the same message shape.
+
+Do not spam users. Warn at most once per process:
+- C++: use `TORCH_WARN_ONCE`, not `TORCH_WARN`.
+- Python: the default filter shows a warning once per call site, which still repeats when the deprecated path is reached from many places (or under filters that reset the registry). For APIs that can be hit repeatedly, such as per-op, per-step, or per-module calls, guard the warning with a module-level flag so it fires once per process.
+- Warn where the user opts into the deprecated behavior (the call or argument), not in hot internal paths.
+- PyTorch itself must not trigger the warning: migrate internal callers so users only see warnings for their own code.
 
 The message must state:
 - the start version and the removal version as concrete numbers (`since 2.15 ... removed in 2.17`), never "a future release";
