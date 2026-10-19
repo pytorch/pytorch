@@ -152,10 +152,13 @@ class AbstractWindowTest:
         self.backend.register_mem_pool(pool, symm=True)
         try:
             with torch.cuda.use_mem_pool(pool):
-                win_buf = torch.zeros(self.world_size + 1, device=self.device)
+                win_buf = torch.zeros(self.world_size, device=self.device)
             win = dist._new_window(win_buf)
-            src = win_buf[self.world_size :]
-            src.fill_(self.rank)
+            # A large allocation lands in a new segment, which symm=True
+            # registers, so it is a valid put source outside the window.
+            with torch.cuda.use_mem_pool(pool):
+                src_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
+            src = src_seg[:1]
             next_rank = (self.rank + 1) % self.world_size
             prev_rank = (self.rank - 1) % self.world_size
             win.put(src, next_rank, self.rank, False)
@@ -163,7 +166,7 @@ class AbstractWindowTest:
             torch.cuda.synchronize()
             self.assertEqual(win_buf[prev_rank].item(), prev_rank)
             win.tensor_deregister()
-            del win, src, win_buf
+            del win, src, src_seg, win_buf
         finally:
             self.backend.deregister_mem_pool(pool)
         del pool
