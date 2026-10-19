@@ -8,6 +8,10 @@
 
 #include <memory>
 
+#if __linux__
+#include <unistd.h>
+#endif
+
 // TODO(T90238193)
 // @lint-ignore-every CLANGTIDY facebook-hte-RelativeInclude
 #include "ActivityProfilerProxy.h"
@@ -50,6 +54,13 @@ static bool shouldPreloadCuptiInstrumentation() {
 
 #endif // HAS_CUPTI
 
+#if __linux__
+// fork() copies a loaded library, so a different pid means libkineto_init is
+// running in a forked child, e.g. from a pthread_atfork handler. A child only
+// registers; initialization waits for the child's first profiler use.
+static const pid_t kLibraryLoadPid = getpid();
+#endif
+
 } // namespace KINETO_NAMESPACE
 
 // Library initialization entry points
@@ -68,8 +79,9 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 #if __linux__
   // KINETO_USE_DAEMON selects the OSS IPC loader only when the platform has
   // not already registered its own loader.
-  const bool registerOssDaemon = libkineto::isDaemonEnvVarSet() &&
-      !ConfigLoader::hasDaemonConfigLoaderFactory();
+  const bool initAsyncProfiler = libkineto::isDaemonEnvVarSet();
+  const bool registerOssDaemon =
+      initAsyncProfiler && !ConfigLoader::hasDaemonConfigLoaderFactory();
   if (registerOssDaemon) {
     LOG(INFO) << "Registering daemon config loader, cpuOnly = " << cpuOnly;
     DaemonConfigLoader::registerFactory();
@@ -90,6 +102,9 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 
   auto& api = libkineto::api();
   ConfigLoader& config_loader = api.configLoader();
+  if (api.isProfilerInitialized()) {
+    return;
+  }
   api.registerProfiler(
       std::make_unique<ActivityProfilerProxy>(cpuOnly, config_loader));
 
@@ -115,7 +130,7 @@ void libkineto_init(bool cpuOnly, [[maybe_unused]] bool logOnError) {
 #endif // HAS_XPUPTI
 
 #if __linux__
-  if (registerOssDaemon) {
+  if (initAsyncProfiler && getpid() == kLibraryLoadPid) {
     api.initProfilerIfRegistered();
     VLOG(0) << "libkineto profilers activated";
   }
