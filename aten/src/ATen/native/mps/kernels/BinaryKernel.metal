@@ -19,14 +19,6 @@ struct sub_functor {
   }
 };
 
-struct mse_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b) {
-    const T diff = a - b;
-    return diff * diff;
-  }
-};
-
 struct add_alpha_functor {
   template <typename T>
   inline T operator()(const T a, const T b, const T alpha) {
@@ -708,10 +700,6 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
 REGISTER_INTEGER_BINARY_OP(mul);
 REGISTER_FLOAT_BINARY_OP(sub);
 REGISTER_INTEGER_BINARY_OP(sub);
-REGISTER_FLOAT_BINARY_OP(mse);
-REGISTER_BINARY_CASTOUT_OP(mse, float, float);
-REGISTER_BINARY_CASTOUT_OP(mse, half, half);
-REGISTER_BINARY_CASTOUT_OP(mse, bfloat, bfloat);
 REGISTER_OPMATH_FLOAT_BINARY_OP(div_floor);
 REGISTER_INTEGER_BINARY_OP(div_floor);
 REGISTER_FLOAT_BINARY_OP(div_trunc);

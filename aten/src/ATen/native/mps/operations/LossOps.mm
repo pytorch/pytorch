@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
@@ -910,6 +911,13 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 }
 
 // MSELoss
+static void mse_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK(mps::supportedFloatingType(iter.common_dtype()), "mse_mps only supports floating types");
+  mps::lib.exec_binary_kernel(iter, "mse", std::nullopt, std::nullopt, iter.common_dtype());
+}
+
+REGISTER_DISPATCH(mse_stub, &mse_mps_kernel)
+
 Tensor& mse_loss_backward_out_mps(const Tensor& grad_output,
                                   const Tensor& input,
                                   const Tensor& target,
