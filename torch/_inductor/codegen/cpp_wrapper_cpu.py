@@ -4496,8 +4496,7 @@ if (!custom_op_wrapper) {
 
             # Handle optional tensors as a special case, as above.
             if isinstance(element_type, torch.TensorType):
-                base_handle = self.val_to_arg_str(val, element_type)
-                return f"&temporary_reference({base_handle}.get())"
+                return f"&temporary_reference({arg_str}.get())"
 
             var_name = f"var_{next(self.arg_var_id)}"
             if isinstance(element_type, torch.DeviceObjType):
