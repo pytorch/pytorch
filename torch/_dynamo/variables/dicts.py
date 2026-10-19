@@ -23,7 +23,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
@@ -57,6 +57,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    specialize_symnode,
     tracked_repr,
     unpack_iterable,
 )
@@ -141,6 +142,26 @@ def pyodict_checkexact(obj: VariableTracker) -> TypeIs["OrderedDictVariable"]:
     return obj.python_type() is collections.OrderedDict
 
 
+_T = TypeVar("_T")
+
+
+def _iter_detecting_mutation(iterator: Iterator[_T]) -> Iterator[_T]:
+    while True:
+        try:
+            item = next(iterator)
+        except StopIteration:
+            return
+        except RuntimeError as error:
+            unimplemented(
+                gb_type="Dictionary mutated during comparison",
+                context=str(error),
+                explanation="Dynamo cannot trace dictionary comparison that changes its keys.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # Keep user comparisons outside the handler so their exceptions propagate.
+        yield item
+
+
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
     """PyAnySet_Check(other) || PyDictViewSet_Check(other)"""
     try:
@@ -199,9 +220,20 @@ class ConstDictVariable(VariableTracker):
 
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
-        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
-            {make_hashable(x): v for x, v in items.items()}
-        )
+        self.items: dict[HashableTracker, VariableTracker]
+        if storage_cls is collections.OrderedDict and isinstance(
+            items, collections.OrderedDict
+        ):
+            # Normalizing tracker keys must preserve both orders without hashing twice.
+            keys = {id(key): make_hashable(key) for key in items}
+            storage = cast(dict[object, VariableTracker], items)
+            self.items = collections.OrderedDict(
+                (keys[id(key)], value) for key, value in dict.items(storage)
+            )
+            for key in items:
+                self.items.move_to_end(keys[id(key)])
+        else:
+            self.items = storage_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -978,27 +1010,52 @@ class ConstDictVariable(VariableTracker):
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
     def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
     ) -> VariableTracker:
-        # dict_richcompare: https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4198
-        # Only supports eq/ne; returns NotImplemented for ordering.
-        from .builder import SourcelessBuilder
-
-        if op not in ("__eq__", "__ne__"):
+        try:
+            if op not in ("__eq__", "__ne__") or not pydict_check(other):
+                return ConstantVariable.create(NotImplemented)
+        except NotImplementedError:
             return ConstantVariable.create(NotImplemented)
-        # Unwrap UserDefinedDictVariable to its base ConstDictVariable.
-        # This is correct because CPython's dict_equal operates on the
-        # internal C struct directly (ma_used, dk_entries, _Py_dict_lookup)
-        # -- it never calls __getitem__ or __len__ on dict subclasses.
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+        if self is other:
+            # Keys and values match by identity; avoid guarding nn.Module hook IDs.
+            return ConstantVariable.create(op == "__eq__")
         if not isinstance(other, ConstDictVariable):
-            return ConstantVariable.create(NotImplemented)
-        eq_result = SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
-            tx, [self, other], {}
+            unimplemented(
+                gb_type="Unsupported dictionary storage",
+                context=str(type(other)),
+                explanation="Dynamo cannot access this dictionary's stored keys and values.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        for mapping in (self, other):
+            mapping.install_dict_keys_match_guard()
+        if len(self.items) != len(other.items):
+            return ConstantVariable.create(op == "__ne__")
+        if self.source:
+            # Value comparisons can have order-dependent side effects.
+            tx.output.guard_on_key_order.add(self.source)
+        # CPython's dict_equal walks storage order even for OrderedDict.
+        items = (
+            dict.items(self.items)
+            if isinstance(self.items, dict)
+            else self.items.items()
         )
-        if op == "__ne__":
-            return VariableTracker.build(tx, not eq_result.as_python_constant())
-        return eq_result
+        for key, value in _iter_detecting_mutation(iter(items)):
+            # Native equality reuses each key's insertion-time hash.
+            other_value = other.items.get(key)
+            if other_value is None or isinstance(
+                other_value, variables.DeletedVariable
+            ):
+                # Keep the missing-key hint without repeating key comparisons.
+                other.install_dict_contains_guard(tx, key, key_present=False)
+                return ConstantVariable.create(op == "__ne__")
+            equal = generic_richcompare_bool(tx, value, other_value, "__eq__")
+            if not specialize_symnode(generic_is_true(tx, equal)).as_python_constant():
+                return ConstantVariable.create(op == "__ne__")
+        return ConstantVariable.create(op == "__eq__")
 
     def tp_getattro_impl(self, tx: "InstructionTranslatorBase", name: str):
         # DictGuardManager does not support getattr_manager for plain dicts,
@@ -1035,6 +1092,43 @@ class OrderedDictVariable(ConstDictVariable):
     ) -> VariableTracker:
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.odict_update), [self, *args], kwargs
+        )
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        result = ConstDictVariable.tp_richcompare_impl(self, tx, other, op)
+        if (
+            op not in ("__eq__", "__ne__")
+            or self is other
+            or not isinstance(other, OrderedDictVariable)
+        ):
+            return result
+        # Distinct hook dictionaries need key guards even when dict equality
+        # fails: replacing their IDs can make them equal on the next call.
+        for mapping in (self, other):
+            if mapping.source:
+                install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_KEYS_MATCH))
+        if result.as_python_constant() == (op == "__ne__"):
+            return result
+        # CPython's odict_richcompare checks key order only after dict equality.
+        # These iterators advance after comparison, detecting mutations even on
+        # the last pair or when comparison returns false, as `_odict_keys_equal` does.
+        mutation_checks = tuple(
+            _iter_detecting_mutation(iter(mapping.items)) for mapping in (self, other)
+        )
+        for left, right in _iter_detecting_mutation(zip(self.items, other.items)):
+            equal = generic_richcompare_bool(tx, left.vt, right.vt, "__eq__")
+            is_equal = specialize_symnode(
+                generic_is_true(tx, equal)
+            ).as_python_constant()
+            for iterator in mutation_checks:
+                next(iterator)
+            if not is_equal:
+                return ConstantVariable.create(op == "__ne__")
+        # Value comparisons can change either size before key comparison starts.
+        return ConstantVariable.create(
+            (len(self.items) == len(other.items)) == (op == "__eq__")
         )
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.

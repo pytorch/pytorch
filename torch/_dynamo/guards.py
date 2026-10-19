@@ -1444,6 +1444,40 @@ def check_closure(value: object, metadata: Any) -> bool:
     return id(value) == metadata
 
 
+def _ordered_dict_key_signature(
+    value: collections.OrderedDict[Any, Any],
+) -> list[tuple[type[Any] | None, Any]]:
+    from .variables.constant import ConstantVariable
+    from .variables.dicts import _contains_nan
+
+    # NaN-containing keys and nonliteral keys require identity matching.
+    return [
+        (type(key), key)
+        if ConstantVariable.is_literal(key) and not _contains_nan(key)
+        else (None, id(key))
+        for key in collections.OrderedDict.keys(value)
+    ]
+
+
+def _ordered_dict_keys_match(
+    value: collections.OrderedDict[Any, Any],
+    signature: list[tuple[type[Any] | None, Any]],
+) -> bool:
+    if collections.OrderedDict.__len__(value) != len(signature):
+        return False
+    for key, (key_type, expected) in zip(
+        collections.OrderedDict.keys(value), signature
+    ):
+        if key_type is None:
+            if id(key) != expected:
+                return False
+        elif key is not expected and (
+            type(key) is not key_type or not constants_identical(key, expected)
+        ):
+            return False
+    return True
+
+
 def _constant_subclass_base_value(value: object) -> Any:
     """Extract the base constant value from a constant subclass instance."""
     from .variables.user_defined import _CONSTANT_BASE_TYPES
@@ -3698,27 +3732,20 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        get_metadata_fn=lambda guard, value: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ],
-        eval_fn=lambda value, metadata: [
-            id(key) for key in collections.OrderedDict.keys(value)
-        ]
-        == metadata,
+        get_metadata_fn=lambda guard, value: _ordered_dict_key_signature(value),
+        eval_fn=_ordered_dict_keys_match,
     )
     def ORDERED_DICT_KEYS_MATCH(self, guard: Guard) -> None:
-        key_ids = [
-            self.id_ref(key, guard.name)
-            for key in collections.OrderedDict.keys(self.get(guard))
-        ]
+        value = self.get(guard)
+        key_signature = _ordered_dict_key_signature(value)
+        for key, (key_type, _) in zip(
+            collections.OrderedDict.keys(value), key_signature
+        ):
+            if key_type is None:
+                self.id_ref(key, guard.name)
 
         def guard_fn(value: collections.OrderedDict[Any, Any]) -> bool:
-            return collections.OrderedDict.__len__(value) == len(key_ids) and all(
-                id(current) == expected
-                for current, expected in zip(
-                    collections.OrderedDict.keys(value), key_ids
-                )
-            )
+            return _ordered_dict_keys_match(value, key_signature)
 
         code = [f"___check_order({self.arg_ref(guard)})"]
         self.add_python_lambda_leaf_guard_to_root(
