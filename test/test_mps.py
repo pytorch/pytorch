@@ -2619,6 +2619,32 @@ class TestMPS(TestCaseMPS):
             helper((1, 1000, 1, 4), ks=(1, 4), ceil_mode=True,
                    return_indices=True, test_ties=test_ties)  # test for max_pool1d
 
+    def test_max_pool_nan(self):
+        # https://github.com/pytorch/pytorch/issues/200910
+        # A NaN anywhere in the window must win, as on CPU, not only the first element.
+        # https://github.com/pytorch/pytorch/issues/200789
+        # A window of all -inf must give -inf, not 0.
+        nan, inf = float("nan"), float("inf")
+        x = torch.tensor([[[1.0, nan, 2.0, 3.0, nan, nan, 4.0, 5.0]]])
+        y = torch.tensor([[[-inf, -inf, -inf, 1.0, nan, -inf, -inf, -inf]]])
+        cases = [
+            (F.max_pool1d, x, dict(kernel_size=2, stride=2)),
+            (F.max_pool2d, x.view(1, 1, 2, 4), dict(kernel_size=2, stride=2)),
+            (F.max_pool3d, x.view(1, 1, 1, 2, 4), dict(kernel_size=(1, 2, 2), stride=2)),
+            (F.max_pool1d, x, dict(kernel_size=3, stride=1, padding=1)),
+            (F.max_pool2d, x.view(1, 1, 2, 4), dict(kernel_size=2, stride=1)),
+            (F.max_pool1d, y, dict(kernel_size=2, stride=1)),
+            (F.max_pool2d, y.view(1, 1, 2, 4), dict(kernel_size=(1, 2), stride=1)),
+        ]
+        for fn, inp, kwargs in cases:
+            for dtype in [torch.float, torch.half, torch.bfloat16]:
+                cpu_x = inp.to(dtype)
+                out, idx = fn(cpu_x.to("mps"), return_indices=True, **kwargs)
+                ref_out, ref_idx = fn(cpu_x, return_indices=True, **kwargs)
+                self.assertEqual(out, ref_out, equal_nan=True)
+                self.assertEqual(idx, ref_idx)
+                self.assertEqual(fn(cpu_x.to("mps"), **kwargs), ref_out, equal_nan=True)
+
     def test_adaptive_avg_pool2d_output_size_one(self):
         def helper(size, memory_format):
             x = torch.randint(1, 10, size, dtype=torch.float, device='mps', requires_grad=True)
