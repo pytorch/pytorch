@@ -1438,9 +1438,10 @@ Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
 
 Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
-        and fit within its window. Backends may require it to reside in
-        a tensor registered with a window, e.g. a slice of this window's
-        tensor.
+        and fit within its window. Backends may require it to be
+        contiguous and to lie in an allocator segment that has a window,
+        e.g. a slice of this window's tensor or any tensor from a pool
+        registered with ``register_mem_pool(pool, symm=True)``.
     dst_rank (int): Destination rank in the group.
     target_offset_nelems (int): Element offset into the destination window.
     async_op (bool): Whether this op should be an async op.

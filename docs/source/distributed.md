@@ -617,9 +617,9 @@ a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed
 posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
 {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
 windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
-when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation or
-`TORCH_DISTRIBUTED_DEBUG=DETAIL` wraps it in a debug wrapper, which does not
-forward windows.
+when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation. No backend
+supports windows under `TORCH_DISTRIBUTED_DEBUG=DETAIL`, whose debug wrapper
+does not forward them.
 {func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
@@ -629,9 +629,13 @@ allocated from the backend's memory pool,
 `torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
 tensor's whole allocator segment, so all ranks must register matching
 segments; allocating the same sizes in the same order on every rank satisfies
-this. Unless the pool is registered with `symm=True` (see below), the source
-of {meth}`~torch.distributed.distributed_c10d.Window.put` must lie in a segment that a window has
-registered, e.g. a contiguous slice of this window's tensor.
+this. The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie in an
+allocator segment that has a window, e.g. a slice of this window's tensor.
+`backend.register_mem_pool(pool, symm=True)` gives every segment the pool
+allocates a symmetric window, so any tensor from the pool is a valid source;
+each new segment is then registered collectively, so all ranks must allocate
+the same sizes in the same order, and allocation raises if no transport
+supports symmetric memory.
 A window holds one tensor at a time; call
 {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another, and note
 that {func}`~torch.distributed.distributed_c10d._new_window` with a tensor already registers it.
@@ -644,8 +648,7 @@ first `wait_signal` can return before the put's data arrives.
 {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's bookkeeping;
 the segment stays registered with NCCL until the allocator frees it, and
 every rank must free its segments in the same order or teardown can hang.
-Registering the pool with
-`backend.register_mem_pool(pool, symm=True)` and calling
+Registering the pool with `backend.register_mem_pool(pool)` and calling
 `backend.deregister_mem_pool(pool)` on every rank before freeing avoids this.
 {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank and
 requires the default `owning=True` registration, and
