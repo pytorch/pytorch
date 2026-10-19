@@ -31,7 +31,7 @@ import inspect
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
@@ -83,17 +83,22 @@ from ..source import (
 )
 from ..utils import (
     _is_tensorify_enabled,
+    check_positional,
     check_unspec_or_constant_args,
+    fqn,
     guard_if_dyn,
     has_torch_function,
     hashable,
     is_wrapper_or_member_descriptor,
+    no_keywords,
+    no_positional,
     product,
     proxy_args_kwargs,
+    specialize_symnode,
     unpack_iterable,
     unwrap_if_wrapper,
 )
-from .base import AsPythonConstantNotImplementedError, typestr, VariableTracker
+from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -108,7 +113,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import vt_is_iterable
+from .object_protocol import mro_lookup, pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -187,6 +192,10 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_region_activation_memory_budget,
+        torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_annotate,
+        torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -324,6 +333,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch._C._is_tracing: False,
         torch.fx._symbolic_trace.is_fx_tracing: False,
         torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
@@ -670,7 +680,7 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) == "math"
+        return getattr(self.value, "__module__", None) in ("math", "cmath")
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
@@ -793,8 +803,68 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 raise AssertionError(
                     f"torch.fx.traceback.annotate expects no kwargs, got {len(kwargs)}"
                 )
+
+            def annotation_constant(value: VariableTracker) -> Any:
+                value = value.realize()
+                if isinstance(value, variables.SymNodeVariable):
+                    if value.python_type() is not float:
+                        unimplemented(
+                            gb_type="dynamic value in torch.fx.traceback.annotate",
+                            context=str(value),
+                            explanation="Annotation values are stored as constants in the graph. "
+                            "Dynamic floats are specialized, but other dynamic values are not, "
+                            "since specializing them (e.g. a tensor size) can cause a recompile "
+                            "for every distinct value.",
+                            hints=[
+                                "Compute the annotation value from configuration rather than from tensors or sizes.",
+                            ],
+                        )
+                    # e.g. per-layer float settings sharing one forward
+                    value = specialize_symnode(value)
+                return value.as_python_constant()
+
+            annotation = args[0].realize()
+            if isinstance(annotation, variables.UserDefinedDictVariable):
+                unimplemented(
+                    gb_type="dict subclass in torch.fx.traceback.annotate",
+                    context=str(annotation),
+                    explanation="Dynamo reads annotation entries directly, which would bypass "
+                    "overridden mapping methods (e.g. __getitem__) on a dict subclass.",
+                    hints=[
+                        "Pass a plain dict to torch.fx.traceback.annotate.",
+                    ],
+                )
+            if isinstance(annotation, variables.ConstDictVariable):
+                annotation_dict = {
+                    k.vt.as_python_constant(): annotation_constant(v)
+                    for k, v in annotation.items.items()
+                }
+            else:
+                annotation_dict = annotation.as_python_constant()
+            return FxTracebackAnnotateVariable(annotation_dict)
+        elif self.value in (
+            torch.fx.traceback._dynamo_annotate,
+            torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            if len(args) != 1 or kwargs:
+                raise AssertionError("_dynamo_annotate expects one positional argument")
+            return FxTracebackAnnotateVariable(dict(args[0].as_python_constant()))
+        elif self.value in (
+            torch.fx.traceback._dynamo_region_activation_memory_budget,
+            torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            if len(args) != 1 or kwargs:
+                raise AssertionError(
+                    "_dynamo_region_activation_memory_budget expects "
+                    "one positional argument"
+                )
+            budget = guard_if_dyn(args[0])
+            if type(budget) is not float:
+                raise AssertionError(
+                    f"expected a float budget, got {type(budget).__name__}"
+                )
             return FxTracebackAnnotateVariable(
-                args[0].as_python_constant(), source=self.source
+                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget}
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
@@ -925,6 +995,11 @@ class AllowInGraphKind(enum.Enum):
     LEAF_FUNCTION = "leaf_function"
 
 
+_CONSTANT_FN_METADATA_ATTRS = frozenset(
+    {"__name__", "__qualname__", "__module__", "__doc__"}
+)
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
@@ -954,6 +1029,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         return self.value
 
     @staticmethod
+    def _get_mutating_kwarg_names(
+        fn: torch._ops.OpOverload | torch._ops.OpOverloadPacket,
+    ) -> tuple[str, ...]:
+        if isinstance(fn, torch._ops.OpOverload):
+            schemas = (fn._schema,)
+        else:
+            schemas = fn._schemas.values()
+
+        return tuple(
+            dict.fromkeys(
+                arg.name
+                for schema in schemas
+                for arg in schema.arguments
+                if arg.kwarg_only
+                and arg.alias_info is not None
+                and arg.alias_info.is_write
+            )
+        )
+
+    @staticmethod
     @functools.cache
     def _get_handlers() -> dict[Callable[..., Any], Callable[..., Any]]:
         """Build a dict from function -> method to handle it so that we are O(1)
@@ -976,6 +1071,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     f"Expected first argument to be callable, got {type(fns[0])}"
                 )
             return _register
+
+        def as_python_device(device: VariableTracker, /) -> Any:
+            """Preserve CooR's indexless device when unwrapping device arguments."""
+            from .tensor import CurrentDeviceVariable
+
+            if isinstance(device, CurrentDeviceVariable):
+                return device.value
+            return device.as_python_constant()
 
         from torch.backends.cuda import SDPAParams
 
@@ -1131,6 +1234,101 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 kwargs,
             )
 
+        @register(math.ceil)
+        def handle_ceil(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.ceil", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.ceil() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__ceil__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.floor)
+        def handle_floor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.floor", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.floor() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__floor__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.trunc)
+        def handle_trunc(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            no_keywords(tx, "math.trunc", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.trunc() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__trunc__", [])
+            if result is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __trunc__ method"
+                )
+            return result
+
+        @register(math.atan2, math.copysign, math.remainder)
+        def handle_math_2(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            # Mirrors CPython's shared math_2 argument conversion.
+            # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Modules/mathmodule.c#L1035-L1068
+            from .object_protocol import pyfloat_as_double
+
+            # CPython uses the qualified name when rejecting keyword arguments,
+            # while FUNC2 passes the bare name to _PyArg_CheckPositional.
+            name = self.value.__name__
+            no_keywords(tx, f"math.{name}", kwargs)
+            check_positional(tx, name, len(args), 2, 2)
+            if not any(
+                isinstance(arg, variables.UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            converted = [pyfloat_as_double(tx, arg) for arg in args]
+            return self.call_function(tx, converted, {})
+
         @register(math.radians)
         def handle_radians(
             self,
@@ -1144,6 +1342,30 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     VariableTracker.build(tx, polyfills.radians),
                     list(args),
                     kwargs,
+                )
+
+        if hasattr(math, "sumprod"):  # Python 3.12+
+
+            @register(math.sumprod)
+            def handle_sumprod(
+                self,
+                tx: "InstructionTranslatorBase",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
+            ) -> VariableTracker | None:
+                no_keywords(tx, "math.sumprod", kwargs)
+                check_positional(tx, "sumprod", len(args), 2, 2)
+                if check_unspec_or_constant_args(args, kwargs):
+                    return None
+                # Lists/tuples with any non-constant element use plain accumulation
+                # for the whole call. Other iterables are materialized first so
+                # lists of constants still fold with CPython's float path.
+                if all(isinstance(a, (ListVariable, TupleVariable)) for a in args):
+                    fn = polyfills.sumprod_generic
+                else:
+                    fn = polyfills.sumprod
+                return tx.inline_user_function_return(
+                    VariableTracker.build(tx, fn), list(args), {}
                 )
 
         if hasattr(math, "fma"):  # Python 3.13+
@@ -1165,6 +1387,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 # Use math.fma if constants
                 return None
+
+        @register(math.gcd)
+        def handle_gcd(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.lcm)
+        def handle_lcm(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
@@ -1674,12 +1924,38 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if tf_state.skip_next:
                 tf_state.skip_next = False
                 return VariableTracker.build(tx, False)
+            # Mirrors check_has_torch_function in C++: an active torch
+            # function mode makes every argument "have" a torch function.
+            if (
+                tf_state.torch_function_mode_enabled
+                and tf_state.in_torch_function_mode()
+            ):
+                return VariableTracker.build(tx, True)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
                 else args
             )
             return VariableTracker.build(tx, any(has_torch_function(x) for x in elems))
+
+        @register(torch.overrides.handle_torch_function)
+        def handle_handle_torch_function(
+            self,
+            tx: "InstructionTranslatorBase",
+            public_api: VariableTracker,
+            relevant_args: VariableTracker,
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            from .torch_function import dispatch_torch_function
+
+            return dispatch_torch_function(
+                tx,
+                public_api,
+                list(args),
+                kwargs,
+                relevant_args=unpack_iterable(tx, relevant_args),
+            )
 
         @register(torch._C._skip_one_hop_torch_function)
         def handle_skip_one_hop_torch_function(
@@ -2119,6 +2395,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
             ):
+                return ConstantVariable.create(None)
+            if condition.is_tensor():
+                tx.output.create_proxy(
+                    "call_function",
+                    torch._assert_async,
+                    *proxy_args_kwargs((condition, message), {}),
+                )
                 return ConstantVariable.create(None)
             return None
 
@@ -2668,9 +2951,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = kwargs["device"].as_python_constant()
+                    device = as_python_device(kwargs["device"])
                 elif args:
-                    device = args[0].as_python_constant()
+                    device = as_python_device(args[0])
                 else:
                     device = None
                 module = torch.get_device_module(device)
@@ -2699,6 +2982,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
+            torch.mtia.current_stream,
             torch.xpu.current_stream,
         )
         def handle_current_stream(
@@ -2720,9 +3004,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = torch.device(kwargs["device"].as_python_constant())
+                    device = torch.device(as_python_device(kwargs["device"]))
                 elif args:
-                    device = torch.device(args[0].as_python_constant())
+                    device = torch.device(as_python_device(args[0]))
                 else:
                     device = None
 
@@ -2735,6 +3019,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
+                        current_device=stream_var.current_device,
                         source=stream_var.source,
                     )
                 return stream_var
@@ -2749,6 +3034,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         _synchronize_fn_to_device_type = {
             torch.cuda.synchronize: "cuda",
+            torch.mtia.synchronize: "mtia",
             torch.xpu.synchronize: "xpu",
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
@@ -2757,6 +3043,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.synchronize,
             torch.cuda.synchronize,
+            torch.mtia.synchronize,
             torch.xpu.synchronize,
             torch.mps.synchronize,
             torch.cpu.synchronize,
@@ -2767,11 +3054,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker:
-            device = None
+            device_arg = None
             if kwargs and "device" in kwargs:
-                device = torch.device(kwargs["device"].as_python_constant())
+                device_arg = as_python_device(kwargs["device"])
             elif args:
-                device = torch.device(args[0].as_python_constant())
+                device_arg = as_python_device(args[0])
+            # An explicit None means "current device", same as no argument.
+            device = None if device_arg is None else torch.device(device_arg)
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -2789,10 +3078,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
+                if not _coor_enabled():
+                    device_index = 0
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)
@@ -3185,11 +3483,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
             from .constant import ConstantVariable
-            from .dicts import ConstDictVariable
+            from .dicts import ConstDictVariable, OrderedDictVariable
             from .lists import BaseListVariable
-            from .tensor import TensorVariable
+            from .tensor import _contains_graph_intermediate, TensorVariable
 
             if not config.trace_autograd_ops:
+                inputs = args[1] if len(args) >= 2 else kwargs.get("inputs")
+                skip_frame = (
+                    _contains_graph_intermediate(inputs)
+                    or tx.has_live_graph_intermediate()
+                )
+                # AOTAutograd does not preserve relationships between outputs of
+                # a compiled prefix. Skip this invocation if eager grad targets an
+                # intermediate or another differentiable intermediate stays live.
                 unimplemented(
                     gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
                     context=f"trace_autograd_ops={config.trace_autograd_ops}",
@@ -3200,6 +3506,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     hints=[
                         "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
                     ],
+                    skip_frame=skip_frame,
+                    preserve_skip_frame_after_inline=skip_frame,
+                    apply_to_code=not skip_frame,
                 )
 
             # Graph break if we detected on a previous attempt that autograd.grad
@@ -3243,6 +3552,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         "Or restructure your code so autograd.grad() and compiled_autograd don't overlap.",
                     ],
                 )
+
+            inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
+            inputs_mapping_keys = None
+            result_type = (
+                OrderedDictVariable
+                if isinstance(inputs_var, OrderedDictVariable)
+                else ConstDictVariable
+            )
+            if (
+                isinstance(inputs_var, variables.MappingProxyVariable)
+                and inputs_var.source
+            ):
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
+                )
+            if inputs_var is not None and issubclass(inputs_var.python_type(), Mapping):
+                if isinstance(inputs_var, OrderedDictVariable) and inputs_var.source:
+                    install_guard(
+                        inputs_var.source.make_guard(
+                            GuardBuilder.ORDERED_DICT_KEYS_MATCH
+                        )
+                    )
+                keys_and_values = tx.inline_user_function_return(
+                    VariableTracker.build(tx, polyfills.unpack_mapping_keys_and_values),
+                    [inputs_var],
+                    {},
+                )
+                keys, inputs_as_tuple = keys_and_values.unpack_var_sequence(tx)
+                inputs_mapping_keys = keys.unpack_var_sequence(tx)  # key VTs for `zip`
+                if len(args) >= 2:
+                    args = (args[0], inputs_as_tuple, *args[2:])
+                else:
+                    kwargs = {**kwargs, "inputs": inputs_as_tuple}
 
             # Check for external GradientEdge objects in outputs and inputs args
             # if there is it will be a graph break
@@ -3377,16 +3724,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
 
-            # Convert dict inputs to tuple for the FX graph. The engine
-            # always operates on flat tuples; we reconstruct the dict after.
-            inputs_var = args[1] if len(args) >= 2 else kwargs.get("inputs")
-            if isinstance(inputs_var, ConstDictVariable):
-                inputs_as_tuple = TupleVariable(list(inputs_var.items.values()))
-                if len(args) >= 2:
-                    args = (args[0], inputs_as_tuple, *args[2:])
-                else:
-                    kwargs = {**kwargs, "inputs": inputs_as_tuple}
-
             with (
                 torch.fx.traceback.preserve_node_meta(),
                 torch.fx.traceback._set_autograd_backward(),
@@ -3398,20 +3735,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             result = wrap_fx_proxy(tx=tx, proxy=proxy)
 
-            if isinstance(inputs_var, ConstDictVariable):
+            if inputs_mapping_keys is not None:
                 if not isinstance(result, BaseListVariable):
                     raise AssertionError(
                         f"Expected BaseListVariable from autograd.grad with dict inputs, "
                         f"got {type(result)}"
                     )
-                items: dict[VariableTracker, VariableTracker] = dict(
-                    zip(
-                        inputs_var.items.keys(),
-                        result.items,
-                        strict=True,
-                    )
-                )
-                return ConstDictVariable(items)
+                items = dict(zip(inputs_mapping_keys, result.items, strict=True))
+                return result_type(items)
             return result
 
         @register(torch._functorch.eager_transforms._set_tensor_requires_grad)
@@ -3512,6 +3843,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
         ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
             return TorchInGraphFunctionVariable(member, source=source)
+        # Function metadata (__name__, __module__, __qualname__, ...) is
+        # immutable on builtins and descriptors, so it can be constant folded.
+        if name in _CONSTANT_FN_METADATA_ATTRS and ConstantVariable.is_literal(member):
+            return ConstantVariable.create(member)
         return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
@@ -3531,6 +3866,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
+
+        if self.can_constant_fold_through():
+            from .tensor import CurrentDeviceVariable
+
+            if any(
+                isinstance(a, CurrentDeviceVariable) for a in (*args, *kwargs.values())
+            ):
+                # Under CooR the current device's index is only known at runtime, so
+                # there is no constant to fold to. Breaking is correct rather than
+                # merely conservative: get_device_properties mixes rank-invariant
+                # hardware facts with per-card identity (uuid, pci_bus_id), so the
+                # compiling rank's answer is not right for every rank. The eager
+                # fallback reads the running rank's.
+                unimplemented(
+                    gb_type="Constant fold with a rank-relative device",
+                    context=fqn(self.value),
+                    explanation=(
+                        f"`{fqn(self.value)}` was called with the current device, "
+                        "whose index is only known at runtime under "
+                        "compile_on_one_rank, so the result cannot be folded into "
+                        "the graph."
+                    ),
+                    hints=[
+                        "This graph break is expected under compile_on_one_rank.",
+                        "The resumed eager call observes the running rank's device.",
+                        "Pass an explicit device if the value is the same on every rank.",
+                    ],
+                )
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
@@ -3560,18 +3923,21 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         if self.is_tensor_method():
+            from .tensor import TensorVariable
+
             name = self.value.__name__
             # Guard against inplace view op on input tensor (not supported)
-            if args and args[0].is_tensor():
+            if args and isinstance(args[0], TensorVariable):
                 tensor_var = args[0]
                 # Check if input tensor and inplace_view op specifically
-                if tensor_var.source is not None and hasattr(torch.ops.aten, name):
+                if name.endswith("_") and hasattr(torch.ops.aten, name):
                     fn = getattr(torch.ops.aten, name)
                     if (
                         hasattr(fn, "overloads")
                         and hasattr(fn, fn.overloads()[0])
                         and torch.Tag.inplace_view
                         in getattr(fn, fn.overloads()[0]).tags
+                        and tensor_var.graph_input_source(tx) is not None
                     ):
                         unimplemented(
                             gb_type="Inplace op on input tensor",
@@ -3582,7 +3948,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 "Ensure you do not modify input tensor in place.",
                             ],
                         )
-            return self.call_tensor_method(tx, list(args), kwargs)
+            # call_tensor_method records `x.<name>(...)`, which resolves on
+            # type(x) when the graph runs. If a tensor subclass overrides the
+            # method, fall through so the graph calls the descriptor itself.
+            self_type = args[0].python_type() if args and args[0].is_tensor() else None
+            if (
+                self_type is None
+                or self_type is torch.Tensor
+                or mro_lookup(self_type, name) is mro_lookup(torch.Tensor, name)
+            ):
+                return self.call_tensor_method(tx, list(args), kwargs)
 
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
@@ -3642,16 +4017,48 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # defined `@allow_in_graph` function as well, which doesn't have the
         # same semantics as the torch ops.
 
-        # Calling fake tensor propagation can mutate the out= tensor in
+        # Calling fake tensor propagation can mutate writable output tensors in
         # tx.output.tracked_fakes. tracked_fakes are used to apply
         # symbolic_shape guards. Mutating them destroys the information
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
         # changed. If it has, graph break.
-        saved_out_shapes = None
-        out_kwarg_vt = None
-        if "out" in kwargs:
-            out_kwarg_vt = kwargs["out"]
+        out_arg_names: list[str] = ["out"] if "out" in kwargs else []
+        selected_overload: torch._ops.OpOverload | None = None
+        if isinstance(self.value, torch._ops.OpOverload):
+            selected_overload = self.value
+        elif isinstance(self.value, torch._ops.OpOverloadPacket) and kwargs:
+            possible_out_args = self._get_mutating_kwarg_names(self.value)
+            if any(name in kwargs for name in possible_out_args):
+                from ..output_graph import resolve_op_overload
+
+                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+                selected_overload = resolve_op_overload(
+                    tx.output, self.value, proxy_args, proxy_kwargs
+                )
+
+        if selected_overload is not None:
+            if torch._library.utils.is_out(selected_overload):
+                out_arg_names.extend(
+                    name
+                    for name in self._get_mutating_kwarg_names(selected_overload)
+                    if name in kwargs and name != "out"
+                )
+
+        auto_functionalizes = False
+        if out_arg_names and selected_overload is not None:
+            from torch._higher_order_ops.auto_functionalize import (
+                can_auto_functionalize,
+            )
+
+            auto_functionalizes = can_auto_functionalize(selected_overload)
+
+        saved_out_args: list[
+            tuple[VariableTracker, torch.Size | list[torch.Size | None]]
+        ] = []
+        for out_arg_name in out_arg_names:
+            out_kwarg_vt = kwargs[out_arg_name]
+            saved_out_shapes: torch.Size | list[torch.Size | None] | None = None
 
             # e.g., out=(t1, t2, ...)
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
@@ -3668,6 +4075,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 saved_out_shapes = (
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
+
+            if saved_out_shapes is not None:
+                saved_out_args.append((out_kwarg_vt, saved_out_shapes))
 
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
@@ -3701,10 +4111,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ],
             )
 
-        # Handle e.g., `torch.add(a, b, out=result)`
-        if saved_out_shapes is not None:
-            # out variants of torch operators like torch.sort and torch.sigmoid
-            # mutate the tensors in the out field.
+        # Handle e.g., `torch.add(a, b, out=result)` and operators whose writable
+        # output arguments have schema-specific names such as `values` or `out0`.
+        for out_kwarg_vt, saved_out_shapes in saved_out_args:
+            # Out variants of torch operators like torch.sort and torch.sigmoid
+            # mutate the tensors passed as writable outputs.
             #
             # However, it's non-trivial to update all references of the old
             # `TensorVariable` to the new one returned (`result_var`), so we
@@ -3744,7 +4155,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                                 *graph_break_hints.SUPPORTABLE,
                             ],
                         )
-                    if not _is_supported_out_tensor_layout(
+                    if not auto_functionalizes and not _is_supported_out_tensor_layout(
                         fake_out, false_if_dde=False
                     ):
                         # It's difficult to handle strides correctly in functionalization
@@ -3758,8 +4169,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             ],
                         )
             else:
-                if out_kwarg_vt is None:
-                    raise AssertionError("Expected out= kwarg to be set")
                 if not out_kwarg_vt.is_tensor():
                     raise AssertionError("Expected out= kwarg to be a tensor")
                 if "example_value" not in out_kwarg_vt.as_proxy().node.meta:
@@ -3781,7 +4190,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not _is_supported_out_tensor_layout(fake_out, false_if_dde=True):
+                if not auto_functionalizes and not _is_supported_out_tensor_layout(
+                    fake_out, false_if_dde=True
+                ):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
@@ -4470,30 +4881,34 @@ class DispatchKeySetVariable(BaseTorchVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def is_constant_fold_method(self, name: str) -> bool:
-        return name == "has"
-
-    def call_method(
+    def has(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        if self.is_constant_fold_method(name) and check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            method = getattr(self.value, name)
-            return VariableTracker.build(
-                tx,
-                method(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-        elif name == "highestPriorityTypeId":
-            return VariableTracker.build(tx, self.value.highestPriorityTypeId())
-        return super().call_method(tx, name, args, kwargs)
+    ) -> VariableTracker | None:
+        if not check_unspec_or_constant_args(args, kwargs):
+            return None
+        return VariableTracker.build(
+            tx,
+            self.value.has(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            ),
+        )
+
+    def highestPriorityTypeId(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.highestPriorityTypeId())
+
+    tp_methods = {
+        "has": Method(has),
+        "highestPriorityTypeId": Method(highestPriorityTypeId),
+    }
 
 
 class FuncTorchInterpreterVariable(BaseTorchVariable):
@@ -4506,29 +4921,68 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
         return cls(value, source=source)
 
-    def call_method(
+    def key(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        if name == "key":
-            return VariableTracker.build(tx, self.value.key())
-        elif name == "process":
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, self.value.process.__func__),
-                [self] + args,
-                kwargs,
-            )
-        elif name in ["level", "batch_size", "randomness"]:
-            return VariableTracker.build(tx, getattr(self.value, name)())
-        elif name == "lower":
-            if args:
-                raise AssertionError(f"lower() expects no args, got {len(args)}")
-            if kwargs:
-                raise AssertionError(f"lower() expects no kwargs, got {len(kwargs)}")
-            return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
-                tx, None
-            )
-        return super().call_method(tx, name, args, kwargs)
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.key())
+
+    def process(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, self.value.process.__func__),
+            [self] + args,
+            kwargs,
+        )
+
+    def level(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.level())
+
+    def batch_size(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.batch_size())
+
+    def randomness(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.randomness())
+
+    def lower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Python method, so Method cannot derive METH_NOARGS from ml_flags.
+        no_positional(tx, "lower", args)
+        no_keywords(tx, "lower", kwargs)
+        return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
+            tx, None
+        )
+
+    tp_methods = {
+        "key": Method(key),
+        "process": Method(process),
+        "level": Method(level),
+        "batch_size": Method(batch_size),
+        "randomness": Method(randomness),
+        "lower": Method(lower),
+    }

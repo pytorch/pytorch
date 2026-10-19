@@ -9,6 +9,9 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/ceil_div.h>
 
+#include <cstdint>
+#include <type_traits>
+
 namespace at::native {
 template <int Alignment, typename index_t>
 __global__ void vectorized_gather_kernel(char * out, char * inp, index_t * idx, int num_ind, int64_t slice_size, int64_t ind_dim_size, int64_t inp_stride, int64_t out_stride, bool allow_neg_indices) {
@@ -49,7 +52,7 @@ int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool a
 template void vectorized_gather_kernel_launch<16, int32_t>(char * out, char * inp, int32_t * idx, int num_ind, int64_t slice_size_in_bytes,
 int64_t ind_dim_size, int64_t inp_stride_bytes, int64_t out_stride_bytes, bool allow_neg_indices);
 
-// Vectorized scatter_add: load a vector from src, atomicAdd each element to self
+// Vectorized scatter: load a vector from src and apply an atomic operation.
 template <int Alignment, typename scalar_t>
 __device__ __forceinline__ void atomicAddVec(
     scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
@@ -99,8 +102,124 @@ __device__ __forceinline__ void atomicAddVec(
   }
 }
 
-template <int Alignment, typename scalar_t, typename index_t>
-__global__ void vectorized_scatter_add_kernel(
+#if !defined(USE_ROCM)
+template <typename scalar_t>
+__device__ __forceinline__ bool packed_isnan(uint16_t bits) {
+  if constexpr (std::is_same_v<scalar_t, c10::Half>) {
+    return (bits & 0x7c00u) == 0x7c00u && (bits & 0x03ffu) != 0;
+  } else {
+    return (bits & 0x7f80u) == 0x7f80u && (bits & 0x007fu) != 0;
+  }
+}
+
+template <typename scalar_t>
+__device__ __forceinline__ bool packed_less(uint16_t a, uint16_t b) {
+  const uint16_t a_mag = a & 0x7fffu;
+  const uint16_t b_mag = b & 0x7fffu;
+  if (a_mag == 0 && b_mag == 0) {
+    return false;
+  }
+  const bool a_negative = (a & 0x8000u) != 0;
+  const bool b_negative = (b & 0x8000u) != 0;
+  if (a_negative != b_negative) {
+    return a_negative;
+  }
+  return a_negative ? a_mag > b_mag : a_mag < b_mag;
+}
+
+template <typename scalar_t, bool is_max>
+__device__ __forceinline__ uint16_t packed_reduce_bits(
+    uint16_t old_bits, uint16_t value_bits) {
+  if (packed_isnan<scalar_t>(value_bits)) {
+    return value_bits;
+  }
+  if (packed_isnan<scalar_t>(old_bits)) {
+    return old_bits;
+  }
+  if constexpr (is_max) {
+    return packed_less<scalar_t>(old_bits, value_bits) ? value_bits : old_bits;
+  } else {
+    return packed_less<scalar_t>(value_bits, old_bits) ? value_bits : old_bits;
+  }
+}
+
+template <typename scalar_t, bool is_max>
+__device__ __forceinline__ void atomicReducePackedVec2(
+    scalar_t* dst, uint32_t value_bits) {
+  auto* address = reinterpret_cast<uint32_t*>(dst);
+  uint32_t old = *address;
+  uint32_t assumed;
+  do {
+    assumed = old;
+    const uint16_t old_lo = static_cast<uint16_t>(assumed & 0xffffu);
+    const uint16_t old_hi = static_cast<uint16_t>(assumed >> 16);
+    const uint16_t value_lo = static_cast<uint16_t>(value_bits & 0xffffu);
+    const uint16_t value_hi = static_cast<uint16_t>(value_bits >> 16);
+    const uint32_t result =
+        static_cast<uint32_t>(packed_reduce_bits<scalar_t, is_max>(old_lo, value_lo)) |
+        (static_cast<uint32_t>(packed_reduce_bits<scalar_t, is_max>(old_hi, value_hi)) << 16);
+    if (result == assumed) {
+      return;
+    }
+    old = atomicCAS(address, assumed, result);
+  } while (old != assumed);
+}
+
+template <int Alignment, typename scalar_t>
+__device__ __forceinline__ void atomicMinVec(
+    scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
+  constexpr int N = Alignment / sizeof(scalar_t);
+  static_assert(std::is_same_v<scalar_t, c10::Half> ||
+                std::is_same_v<scalar_t, c10::BFloat16>);
+  static_assert(N % 2 == 0, "packed CAS requires pairs of 16-bit values");
+  const uint32_t* values = reinterpret_cast<const uint32_t*>(&vec);
+  #pragma unroll
+  for (int i = 0; i < N / 2; ++i) {
+    atomicReducePackedVec2<scalar_t, false>(dst + 2 * i, values[i]);
+  }
+}
+
+template <int Alignment, typename scalar_t>
+__device__ __forceinline__ void atomicMaxVec(
+    scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
+  constexpr int N = Alignment / sizeof(scalar_t);
+  static_assert(std::is_same_v<scalar_t, c10::Half> ||
+                std::is_same_v<scalar_t, c10::BFloat16>);
+  static_assert(N % 2 == 0, "packed CAS requires pairs of 16-bit values");
+  const uint32_t* values = reinterpret_cast<const uint32_t*>(&vec);
+  #pragma unroll
+  for (int i = 0; i < N / 2; ++i) {
+    atomicReducePackedVec2<scalar_t, true>(dst + 2 * i, values[i]);
+  }
+}
+
+struct ScatterMinOp {
+  template <int Alignment, typename scalar_t>
+  __device__ __forceinline__ static void apply(
+      scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
+    atomicMinVec<Alignment>(dst, vec);
+  }
+};
+
+struct ScatterMaxOp {
+  template <int Alignment, typename scalar_t>
+  __device__ __forceinline__ static void apply(
+      scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
+    atomicMaxVec<Alignment>(dst, vec);
+  }
+};
+#endif
+
+struct ScatterAddOp {
+  template <int Alignment, typename scalar_t>
+  __device__ __forceinline__ static void apply(
+      scalar_t* dst, const at::native::memory::Vec<Alignment>& vec) {
+    atomicAddVec<Alignment>(dst, vec);
+  }
+};
+
+template <typename reduce_op, int Alignment, typename scalar_t, typename index_t>
+__global__ void vectorized_scatter_kernel(
     scalar_t* __restrict__ self_data,
     const scalar_t* __restrict__ src_data,
     const index_t* __restrict__ idx,
@@ -119,7 +238,7 @@ __global__ void vectorized_scatter_add_kernel(
   if (entry_id >= num_ind) return;
 
   int64_t ind = idx[entry_id];
-  CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "vectorized scatter add kernel index out of bounds",
+  CUDA_KERNEL_ASSERT_VERBOSE(ind >= 0 && ind < self_dim_size && "vectorized scatter kernel index out of bounds",
       "Expected 0 <= index < self_dim_size(%ld), but got index = %ld", self_dim_size, ind);
 
   scalar_t* dst_slice = reinterpret_cast<scalar_t*>(
@@ -135,12 +254,12 @@ __global__ void vectorized_scatter_add_kernel(
     scalar_t* dst = reinterpret_cast<scalar_t*>(
         reinterpret_cast<char*>(dst_slice) + off);
 
-    atomicAddVec<Alignment>(dst, vec);
+    reduce_op::template apply<Alignment>(dst, vec);
   }
 }
 
-template <int64_t Alignment, typename scalar_t, typename index_t>
-void vectorized_scatter_add_kernel_launch(
+template <typename atomic_op, int64_t Alignment, typename scalar_t, typename index_t>
+void vectorized_scatter_kernel_launch(
     scalar_t* self_data, const scalar_t* src_data, index_t* idx, int num_ind,
     int64_t slice_size_in_bytes, int64_t self_dim_size,
     int64_t self_stride_bytes, int64_t src_stride_bytes) {
@@ -159,7 +278,7 @@ void vectorized_scatter_add_kernel_launch(
       grid_y);
 
   dim3 grid = {static_cast<uint32_t>(grid_x), grid_y, 1};
-  vectorized_scatter_add_kernel<Alignment, scalar_t, index_t>
+  vectorized_scatter_kernel<atomic_op, Alignment, scalar_t, index_t>
       <<<grid, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
       self_data, src_data, idx, num_ind, slice_size_in_bytes,
       self_dim_size, self_stride_bytes, src_stride_bytes,
@@ -167,17 +286,28 @@ void vectorized_scatter_add_kernel_launch(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-#define INSTANTIATE_SCATTER_ADD(scalar_t) \
-template void vectorized_scatter_add_kernel_launch<16, scalar_t, int64_t>( \
+#define INSTANTIATE_SCATTER_OP(op, scalar_t) \
+template void vectorized_scatter_kernel_launch<op, 16, scalar_t, int64_t>( \
     scalar_t*, const scalar_t*, int64_t*, int, int64_t, int64_t, int64_t, int64_t); \
-template void vectorized_scatter_add_kernel_launch<16, scalar_t, int32_t>( \
+template void vectorized_scatter_kernel_launch<op, 16, scalar_t, int32_t>( \
     scalar_t*, const scalar_t*, int32_t*, int, int64_t, int64_t, int64_t, int64_t);
+
+#define INSTANTIATE_SCATTER_ADD(scalar_t) INSTANTIATE_SCATTER_OP(ScatterAddOp, scalar_t)
+#if !defined(USE_ROCM)
+#define INSTANTIATE_SCATTER_MINMAX(scalar_t) \
+  INSTANTIATE_SCATTER_OP(ScatterMinOp, scalar_t) \
+  INSTANTIATE_SCATTER_OP(ScatterMaxOp, scalar_t)
 
 INSTANTIATE_SCATTER_ADD(float)
 INSTANTIATE_SCATTER_ADD(double)
 INSTANTIATE_SCATTER_ADD(c10::Half)
 INSTANTIATE_SCATTER_ADD(c10::BFloat16)
+INSTANTIATE_SCATTER_MINMAX(c10::Half)
+INSTANTIATE_SCATTER_MINMAX(c10::BFloat16)
+#undef INSTANTIATE_SCATTER_MINMAX
+#endif
 #undef INSTANTIATE_SCATTER_ADD
+#undef INSTANTIATE_SCATTER_OP
 
 
 }

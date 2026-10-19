@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NamedTuple
+from unittest.mock import patch
 
 import torch
 from torch._inductor import config
@@ -18,7 +19,10 @@ from torch._inductor.codegen.cpp_wrapper_gpu import (
     CppWrapperGpu,
     DeferredTritonCallWrapper,
 )
+from torch._inductor.codegen.cpp_wrapper_mps import CppWrapperMps
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
+from torch._inductor.codegen.mps_device_op_overrides import MPSDeviceOpOverrides
+from torch._inductor.codegen.mtia.device_op_overrides import MTIADeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
 from torch._inductor.virtualized import V
@@ -164,7 +168,11 @@ class TestGpuWrapper(InductorTestCase):
 
         wrapper.prefix = IndentedBuffer()
         wrapper._lazy_kernel_names = []
-        graph = SimpleNamespace(is_dual_wrapper_mode=False)
+        # The prologue hoists a stream declaration per device, so it reads the
+        # devices the graph lowered for.
+        graph = SimpleNamespace(
+            aot_mode=False, is_dual_wrapper_mode=False, device_idxs=()
+        )
         with (
             config.patch({"triton.debug_sync_graph": True}),
             V.set_graph_handler(graph),
@@ -184,6 +192,165 @@ class TestGpuWrapper(InductorTestCase):
             NotImplementedError, "triton debug sync is not supported"
         ):
             wrapper.generate_debug_sync(IndentedBuffer())
+
+    def test_prologue_stream_declaration_per_backend(self):
+        def prologue(wrapper_cls, device, device_codegen, aot_mode=False):
+            wrapper = wrapper_cls.__new__(wrapper_cls)
+            wrapper.device = device
+            wrapper.device_codegen = device_codegen
+            wrapper.prefix = IndentedBuffer()
+            wrapper._lazy_kernel_names = []
+            graph = SimpleNamespace(
+                aot_mode=aot_mode, is_dual_wrapper_mode=False, device_idxs=(0,)
+            )
+            with V.set_graph_handler(graph):
+                wrapper._codegen_entry_impl_prologue()
+            return wrapper.prefix.getvalue()
+
+        self.assertIn(
+            "stream0;", prologue(CppWrapperGpu, "cuda", CUDADeviceOpOverrides())
+        )
+        # Neither backend has a stream type to query: Metal kernels are
+        # dispatched without a raw stream, and pure AOTI takes the stream as a
+        # parameter, which is how MTIA runs through CppWrapperGpu.
+        self.assertNotIn(
+            "stream0", prologue(CppWrapperMps, "mps", MPSDeviceOpOverrides())
+        )
+        self.assertNotIn(
+            "stream0",
+            prologue(CppWrapperGpu, "mtia", MTIADeviceOpOverrides(), aot_mode=True),
+        )
+
+    def test_tunableop_dynamic_dims_guard_codegen(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+        wrapper.lines = []
+
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
+            self.assertTrue(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cuda"
+                )
+            )
+        self.assertEqual(
+            wrapper.lines,
+            [
+                "{",
+                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(2);",
+            ],
+        )
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}):
+            self.assertFalse(wrapper._begin_tunableop_dynamic_dims_guard(None, "cuda"))
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, False, False, False), "cuda"
+                )
+            )
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cpu"
+                )
+            )
+        with config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": False}):
+            self.assertFalse(
+                wrapper._begin_tunableop_dynamic_dims_guard(
+                    (False, True, False, False), "cuda"
+                )
+            )
+
+    def test_tunableop_dynamic_dims_guard_preserves_alloc_output_scope(self):
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.device = "cuda"
+        wrapper.lines = []
+        extern_kernel = SimpleNamespace(
+            name="buf0",
+            op_overload=None,
+            outputs=[],
+            python_kernel_name=None,
+            tunable_dyn_dims_mask=(True, False, False, False),
+            get_device=lambda: torch.device("cuda"),
+            get_kernel_name=lambda: "at::test",
+        )
+
+        def emit_call(wrapper, *_args, **_kwargs):
+            wrapper.writeline("CALL;")
+
+        with (
+            config.patch({"cuda.autotune_tunableop_dynamic_dims_wildcard": True}),
+            patch.object(
+                CppWrapperCpu,
+                "generate_c_shim_extern_kernel_call",
+                emit_call,
+            ),
+        ):
+            wrapper._generate_extern_kernel_alloc_helper(extern_kernel, ["arg0"])
+
+        self.assertEqual(
+            wrapper.lines,
+            [
+                "AtenTensorHandle buf0_handle;",
+                "{",
+                "AOTICudaTunableOpDynamicDimsGuard tunable_dynamic_dims_guard(1);",
+                "CALL;",
+                "}",
+                "RAIIAtenTensorHandle buf0(buf0_handle);",
+            ],
+        )
+
+    def test_tunableop_dynamic_dims_guard_in_compiled_wrapper(self):
+        if not RUN_GPU or self.device != "cuda":
+            self.skipTest("requires CUDA/ROCm cpp_wrapper")
+
+        def fn(bias, x, weight):
+            return torch.addmm(bias, x, weight)
+
+        bias = torch.randn(32, device=self.device)
+        x = torch.randn(8, 16, device=self.device)
+        weight = torch.randn(16, 32, device=self.device)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        previous_enabled = torch.cuda.tunable.is_enabled()
+        previous_tuning = torch.cuda.tunable.tuning_is_enabled()
+        previous_filename = torch.cuda.tunable.get_filename()
+        try:
+            torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.tuning_enable(False)
+            with config.patch(
+                {
+                    "cuda.autotune_tunableop_dynamic_dims_wildcard": True,
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN",
+                }
+            ):
+                compiled = torch.compile(
+                    fn, fullgraph=True, options={"cpp_wrapper": True}
+                )
+                actual, code = test_torchinductor.run_and_get_cpp_code(
+                    compiled, bias, x, weight
+                )
+
+            self.assertEqual(actual, fn(bias, x, weight))
+            self.assertIn("AOTICudaTunableOpDynamicDimsGuard", code)
+            self.assertIn("tunable_dynamic_dims_guard(1)", code)
+            self.assertNotIn("ATen/cuda/tunable/Tunable.h", code)
+            self.assertNotIn("at::cuda::tunable", code)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                torch.cuda.tunable.set_filename(
+                    os.path.join(tmpdir, "results.csv"), False
+                )
+                torch.cuda.tunable._clear_all()
+                torch.cuda.tunable.enable(True)
+                torch.cuda.tunable.tuning_enable(True)
+                self.assertEqual(compiled(bias, x, weight), fn(bias, x, weight))
+                self.assertTrue(
+                    any("*" in entry[1] for entry in torch.cuda.tunable.get_results())
+                )
+        finally:
+            torch.cuda.tunable._clear_all()
+            torch.cuda.tunable.set_filename(previous_filename, False)
+            torch.cuda.tunable.enable(previous_enabled)
+            torch.cuda.tunable.tuning_enable(previous_tuning)
 
     def test_debug_sync_graph(self):
         if not RUN_GPU:
@@ -327,12 +494,40 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @skipIfXpu(msg="tests CUDA TMA helper codegen")
+    def test_tma_descriptor_separates_global_and_kernel_shapes(self):
+        if torch.version.hip is not None:
+            self.skipTest("requires CUDA TMA helpers")
+
+        helpers = CUDADeviceOpOverrides().tma_descriptor_helpers()
+        self.assertNotIn("int32_t* shape", helpers)
+        self.assertIn("uint64_t* shape", helpers)
+        self.assertIn("int32_t kernel_shape[5];", helpers)
+        self.assertIn("uint64_t global_shape[5];", helpers)
+        self.assertIn("uint64_t dim = shape[i];", helpers)
+
+        wrapper = CppWrapperGpu.__new__(CppWrapperGpu)
+        wrapper.arg_var_id = itertools.count()
+        launch_args = wrapper.generate_args_decl(
+            IndentedBuffer(),
+            ["descriptor"],
+            [torch.float32],
+            ["tensordesc<fp32[16, 32]>"],
+        )
+        self.assertEqual(
+            launch_args,
+            "&var_0.m, &var_0.kernel_shape[0], &var_0.kernel_shape[1], "
+            "&var_0.strides[0], &var_0.strides[1]",
+        )
+
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_cpp_scratch_scales_with_grid_size_for_tma(self):
         scratch_def, scratch_var = CUDADeviceOpOverrides().cpp_scratch(
             0,
             TritonScratchWorkspace(
-                size=256, generate_dtype_str=lambda: "at::ScalarType::Byte"
+                size=256,
+                generate_dtype_str=lambda: "at::ScalarType::Byte",
+                generate_device_type_str=lambda: "cached_torch_device_type_cuda",
             ),
             prefix="global_scratch",
         )
@@ -340,6 +535,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn(
             "static_cast<int64_t>(256) * grid_0 * grid_1 * grid_2", scratch_def[0]
         )
+        self.assertIn("cached_torch_device_type_cuda", scratch_def[3])
 
     @skipIfXpu(msg="tests CUDA/ROCm CUDADeviceOpOverrides codegen")
     def test_triton_wrapper_scales_scratch_with_num_ctas(self):

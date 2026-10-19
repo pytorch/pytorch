@@ -39,9 +39,7 @@ class TORCH_API Dtype {
   Dtype(ScalarType type, int64_t lanes) : scalar_type_(type), lanes_(lanes) {}
   Dtype(Dtype type, int64_t lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
-    if (type.lanes() != 1) {
-      throw malformed_input("dtype lanes don't match");
-    }
+    TORCH_CHECK(type.lanes() == 1, "MALFORMED INPUT: dtype lanes don't match");
   }
   int64_t lanes() const {
     return lanes_;
@@ -106,9 +104,9 @@ NNC_TODTYPE_DECLARATION(c10::qint8, QInt8)
 TORCH_API Dtype ToDtype(ScalarType type);
 
 inline Dtype promoteTypes(Dtype a, Dtype b) {
-  if (a.lanes() != b.lanes()) {
-    throw malformed_input("promoting types with different lanes");
-  }
+  TORCH_CHECK(
+      a.lanes() == b.lanes(),
+      "MALFORMED INPUT: promoting types with different lanes");
   return Dtype(
       static_cast<ScalarType>(c10::promoteTypes(
           static_cast<c10::ScalarType>(a.scalar_type()),
@@ -128,15 +126,15 @@ inline Dtype BinaryOpDtype(
     return ToDtype(ret_type);
   }
 
-  if (op1_dtype.lanes() != op2_dtype.lanes()) {
-    throw malformed_input("lanes don't match");
-  }
+  TORCH_CHECK(
+      op1_dtype.lanes() == op2_dtype.lanes(),
+      "MALFORMED INPUT: lanes don't match");
   int64_t lanes = op1_dtype.lanes();
 
   Dtype resultType = promoteTypes(op1_dtype, op2_dtype);
-  if (resultType.scalar_type() == ScalarType::Undefined) {
-    throw malformed_input("scalar type doesn't match");
-  }
+  TORCH_CHECK(
+      resultType.scalar_type() != ScalarType::Undefined,
+      "MALFORMED INPUT: scalar type doesn't match");
 
   if (lanes == 1) {
     // Use the fixed scalar Dtypes.
