@@ -617,9 +617,9 @@ a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed
 posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
 {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
 windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
-when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation. No backend
-supports windows under `TORCH_DISTRIBUTED_DEBUG=DETAIL`, whose debug wrapper
-does not forward them.
+when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation. With
+`TORCH_DISTRIBUTED_DEBUG=DETAIL` and Gloo available, groups are wrapped in a
+debug wrapper that does not forward windows, so no backend supports them.
 {func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
@@ -632,10 +632,12 @@ segments; allocating the same sizes in the same order on every rank satisfies
 this. The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie in an
 allocator segment that has a window, e.g. a slice of this window's tensor.
 `backend.register_mem_pool(pool, symm=True)` gives every segment the pool
-allocates a symmetric window, so any tensor from the pool is a valid source;
+allocates afterwards a symmetric window, so any tensor allocated from the pool
+after the call is a valid source;
 each new segment is then registered collectively, so all ranks must allocate
 the same sizes in the same order, and allocation raises if no transport
-supports symmetric memory.
+supports symmetric memory. Segments that already exist are upgraded too, but
+without such a transport they only log a warning and are not valid sources.
 A window holds one tensor at a time; call
 {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another, and note
 that {func}`~torch.distributed.distributed_c10d._new_window` with a tensor already registers it.
