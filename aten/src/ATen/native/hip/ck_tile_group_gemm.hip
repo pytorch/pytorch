@@ -12,9 +12,12 @@
 #include <ck_tile/ops/gemm.hpp>
 
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <limits>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace at::hip::detail {
 	namespace {
@@ -126,20 +129,33 @@ namespace at::hip::detail {
 		template <typename T>
 		constexpr index_t vector16_elems() { return 16 / sizeof(T); }
 
-		// Configs for one GEMM type (forward, dX or dW), tried in this order: the first class whose condition holds and
-		// whose config fits is launched.
-		//   N256 / N128 / N64: output dims divisible by 256 / 128 / 64 (dW: both M and N), so a tile that wide fits exactly
-		//   Aligned:           every contiguous dim of A, B and C is a whole number of 16-byte vectors
-		//   Unaligned:         any shape; must pad M, N and K and use 1-element C vectors
+		// A candidate config with its time estimate for the persistent kernel, which runs one workgroup per CU and hands
+		// out output tiles round-robin: rounds * (kPerTileUs + K steps per tile * kPerStepUs), with rounds = ceil(tiles / CUs).
+		// The two constants are fitted per config to measured kernel times; only their ratios between candidates matter.
+		template <typename Config_, double kPerTileUs_, double kPerStepUs_>
+		struct TimedConfig {
+			using Config = Config_;
+			static constexpr double kPerTileUs = kPerTileUs_;
+			static constexpr double kPerStepUs = kPerStepUs_;
+		};
+
+		template <typename C>
+		concept TimedCandidate = requires {
+			typename C::Config;
+			{ C::kPerTileUs } -> std::convertible_to<double>;
+			{ C::kPerStepUs } -> std::convertible_to<double>;
+		};
+
+		template <typename Tuple>
+		concept CandidateList = []<size_t... I>(std::index_sequence<I...>) {
+			return (TimedCandidate<std::tuple_element_t<I, Tuple>> && ...);
+		}(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+
+		// Configs for one GEMM type (forward, dX or dW). When every contiguous dim is 16-byte aligned, the fitting Candidate
+		// with the lowest estimated time is launched; otherwise Unaligned, which pads M, N and K and uses 1-element C vectors.
 		// A specialization missing a name fails its static_assert.
 		template <typename G>
-		concept GemmTypeConfigs = requires {
-			typename G::N256;
-			typename G::N128;
-			typename G::N64;
-			typename G::Aligned;
-			typename G::Unaligned;
-		};
+		concept GemmTypeConfigs = CandidateList<typename G::Candidates> && requires { typename G::Unaligned; };
 
 		template <typename T>
 		concept GroupGemmConfigs = GemmTypeConfigs<typename T::Forward> && GemmTypeConfigs<typename T::GradInput> &&
@@ -157,32 +173,37 @@ namespace at::hip::detail {
 			// Pads M, N and K with 1-element C vectors, so it accepts every shape.
 			using AnyShape = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>;
 
+			// Time constants (us) fitted to standalone kernel timings of the Primus-Turbo grouped GEMM benchmark shapes at 256 CUs.
+			// Smaller tiles win only when the large ones leave CUs idle or a mostly empty last round.
+
 			// Forward (2D x 3D, 3D x 3D): row-major A, column-major B
 			struct Forward {
-				// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs
-				using N256 = CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false>;
-				using N128 = N256;
-				using N64 = N256;
-				using Aligned = N256;
+				using Candidates = std::tuple<
+					// 256x192 holds the 192 accumulators per lane this compiler keeps in VGPRs
+					TimedConfig<CkTileGroupGemmConfig<256, 192, 64, 32, 32, 16, 2, 2, false, true, false>, 5.891, 1.218>,
+					TimedConfig<CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>, 5.892, 0.9473>,
+					TimedConfig<CkTileGroupGemmConfig<128, 192, 64, 32, 32, 16, 2, 2, false, true, false>, 3.790, 0.7594>,
+					TimedConfig<CkTileGroupGemmConfig<128, 128, 64, 32, 32, 16, 2, 2, false, true, false>, 2.768, 0.5831>>;
 				using Unaligned = AnyShape;
 			};
 
 			// dX (2D x 3D, 3D x 3D): row-major A and B
 			struct GradInput {
-				// eight waves split 256x256 into 128 accumulators per lane
-				using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>;
-				using N128 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
-				using N64 = CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>;
-				using Aligned = N64;
+				using Candidates = std::tuple<
+					// eight waves split 256x256 into 128 accumulators per lane
+					TimedConfig<CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>, 0.0, 0.9204>,
+					TimedConfig<CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, false, false, false>, 7.261, 1.0627>,
+					TimedConfig<CkTileGroupGemmConfig<256, 128, 64, 32, 32, 16, 2, 2, false, true, false>, 5.849, 1.2472>,
+					TimedConfig<CkTileGroupGemmConfig<128, 128, 64, 32, 32, 16, 2, 2, false, true, false>, 4.575, 0.8568>>;
 				using Unaligned = AnyShape;
 			};
 
 			// dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K
 			struct GradWeight {
-				using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, true>;
-				using N128 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, true, true, true>;
-				using N64 = N128;
-				using Aligned = N128;
+				using Candidates = std::tuple<
+					TimedConfig<CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, true>, 5.724, 1.0234>,
+					TimedConfig<CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, true, true, true>, 6.694, 1.1341>,
+					TimedConfig<CkTileGroupGemmConfig<256, 128, 32, 32, 32, 16, 2, 2, true, true, true>, 6.160, 0.8104>>;
 				using Unaligned = AnyShape;
 			};
 
@@ -201,34 +222,69 @@ namespace at::hip::detail {
 		// Host-side view of one launch, for picking a config. -1 marks the jagged dim.
 		struct GemmProblem {
 			int64_t M, N, K;
-			bool aligned;       // every contiguous dim of A, B and C is a whole number of 16-byte vectors
-			bool classes_test_m; // dW: M is an output dim and A's contiguous dim, so the classes test it too
+			int64_t groups;
+			int64_t jagged_total; // the jagged dim's total over all groups (e.g. all tokens); unused for 3D x 3D
+			int64_t cus;          // compute units, one persistent workgroup each
+			bool aligned;         // every contiguous dim of A, B and C is a whole number of 16-byte vectors
+			bool fits_test_m;     // dW: M is an output dim and A's contiguous dim, so configs must fit it too
 		};
 
-		// A config fits when every known dim it does not pad is a multiple of its tile. Checked against the config itself,
-		// so a wrong alias falls through to the next class instead of launching an out-of-bounds kernel.
+		// A config fits when every known dim it does not pad is a multiple of its tile.
 		template <typename Config>
 		bool config_fits(const GemmProblem& p) {
 			const auto fits = [](int64_t extent, index_t tile, bool pad) { return extent < 0 || pad || extent % tile == 0; };
 			return fits(p.N, Config::N_Tile, Config::PadN) && fits(p.K, Config::K_Tile, Config::PadK) &&
-					(!p.classes_test_m || fits(p.M, Config::M_Tile, Config::PadM));
+					(!p.fits_test_m || fits(p.M, Config::M_Tile, Config::PadM));
+		}
+
+		// Estimated kernel time of a TimedConfig, see TimedConfig. A jagged M or N counts ceil(total / tile) tiles, exact
+		// when every group is a whole number of tiles; a jagged K uses the average per group.
+		template <TimedCandidate Timed>
+		double estimated_us(const GemmProblem& p) {
+			using Config = typename Timed::Config;
+			const auto ceil_div = [](int64_t a, int64_t b) { return (a + b - 1) / b; };
+			int64_t tiles = 0;
+			if (p.M < 0) {
+				tiles = ceil_div(p.jagged_total, Config::M_Tile) * ceil_div(p.N, Config::N_Tile);
+			} else if (p.N < 0) {
+				tiles = ceil_div(p.jagged_total, Config::N_Tile) * ceil_div(p.M, Config::M_Tile);
+			} else {
+				tiles = p.groups * ceil_div(p.M, Config::M_Tile) * ceil_div(p.N, Config::N_Tile);
+			}
+			const int64_t k = p.K < 0 ? ceil_div(p.jagged_total, p.groups) : p.K;
+			return static_cast<double>(ceil_div(tiles, p.cus)) * (Timed::kPerTileUs + ceil_div(k, Config::K_Tile) * Timed::kPerStepUs);
 		}
 
 		template <GemmTypeConfigs Type, typename Run>
 		void run_gemm_type(const GemmProblem& p, Run&& run) {
-			const auto divisible = [&](int64_t d) { return p.aligned && p.N % d == 0 && (!p.classes_test_m || p.M % d == 0); };
-			const auto try_run = [&](auto config) {
-				if (!config_fits<decltype(config)>(p)) {
-					return false;
-				}
-				run(config);
-				return true;
-			};
-			if (divisible(256) && try_run(typename Type::N256{})) return;
-			if (divisible(128) && try_run(typename Type::N128{})) return;
-			if (divisible(64) && try_run(typename Type::N64{})) return;
-			if (p.aligned && try_run(typename Type::Aligned{})) return;
-			TORCH_CHECK(try_run(typename Type::Unaligned{}), "ck_tile group gemm: the Unaligned config must accept every shape");
+			using Candidates = typename Type::Candidates;
+			constexpr size_t count = std::tuple_size_v<Candidates>;
+			size_t best = count;
+			if (p.aligned) {
+				double best_us = std::numeric_limits<double>::infinity();
+				[&]<size_t... I>(std::index_sequence<I...>) {
+					const auto consider = [&](auto index, auto timed) {
+						using Timed = decltype(timed);
+						if (!config_fits<typename Timed::Config>(p)) {
+							return;
+						}
+						const double us = estimated_us<Timed>(p);
+						if (us < best_us) {
+							best_us = us;
+							best = index;
+						}
+					};
+					(consider(I, std::tuple_element_t<I, Candidates>{}), ...);
+				}(std::make_index_sequence<count>{});
+			}
+			if (best == count) {
+				TORCH_CHECK(config_fits<typename Type::Unaligned>(p), "ck_tile group gemm: the Unaligned config must accept every shape");
+				run(typename Type::Unaligned{});
+				return;
+			}
+			[&]<size_t... I>(std::index_sequence<I...>) {
+				((I == best ? run(typename std::tuple_element_t<I, Candidates>::Config{}) : void()), ...);
+			}(std::make_index_sequence<count>{});
 		}
 
 		using Strides = std::array<int64_t, 3>;
@@ -389,7 +445,8 @@ namespace at::hip::detail {
 				int32_t M,                           // -1 if jagged, see prepare_grouped_gemm_data
 				int32_t N,
 				int32_t K,
-				int32_t group_count) {
+				int32_t group_count,
+				int64_t jagged_total) {              // the jagged dim's total over all groups, see group_gemm_ck_tile
 			const hipStream_t stream = c10::hip::getCurrentHIPStream().stream();
 
 			auto to_strides = [](at::IntArrayRef values) {
@@ -436,11 +493,11 @@ namespace at::hip::detail {
 			// Contiguous dims: A's is K (row-major) or M, B's is N (row-major) or K, C's is N. A jagged dim (-1) is never contiguous.
 			const auto vectors_fit = [](int64_t extent, index_t elems) { return extent < 0 || extent % elems == 0; };
 			const GemmProblem problem{
-				M, N, K,
+				M, N, K, group_count, jagged_total, at::cuda::getCurrentDeviceProperties()->multiProcessorCount,
 				vectors_fit(a_row_major ? K : M, vector16_elems<InputType>()) &&
 						vectors_fit(b_row_major ? N : K, vector16_elems<InputType>()) &&
 						vectors_fit(N, vector16_elems<OutputType>()),
-				/*classes_test_m=*/K < 0};
+				/*fits_test_m=*/K < 0};
 
 			if (K < 0) {
 				// dW (2D x 2D): K is jagged, M and N are fixed per group
@@ -504,14 +561,19 @@ namespace at::hip::detail {
 		int64_t K = mat_a.size(-1);
 		int64_t N = mat_b.size(-1);
 		int64_t group_count = 0;
+		// Total of the jagged dim over all groups, known without reading offs; used to estimate each config's time.
+		int64_t jagged_total = 0;
 		if (a_is_2d && b_is_2d) {
 			group_count = offs->size(0);
+			jagged_total = K;
 			K = -1;
 		} else if (a_is_2d) {
 			group_count = mat_b.size(0);
+			jagged_total = M;
 			M = -1;
 		} else if (b_is_2d) {
 			group_count = mat_a.size(0);
+			jagged_total = N;
 			N = -1;
 		} else {
 			group_count = mat_a.size(0);
@@ -571,7 +633,7 @@ namespace at::hip::detail {
 					with_ck_type(out.scalar_type(), [&](auto output_tag) {
 						launch_ck_tile_group_gemm<Arch, InputType, decltype(output_tag)>(
 								mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
-								static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count));
+								static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count), jagged_total);
 					});
 				} else {
 					TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no configs for ", mat_a.scalar_type(), " inputs on ",
