@@ -1436,6 +1436,7 @@ class TestPartitionedScatterOpt(TestCase):
                 f"output {i} mismatch: expected[:5]={e[:5]}\nactual[:5]={a[:5]}",
             )
 
+    @unittest.skipUnless(DO_PERF_TEST, "Perf test not enabled")
     @unittest.skipUnless(HAS_GPU, "requires GPU")
     def test_perf_atomic_contention(self):
         """
