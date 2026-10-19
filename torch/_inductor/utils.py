@@ -5848,11 +5848,7 @@ def tlx_only_hip_options() -> list[str]:
 
 
 def forwarded_hip_compile_options() -> list[str]:
-    """HIP Triton compile options forwarded from kernel configs.
-
-    These options are also set by ordinary Triton templates, so they must be
-    forwarded even when TLX is off.
-    """
+    """HIP compiler options forwarded to Triton."""
     options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
     return list(dict.fromkeys(options))
 
