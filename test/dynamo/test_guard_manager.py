@@ -193,6 +193,27 @@ user_stack=None)
         finally:
             torch.set_autocast_cache_enabled(old_cache)
 
+    def test_global_state_reason_autocast(self):
+        guard = GlobalStateGuard()
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertIs(guard.check(), False)
+            self.assertEqual(guard.reason(), "autocast(cpu)_enabled ")
+            guard = GlobalStateGuard()
+            self.assertIs(guard.check(), True)
+            with torch.autocast("cpu", dtype=torch.float16):
+                self.assertIs(guard.check(), False)
+                self.assertEqual(guard.reason(), "autocast(cpu)_dtype ")
+        self.assertIs(guard.check(), False)
+
+    def test_global_state_autocast_round_trip(self):
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            state = GlobalStateGuard().__getstate__()
+        guard = GlobalStateGuard()
+        guard.__setstate__(state)
+        self.assertIs(guard.check(), False)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertIs(guard.check(), True)
+
     def test_python_lambda_leaf_guard(self):
         root = RootGuardManager()
         const_guard = guards.LAMBDA_GUARD(
@@ -560,6 +581,32 @@ user_stack=None)
             with self.assertRaisesRegex(RuntimeError, err):
                 root.check_verbose({"x": nested})
             self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_tensor_match_guard_sparse_compressed(self):
+        # Compressed sparse layouts have no strides; the guard compares -1s.
+        for layout, blocksize in (
+            (torch.sparse_csr, None),
+            (torch.sparse_csc, None),
+            (torch.sparse_bsr, (1, 1)),
+            (torch.sparse_bsc, (1, 1)),
+        ):
+            with self.subTest(layout=layout):
+                x = torch.eye(4).to_sparse(layout=layout, blocksize=blocksize)
+                guard_manager = RootGuardManager()
+                guard_manager.add_tensor_match_guard(
+                    x,
+                    list(x.size()),
+                    [-1, -1],
+                    "x",
+                    ["check_tensor(x)"],
+                    None,
+                    type(x),
+                    torch._C._dispatch_keys(x),
+                    False,
+                )
+                self.assertTrue(guard_manager.check(x))
+                y = torch.eye(3).to_sparse(layout=layout, blocksize=blocksize)
+                self.assertFalse(guard_manager.check(y))
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
