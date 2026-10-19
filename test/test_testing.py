@@ -512,7 +512,7 @@ if __name__ == '__main__':
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
         )
         if torch.version.cuda:
-            self.assertIn('errors=2', stderr)
+            self.assertIn('errors=1', stderr)
 
     @expectedFailureMeta  # This is only supported for CPU and CUDA
     @onlyNativeDeviceTypes
