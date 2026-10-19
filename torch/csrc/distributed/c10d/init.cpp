@@ -1442,8 +1442,8 @@ Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
 Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
         and fit within its window. Backends may require it to be
-        contiguous and to lie in an allocator segment that has a window,
-        e.g. a slice of this window's tensor or any tensor allocated from
+        contiguous and to lie in an allocator segment that has a window
+        on the same process group, e.g. a slice of this window's tensor or any tensor allocated from
         a pool after registering it with
         ``register_mem_pool(pool, symm=True)``.
     dst_rank (int): Destination rank in the group.
@@ -4291,7 +4291,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
               py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, they are registered as NCCL symmetric windows instead, when NCCL supports them.)")
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, they are registered as NCCL symmetric windows instead; ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool,
