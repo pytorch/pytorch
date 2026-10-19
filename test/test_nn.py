@@ -3632,12 +3632,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x = torch.randn(128, 100, requires_grad=True)
         cloned = x.clone()
         F.hardtanh(cloned, inplace=True)
-        saved = [t for t in cloned.grad_fn.saved_tensors]
-        for t in saved:
-            self.assertTrue(
-                t.data_ptr() == cloned.data_ptr(),
-                "Inplace hardtanh should save result, not a copy of input",
-            )
+        # C++ autograd nodes expose saved outputs as _saved_result, not
+        # Python Function.saved_tensors.
+        saved = cloned.grad_fn._saved_result
+        self.assertTrue(
+            saved.data_ptr() == cloned.data_ptr(),
+            "Inplace hardtanh should save result, not a copy of input",
+        )
 
     def test_hardtanh_inplace_correctness(self):
         x = torch.tensor([-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0], requires_grad=True)
