@@ -727,6 +727,27 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
                 self.assertEqual(output.full_tensor(), expected)
                 self.assertEqual(dt.full_tensor(), value)
 
+    @dtypes(torch.int32, torch.int64)
+    @parametrize("op_name", ["__lshift__", "__rshift__"])
+    @parametrize("shard_rhs", [False, True])
+    def test_shift_dunder_broadcast(self, device, dtype, op_name, shard_rhs):
+        mesh = self.build_device_mesh()
+        value = torch.arange(-8, 9, device=device, dtype=dtype)
+        shifts = torch.arange(34, device=device, dtype=dtype).reshape(2, 17) % 4
+        expected = getattr(value, op_name)(shifts)
+        dt = distribute_tensor(value.clone(), mesh, [Shard(0)])
+        rhs_placement = Shard(1) if shard_rhs else Replicate()
+        rhs = distribute_tensor(shifts.clone(), mesh, [rhs_placement])
+        for _ in range(2):
+            result = getattr(dt, op_name)(rhs)
+            self.assertIsNot(result, dt)
+            self.assertEqual(result.placements, (Shard(1),))
+            self.assertEqual(result.full_tensor(), expected)
+            self.assertEqual(dt.placements, (Shard(0),))
+            self.assertEqual(dt.full_tensor(), value)
+            self.assertEqual(rhs.placements, (rhs_placement,))
+            self.assertEqual(rhs.full_tensor(), shifts)
+
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
     @skipOps(
