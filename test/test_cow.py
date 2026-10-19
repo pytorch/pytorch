@@ -474,7 +474,7 @@ class TestCOW(TestCase):
             with self.assertRaisesRegex(RuntimeError, "complete COW uses across"):
                 torch._C._cow_record_done(x)
         self.assertTrue(torch._C._is_cow_tensor(y))
-        del y
+        del y, graph
         x.add_(1)
 
         with _capture(a) as graph:

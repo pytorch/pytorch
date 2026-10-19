@@ -55,7 +55,7 @@ both siblings materialize without completion, both may copy.
 
 `torch._C._cow_record_done(x)` (C++: `cow::record_done(storage)`) records events on the current
 stream and releases the retained reference, enabling sharing of the new allocation again. It leaves
-current references, values, and pointers unchanged, and is a no-op for CPU or non-COW storage.
+current references, values, and pointers unchanged.
 
 Before completion, join **all earlier uses** onto the current stream, including uses through storage
 aliases, views, saved pointers, uses before the first lazy clone, and materializing copies.
@@ -74,8 +74,6 @@ these events before stealing, avoiding unrelated later work on A. If any departe
 incomplete, it instead takes a fresh wait on A, relying on the ordinary lifetime contract.
 Completion also makes A wait immediately, protecting reuse without work in a deleter. One event per
 completed sibling remains until the context dies. Completion covers aliases, not lazy siblings.
-
-See the `_cow_record_done` docstring for an example of avoiding a second copy.
 
 ### Capture boundaries
 

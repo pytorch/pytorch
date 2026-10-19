@@ -2060,7 +2060,7 @@ class TestCompositeCompliance(TestCase):
                 else f"Keyword argument '{idx_or_kw}'"
             ) + f" during {backward_or_forward} call"
 
-            if is_strided_tensor(arg):
+            if is_strided_tensor(arg) and arg.untyped_storage().nbytes():
                 self.assertTrue(
                     torch._C._is_cow_tensor(arg_raw),
                     msg=(
@@ -2116,6 +2116,7 @@ class TestCompositeCompliance(TestCase):
             # all inputs
             for arg in args_raw:
                 if is_strided_tensor(arg):
+                    torch._C._cow_record_done(arg)
                     args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
                 else:
@@ -2127,6 +2128,7 @@ class TestCompositeCompliance(TestCase):
 
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
+                    torch._C._cow_record_done(arg)
                     kwargs_copy[kw] = arg.detach().clone()
                     kwargs[kw] = torch._lazy_clone(arg)
                 else:
