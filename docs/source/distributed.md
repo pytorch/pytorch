@@ -633,8 +633,18 @@ registered, e.g. a contiguous slice of this window's tensor.
 A window holds one tensor at a time; call
 {meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another, and note
 that {func}`~torch.distributed.distributed_c10d._new_window` with a tensor already registers it.
-Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank, so the
-destination can wait for the data with a single {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`.
+Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank. Signals
+are counted: each {meth}`~torch.distributed.distributed_c10d.Window.wait_signal` consumes one signal from
+the peer, so call it once per `put` or
+{meth}`~torch.distributed.distributed_c10d.Window.signal` from that peer. A `signal` and a `put` from the
+same peer are indistinguishable, so after a `signal` followed by a `put` the
+first `wait_signal` can return before the put's data arrives.
+{meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` only drops the window's bookkeeping;
+the segment stays registered with NCCL until the allocator frees it, and
+every rank must free its segments in the same order or teardown can hang.
+With `nccl`, registering the pool with
+`backend.register_mem_pool(pool, symm=True)` and calling
+`backend.deregister_mem_pool(pool)` on every rank before freeing avoids this.
 {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank and
 requires the default `owning=True` registration, and
 {meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
@@ -678,7 +688,8 @@ win.wait_signal(prev_rank, async_op=False)
 torch.cuda.synchronize()
 assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
 
-# Collective: ranks synchronize before releasing the buffer.
+# Collective, stream-ordered (does not block the host). The segment stays
+# registered until it is freed, which must happen in the same order on all ranks.
 win.tensor_deregister()
 ```
 
