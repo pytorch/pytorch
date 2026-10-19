@@ -5398,6 +5398,24 @@ See :func:`torch.take_along_dim`
 )
 
 add_docstr_all(
+    "put_along_dim",
+    r"""
+put_along_dim(indices, values, dim=None) -> Tensor
+
+See :func:`torch.put_along_dim`
+""",
+)
+
+add_docstr_all(
+    "put_along_dim_",
+    r"""
+put_along_dim_(indices, values, dim=None) -> Tensor
+
+In-place version of :meth:`~Tensor.put_along_dim`
+""",
+)
+
+add_docstr_all(
     "tan",
     r"""
 tan() -> Tensor

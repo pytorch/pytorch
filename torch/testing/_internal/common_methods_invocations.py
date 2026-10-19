@@ -3155,6 +3155,47 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             1)
 
 
+def _put_along_axis_ref(a, indices, values, dim=None):
+    a = a.copy()
+    np.put_along_axis(a, indices, values, axis=dim)
+    return a
+
+
+def sample_inputs_put_along_dim(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    # Indices are unique along `dim` so gradcheck sees a well defined result.
+    yield SampleInput(
+        make_arg((S, S)), gather_variable((S, S), 1, S, device=device), make_arg((S, S)), 0)
+
+    # `indices` broadcast, `values` broadcast
+    yield SampleInput(
+        make_arg((S, S)), gather_variable((1, S // 2), 0, S, device=device), make_arg((S // 2,)), 1)
+
+    # scalar `values`
+    yield SampleInput(
+        make_arg((S, S)), gather_variable((S, S // 2), 0, S, device=device), make_arg(()), -1)
+
+    # negative indices
+    yield SampleInput(
+        make_arg((S, S)), gather_variable((S, S), 1, S, device=device) - S, make_arg((S, S)), 0)
+
+    # without `dim` arg
+    yield SampleInput(
+        make_arg((S, S)), torch.randperm(S * S, device=device)[:S], make_arg((S,)))
+
+
+def error_inputs_put_along_dim(op_info, device, **kwargs):
+    t = torch.zeros(S, S, device=device)
+    idx = torch.zeros(S, 1, dtype=torch.long, device=device)
+    yield ErrorInput(SampleInput(t, idx.int(), t, 1), error_regex="dtype of indices should be Long")
+    yield ErrorInput(SampleInput(t, idx.view(-1), t, 1), error_regex="same number of dimensions")
+    # Out of range indices are a device-side assert on CUDA, test them on CPU only.
+    if torch.device(device).type == "cpu":
+        ones = torch.ones(S, 1, device=device)
+        yield ErrorInput(SampleInput(t, idx + S, ones, 1), error_regex="out of bounds")
+        yield ErrorInput(SampleInput(t, idx - S - 1, ones, 1), error_regex="out of bounds")
+
+
 def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
 
     # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
@@ -20970,6 +21011,15 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            decorators=(
                # RuntimeError: view size is not compatible with input tensor's size and stride
            )),
+    OpInfo('put_along_dim',
+           ref=_put_along_axis_ref,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_put_along_dim,
+           error_inputs_func=error_inputs_put_along_dim,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),

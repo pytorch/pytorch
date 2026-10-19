@@ -287,6 +287,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(svd);
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
+  OP_DECOMPOSE(put_along_dim);
+  OP_DECOMPOSE(put_along_dim_);
   OP_DECOMPOSE(tensordot);
   m.impl("tensor_split.indices", native::tensor_split_indices_symint);
   m.impl("tensor_split.sections", native::tensor_split_sections_symint);

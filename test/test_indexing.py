@@ -1800,6 +1800,70 @@ class TestIndexingDevice(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.take_along_dim(t, indices, dim=7)
 
+    @dtypes(torch.long, torch.float32)
+    def test_put_along_dim(self, device, dtype):
+        def _test_against_numpy(t, indices, values, dim):
+            expected = t.cpu().numpy().copy()
+            np.put_along_axis(expected, indices.cpu().numpy(), values.cpu().numpy(), axis=dim)
+            self.assertEqual(torch.put_along_dim(t, indices, values, dim), expected, atol=0, rtol=0)
+            # keep t's strides so the in-place path also sees non-contiguous self
+            t = torch.empty_strided(t.shape, t.stride(), device=device, dtype=dtype).copy_(t)
+            self.assertIs(t.put_along_dim_(indices, values, dim), t)
+            self.assertEqual(t, expected, atol=0, rtol=0)
+
+        for shape in [(3, 2), (2, 3, 5), (2, 4, 0), (2, 3, 1, 4)]:
+            for noncontiguous in [True, False]:
+                t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=noncontiguous)
+                for dim in list(range(t.ndim)) + [None]:
+                    if dim is None:
+                        indices = torch.randperm(t.numel(), device=device)
+                    else:
+                        indices = torch.argsort(torch.rand(shape, device=device), dim=dim)
+                    values = make_tensor(indices.shape, device=device, dtype=dtype)
+                    _test_against_numpy(t, indices, values, dim)
+                    _test_against_numpy(t, indices - (t.numel() if dim is None else shape[dim]), values, dim)
+
+        # `indices` and `values` broadcast, `t` keeps its shape
+        t = torch.zeros((3, 4, 5), device=device, dtype=dtype)
+        indices = torch.tensor([[[0], [2]]], device=device)
+        values = torch.tensor([7, 8], device=device, dtype=dtype).view(1, 2, 1)
+        _test_against_numpy(t, indices, values, 1)
+        _test_against_numpy(t, indices, torch.tensor(9, device=device, dtype=dtype), 1)
+
+        # empty indices
+        _test_against_numpy(t, torch.ones((3, 0, 5), dtype=torch.long, device=device), values[:, :0], 1)
+
+    @dtypes(torch.long, torch.float32)
+    def test_put_along_dim_invalid(self, device, dtype):
+        t = make_tensor((2, 3), device=device, dtype=dtype)
+        indices = torch.zeros((2, 1), dtype=torch.long, device=device)
+        values = torch.ones((2, 1), device=device, dtype=dtype)
+
+        with self.assertRaisesRegex(RuntimeError, "input and indices should have the same number of dimensions"):
+            torch.put_along_dim(t, indices[0], values, dim=1)
+
+        with self.assertRaisesRegex(RuntimeError, r"dtype of indices should be Long"):
+            torch.put_along_dim(t, indices.int(), values, dim=1)
+
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.put_along_dim(t, indices, values, dim=2)
+
+        # `t` can't grow to match `indices`
+        with self.assertRaises(RuntimeError):
+            torch.put_along_dim(t, torch.zeros((3, 1), dtype=torch.long, device=device), values, dim=1)
+
+        # `values` must broadcast to `indices`, not the other way around
+        with self.assertRaises(RuntimeError):
+            torch.put_along_dim(t, indices, torch.ones((2, 2), device=device, dtype=dtype), dim=1)
+
+        # out of range is an error, not silently wrapped. On CUDA it is a
+        # device-side assert, which kills the process.
+        if self.device_type != "cpu":
+            return
+        for bad in (3, -4):
+            with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+                torch.put_along_dim(t, indices + bad, values, dim=1)
+
     @onlyAccelerator
     @skipMPS
     @dtypes(torch.float)
