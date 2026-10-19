@@ -165,6 +165,18 @@ try:
     from quantization.core.test_workflow_module import TestFakeQuantizeAcceleratorCUDA  # noqa: F401
 except ImportError as e:
     log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestDistributedAcceleratorCPU  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestDistributedAcceleratorCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
+try:
+    from quantization.core.test_workflow_module import TestDistributedCudaOnlyCUDA  # noqa: F401
+except ImportError as e:
+    log.warning(e)
 
 if __name__ == '__main__':
     run_tests()

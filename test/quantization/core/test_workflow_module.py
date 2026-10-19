@@ -7,7 +7,6 @@ import copy
 import io
 import itertools
 import math
-import unittest
 
 import numpy as np
 import torch
@@ -45,7 +44,6 @@ from torch.testing._internal.common_device_type import onlyAccelerator, instanti
     deviceCountAtLeast
 
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 
 from torch.testing._internal.common_quantization import (
     AnnotatedSingleLayerLinearModel,
@@ -58,7 +56,6 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     _fake_quantize_per_channel_affine_grad_reference,
     _fake_quantize_per_channel_affine_reference,
-    override_qengines,
     override_quantized_engine,
     supported_qengines,
     to_tensor,
@@ -1035,6 +1032,7 @@ class TestFusedModuleScriptable(QuantizationTestCase):
                     torch.jit.script(fused_model)
 
 class TestDistributed(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_observers_preserve_buffers(self):
         """
@@ -1087,49 +1085,6 @@ class TestDistributed(QuantizationTestCase):
             buffer_ids_after,
             msg="FakeQuant: Buffers must be modified in place")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_qat_data_parallel(self):
-        """
-        Tests that doing QAT in nn.DataParallel does not crash.
-        """
-        if 'fbgemm' not in torch.backends.quantized.supported_engines:
-            return
-        with override_quantized_engine('fbgemm'):
-            device = torch.device('cuda')
-
-            model = nn.Sequential(
-                torch.ao.quantization.QuantStub(),
-                nn.Conv2d(3, 1, 1, bias=False),
-                nn.BatchNorm2d(1),
-                nn.ReLU(),
-                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
-                nn.BatchNorm2d(2),
-                nn.AvgPool2d(14),
-                nn.Sigmoid(),
-                torch.ao.quantization.DeQuantStub(),
-            )
-
-            torch.ao.quantization.fuse_modules_qat(model, [['1', '2', '3'], ['4', '5']], inplace=True)
-
-            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
-            torch.ao.quantization.prepare_qat(model, inplace=True)
-            model = nn.DataParallel(model, device_ids=[0, 1])
-            model.to(device)
-            model.train()
-
-            for epoch in range(3):
-                inputs = torch.rand(2, 3, 28, 28).to(device)
-                model(inputs)
-                if epoch >= 1:
-                    model.apply(torch.ao.quantization.disable_observer)
-                if epoch >= 2:
-                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
-                quant_model = copy.deepcopy(model.module)
-                quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
-                with torch.no_grad():
-                    out = quant_model(torch.rand(1, 3, 28, 28))
-
     def test_qat_convbn_fused_syncbn_replacement(self):
         """
         Tests that SyncBatchNorm replacement works for fused ConvBN.
@@ -1179,41 +1134,90 @@ class TestDistributed(QuantizationTestCase):
             hasattr(m[1], "qconfig"),
             "missing qconfig after SyncBatchNorm conversion")
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @override_qengines
-    def test_device_affinity(self):
+class TestDistributedAccelerator(QuantizationTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_device_affinity(self, device):
         """
         Tests that converting a model to QAT respects device affinity
         """
-        class Model(nn.Module):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                class Model(nn.Module):
 
-            def __init__(self) -> None:
-                super().__init__()
-                self.conv = nn.Conv2d(1, 1, 1)
-                self.bn = nn.BatchNorm2d(1)
-                self.relu = nn.ReLU()
+                    def __init__(self) -> None:
+                        super().__init__()
+                        self.conv = nn.Conv2d(1, 1, 1)
+                        self.bn = nn.BatchNorm2d(1)
+                        self.relu = nn.ReLU()
 
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                return x
+                    def forward(self, x):
+                        x = self.conv(x)
+                        x = self.bn(x)
+                        x = self.relu(x)
+                        return x
 
-        model = Model()
-        model.qconfig = torch.ao.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
-        device = torch.device('cuda:0')
-        model.to(device)
-        torch.ao.quantization.prepare_qat(model, inplace=True)
-        model_devices = {p.device for p in model.parameters()} | \
-            {p.device for p in model.buffers()}
-        self.assertEqual(len(model_devices), 1)
-        model_device = next(iter(model_devices))
-        self.assertEqual(model_device, device)
+                model = Model()
+                model.qconfig = torch.ao.quantization.get_default_qat_qconfig(torch.backends.quantized.engine)
+                device = torch.device(device)
+                model.to(device)
+                torch.ao.quantization.prepare_qat(model, inplace=True)
+                model_devices = {p.device for p in model.parameters()} | \
+                    {p.device for p in model.buffers()}
+                self.assertEqual(len(model_devices), 1)
+                model_device = next(iter(model_devices))
+                self.assertEqual(model_device, device)
 
-        # ensure that running an input on CUDA works without any needed changes
-        input = torch.randn(4, 1, 4, 4, device=device)
-        model(input)
+                # ensure that running an input on CUDA works without any needed changes
+                input = torch.randn(4, 1, 4, 4, device=device)
+                model(input)
+
+class TestDistributedCudaOnly(QuantizationTestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @deviceCountAtLeast(2)
+    def test_qat_data_parallel(self, devices):
+        """
+        Tests that doing QAT in nn.DataParallel does not crash.
+        """
+        if 'fbgemm' not in torch.backends.quantized.supported_engines:
+            return
+        with override_quantized_engine('fbgemm'):
+            device = torch.device(devices[0])
+            device_ids = [torch.device(d).index for d in devices[:2]]
+
+            model = nn.Sequential(
+                torch.ao.quantization.QuantStub(),
+                nn.Conv2d(3, 1, 1, bias=False),
+                nn.BatchNorm2d(1),
+                nn.ReLU(),
+                nn.Conv2d(1, 2, 3, stride=2, padding=1, bias=False),
+                nn.BatchNorm2d(2),
+                nn.AvgPool2d(14),
+                nn.Sigmoid(),
+                torch.ao.quantization.DeQuantStub(),
+            )
+
+            torch.ao.quantization.fuse_modules_qat(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
+            torch.ao.quantization.prepare_qat(model, inplace=True)
+            model = nn.DataParallel(model, device_ids=device_ids)
+            model.to(device)
+            model.train()
+
+            for epoch in range(3):
+                inputs = torch.rand(2, 3, 28, 28).to(device)
+                model(inputs)
+                if epoch >= 1:
+                    model.apply(torch.ao.quantization.disable_observer)
+                if epoch >= 2:
+                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
+                quant_model = copy.deepcopy(model.module)
+                quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
+                with torch.no_grad():
+                    out = quant_model(torch.rand(1, 3, 28, 28))
 
 class TestFusedObsFakeQuantModule(TestCase):
     @given(
@@ -1546,6 +1550,8 @@ class TestFusedObsFakeQuantModule(TestCase):
 
 instantiate_device_type_tests(TestObserverAccelerator, globals())
 instantiate_device_type_tests(TestFakeQuantizeAccelerator, globals())
+instantiate_device_type_tests(TestDistributedAccelerator, globals())
+instantiate_device_type_tests(TestDistributedCudaOnly, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
