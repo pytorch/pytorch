@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from torch.utils.hooks import RemovableHandle
+
+
+logger = logging.getLogger(__name__)
 
 
 # graph_node_id -> annotation name (or None). The graph naming mechanism shared by
@@ -66,6 +70,20 @@ def default_graph_annotation_resolver(graph_node_id: int) -> Any | None:
     return annotation_for(graph_node_id)
 
 
+class _CachedResolver:
+    def __init__(self, fn: Callable[[int], Any]) -> None:
+        self._fn = fn
+        self._cached = functools.cache(fn)
+
+    def __call__(self, graph_node_id: int) -> Any:
+        return self._cached(graph_node_id)
+
+    def cache_clear(self) -> None:
+        # An in-flight miss can repopulate a cleared functools cache. Replace the
+        # wrapper so that result can only reach the retired cache.
+        self._cached = functools.cache(self._fn)
+
+
 @dataclass(frozen=True)
 class ObserverAnnotationSettings:
     """How an observer attributes activity to named regions. Each source enforces its own
@@ -108,6 +126,14 @@ class CuspyObserver:
     (eager only -- external ids don't survive graph capture; under graphs use
     ``graph_node_id``)."""
 
+    # Whether this observer identifies a graph node by its source (capture-graph) id alone,
+    # so _with_graph_fields can leave the exec id out of the selection and keep records
+    # smaller. Default False: select both and resolve source-then-exec, which is what a
+    # trace mixing key_by="source" and key_by="exec" graphs needs. A subclass offering the
+    # narrower mode sets it before calling super().__init__() (see NodeTimerObserver's
+    # key_space).
+    _source_key_space: bool = False
+
     # Both graph resolvers are keyed on graph_node_id: a node's annotation and lane are stable
     # once its graph is baked, so each resolves once for this observer's lifetime (reused across
     # every buffer delivery). Both take the int graph_node_id and are wrapped in functools.cache
@@ -121,7 +147,7 @@ class CuspyObserver:
     @_annotation_resolver.setter
     def _annotation_resolver(self, fn: GraphAnnotationResolver | None) -> None:
         self._annotation_resolver_cached = (
-            functools.cache(fn) if fn is not None else None
+            _CachedResolver(fn) if fn is not None else None
         )
 
     @property
@@ -130,7 +156,7 @@ class CuspyObserver:
 
     @_lane_resolver.setter
     def _lane_resolver(self, fn: LaneResolver | None) -> None:
-        self._lane_resolver_cached = functools.cache(fn) if fn is not None else None
+        self._lane_resolver_cached = _CachedResolver(fn) if fn is not None else None
 
     @property
     def _dependency_resolver(self) -> GraphDependencyResolver | None:
@@ -139,7 +165,7 @@ class CuspyObserver:
     @_dependency_resolver.setter
     def _dependency_resolver(self, fn: GraphDependencyResolver | None) -> None:
         self._dependency_resolver_cached = (
-            functools.cache(fn) if fn is not None else None
+            _CachedResolver(fn) if fn is not None else None
         )
 
     def __init__(
@@ -185,7 +211,7 @@ class CuspyObserver:
             )
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
-            activities = self._with_graph_fields(activities)
+            activities = self._with_graph_fields(activities, self._source_key_space)
         if self._eager:
             activities = self._with_eager_fields(activities)
         # frozenset of requested kinds (a field map collapses to keys) for the observer's
@@ -197,20 +223,18 @@ class CuspyObserver:
         # _ann_lock (push on the caller's thread; a drain may read/reset from another).
         self._ann_lock = threading.Lock()
         self._ext_names: dict[int, str] = {}
-        # Degrade gracefully (available == False) if Cuspy can't be reached or
-        # registration fails (CUPTI subscribe rejected, libcupti lacks v2)
+        # Failed initialization disables this observer without interrupting the application.
         try:
             from torch.profiler._cuspy.core import Cuspy
 
             self._cuspy = Cuspy()
             self._obs = self._cuspy.register(activities, self._on_activities)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Cuspy observer unavailable: %s", exc)
             self._obs = None
         # Register a graph-destroy hook per installed graph-node resolver so a
         # destroyed CUDA graph purges that resolver's registry and invalidates
-        # its cache. Registering any hook is also the "Cuspy active" gate
-        # torch.cuda.graphs checks before arming its destroy callback. Handles are
-        # removed in close() so nothing leaks this observer.
+        # its cache. Handles are removed in close() so nothing leaks this observer.
         self._destroy_hook_handles: list[RemovableHandle] = []
         if self.available:
             self._register_graph_destroy_hooks()
@@ -234,18 +258,11 @@ class CuspyObserver:
         return self._obs is not None
 
     def _register_graph_destroy_hooks(self) -> None:
-        """Register a graph-destroy hook per installed graph-node resolver. Each hook
-        purges its backing store (the annotation module registry, or this observer's own
-        dependency map) and clears its resolver cache (cache_clear is global per resolver
-        -- it drops every graph's cached lookups, not just the destroyed graph's --
-        acceptable on the infrequent destroy path and what bounds cache growth over a
-        long run). Hooks capture only the cache wrapper + purge fn (never self, so they
-        cannot pin this observer -- the dependency purge closes over the map dict, not the
-        observer); the destroy fan-out also swallows any error they raise
-        (finalizer-safe, since a destroy may fire from a GC/finalizer thread). The lane
-        resolver is externally backed (nothing to purge), so its hook only clears the
-        cache."""
-        from torch.cuda._graph_annotations import remove_kernel_annotations
+        """Invalidate resolver caches after graph-owned annotations are purged.
+
+        Dependency state is owned by the profiler and purged here. Hooks retain
+        the cache wrappers and backing maps, never the observer.
+        """
         from torch.cuda.graphs import register_graph_destroy_hook
 
         handles = self._destroy_hook_handles
@@ -270,7 +287,7 @@ class CuspyObserver:
             handles.append(register_graph_destroy_hook(hook))
 
         if self._annotation_resolver_cached is not None:
-            add(self._annotation_resolver_cached, remove_kernel_annotations)
+            add(self._annotation_resolver_cached, None)
         if self._dependency_resolver_cached is not None:
             add(self._dependency_resolver_cached, purge_deps)
         if self._lane_resolver_cached is not None:
@@ -305,12 +322,15 @@ class CuspyObserver:
         return aug
 
     @staticmethod
-    def _with_graph_fields(activities: Any) -> dict[int, set[int]]:
+    def _with_graph_fields(
+        activities: Any, source_key_space: bool = False
+    ) -> dict[int, set[int]]:
         """Augment a field map so the graph resolver can name nodes: add each GPU-op kind's
         GRAPH_NODE_ID, plus its SOURCE_GRAPH_NODE_ID where the CUPTI ABI has one (the key an
         annotation kept on its capture graph is under). Collection-free (normal record
         fields, no extra kinds, stays on the vectorized path). Expects a ``{kind: fields}``
-        map."""
+        map. With ``source_key_space`` the exec id is left out for any kind that has a
+        source id, since the caller names nodes by the latter alone."""
         from torch.profiler._cuspy.records import (
             GRAPH_NODE_FIELD,
             SOURCE_GRAPH_NODE_FIELD,
@@ -320,10 +340,11 @@ class CuspyObserver:
         for kind, sel in dict(activities).items():
             k = int(kind)
             fields = {int(f) for f in sel}
-            if k in GRAPH_NODE_FIELD:
-                fields.add(GRAPH_NODE_FIELD[k])
-            if k in SOURCE_GRAPH_NODE_FIELD:
+            has_source = k in SOURCE_GRAPH_NODE_FIELD
+            if has_source:
                 fields.add(SOURCE_GRAPH_NODE_FIELD[k])
+            if k in GRAPH_NODE_FIELD and not (has_source and source_key_space):
+                fields.add(GRAPH_NODE_FIELD[k])
             aug[k] = fields
         return aug
 

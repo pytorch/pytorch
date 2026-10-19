@@ -134,11 +134,23 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 
 #endif // AT_MKL_ENABLED
 
+template<typename T>
+bool LogitMKLEnabled() {
+  return true;
+}
+
+#if defined(AT_VEC_CUSTOM_MATH)
+template<>
+bool LogitMKLEnabled<float>() {
+  return false;
+}
+#endif
+
 static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
-        if (at::hasMKL() && iter.is_contiguous()) {
+        if (LogitMKLEnabled<scalar_t>() && at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
           iter.cast_outputs();
         } else if (eps < scalar_t(0)) {
@@ -384,19 +396,53 @@ static void cosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void acosh_kernel(TensorIteratorBase& iter) {
+#if defined(AT_VEC_CUSTOM_MATH) && defined(FBCODE_CAFFE2)
+    // Only Vectorized<float> is backed by the custom math library; complex has
+    // no acosh() member at all, so every other dtype stays on the scalar path.
+    if (iter.dtype() == kFloat) {
+      cpu_kernel_vec(
+        iter,
+        [=](float a) -> float { return std::acosh(a); },
+        [=](Vectorized<float> self_vec){return self_vec.acosh();});
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "acosh_cpu", [&]() {
+        cpu_kernel(
+          iter,
+          [=](scalar_t a) -> scalar_t { return std::acosh(a); });
+      });
+    }
+#else
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
     });
+#endif
 }
 
 static void asinh_kernel(TensorIteratorBase& iter) {
+#if defined(AT_VEC_CUSTOM_MATH) && defined(FBCODE_CAFFE2)
+    // Only Vectorized<float> is backed by the custom math library; complex and
+    // the reduced float types have no asinh() member, so they stay scalar.
+    if (iter.dtype() == kFloat) {
+      cpu_kernel_vec(
+        iter,
+        [=](float a) -> float { return std::asinh(a); },
+        [=](Vectorized<float> self_vec){return self_vec.asinh();});
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "asinh_cpu", [&]() {
+        cpu_kernel(
+          iter,
+          [=](scalar_t a) -> scalar_t { return std::asinh(a); });
+      });
+    }
+#else
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
     });
+#endif
 }
 
 static void atanh_kernel(TensorIteratorBase& iter) {

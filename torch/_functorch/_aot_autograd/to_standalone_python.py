@@ -830,14 +830,12 @@ def _graph_has_dynamic_shapes(gm: GraphModule) -> bool:
     not on any placeholder, are still missed here, but such a graph fails loudly
     downstream when emit_value rejects the still-symbolic metadata.)
 
-    Both metadata keys are checked: make_fx stashes the fake under "val", while a Dynamo
-    graph (which torch.compiler.precompile's dynamo tracer feeds here) stashes it under
-    "example_value" -- reading only "val" would call a dynamic Dynamo graph static and
-    silently specialize it to the example sizes. The check is a union, not a fallback: a
-    symbolic value under EITHER key makes the graph dynamic, even if the other key holds a
-    static fake (graphs carrying both keys exist, e.g. split_module copies the whole meta
-    dict onto partition placeholders). The make_fx path is unchanged because make_fx never
-    writes "example_value", not because "val" takes precedence."""
+    Both metadata keys are checked, as a union. make_fx writes the fake only under "val".
+    The graph Dynamo hands a torch.compile backend carries it only under "example_value";
+    Dynamo's export paths stamp "val" as well, so "val" alone does not identify a make_fx
+    graph. A symbolic fake under either key makes the graph dynamic even if the other key
+    holds a static one (split_module copies the whole meta dict, so both can coexist). The
+    follow-up Dynamo tracer will feed backend graphs here."""
     import torch
 
     def _is_symbolic(v: Any) -> bool:

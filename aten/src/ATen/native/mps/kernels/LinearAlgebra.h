@@ -22,7 +22,7 @@ struct UnpackPivotsParams {
   uint32_t dim_size;
 };
 
-// General batched triangular solve: one independent RHS vector per thread.
+// Parameters for batched triangular solves.
 // Solves op(A) X = B (left) or X op(A) = B (right), where op applies an
 // optional transpose and/or conjugation.
 struct TriangularSolveParams {
@@ -33,7 +33,13 @@ struct TriangularSolveParams {
   bool transpose; // op transposes A
   bool conj; // op conjugates A (adjoint when combined with transpose)
   bool unit; // unit (implicit 1) diagonal
+  bool b_col_major; // B is column-major (element (r, c) at r + c * n)
+  bool x_col_major; // X is column-major
 };
+
+C10_METAL_CONSTEXPR uint32_t kTriangularSolveTileSize = 8;
+C10_METAL_CONSTEXPR uint32_t kTriangularSolveMppRows = 16;
+C10_METAL_CONSTEXPR uint32_t kTriangularSolveMppCols = 32;
 
 template <unsigned N = c10::metal::max_ndim>
 struct GeqrfParams {
@@ -77,6 +83,22 @@ struct EighParams {
   float tol;
   bool compute_v;
   bool upper; // UPLO: true read upper triangle, false read lower
+};
+
+// Per-thread small-matrix inverse kernel: up to this size one thread inverts a
+// whole matrix from registers. LinearAlgebra.metal instantiates exact sizes
+// 1..4 and static_asserts the list against this constant. Strides are in
+// elements.
+C10_METAL_CONSTEXPR int64_t kLUSmallInvMax = 4;
+
+template <typename index_t = int64_t>
+struct LUSmallInvParams {
+  index_t A_bstride;
+  index_t A_rstride;
+  index_t A_cstride;
+  index_t X_bstride;
+  index_t X_rstride;
+  index_t X_cstride;
 };
 
 // for LU streaming-panel kernels

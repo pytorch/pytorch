@@ -293,6 +293,75 @@ class TestCuspyNodeTimerCUDA(TestCase):
         self.assertGreater(len(spans.get("sourceregion", [])), 0)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_source_key_space_names_spans_without_the_exec_field(self):
+        # key_space="source" is the caller asserting every graph is source-keyed, so the
+        # exec node id is not selected at all -- one field less per record -- and the
+        # source id alone both names and identifies a span.
+        from torch.cuda._graph_annotations import source_node_ids_available
+        from torch.cuda.graph_annotations import get_kernel_annotations, mark_kernels
+        from torch.profiler._cuspy.observers.base import ObserverAnnotationSettings
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
+
+        if not source_node_ids_available():
+            self.skipTest("sourceGraphNodeId needs a CUDA driver >= 13.4")
+
+        x = torch.randn(512, 512, device="cuda")
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            torch.relu_(x)
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("sourceonly"):
+                for _ in range(4):
+                    torch.relu_(x)
+        g.instantiate()
+        capture_ids = set(get_kernel_annotations())
+
+        obs = NodeTimerObserver(
+            key_space="source",
+            annotations=ObserverAnnotationSettings(
+                graph_annotation_resolver=lambda nid: (
+                    {"name": "sourceonly"} if nid in capture_ids else None
+                )
+            ),
+        )
+        if not obs.available:
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
+        try:
+            obs._cuspy.flush(sync=True)
+            obs.drain_annotated()  # discard warmup spans
+            for _ in range(3):
+                g.replay()
+            torch.cuda.synchronize()
+            obs._cuspy.flush(sync=True)
+            spans = obs.drain_annotated()
+            nodes, _, _, _ = obs.drain()
+        finally:
+            obs.close()
+
+        if not any(spans.values()):
+            self.skipTest("driver delivered no graph spans")
+        self.assertGreater(len(spans.get("sourceonly", [])), 0)
+        # The reported node ids are the capture graph's, not an exec graph's.
+        self.assertTrue(set(nodes.tolist()) <= capture_ids | {0})
+
+    # Constructor validation only, so libcupti's version does not matter -- but importing
+    # the observer still needs the bindings and the generated _cupti_stubs.
+    @unittest.skipIf(not TEST_CUPTI, "requires cupti bindings + generated _cupti_stubs")
+    def test_source_key_space_rejects_kinds_without_a_source_id(self):
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
+
+        with self.assertRaisesRegex(ValueError, "key_space='source'"):
+            NodeTimerObserver(kinds=(ActivityKind.MEMCPY2,), key_space="source")
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     def test_node_timer_collects_memcpy2_spans(self):
         # Peer-to-peer / cross-device copies surface under MEMCPY2 (not MEMCPY). CUPTI
