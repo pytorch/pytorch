@@ -1447,7 +1447,7 @@ class TestIndexingDevice(TestCase):
     def test_empty_ndim_index_bool(self, device):
         x = torch.randn(5, device=device)
         self.assertRaises(
-            IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8, device=device)]
+            IndexError, lambda: x[torch.empty(0, 2, dtype=torch.bool, device=device)]
         )
 
     def test_empty_slice(self, device):
@@ -1460,8 +1460,8 @@ class TestIndexingDevice(TestCase):
         self.assertTrue(z.is_contiguous())
 
     def test_index_getitem_copy_bools_slices(self, device):
-        true = torch.tensor(1, dtype=torch.uint8, device=device)
-        false = torch.tensor(0, dtype=torch.uint8, device=device)
+        true = torch.tensor(True, device=device)
+        false = torch.tensor(False, device=device)
 
         tensors = [torch.randn(2, 3, device=device), torch.tensor(3.0, device=device)]
 
@@ -1474,8 +1474,8 @@ class TestIndexingDevice(TestCase):
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
     def test_index_setitem_bools_slices(self, device):
-        true = torch.tensor(1, dtype=torch.uint8, device=device)
-        false = torch.tensor(0, dtype=torch.uint8, device=device)
+        true = torch.tensor(True, device=device)
+        false = torch.tensor(False, device=device)
 
         tensors = [torch.randn(2, 3, device=device), torch.tensor(3, device=device)]
 
@@ -2511,7 +2511,7 @@ class NumpyTestsDevice(TestCase):
         index = tensor([False] * 6, device=device)
         self.assertRaisesRegex(IndexError, "mask", lambda: arr[index])
 
-        index = torch.ByteTensor(4, 4).to(device).zero_()
+        index = torch.zeros(4, 4, dtype=torch.bool, device=device)
         self.assertRaisesRegex(IndexError, "mask", lambda: arr[index])
         self.assertRaisesRegex(IndexError, "mask", lambda: arr[(slice(None), index)])
 

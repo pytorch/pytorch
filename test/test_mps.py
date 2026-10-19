@@ -14814,8 +14814,8 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertRaises(IndexError, lambda: x.amin(dim=0))
 
     def test_index_getitem_copy_bools_slices(self, device="mps"):
-        true = torch.tensor(1, dtype=torch.uint8, device=device)
-        false = torch.tensor(0, dtype=torch.uint8, device=device)
+        true = torch.tensor(True, device=device)
+        false = torch.tensor(False, device=device)
 
         tensors = [torch.randn(2, 3, device=device), torch.tensor(3., device=device)]
 
