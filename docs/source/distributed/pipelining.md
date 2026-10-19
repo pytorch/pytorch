@@ -438,7 +438,7 @@ All stages assigned to one rank must execute on one device; adjacent same-rank
 stages pass activations and gradients directly without device copies.
 
 For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineScheduleSingle`.
-Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, `ScheduleZBVZeroBubble`,
+Whereas, `ScheduleInterleaved1F1B`, `ScheduleInterleaved1F1BCombined`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, `ScheduleZBVZeroBubble`,
 and `ScheduleDualPipeV` are subclasses of `PipelineScheduleMulti`.
 
 ### Accessing Stage Forward Information
@@ -722,6 +722,10 @@ pipeline rank.
 
 ```{eval-rst}
 .. autoclass:: ScheduleInterleaved1F1B
+```
+
+```{eval-rst}
+.. autoclass:: ScheduleInterleaved1F1BCombined
 ```
 
 ```{eval-rst}

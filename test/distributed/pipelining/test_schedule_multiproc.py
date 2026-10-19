@@ -37,6 +37,7 @@ from torch.distributed.pipelining import (
     ScheduleDualPipeV,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
+    ScheduleInterleaved1F1BCombined,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
@@ -885,6 +886,7 @@ class ScheduleTest(MultiProcContinuousTest):
         [
             (ScheduleInterleaved1F1B, None),
             (ScheduleInterleaved1F1B, 4),
+            (ScheduleInterleaved1F1BCombined, None),
             (ScheduleLoopedBFS, None),
             (ScheduleLoopedBFS, 4),
             (ScheduleInterleavedZeroBubble, None),

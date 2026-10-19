@@ -55,6 +55,7 @@ __all__ = [
     "Schedule1F1B",
     "ScheduleGPipe",
     "ScheduleInterleaved1F1B",
+    "ScheduleInterleaved1F1BCombined",
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
     "ScheduleZBVZeroBubble",
@@ -4001,6 +4002,7 @@ def _get_1f1b_rank_ops(
     backward_stage_index,
     num_1f1b_microbatches=0,
     enable_zero_bubble=False,
+    combine_fwd_bwd=False,
 ):
     # All stages start with handling microbatch 0
     fwd_stage_mb_index: dict[int, int] = defaultdict(int)
@@ -4053,16 +4055,20 @@ def _get_1f1b_rank_ops(
             fwd_stage_mb_index[fwd_stage_index] = (
                 fwd_mb_index := fwd_stage_mb_index[fwd_stage_index]
             ) + 1
-            rank_ops.append(
-                _Action(fwd_stage_index, _ComputationType.FORWARD, fwd_mb_index)
-            )
+            forward_action = _Action(fwd_stage_index, FORWARD, fwd_mb_index)
             bwd_stage_index = backward_stage_index(op)
             bwd_stage_mb_index[bwd_stage_index] = (
                 bwd_mb_index := bwd_stage_mb_index[bwd_stage_index]
             ) + 1
-            rank_ops.append(
-                _Action(bwd_stage_index, FULL_BACKWARD_OR_BACKWARD_INPUT, bwd_mb_index)
+            backward_action = _Action(
+                bwd_stage_index, FULL_BACKWARD_OR_BACKWARD_INPUT, bwd_mb_index
             )
+            if combine_fwd_bwd:
+                rank_ops.append(
+                    _Action(-1, OVERLAP_F_B, None, (forward_action, backward_action))
+                )
+            else:
+                rank_ops.extend((forward_action, backward_action))
             backward_op_ids.append(op)
 
             if enable_zero_bubble and op - warmup_ops >= num_1f1b_microbatches:
@@ -4183,6 +4189,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             limit.
     """
 
+    _combine_fwd_bwd = False
+
     def __init__(
         self,
         stages: list[_PipelineStageBase],
@@ -4247,6 +4255,10 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             multiply_factor=2,
         )
         microbatch_ops = self.n_local_stages * self._n_microbatches
+        if self._combine_fwd_bwd:
+            # An older forward must exist before its backward can join the
+            # next forward, including on the last pipeline rank.
+            warmup_ops = min(warmup_ops + 1, microbatch_ops)
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
         # cooldown_ops should encompass the remaining backwards
@@ -4287,7 +4299,28 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             rank,
             forward_stage_index,
             backward_stage_index,
+            combine_fwd_bwd=self._combine_fwd_bwd,
         )
+
+
+class ScheduleInterleaved1F1BCombined(ScheduleInterleaved1F1B):
+    """Interleaved 1F1B with independent forward/backward steady-state pairs.
+
+    One additional warmup forward, bounded by the total forward count, ensures
+    every paired backward consumes an earlier forward's saved activations.
+    Stage mapping, round selection and per-stage microbatch order are unchanged.
+    Warmup forwards and cooldown backwards remain individual actions.
+
+    Each steady-state pair is an ``OVERLAP_F_B`` action containing explicit
+    forward and full-backward sub-actions. The default runtime executes them
+    sequentially; a registered handler can overlap their independent work.
+    Both actions' receives and unshards precede the pair. Compound actions can
+    require additional simultaneous stage or activation residency.
+
+    Constructor arguments are those of :class:`ScheduleInterleaved1F1B`.
+    """
+
+    _combine_fwd_bwd = True
 
 
 class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
@@ -5328,6 +5361,7 @@ def get_schedule_class(schedule_name: str):
     schedule_map = {
         "1F1B": Schedule1F1B,
         "Interleaved1F1B": ScheduleInterleaved1F1B,
+        "Interleaved1F1BCombined": ScheduleInterleaved1F1BCombined,
         "GPipe": ScheduleGPipe,
         "LoopedBFS": ScheduleLoopedBFS,
         "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
