@@ -895,6 +895,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @onlyOn(["cuda", "xpu"])
     @expectedFailureXPU  # Missing XPU support for scale_result; XPU still does not support scale_result in ScaledBlas.cpp
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale_result(self, device) -> None:
@@ -1381,6 +1382,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 if not fake:
                     self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
 
+    @onlyOn(["cuda", "xpu"])
     @expectedFailureXPU  # Missing XPU support for _scaled_addmm
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
