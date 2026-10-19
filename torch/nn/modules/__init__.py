@@ -1,5 +1,5 @@
 from .module import Module  # usort: skip
-from .linear import Bilinear, Identity, LazyLinear, Linear  # usort: skip
+from .linear import Bias, Bilinear, Identity, LazyLinear, Linear  # usort: skip
 from .activation import (
     CELU,
     ELU,
@@ -185,6 +185,7 @@ __all__ = [
     "BatchNorm1d",
     "BatchNorm2d",
     "BatchNorm3d",
+    "Bias",
     "Bilinear",
     "CELU",
     "CTCLoss",

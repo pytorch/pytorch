@@ -128,6 +128,7 @@ scaled_dot_product_attention.
     :toctree: generated
     :nosignatures:
 
+    bias
     linear
     bilinear
 ```

@@ -12,6 +12,7 @@ from .module import Module
 
 
 __all__ = [
+    "Bias",
     "Bilinear",
     "Identity",
     "LazyLinear",
@@ -48,6 +49,53 @@ class Identity(Module):
         Runs the forward pass.
         """
         return input
+
+
+class Bias(Module):
+    r"""Adds a learnable bias to the last dimension of the incoming data: :math:`y = x + b`.
+
+    Args:
+        num_features: size of the last dimension of each input sample
+
+    Shape:
+        - Input: :math:`(*, H)` where :math:`*` means any number of dimensions
+          including none and :math:`H = \text{num\_features}`.
+        - Output: :math:`(*, H)`, same shape as the input.
+
+    Attributes:
+        bias: the learnable bias of the module of shape :math:`(\text{num\_features})`.
+            The values are initialized from :math:`\mathcal{N}(0, 1)`.
+
+    Examples::
+
+        >>> m = nn.Bias(5)
+        >>> input = torch.randn(10, 5)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([10, 5])
+    """
+
+    __constants__ = ["num_features"]
+    num_features: int
+
+    def __init__(self, num_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        super().__init__()
+        self.num_features = num_features
+        self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """Re-initialize the bias from a standard normal distribution."""
+        init.normal_(self.bias)
+
+    def forward(self, input: Tensor) -> Tensor:
+        """Run forward pass."""
+        return F.bias(input, self.bias)
+
+    def extra_repr(self) -> str:
+        """Return the extra representation of the module."""
+        return f"num_features={self.num_features}"
 
 
 class Linear(Module):

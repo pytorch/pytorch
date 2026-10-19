@@ -3333,6 +3333,9 @@
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: nan_to_num_sparse_out
   tags: pointwise
 
+- func: bias(Tensor input, Tensor bias) -> Tensor
+  python_module: nn
+
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:

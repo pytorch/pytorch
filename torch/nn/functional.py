@@ -2409,6 +2409,23 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 
+bias = _add_docstr(
+    torch._C._nn.bias,
+    r"""
+bias(input, bias) -> Tensor
+
+Adds :attr:`bias` to the last dimension of the incoming data: :math:`y = x + b`.
+
+Shape:
+
+    - Input: :math:`(*, num\_features)` where `*` means any number of
+      additional dimensions, including none
+    - Bias: :math:`(num\_features)`
+    - Output: :math:`(*, num\_features)`, same shape as the input
+""",
+)
+
+
 linear = _add_docstr(
     torch._C._nn.linear,
     r"""

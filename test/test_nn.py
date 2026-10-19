@@ -5237,7 +5237,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     _test_interpolate_helper(_make_input(3, device), scale_factor, m)
 
-    def test_linear_broadcasting(self):
+    def test_bias(self):
+        m = nn.Bias(5)
+        self.assertEqual(m.bias.shape, (5,))
+        self.assertEqual(repr(m), "Bias(num_features=5)")
+        for shape in [(5,), (10, 5), (2, 3, 5)]:
+            inp = torch.randn(shape)
+            self.assertEqual(m(inp), inp + m.bias)
+            self.assertEqual(F.bias(inp, m.bias), inp + m.bias)
+        with self.assertRaisesRegex(RuntimeError, "last dimension of input"):
+            m(torch.randn(10, 4))
+        with self.assertRaisesRegex(RuntimeError, "expected bias to be 1D"):
+            F.bias(torch.randn(10, 5), torch.randn(1, 5))
+
+    def test_bias_gradcheck(self):
+        inp = torch.randn(3, 4, dtype=torch.double, requires_grad=True)
+        bias = torch.randn(4, dtype=torch.double, requires_grad=True)
+        self.assertTrue(gradcheck(F.bias, (inp, bias)))
+
         m = nn.Linear(5, 8)
         inp = torch.randn(2, 3, 5)
         expected = m(inp.view(6, 5)).view(2, 3, 8)
