@@ -34,6 +34,9 @@ from post_review import (  # noqa: E402
 )
 
 
+# Backfill writes pause between calls in production; not in tests.
+post_review.BACKFILL_PAUSE = 0
+
 SHA = "a" * 40
 # The URL linter checks every URL literal in the tree; these resolve nowhere.
 BLOB = f"https://github.com/o/r/blob/{SHA}"  # @lint-ignore
@@ -93,6 +96,8 @@ class FakeGitHub(GitHub):
             else [comment(r["id"] * 10, r["id"]) for r in self.reviews]
         )
         self.refuse_inline = refuse_inline
+        # Replies the REST listing never shows but the thread counts.
+        self.hidden_replies: dict[int, int] = {}
         self.calls: list[tuple] = []
 
     def request(self, method, path, body=None, idempotent=None):
@@ -151,7 +156,14 @@ class FakeGitHub(GitHub):
                 {
                     "id": f"T{c['id']}",
                     "isResolved": False,
-                    "comments": {"nodes": [{"databaseId": c["id"]}]},
+                    "comments": {
+                        "totalCount": 1
+                        + self.hidden_replies.get(c["id"], 0)
+                        + sum(
+                            r.get("in_reply_to_id") == c["id"] for r in self.comments
+                        ),
+                        "nodes": [{"databaseId": c["id"]}],
+                    },
                 }
                 for c in self.comments
                 if not c.get("in_reply_to_id")
@@ -947,6 +959,79 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
         # The COMMENT leaves 5 standing, so the backfill must not empty it.
         self.assertEqual((deleted(gh), folds(gh)), ([], []))
 
+    def test_a_thread_with_a_reply_the_listing_missed_is_kept(self):
+        # The REST listing never shows the reply (a page shifted under an
+        # overlapping run's delete); the thread's comment count still has it.
+        for hidden in (False, True):
+            old = old_review(5)
+            old["minimized"] = hidden
+            gh = FakeGitHub(reviews=[old], comments=[comment(50, 5), comment(52, 5)])
+            gh.hidden_replies = {50: 1}
+            go(gh)
+            self.assertEqual(deleted(gh), [52], f"hidden={hidden}")
+
+    def test_unreadable_threads_delete_nothing(self):
+        class NoThreads(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if path == "/graphql" and "reviewThreads" in body["query"]:
+                    raise GitHubError(503, "unavailable")
+                return super().request(method, path, body)
+
+        gh = NoThreads(reviews=[old_review(5)])
+        with mock.patch("post_review._sleep"):
+            go(gh)
+        self.assertEqual(deleted(gh), [])
+        self.assertEqual(minimized(gh), ["N5"])
+
+    def test_a_folded_body_is_defused_again(self):
+        old = old_review(5, body=MARKER + "\n@pytorchbot merge -f")
+        gh = FakeGitHub(reviews=[old])
+        go(gh)
+        self.assertNotIn("@pytorchbot", old["body"])
+        self.assertIn("@ pytorchbot", old["body"])
+
+    def test_a_retry_wait_past_the_clock_is_out_of_time(self):
+        gh = GitHub("token", "o/r")
+        gh.deadline = post_review.time.monotonic() + 5
+        throttled = GitHubError(429, "slow down", retry_after=60)
+        with mock.patch.object(gh, "_once", side_effect=throttled):
+            with self.assertRaises(post_review.OutOfTime):
+                gh.request("DELETE", "/x")
+
+    def test_backfill_writes_are_paced(self):
+        hidden = []
+        for rid in (1, 2):
+            r = old_review(rid)
+            r["minimized"] = True
+            hidden.append(r)
+        gh = FakeGitHub(reviews=hidden)
+        with mock.patch.object(post_review, "BACKFILL_PAUSE", 1.0):
+            with mock.patch("post_review._sleep") as sleep:
+                go(gh)
+        writes = len(folds(gh)) + len(deleted(gh))
+        self.assertEqual(writes, 4)
+        self.assertEqual(
+            [c.args for c in sleep.call_args_list], [(1.0,)] * (writes - 1)
+        )
+
+    def test_a_discussed_finding_survives_a_refused_inline_post(self):
+        root = comment(50, 5, line=4)
+        findings = [
+            {"path": "torch/x.py", "line": 3, "severity": "major", "message": "A."},
+            {"path": "torch/y.py", "line": 3, "severity": "major", "message": "B."},
+        ]
+        gh = FakeGitHub(
+            reviews=[old_review(5)],
+            comments=[root, comment(51, 8, "t", reply_to=50)],
+            refuse_inline=True,
+        )
+        go(gh, row(findings=findings))
+        body = gh.posted()[-1]["body"]
+        self.assertIn("A.", body)
+        self.assertIn("B.", body)
+        self.assertEqual(body.count("discussion_r50"), 1)
+        self.assertNotIn("attached to the code below", body)
+
     def test_a_comment_someone_reacted_to_is_kept(self):
         reacted = {**comment(50, 5), "reactions": {"total_count": 1}}
         gh = FakeGitHub(reviews=[old_review(5)], comments=[reacted, comment(52, 5)])
@@ -1215,8 +1300,12 @@ class TestTheEarlierReviewIsReplaced(unittest.TestCase):
             return "minimize" if "minimizeComment" in w[2]["query"] else "read"
 
         steps = [step(w) for w in gh.writes()]
-        # The last read is the backfill's look for hidden reviews.
-        self.assertEqual(steps, ["post", "read", "fold", "delete", "minimize", "read"])
+        # Reads: hidden state, thread sizes before deleting, then the
+        # backfill's hidden-state and thread-size reads.
+        self.assertEqual(
+            steps,
+            ["post", "read", "fold", "read", "delete", "minimize", "read", "read"],
+        )
         self.assertEqual(minimized(gh), ["N5"])
 
     def test_a_newer_change_request_does_not_dismiss_the_older_one(self):

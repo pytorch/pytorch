@@ -128,9 +128,9 @@ class GitHub:
     def __init__(self, token: str, repo: str):
         self.token = token
         self.repo = repo
-        # Every comment any listed reply in this run answers. It is the only
-        # deletion gate: such a comment is never deleted, even if a later
-        # listing misses the reply.
+        # Every comment any listed reply in this run answers: such a comment is
+        # never deleted, even if a later listing misses the reply. One of the
+        # deletion gates, with reactions and the thread's comment count.
         self.replies_seen: set[int] = set()
         # When set (time.monotonic()), no call starts or waits past it.
         self.deadline: float | None = None
@@ -160,7 +160,7 @@ class GitHub:
                     self.deadline is not None
                     and time.monotonic() + wait > self.deadline
                 ):
-                    raise
+                    raise OutOfTime() from exc
                 _sleep(wait)
 
     def _once(self, method: str, path: str, body: dict | None):
@@ -605,15 +605,19 @@ def folded(review: dict, reason: str = SUPERSEDED) -> str:
     """The review's body inside a collapsed section, marker still first."""
     rest = (review.get("body") or "")[len(MARKER) :].lstrip("\n")
     sha = str(review.get("commit_id") or "")[:12]
-    return "\n".join(
-        [
-            MARKER,
-            f"{FOLDED_REVIEW} of {sha}; {reason}</summary>",
-            "",
-            rest,
-            "",
-            "</details>",
-        ]
+    # Defused again: the body may come from an older version of this script,
+    # and pytorch-bot reads edited review bodies.
+    return defuse_bot_commands(
+        "\n".join(
+            [
+                MARKER,
+                f"{FOLDED_REVIEW} of {sha}; {reason}</summary>",
+                "",
+                rest,
+                "",
+                "</details>",
+            ]
+        )
     )
 
 
@@ -644,17 +648,23 @@ def reacted(comment: dict) -> bool:
 
 
 class Budget:
-    """API writes a step may still start; None is unlimited."""
+    """API writes a step may still start; None is unlimited. With `pause`,
+    each write after the first waits that long, as GitHub asks of clients
+    making many mutating requests."""
 
-    def __init__(self, left: int | None = None):
+    def __init__(self, left: int | None = None, pause: float = 0):
         self.left = left
+        self.pause = pause
+        self.taken = 0
 
     def take(self) -> bool:
-        if self.left is None:
-            return True
-        if self.left <= 0:
-            return False
-        self.left -= 1
+        if self.left is not None:
+            if self.left <= 0:
+                return False
+            self.left -= 1
+        if self.pause and self.taken:
+            _sleep(self.pause)
+        self.taken += 1
         return True
 
     def spent(self) -> bool:
@@ -662,7 +672,13 @@ class Budget:
 
 
 def delete_unreplied(
-    gh: GitHub, pr: int, rid: int, comments, budget: Budget | None = None, refresh=True
+    gh: GitHub,
+    pr: int,
+    rid: int,
+    comments,
+    budget: Budget | None = None,
+    refresh=True,
+    sizes=None,
 ) -> set[int] | None:
     """Delete review `rid`'s inline comments nobody replied to.
 
@@ -670,9 +686,11 @@ def delete_unreplied(
     not be listed. Replies stay, and so does a comment someone answered or
     reacted to; a reply any listing in this run saw protects its comment. A
     reply still pending in someone's unsubmitted review is invisible to the
-    API and protects nothing. With `refresh` the
-    comments are listed again just before deleting, which narrows the window
-    for a reply landing first but cannot close it. Each delete spends `budget`.
+    API and protects nothing. A comment is deleted only if its thread, read
+    by cursor (`sizes`, from `thread_sizes`), holds that one comment. With
+    `refresh` the comments are listed again just before deleting, which
+    narrows the window for a reply landing first but cannot close it. Each
+    delete spends `budget`.
     """
     budget = budget or Budget()
 
@@ -691,9 +709,14 @@ def delete_unreplied(
     fresh = pr_comments(gh, pr) if refresh else comments
     if fresh is None:
         return None
+    if sizes is None:
+        sizes = thread_sizes(gh, pr)
+        if sizes is None:
+            return {c["id"] for c in roots_of(fresh)}
     kept: set[int] = set()
     for c in roots_of(fresh):
-        if c["id"] in gh.replies_seen or reacted(c) or not budget.take():
+        alone = sizes.get(c["id"]) == 1
+        if not alone or c["id"] in gh.replies_seen or reacted(c) or not budget.take():
             kept.add(c["id"])
             continue
         try:
@@ -712,6 +735,7 @@ def delete_unreplied(
 # the clock, which every call (and its retry waits) honours.
 MAX_BACKFILL = 50
 BACKFILL_SECONDS = 90
+BACKFILL_PAUSE = 1.0
 
 
 def backfill(gh: GitHub, pr: int, author: str, new_id: int) -> None:
@@ -736,8 +760,8 @@ def _backfill(gh: GitHub, pr: int, author: str, new_id: int) -> None:
     listing = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
     _, hidden = earlier_reviews(gh, pr, author, new_id, listing)
     replaced = latest_is_request(listing, author)
-    budget = Budget(MAX_BACKFILL)
-    comments = None
+    budget = Budget(MAX_BACKFILL, BACKFILL_PAUSE)
+    comments = sizes = None
     for old in sorted(hidden, key=lambda r: r["id"], reverse=True):
         if old.get("state") == "CHANGES_REQUESTED" and not replaced:
             continue
@@ -747,9 +771,10 @@ def _backfill(gh: GitHub, pr: int, author: str, new_id: int) -> None:
         fold(gh, pr, old, budget=budget)
         if comments is None:
             comments = pr_comments(gh, pr)
-            if comments is None:
+            sizes = thread_sizes(gh, pr)
+            if comments is None or sizes is None:
                 return
-        delete_unreplied(gh, pr, old["id"], comments, budget, refresh=False)
+        delete_unreplied(gh, pr, old["id"], comments, budget, False, sizes)
 
 
 def latest_is_request(listing: list[dict], author: str) -> bool:
@@ -771,9 +796,35 @@ _THREADS = """query($o: String!, $r: String!, $n: Int!, $c: String) {
   repository(owner: $o, name: $r) { pullRequest(number: $n) {
     reviewThreads(first: 100, after: $c) {
       pageInfo { hasNextPage endCursor }
-      nodes { id isResolved comments(first: 1) { nodes { databaseId } } }
+      nodes { id isResolved comments(first: 1) { totalCount nodes { databaseId } } }
     } } } }"""
 _RESOLVE = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { clientMutationId } }"
+
+
+def thread_sizes(gh: GitHub, pr: int) -> dict[int, int] | None:
+    """Comments per review thread, keyed by the thread's first comment, or None
+    if the threads could not be read. Cursor pagination, unlike the REST
+    listing's page offsets, does not skip a thread when an overlapping run
+    deletes comments meanwhile."""
+    owner, name = gh.repo.split("/")
+    sizes: dict[int, int] = {}
+    cursor = None
+    try:
+        while True:
+            data = gh.graphql(_THREADS, {"o": owner, "r": name, "n": pr, "c": cursor})
+            threads = data["repository"]["pullRequest"]["reviewThreads"]
+            for node in threads["nodes"]:
+                comments = node["comments"]
+                if comments["nodes"]:
+                    sizes[comments["nodes"][0]["databaseId"]] = comments["totalCount"]
+            if not threads["pageInfo"]["hasNextPage"]:
+                return sizes
+            cursor = threads["pageInfo"]["endCursor"]
+    except OutOfTime:
+        raise
+    except (GitHubError, KeyError, TypeError) as exc:
+        warn(f"could not read the PR's review threads: {exc!r}")
+        return None
 
 
 def resolve_threads(gh: GitHub, pr: int, comment_ids: set[int]) -> bool:
