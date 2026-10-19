@@ -86,7 +86,7 @@ class TestBits(TestCase):
                 z_ref = torch.cat([x_int, y_ref], dim=dim)
                 z = torch.cat([x, y_b], dim=dim)
                 self.assertEqual(z_ref, z.view(view_type))
-    
+                
     def test_shell_dtype_cast_raises(self, device):
         # Casts to or from bits and sub-byte int dtypes used to device-assert
         # on CUDA; they must raise on the host, in eager and while tracing.
@@ -109,8 +109,8 @@ class TestBits(TestCase):
                 torch.ops.prims.convert_element_type(x_bits, torch.uint4)
         # the device is still usable afterwards
         self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
-        
-        
+
+
 instantiate_device_type_tests(TestBits, globals(), allow_xpu=True)
 
 
