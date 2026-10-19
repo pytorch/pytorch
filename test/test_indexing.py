@@ -1829,6 +1829,8 @@ class TestIndexingDevice(TestCase):
         values = torch.tensor([7, 8], device=device, dtype=dtype).view(1, 2, 1)
         _test_against_numpy(t, indices, values, 1)
         _test_against_numpy(t, indices, torch.tensor(9, device=device, dtype=dtype), 1)
+        # a 0-dim CPU values works on any device, like index_put_
+        _test_against_numpy(t, indices, torch.tensor(9, dtype=dtype), 1)
 
         # empty indices
         _test_against_numpy(t, torch.ones((3, 0, 5), dtype=torch.long, device=device), values[:, :0], 1)
@@ -1848,13 +1850,25 @@ class TestIndexingDevice(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.put_along_dim(t, indices, values, dim=2)
 
+        with self.assertRaisesRegex(RuntimeError, "same dtype as input"):
+            torch.put_along_dim(t, indices, values.to(torch.complex64), dim=1)
+
+        with self.assertRaisesRegex(RuntimeError, "indices must be 1-D when dim is None"):
+            torch.put_along_dim(t, indices, values)
+
         # `t` can't grow to match `indices`
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "must match the existing size"):
             torch.put_along_dim(t, torch.zeros((3, 1), dtype=torch.long, device=device), values, dim=1)
 
         # `values` must broadcast to `indices`, not the other way around
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "must match the existing size"):
             torch.put_along_dim(t, indices, torch.ones((2, 2), device=device, dtype=dtype), dim=1)
+
+        # 0-dim input works with dim=None only
+        s = torch.tensor(1, device=device, dtype=dtype)
+        self.assertEqual(torch.put_along_dim(s, indices[0, :1], values[0, :1]), values[0, 0])
+        with self.assertRaisesRegex(IndexError, "has no dimensions"):
+            torch.put_along_dim(s, indices[0, 0], values[0, 0], dim=0)
 
         # out of range is an error, not silently wrapped. On CUDA it is a
         # device-side assert, which kills the process.

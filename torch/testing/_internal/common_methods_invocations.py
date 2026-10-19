@@ -3183,12 +3183,28 @@ def sample_inputs_put_along_dim(op_info, device, dtype, requires_grad, **kwargs)
     yield SampleInput(
         make_arg((S, S)), torch.randperm(S * S, device=device)[:S], make_arg((S,)))
 
+    # 3-D, `indices` broadcast in the middle dim
+    idx = torch.rand(S, 1, S, device=device).argsort(dim=2)[..., :2]
+    yield SampleInput(make_arg((S, S, S)), idx, make_arg((S, S, 2)), 2)
+
+    # empty `indices`
+    yield SampleInput(
+        make_arg((S, S)), torch.empty(S, 0, dtype=torch.long, device=device), make_arg((S, 0)), 1)
+
+    # 0-dim input
+    yield SampleInput(make_arg(()), torch.zeros(1, dtype=torch.long, device=device), make_arg((1,)))
+
 
 def error_inputs_put_along_dim(op_info, device, **kwargs):
     t = torch.zeros(S, S, device=device)
     idx = torch.zeros(S, 1, dtype=torch.long, device=device)
     yield ErrorInput(SampleInput(t, idx.int(), t, 1), error_regex="dtype of indices should be Long")
     yield ErrorInput(SampleInput(t, idx.view(-1), t, 1), error_regex="same number of dimensions")
+    yield ErrorInput(SampleInput(t, idx, t.int(), 1), error_regex="same dtype as input")
+    yield ErrorInput(SampleInput(t, idx, t), error_regex="must be 1-D when dim is None")
+    yield ErrorInput(SampleInput(t, idx, t, 2), error_type=IndexError, error_regex="Dimension out of range")
+    yield ErrorInput(SampleInput(t, idx.new_zeros(S + 1, 1), t[:1, :1], 1), error_regex="must match the existing size")
+    yield ErrorInput(SampleInput(t, idx, t[:, :2], 1), error_regex="must match the existing size")
     # Out of range indices are a device-side assert on CUDA, test them on CPU only.
     if torch.device(device).type == "cpu":
         ones = torch.ones(S, 1, device=device)

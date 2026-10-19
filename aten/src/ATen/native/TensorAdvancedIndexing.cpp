@@ -2751,8 +2751,7 @@ Tensor& take_along_dim_out(
 }
 
 // Returns (dim, indices, values) ready for self.scatter(dim, indices, values).
-// With dim=None, indices and values come back flat and the caller scatters
-// into self.reshape(-1).
+// With dim=None the caller scatters into self.reshape(-1).
 // Unlike take_along_dim, self never broadcasts here (the result has self's
 // shape), so indices broadcast towards self and values towards indices.
 static std::tuple<int64_t, Tensor, Tensor> _put_along_dim_helper(
@@ -2760,14 +2759,22 @@ static std::tuple<int64_t, Tensor, Tensor> _put_along_dim_helper(
     const Tensor& indices,
     const Tensor& values,
     std::optional<int64_t> opt_dim) {
-  checkDevice("torch.put_along_dim():", {self, indices, values}, self.device());
+  // Same as index_put_: allow a CPU scalar for values on any device.
+  auto vals = values.dim() == 0 ? values.to(self.device()) : values;
+  checkDevice("torch.put_along_dim():", {self, indices, vals}, self.device());
   TORCH_CHECK(
       indices.scalar_type() == ScalarType::Long,
       "torch.put_along_dim(): dtype of indices should be Long but got ",
       indices.scalar_type())
+  TORCH_CHECK(
+      vals.scalar_type() == self.scalar_type(),
+      "torch.put_along_dim(): expected values to have the same dtype as input (",
+      self.scalar_type(),
+      ") but got ",
+      vals.scalar_type())
 
   int64_t dim = 0;
-  Tensor idx;
+  SymDimVector shape;
   if (opt_dim.has_value()) {
     TORCH_CHECK(
         self.dim() == indices.dim(),
@@ -2778,23 +2785,24 @@ static std::tuple<int64_t, Tensor, Tensor> _put_along_dim_helper(
         indices.dim(),
         " dimensions for indices")
     dim = at::maybe_wrap_dim(opt_dim.value(), self.dim());
-    SymDimVector shape{self.sym_sizes()};
+    shape = SymDimVector{self.sym_sizes()};
     shape[dim] = indices.sym_size(dim);
-    idx = indices.broadcast_to_symint(shape);
   } else {
-    idx = indices.reshape(-1);
+    TORCH_CHECK(
+        indices.dim() == 1,
+        "torch.put_along_dim(): indices must be 1-D when dim is None, but got ",
+        indices.dim(),
+        " dimensions")
+    shape = SymDimVector{indices.sym_sizes()};
   }
 
-  auto vals = values.to(self.scalar_type()).broadcast_to_symint(idx.sym_sizes());
-  if (!opt_dim.has_value()) {
-    vals = vals.reshape(-1);
-  }
-
-  // Only wrap negative indices. Out of range ones must still hit scatter's
-  // bounds check, so remainder() (as in take_along_dim) is not an option.
+  // Only wrap negative indices, so out of range ones still hit scatter's
+  // bounds check (remainder() as in take_along_dim would hide them). Wrap
+  // before broadcasting to keep the broadcast a free stride-0 view.
   auto size = opt_dim.has_value() ? self.sym_size(dim) : self.sym_numel();
-  idx = at::where(idx < 0, idx + size, idx);
-  return std::make_tuple(dim, std::move(idx), std::move(vals));
+  auto idx = at::where(indices < 0, indices + size, indices);
+  return std::make_tuple(
+      dim, idx.broadcast_to_symint(shape), vals.broadcast_to_symint(shape));
 }
 
 Tensor put_along_dim(
@@ -2815,7 +2823,7 @@ Tensor& put_along_dim_(
     const Tensor& values,
     std::optional<int64_t> opt_dim) {
   // Not scatter_: it has no vmap batch rule, and the dim=None path would need
-  // to check aliasing, which BatchedTensor does not allow.
+  // to check aliasing, which BatchedTensor does not allow. Costs one full copy.
   return self.copy_(at::put_along_dim(self, indices, values, opt_dim));
 }
 

@@ -11798,15 +11798,17 @@ add_docstr(
 put_along_dim(input, indices, values, dim=None) -> Tensor
 
 Returns a copy of :attr:`input` with :attr:`values` written at the 1-dimensional
-indices from :attr:`indices` along the given :attr:`dim`. This is the inverse of
-:func:`torch.take_along_dim`.
+indices from :attr:`indices` along the given :attr:`dim`. This is the write
+counterpart of :func:`torch.take_along_dim`.
 
-:attr:`indices` must have the same number of dimensions as :attr:`input` and is
-broadcast against it in every dimension except :attr:`dim`. :attr:`values` is then
-broadcast to the shape of the broadcast :attr:`indices`. Negative indices count
-from the end of :attr:`dim`.
+When :attr:`dim` is given, :attr:`indices` must have the same number of dimensions
+as :attr:`input` and is broadcast against it in every dimension except :attr:`dim`.
+:attr:`values` is then broadcast to the shape of the broadcast :attr:`indices`.
 
-If :attr:`dim` is None, :attr:`input` is treated as if it has been flattened to 1d.
+If :attr:`dim` is None, :attr:`indices` must be 1-D and indexes :attr:`input` as if
+it had been flattened to 1d. :attr:`values` is broadcast to the shape of :attr:`indices`.
+
+Negative indices count from the end. Out of range indices raise an error.
 
 .. note::
     This function is similar to NumPy's `put_along_axis`, which works in place.
@@ -11814,14 +11816,15 @@ If :attr:`dim` is None, :attr:`input` is treated as if it has been flattened to 
     See also :func:`torch.scatter`.
 
 .. warning::
-    If :attr:`indices` has repeated entries along :attr:`dim`, which of the
-    matching :attr:`values` gets written is not defined.
+    If :attr:`indices` has repeated indices, which of the matching
+    :attr:`values` gets written is not defined. In backward, all of them
+    get a gradient, as with :func:`torch.scatter`.
 
 Args:
     {input}
     indices (LongTensor): the indices into :attr:`input`. Must have long dtype.
-    values (Tensor): the values to write. Cast to the dtype of :attr:`input`.
-    dim (int, optional): dimension to write along. Default: `None`.
+    values (Tensor): the values to write. Must have the same dtype as :attr:`input`.
+    dim (int, optional): dimension to write along. Default: ``None``.
 
 Example::
 

@@ -147,8 +147,8 @@ range of distributions.
     nonzero_static
     permute
     permute_copy
-    put_along_dim
     put
+    put_along_dim
     reshape
     row_indices_copy
     row_stack
