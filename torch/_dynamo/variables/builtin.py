@@ -3697,6 +3697,11 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
         try:
             return self._call_getattr(tx, args, kwargs)
         except Unsupported:
+            # as_python_constant() rebuilds a fresh OrderedDict from the tracked
+            # items and drops its instance __dict__, so eager getattr() on it can
+            # silently return the default / a wrong value. Propagate the decline.
+            if isinstance(args[0], variables.OrderedDictVariable):
+                raise
             # Replicate the constant-fold fallback from BuiltinVariable._make_handler:
             # if all args are python constants, evaluate getattr() directly rather
             # than propagating a graph break from tp_getattro_impl.

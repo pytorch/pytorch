@@ -72,6 +72,36 @@
       ]
     }
   ],
+  "GB6896": [
+    {
+      "Gb_type": "unmaterializable instance __dict__ key",
+      "Context": "key type: {type(name)}",
+      "Explanation": "Dynamo cannot replay a write through object.__dict__ whose key is neither a literal nor a tuple/frozenset of literals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB2085": [
+    {
+      "Gb_type": "unreplayable key type in instance __dict__",
+      "Context": "key type: {type(name)}",
+      "Explanation": "Dynamo cannot replay an object instance __dict__ write whose key is neither a scalar constant nor a tuple/frozenset of scalar constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6032": [
+    {
+      "Gb_type": "non-constant key in instance __dict__",
+      "Context": "key: {key.vt}",
+      "Explanation": "Dynamo models object instance __dict__ keys as constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB2861": [
     {
       "Gb_type": "Untraceable C tp_hash",
@@ -1436,6 +1466,16 @@
       ]
     }
   ],
+  "GB9131": [
+    {
+      "Gb_type": "Skipped function wrapper __dict__ access",
+      "Context": "{self}",
+      "Explanation": "Dynamo does not model the copied dictionary of this function wrapper.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0089": [
     {
       "Gb_type": "Observed exception (EXCEPT_HANDLER)",
@@ -2429,6 +2469,72 @@
       "Hints": [
         "Remove the custom `vjp` method if possible.",
         "Use standard `backward` instead if applicable.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4085": [
+    {
+      "Gb_type": "setattr() on a pre-existing OrderedDict",
+      "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
+      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. Supporting writes to a pre-existing OrderedDict (guarded value + mutation replay) is out of scope for this fix, so the frame is graph-broken instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "setattr() on a pre-existing OrderedDict",
+      "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
+      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. A pre-existing OrderedDict is dict-backed, so the write could not be guarded/replayed soundly.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6048": [
+    {
+      "Gb_type": "non-constant attribute name in OrderedDict.__setattr__",
+      "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
+      "Explanation": "Dynamo requires the attribute name to be a constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4118": [
+    {
+      "Gb_type": "setattr() of a descriptor attribute on OrderedDict",
+      "Context": "setattr({self.debug_repr()}, {name}, {value})",
+      "Explanation": "Dynamo does not model writes to the __dict__/__class__ descriptors of an OrderedDict.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5031": [
+    {
+      "Gb_type": "getattr() on a pre-existing OrderedDict instance attribute",
+      "Context": "getattr({self.debug_repr()}, {name})",
+      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. Reading an instance attribute off a pre-existing OrderedDict requires guarded attribute sources and a handle on the live object, which is out of scope for this fix, so the frame is graph-broken instead.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "getattr() on a pre-existing OrderedDict instance attribute",
+      "Context": "getattr({self.debug_repr()}, {name})",
+      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. Reading one off a pre-existing OrderedDict would need a guard through a dict-backed source, which Dynamo cannot represent.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6779": [
+    {
+      "Gb_type": "__dict__ access on a pre-existing OrderedDict",
+      "Context": "getattr({self.debug_repr()}, '__dict__')",
+      "Explanation": "Dynamo only models the instance __dict__ of OrderedDicts built inside the traced region.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

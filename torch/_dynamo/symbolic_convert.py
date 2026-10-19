@@ -136,6 +136,7 @@ from .resume_execution import (
 from .source import (
     AttrSource,
     DictGetItemSource,
+    get_global_source_name,
     GlobalSource,
     GlobalWeakRefSource,
     LocalCellSource,
@@ -250,6 +251,9 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 trace_bytecode_log = torch._logging.getArtifactLogger(__name__, "trace_bytecode")
 tls = threading.local()
+# Prefix of the global an inlined frame's globals are guarded through when they
+# belong to no module (see get_globals_source_and_value).
+UNNAMED_SCOPE_PREFIX = "___unnamed_scope"
 compare_op_handlers: dict[str, Any] = {
     k: BuiltinVariable(v).call_function for k, v in supported_comparison_ops.items()
 }
@@ -3523,6 +3527,11 @@ class InstructionTranslatorBase(
         except Unsupported:
             if not obj.is_python_constant():
                 raise
+            # as_python_constant() rebuilds a fresh OrderedDict from the tracked
+            # items, dropping its instance __dict__, so an eager getattr could
+            # return a wrong value or a spurious error.
+            if isinstance(obj, variables.OrderedDictVariable):
+                raise
             # An eager getattr would run a user-defined __get__ at trace time
             # and bake its result into the graph.
             if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(
@@ -6635,8 +6644,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             global_source = AttrSource(module_source, name)
         else:
             globals_name = self.output.install_global_by_id(
-                "___unnamed_scope", self.f_globals
+                UNNAMED_SCOPE_PREFIX, self.f_globals
             )
+            source = self.funcvar.source
+            root = get_global_source_name(source)
+            # How a loading process finds the live namespace again: the key
+            # embeds this process's id() of it. A source rooted at an unnamed
+            # scope key needs that key bound first, so it cannot.
+            if (
+                source is not None
+                and root is not None
+                and not root.startswith(UNNAMED_SCOPE_PREFIX)
+            ):
+                self.output.unnamed_scope_sources.setdefault(
+                    globals_name, AttrSource(source, "__globals__")
+                )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Don't use lazy vt because we will do a setattr afterwards

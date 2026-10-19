@@ -104,7 +104,10 @@ def vt_identity_compare(
     # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable, MappingProxyVariable
     from .exception import ExceptionVariable, TracebackVariable
-    from .functions import UserMethodVariable
+    from .functions import (
+        _WrappedSkipFunctionMethodDescriptorCommonVariable,
+        UserMethodVariable,
+    )
     from .lists import ListVariable
     from .sets import (
         DictKeySetVariable,
@@ -122,21 +125,20 @@ def vt_identity_compare(
     ):
         return ConstantVariable.create(False)
 
-    if isinstance(
-        left,
-        (
-            ConstDictVariable,
-            ListVariable,
-            SetVariable,
-            FrozensetVariable,
-            DictKeySetVariable,
-            OrderedSetVariable,
-            TracebackVariable,
-            ExceptionVariable,
-            UserMethodVariable,
-            CurrentDeviceVariable,
-        ),
-    ):
+    trace_created_types = (
+        ConstDictVariable,
+        ListVariable,
+        SetVariable,
+        FrozensetVariable,
+        DictKeySetVariable,
+        OrderedSetVariable,
+        TracebackVariable,
+        ExceptionVariable,
+        UserMethodVariable,
+        _WrappedSkipFunctionMethodDescriptorCommonVariable,
+        CurrentDeviceVariable,
+    )
+    if isinstance(left, trace_created_types) or isinstance(right, trace_created_types):
         return ConstantVariable.create(False)
 
     # Different Python types can never be the same object.
@@ -2493,17 +2495,35 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
-            value = tx.output.side_effects.load_attr(obj, name)
-            # A pending store of a descriptor onto a class lands in cls.__dict__,
-            # so reading it back has to run tp_descr_get the way type_getattro
-            # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
-            # staticmethod instead of function.
-            if isinstance(
-                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
-            ):
-                return value.tp_descr_get_impl(tx, obj, obj)
-            return value
-        if tx.output.side_effects.has_pending_mutation_of_attr(
+            if isinstance(obj, variables.OrderedDictVariable):
+                # Mirror the UDOV branch below: a data descriptor on the type
+                # (object.__class__ / object.__dict__) wins over the modeled
+                # instance __dict__, so an entry written through the __dict__
+                # view must not shadow attribute access.
+                value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
+                if not isinstance(value, variables.DeletedVariable):
+                    type_attr = mro_lookup(obj.python_type(), name)
+                    if obj.lookup_tp_getset_member(name) is None and (
+                        type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr)
+                    ):
+                        return value
+                # Deleted entry or data descriptor: fall through to normal
+                # attribute resolution (descriptor / AttributeError).
+            else:
+                value = tx.output.side_effects.load_attr(obj, name)
+                # A pending store of a descriptor onto a class lands in
+                # cls.__dict__, so reading it back has to run tp_descr_get the way
+                # type_getattro does -- otherwise `C.h = staticmethod(f);
+                # type(C.h)` reports staticmethod instead of function.
+                if isinstance(
+                    value,
+                    (variables.StaticMethodVariable, variables.ClassMethodVariable),
+                ):
+                    return value.tp_descr_get_impl(tx, obj, obj)
+                return value
+        if isinstance(
+            obj, variables.UserDefinedObjectVariable
+        ) and tx.output.side_effects.has_pending_mutation_of_attr(
             obj, name, AttrMutationKind.INSTANCE_DICT
         ):
             value = tx.output.side_effects.load_attr(obj, name, deleted_ok=True)
