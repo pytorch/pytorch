@@ -408,6 +408,19 @@ class _DDPSink(Function):
         return (None, *grad_outputs)
 
 
+class _DDPRecoverySink(Function):
+    @staticmethod
+    def forward(ctx, ddp_weakref, tensor):
+        ctx.set_materialize_grads(False)
+        ctx.ddp_weakref = ddp_weakref
+        return tensor.clone() if ddp_weakref()._ddp_sink_clone else tensor
+
+    @staticmethod
+    def backward(ctx, *grad_outputs):
+        ctx.ddp_weakref().reducer._queue_recovery_from_output()
+        return None, *grad_outputs
+
+
 class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
         """Set config variables for internal usage."""
@@ -963,6 +976,7 @@ class DistributedDataParallel(Module, Joinable):
             self.output_device = _get_device_index(output_device, True)
 
         self.static_graph = False
+        self._static_graph_recovery = False
         self.dim = dim
         self.module = module
         self.device = next(iter(self._module_parameters)).device
@@ -1513,6 +1527,7 @@ class DistributedDataParallel(Module, Joinable):
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         self.__dict__.setdefault("_require_manual_backward_finalization", False)
+        self.__dict__.setdefault("_static_graph_recovery", False)
         self.__dict__.setdefault("batched_grad_copy", False)
         self.__dict__.setdefault("lazy_bucket_allocation", False)
         # broadcast_buffers is now a property; pop it so it doesn't shadow.
@@ -1541,6 +1556,8 @@ class DistributedDataParallel(Module, Joinable):
                     "self.logger must not be None when static_graph is True"
                 )
             self.logger._set_static_graph()
+            if self._static_graph_recovery:
+                self.reducer._set_static_graph_recovery()
 
     def _build_params_for_reducer(self):
         # Build tuple of (module, parameter) for all parameters that require grads.
@@ -1898,6 +1915,14 @@ class DistributedDataParallel(Module, Joinable):
             output = _tree_unflatten_with_rref(
                 output_placeholders, treespec, output_is_rref
             )
+
+        elif self._static_graph_recovery and self.require_backward_grad_sync:
+            tensors, treespec, output_is_rref = _tree_flatten_with_rref(output)
+            for i, tensor in enumerate(tensors):
+                if isinstance(tensor, torch.Tensor) and tensor.requires_grad:
+                    # Separate nodes preserve each output's backward dependencies.
+                    tensors[i] = _DDPRecoverySink.apply(weakref.ref(self), tensor)
+            output = _tree_unflatten_with_rref(tensors, treespec, output_is_rref)
 
         # At the end of the forward pass, reset the grad buffer and grad views
         self._clear_grad_buffer()
@@ -2688,10 +2713,11 @@ class DistributedDataParallel(Module, Joinable):
         ``False``, it may instead be called from a backward hook after all DDP
         buckets are ready.
 
-        This is ``True`` while DDP is rebuilding buckets and when DDP native
-        mixed precision requires end-of-backward stream synchronization. It is
-        ``False`` when manual finalization is disabled. In manual mode, the
-        caller is responsible for honoring this ordering requirement.
+        This is ``True`` while DDP is rebuilding buckets, when static graph
+        recovery is enabled, or when DDP native mixed precision requires
+        end-of-backward stream synchronization. It is ``False`` when manual
+        finalization is disabled. In manual mode, the caller is responsible
+        for honoring this ordering requirement.
         """
         if not self._require_manual_backward_finalization:
             return False
@@ -2725,6 +2751,31 @@ class DistributedDataParallel(Module, Joinable):
         """
         self._check_manual_backward_finalization_supported()
         self.reducer._finalize_backward_manual()
+
+    def _set_static_graph_recovery(self) -> None:
+        r"""Recover missing gradient hooks after each synchronized backward.
+
+        Call before the first forward with ``static_graph=True``. Existing
+        gradients are preserved. Missing contributions are zero. Parameters
+        recorded as used can become unused, but the reverse still raises.
+
+        This can hide missing gradients caused by model bugs. Sparse gradients,
+        delayed all-reduce, native mixed precision, the Python reducer, and
+        optimizer in backward are not supported. ``skip_all_reduce_unused_params``
+        must be false. Manual finalization must run after backward returns.
+        Each synchronized backward must reach a visible differentiable output
+        or a DDP parameter. Reentrant backward that no visible output depends
+        on must end on the thread that runs its outer node and nest at most 60
+        levels.
+        """
+        if self._use_python_reducer:
+            raise RuntimeError("Static graph recovery requires the C++ reducer.")
+        if self._delay_all_reduce_params:
+            raise RuntimeError("Recovery does not support delayed all-reduce.")
+        if self.mixed_precision is not None:
+            raise RuntimeError("Recovery does not support native mixed precision.")
+        self.reducer._set_static_graph_recovery()
+        self._static_graph_recovery = True
 
     def _remove_autograd_hooks(self):
         """Remove autograd hooks registered by the reducer on the model parameters."""

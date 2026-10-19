@@ -106,6 +106,9 @@ class TORCH_API Reducer {
   // don't need to be copied from buckets as the optimizer would've already
   // been applied.
   void set_optimizer_in_backward() {
+    TORCH_CHECK(
+        !static_graph_recovery_,
+        "Static graph recovery does not support optimizer in backward.");
     optim_in_backward_ = true;
   }
 
@@ -175,6 +178,14 @@ class TORCH_API Reducer {
 
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
+
+  void set_static_graph_recovery();
+
+  // Finish pending buckets after the outer backward completes.
+  void recover_unused_parameters();
+
+  // Called by an output sink. Its backward ends after all of DDP's gradients.
+  void queue_recovery_from_output();
 
   void set_mixed_precision_param_dtype(c10::ScalarType dtype);
 
@@ -541,6 +552,20 @@ class TORCH_API Reducer {
   int div_factor_;
 
   bool static_graph_;
+
+  bool static_graph_recovery_{false};
+
+  // Last graph task that queued recovery.
+  int recovery_graph_task_id_{-1};
+
+  // An output sink queued recovery in this iteration.
+  bool output_recovery_queued_{false};
+
+  // Expires with the reducer so deferred recovery hooks become no-ops.
+  std::shared_ptr<bool> recovery_alive_ = std::make_shared<bool>(true);
+
+  // Queue recovery at the end of the top-level backward. Requires mutex_.
+  void queue_static_graph_recovery();
 
   bool skip_all_reduce_unused_params_;
 
