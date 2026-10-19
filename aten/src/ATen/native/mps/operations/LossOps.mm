@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/LossOps.h>
@@ -17,7 +18,6 @@
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mse_loss_backward_native.h>
-#include <ATen/ops/mse_loss_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
@@ -717,9 +717,8 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
 Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
   std::string op_name = __func__;
   using namespace mps;
-  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "MPS doesn't know how to do square_i64");
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
-                              "huber_loss for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      isFloatingType(input.scalar_type()), "\"huber_mps\" not implemented for '", input.scalar_type(), "'");
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   TORCH_CHECK(output.is_mps());
@@ -912,51 +911,12 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 }
 
 // MSELoss
-TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output) {
-  std::string op_name = "mse_loss_out_mps";
-  using namespace mps;
-  if ((input.numel() == 0) || (target.numel() == 0)) {
-    reduction == Reduction::Mean ? output.fill_(std::numeric_limits<float>::quiet_NaN()) : output.zero_();
-    return;
-  }
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
-  TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
-              op_name + ": only defined for floating types");
-  TORCH_CHECK(output.is_mps());
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor = nil;
-    MPSGraphTensor* targetTensor = nil;
-    MPSGraphTensor* outputTensor = nil;
-  };
-
-  // MPSGraph cannot mix element types across an operand pair, so promote the way the reference
-  // TensorIterator does rather than letting its verifier abort.
-  const auto computeType = getMPSDataType(c10::promoteTypes(input.scalar_type(), target.scalar_type()));
-
-  @autoreleasepool {
-    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, output});
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
-
-      MPSGraphTensor* diffTensor =
-          [mpsGraph subtractionWithPrimaryTensor:castMPSTensor(mpsGraph, newCachedGraph->inputTensor, computeType)
-                                 secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->targetTensor, computeType)
-                                            name:nil];
-      MPSGraphTensor* diffSquareTensor = [mpsGraph squareWithTensor:diffTensor name:nil];
-      MPSGraphTensor* lossTensor = reduceTensor(diffSquareTensor, reduction, mpsGraph, input.sizes().size());
-      newCachedGraph->outputTensor = castMPSTensor(mpsGraph, lossTensor, getMPSDataType(output.scalar_type()));
-    });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
-
-    auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
+static void mse_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK(mps::supportedFloatingType(iter.common_dtype()), "mse_mps only supports floating types");
+  mps::lib.exec_binary_kernel(iter, "mse", std::nullopt, std::nullopt, iter.common_dtype());
 }
+
+REGISTER_DISPATCH(mse_stub, &mse_mps_kernel)
 
 Tensor& mse_loss_backward_out_mps(const Tensor& grad_output,
                                   const Tensor& input,

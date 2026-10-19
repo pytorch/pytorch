@@ -3189,7 +3189,6 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypesIfXPU(torch.float, torch.cfloat)
-    @skipIfMPS
     def test_std_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
@@ -3223,7 +3222,6 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypesIfXPU(torch.float, torch.cfloat)
-    @skipIfMPS
     def test_var_mean_correction(self, device, dtype):
         _size = (20, 20)
         test_args = [
