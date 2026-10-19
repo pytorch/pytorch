@@ -23,7 +23,6 @@ from github_api import (
     PullRequestRef,
     SUBMITTED_REVIEW_STATES,
 )
-from identifiers import TARGET_BASE_REF
 from schemas import (
     IntakeFacts,
     IntakeResult,
@@ -53,6 +52,7 @@ HANDLED_LABELS = frozenset(
         "triaged",
         "bot-triaged",
         "bot-triage-error",
+        "no automated triage",
     }
 )
 # GitHub does not link references inside comments or code.
@@ -334,7 +334,7 @@ def fetch_actionable_labelers(
 
 
 def is_already_handled(labels: Any) -> bool:
-    """Return whether a prior triage outcome makes this run a no-op."""
+    """Return whether a prior triage outcome or an opt-out label makes this run a no-op."""
 
     if not isinstance(labels, list) or any(
         not isinstance(label, dict)
@@ -485,9 +485,11 @@ def assess_intake(
         raise RuntimeError("pull request response is incomplete")
     if pr_number != pr.number or base_repo.casefold() != pr.repo.casefold():
         raise RuntimeError("pull request identity does not match the target")
-    is_open_non_draft_pr_against_main = (
-        base_ref == TARGET_BASE_REF and state == "open" and not draft
+    # ghstack opens each PR in a stack against its own gh/<user>/<N>/base branch.
+    targets_main = base_ref == "main" or (
+        base_ref.startswith("gh/") and base_ref.endswith("/base")
     )
+    is_open_non_draft_pr_against_main = targets_main and state == "open" and not draft
 
     already_handled = is_already_handled(pr_data.get("labels"))
     body = pr_data.get("body") or ""
@@ -603,7 +605,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("pr", type=int, help="pull request number")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--workflow-sha", required=True)
-    parser.add_argument("--expected-base-ref", required=True)
     parser.add_argument("--proxy", default=os.environ.get("HTTPS_PROXY"))
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--github-output", type=Path)
@@ -616,8 +617,6 @@ def main() -> int:
     args = parse_args()
     if args.pr < 1:
         raise SystemExit("PR number must be positive")
-    if args.expected_base_ref != TARGET_BASE_REF:
-        raise SystemExit(f"--expected-base-ref must be {TARGET_BASE_REF}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     try:
         intake = assess_intake(
@@ -647,7 +646,7 @@ def main() -> int:
     elif not facts.is_open_non_draft_pr_against_main:
         status = "PR is outside the active target state"
     elif facts.is_already_handled:
-        status = "existing triage outcome recorded"
+        status = "existing triage outcome or opt-out label recorded"
     else:
         status = "fails intake unless a team's bypass matches"
     print(f"{args.repository}#{args.pr}: {status}", flush=True)

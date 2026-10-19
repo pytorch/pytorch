@@ -7,6 +7,7 @@ import gc
 import json
 import os
 import pickle
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,13 @@ from unittest import mock
 import torch
 import torch.cuda._gpu_trace as gpu_trace
 import torch.distributed as dist
-from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
+from torch._C._distributed_c10d import (
+    AllgatherOptions,
+    AllreduceCoalescedOptions,
+    ErrorType,
+    ReconfigureOptions,
+    ReduceScatterOptions,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -27,15 +34,26 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
+    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
     run_tests,
     TEST_CUDA,
+    TEST_WITH_ROCM,
     TestCase,
 )
+
+
+try:
+    from nccl.core import NCCLCollConfig
+
+    HAS_NCCL_COLL_CONFIG = True
+except ImportError:
+    HAS_NCCL_COLL_CONFIG = False
 
 
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
@@ -293,6 +311,37 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             time.sleep(0.1)
         self.fail("ephemeral timeout was not reset after collective completion")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_zero_sized(self) -> None:
+        # All zero-sized outputs
+        input_empty = torch.empty(0, device=self.device)
+        outputs_empty = [
+            torch.empty(0, device=self.device) for _ in range(self.world_size)
+        ]
+        dist.all_gather(outputs_empty, input_empty)
+        for out in outputs_empty:
+            self.assertEqual(out.numel(), 0)
+
+        # Uneven gather where the first rank(s) have zero-sized tensors.
+        # Catches #199579 where zero-sized outputs both had null data_ptr and were
+        # misclassified as aliased.
+        sizes = [0, 4] if self.world_size == 2 else [0, 0] + [4] * (self.world_size - 2)
+        input_tensor = (
+            torch.empty(0, device=self.device)
+            if sizes[self.rank] == 0
+            else torch.full((sizes[self.rank],), float(self.rank), device=self.device)
+        )
+        outputs = [torch.empty(s, device=self.device) for s in sizes]
+        dist.all_gather(outputs, input_tensor)
+        for r, s in enumerate(sizes):
+            if s == 0:
+                self.assertEqual(outputs[r].numel(), 0)
+            else:
+                self.assertEqual(
+                    outputs[r], torch.full((s,), float(r), device=self.device)
+                )
+
 
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
     @property
@@ -383,6 +432,466 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-legacy"
+
+
+class ProcessGroupNCCL2LazyInitTest(_ProcessGroupNCCL2OptionsTest):
+    """With lazy_init, communicators are created on first use."""
+
+    @staticmethod
+    def _lazy_opts() -> "dist.ProcessGroupNCCL.Options":
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.lazy_init = True
+        return opts
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_defers_comm(self) -> None:
+        group = dist.new_group(pg_options=self._lazy_opts(), device_id=self.device)
+        backend = group._get_backend(self.device)
+        self.assertFalse(backend.supports_splitting)
+        self.assertEqual(backend.comm_ptr, 0)
+
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=group)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        self.assertEqual(t, torch.full_like(t, self.world_size))
+
+        # Every member initialized it on the all_reduce, so it can be split.
+        self.assertTrue(backend.supports_splitting)
+        child = group.split_group([self.rank], group_name=f"lazy_child{self.rank}")
+        t = torch.ones(1, device=self.device)
+        dist.all_reduce(t, group=child)
+        self.assertEqual(t, torch.ones_like(t))
+        dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_new_group_with_nonmembers(self) -> None:
+        # Only members bootstrap the communicator; non-members don't split.
+        group = dist.new_group(
+            ranks=[0], pg_options=self._lazy_opts(), device_id=self.device
+        )
+        if self.rank == 0:
+            t = torch.ones(1, device=self.device)
+            dist.all_reduce(t, group=group)
+            self.assertEqual(t, torch.ones_like(t))
+            dist.destroy_process_group(group)
+        else:
+            self.assertEqual(group, dist.GroupMember.NON_GROUP_MEMBER)
+        self._check_all_reduce()
+
+
+class ProcessGroupNCCLLazyLazyInitTest(ProcessGroupNCCL2LazyInitTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
+class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
+    """Dict configs, which do not need nccl4py."""
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # Makes NCCL read configs at group end.
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_requires_nccl_2_31(self) -> None:
+        if torch.version.hip is None and torch.cuda.nccl.version() >= (2, 31, 0):
+            self.skipTest("NCCL 2.31+ supports collective configs")
+        tensor = torch.ones(4, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "requires NCCL 2.31 or later"):
+            dist.all_reduce(tensor, config={"max_ctas": 2})
+        # Empty configs use the plain API.
+        dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    # Remove once ncclCollConfig is enabled on ROCm. NCCL2_HAS_COLL_CONFIG
+    # still excludes USE_ROCM; that enablement is a separate change.
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "per-collective ncclCollConfig is compiled out on ROCm; "
+        "enablement is tracked separately",
+    )
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_config(self) -> None:
+        process_group = dist.distributed_c10d._get_default_group()
+        tensor = torch.ones(1024, device=self.device)
+        with dist._time_estimator(group=process_group, device=self.device) as context:
+            dist.all_reduce(tensor, config={"max_ctas": 2, "alg_selection": "ring"})
+        self.assertIsNotNone(context.estimated_time)
+        self.assertGreater(context.estimated_time, 0)
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(
+    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
+)
+class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
+    def _collective(self, op, config, async_op=True, group=None):
+        size = self.world_size
+        root = size - 1
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        reduced = torch.full_like(tensor, size * (size + 1) / 2)
+        rows = [torch.full_like(tensor, rank + 1) for rank in range(size)]
+        kwargs = {"config": config, "async_op": async_op, "group": group}
+        output = tensor
+        expected = reduced
+        if op == "broadcast":
+            work = dist.broadcast(tensor, src=root, **kwargs)
+            expected = rows[root]
+        elif op == "all_reduce":
+            work = dist.all_reduce(tensor, **kwargs)
+        elif op == "reduce":
+            work = dist.reduce(tensor, dst=root, **kwargs)
+        elif op == "all_gather":
+            output = [torch.empty_like(tensor) for _ in range(size)]
+            expected = rows
+            work = dist.all_gather(output, tensor, **kwargs)
+        elif op == "all_gather_single":
+            output = torch.empty(size * tensor.numel(), device=self.device)
+            expected = torch.cat(rows)
+            work = dist.all_gather_single(output, tensor, **kwargs)
+        elif op == "reduce_scatter":
+            inputs = [tensor.clone() for _ in range(size)]
+            work = dist.reduce_scatter(output, inputs, **kwargs)
+        elif op == "reduce_scatter_single":
+            work = dist.reduce_scatter_single(output, tensor.repeat(size), **kwargs)
+        elif op == "all_to_all_single":
+            output = torch.empty(size * tensor.numel(), device=self.device)
+            expected = torch.cat(rows)
+            work = dist.all_to_all_single(output, tensor.repeat(size), **kwargs)
+        elif op == "gather_single":
+            output = torch.empty(size * tensor.numel(), device=self.device)
+            expected = torch.cat(rows)
+            work = dist.gather_single(
+                tensor, output if self.rank == root else None, dst=root, **kwargs
+            )
+        else:
+            self.fail(f"Unknown collective: {op}")
+        if work is not None:
+            work.wait()
+        if op in ("reduce", "gather_single") and self.rank != root:
+            return
+        self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "op",
+        [
+            "broadcast",
+            "all_reduce",
+            "reduce",
+            "all_gather",
+            "all_gather_single",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "all_to_all_single",
+            "gather_single",
+        ],
+    )
+    @parametrize("async_op", [False, True])
+    @parametrize("config_kind", ["object", "dict"])
+    def test_collectives(self, op, async_op, config_kind) -> None:
+        config = NCCLCollConfig(min_ctas=1, max_ctas=2, cta_policy=0)
+        if config_kind == "dict":
+            config = {"min_ctas": 1, "max_ctas": 2, "user_profiler_tag": 3}
+        self._collective(op, config, async_op)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "op",
+        [
+            "allreduce_coalesced",
+            "allgather_coalesced",
+            "all_gather_single_coalesced",
+            "reduce_scatter_single_coalesced",
+        ],
+    )
+    def test_coalesced(self, op) -> None:
+        inputs = [
+            torch.full((n,), float(self.rank + 1), device=self.device) for n in (4, 8)
+        ]
+        size = self.world_size
+        if op == "allreduce_coalesced":
+            opts = AllreduceCoalescedOptions()
+            outputs = inputs
+            args = (inputs, opts)
+        elif op == "reduce_scatter_single_coalesced":
+            opts = ReduceScatterOptions()
+            outputs = [torch.empty_like(tensor) for tensor in inputs]
+            args = (outputs, [tensor.repeat(size) for tensor in inputs], opts)
+        else:
+            opts = AllgatherOptions()
+            outputs = [
+                [torch.empty_like(tensor) for _ in range(size)]
+                if op == "allgather_coalesced"
+                else torch.empty(tensor.numel() * size, device=self.device)
+                for tensor in inputs
+            ]
+            args = (outputs, inputs, opts)
+        opts.config = NCCLCollConfig(min_ctas=1, max_ctas=2)
+        getattr(self.pg, op)(*args).wait()
+        for output, tensor in zip(outputs, inputs):
+            if op in ("allreduce_coalesced", "reduce_scatter_single_coalesced"):
+                expected = torch.full_like(tensor, size * (size + 1) / 2)
+            else:
+                expected = [torch.full_like(tensor, rank + 1) for rank in range(size)]
+                if op != "allgather_coalesced":
+                    expected = torch.cat(expected)
+            self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "config, exc, error",
+        [
+            ({"unknown": 1}, ValueError, "Unknown NCCL collective config key"),
+            ({"max_ctas": "2"}, TypeError, "'max_ctas' must be an int"),
+            ({"max_ctas": 2**31}, ValueError, "'max_ctas' is out of range"),
+            ({"alg_selection": 1}, TypeError, "'alg_selection' must be a str"),
+            ({"user_profiler_tag": -1}, TypeError, "must be a non-negative int"),
+            ({"user_profiler_tag": True}, TypeError, "must be a non-negative int"),
+            (
+                {"vendor_options": ({"vendor_id": 1},)},
+                RuntimeError,
+                "vendor_options are not supported",
+            ),
+        ],
+    )
+    def test_invalid_config(self, config, exc, error) -> None:
+        with self.assertRaisesRegex(exc, error):
+            self._collective("all_reduce", config)
+        self._collective("all_reduce", NCCLCollConfig())
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_invalid_algorithm(self) -> None:
+        group = dist.new_group(pg_options=self.opts(), device_id=self.device)
+        try:
+            config = NCCLCollConfig(alg_selection="invalid_algorithm")
+            with self.assertRaisesRegex(RuntimeError, "NCCL (AllReduce|error)"):
+                self._collective("all_reduce", config, group=group)
+        finally:
+            group.abort()
+            dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_splits(self) -> None:
+        size = self.world_size
+        tensor = torch.full((size * 2,), float(self.rank), device=self.device)
+        output = torch.empty_like(tensor)
+        splits = [2] * size
+        dist.all_to_all_single(output, tensor, splits, splits, config=NCCLCollConfig())
+        expected = torch.arange(size, device=self.device).repeat_interleave(2)
+        self.assertEqual(output, expected.float())
+
+        splits = [1] * (size - 1) + [size + 1]
+        output = torch.empty(splits[self.rank] * size, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "equal all_to_all split sizes"):
+            dist.all_to_all_single(
+                output,
+                tensor,
+                [splits[self.rank]] * size,
+                splits,
+                config=NCCLCollConfig(),
+            )
+        self._collective("all_reduce", NCCLCollConfig())
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
+    @parametrize("native_batch", [False, True])
+    def test_coalescing_config(self, name, native_batch) -> None:
+        size = self.world_size
+        tensor = torch.ones(size * 2, device=self.device)
+        output, expected = {
+            "all_reduce": (tensor, torch.full_like(tensor, size)),
+            "all_gather_single": (
+                torch.empty(size * tensor.numel(), device=self.device),
+                torch.ones(size * tensor.numel(), device=self.device),
+            ),
+            "reduce_scatter_single": (
+                torch.empty(2, device=self.device),
+                torch.full((2,), float(size), device=self.device),
+            ),
+        }[name]
+        args = (tensor,) if name == "all_reduce" else (output, tensor)
+        with dist._coalescing_manager(device=self.device if native_batch else None):
+            getattr(dist, name)(*args, config=NCCLCollConfig(max_ctas=2))
+        torch.cuda.synchronize(self.device)
+        self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_equal_configs(self) -> None:
+        # Equal but distinct config instances coalesce into one batch.
+        size = self.world_size
+        tensors = [torch.ones(n, device=self.device) for n in (2, 4, 8)]
+        with dist._coalescing_manager(device=self.device):
+            for tensor in tensors:
+                dist.all_reduce(tensor, config=NCCLCollConfig(max_ctas=2))
+        torch.cuda.synchronize(self.device)
+        for tensor in tensors:
+            self.assertEqual(tensor, torch.full_like(tensor, size))
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        return dist.ProcessGroupNCCL2.Options()
+
+
+class ProcessGroupNCCL2CollectiveConfigNonblockingTest(
+    ProcessGroupNCCL2CollectiveConfigTest
+):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = super().opts(high_priority_stream)
+        opts.config.blocking = 0
+        return opts
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(
+    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
+)
+class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl_version((2, 31, 0), "per-collective configuration")
+    @parametrize(
+        "name",
+        [
+            "all_reduce",
+            "all_gather",
+            "all_gather_single",
+            "all_gather_into_tensor",
+            "_all_gather_base",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "reduce_scatter_tensor",
+            "_reduce_scatter_base",
+            "all_to_all_single",
+        ],
+    )
+    @parametrize(
+        "frontend", ["inductor", "export_strict", "export_nonstrict", "make_fx"]
+    )
+    def test_tracing(self, name, frontend):
+        import io
+
+        from torch.distributed._functional_collectives import (
+            _LegacyToFunctionalCollectiveMode,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        size = self.world_size
+        config = NCCLCollConfig(
+            min_ctas=1,
+            max_ctas=2,
+        )
+        collective = getattr(dist, name)
+
+        class Module(torch.nn.Module):
+            def forward(self, tensor):
+                if name == "all_reduce":
+                    result = tensor.clone()
+                    collective(result, config=config)
+                elif name == "all_gather":
+                    outputs = [torch.empty_like(tensor) for _ in range(size)]
+                    collective(outputs, tensor, config=config)
+                    result = torch.cat(outputs)
+                elif name in (
+                    "all_gather_single",
+                    "all_gather_into_tensor",
+                    "_all_gather_base",
+                ):
+                    result = tensor.new_empty(tensor.numel() * size)
+                    collective(result, tensor, config=config)
+                elif name == "reduce_scatter":
+                    result = torch.empty_like(tensor)
+                    collective(result, [tensor] * size, config=config)
+                elif name in (
+                    "reduce_scatter_single",
+                    "reduce_scatter_tensor",
+                    "_reduce_scatter_base",
+                ):
+                    result = torch.empty_like(tensor)
+                    collective(result, tensor.repeat(size), config=config)
+                else:
+                    result = torch.empty_like(tensor)
+                    collective(result, tensor, config=config)
+                return result
+
+        tensor = torch.full((size * 2,), self.rank + 1.0, device=self.device)
+        module = Module()
+        expected = module(tensor)
+        if frontend == "inductor":
+            compiled = torch.compile(module, fullgraph=True)
+        elif frontend == "make_fx":
+            with _LegacyToFunctionalCollectiveMode():
+                compiled = make_fx(module)(tensor)
+        else:
+            exported = torch.export.export(
+                module, (tensor,), strict=frontend == "export_strict"
+            )
+            buffer = io.BytesIO()
+            torch.export.save(exported, buffer)
+            buffer.seek(0)
+            compiled = torch.export.load(buffer).module()
+        self.assertEqual(compiled(tensor), expected)
+        torch._dynamo.reset()
+
+    @requires_nccl_version((2, 31, 0), "per-collective configuration")
+    def test_config_mutation_recompiles(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        config = NCCLCollConfig(min_ctas=1, max_ctas=2, user_profiler_tag=1)
+
+        def fn(tensor):
+            output = tensor.clone()
+            dist.all_reduce(output, config=config)
+            return output
+
+        counter = CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        tensor = torch.ones(4, device=self.device)
+        self.assertEqual(compiled(tensor), tensor * self.world_size)
+        config.user_profiler_tag = 2
+        self.assertEqual(compiled(tensor), tensor * self.world_size)
+        self.assertEqual(counter.frame_count, 2)
+        torch._dynamo.reset()
+
+
+class ProcessGroupNCCL2ConfigTracingNonblockingTest(ProcessGroupNCCL2ConfigTracingTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL2.Options(
+            is_high_priority_stream=high_priority_stream
+        )
+        opts.config.blocking = 0
+        return opts
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
 
 
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
@@ -483,6 +992,7 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
     @skip_if_lt_x_gpu(2)
     def test_comm_name(self) -> None:
         self._check_all_reduce()
+        before = len(self._logged_comm_names())
         ranks = list(range(self.world_size))
         opts = dist.ProcessGroupNCCL.Options()
         opts.config.comm_name = "zzz_user"
@@ -492,27 +1002,70 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
             ranks, group_name="zzz_split", group_desc="zzz_desc"
         )
         user_child = self.pg.split_group(ranks, opts=opts, group_name="zzz_user_split")
-        for group in (user, named, default_child, user_child):
+        # Splitting a split child clones its options; it must not inherit the
+        # child's generated name.
+        grandchild = default_child.split_group(
+            ranks, group_name="zzz_grand", group_desc="zzz_gdesc"
+        )
+        for group in (user, named, default_child, user_child, grandchild):
             dist.all_reduce(torch.ones(1, device=self.device), group=group)
 
+        names = self._logged_comm_names()
+        self.assertIn("default_pg:0", names[:before])
         self.assertCountEqual(
-            self._logged_comm_names(),
+            names[before:],
             [
-                "default_pg:0",
                 "zzz_user",
                 f"zzz_new:{named.group_name}",
                 "zzz_desc:zzz_split",
                 "zzz_user",
+                "zzz_gdesc:zzz_grand",
             ],
         )
-        self.assertEqual(
-            default_child._get_backend(self.device).options.config.comm_name,
-            "zzz_desc:zzz_split",
+        self.assertIsNone(
+            default_child._get_backend(self.device).options.config.comm_name
         )
         self.assertEqual(
             user_child._get_backend(self.device).options.config.comm_name,
             "zzz_user",
         )
+        dist.destroy_process_group(user)
+        dist.destroy_process_group(named)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for commName")
+    @skip_if_lt_x_gpu(2)
+    def test_lazy_comm_name(self) -> None:
+        self._check_all_reduce()
+        before = len(self._logged_comm_names())
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.comm_name = "zzz_user"
+        user = dist.new_group(backend="nccl-lazy", pg_options=opts, group_desc="zzz_l")
+        named = dist.new_group(backend="nccl-lazy", group_desc="zzz_named")
+        expected = ["zzz_user", f"zzz_named:{named.group_name}"]
+        for group in (user, named):
+            dist.all_reduce(torch.ones(1, device=self.device), group=group)
+            if self.rank > 1:
+                continue
+            # Pair comms are named by their pair, not the group's comm_name.
+            t = torch.ones(1, device=self.device)
+            if self.rank == 0:
+                dist.send(t, 1, group=group)
+            else:
+                dist.recv(t, 0, group=group)
+            torch.cuda.synchronize()
+        if self.rank <= 1:
+            expected += [
+                f"zzz_l:{user.group_name}/p2p-0-1-",
+                f"zzz_named:{named.group_name}/p2p-0-1-",
+            ]
+
+        # The pair suffix counts attempts across all groups in the process.
+        names = [
+            re.sub(r"(/p2p-\d+-\d+-)\d+$", r"\1", n)
+            for n in self._logged_comm_names()[before:]
+        ]
+        self.assertCountEqual(names, expected)
         dist.destroy_process_group(user)
         dist.destroy_process_group(named)
 
@@ -700,6 +1253,12 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
         else:
             store.wait([key], timedelta(seconds=90))
 
+    def _abort_timed_out_group(self, pg) -> None:
+        # Rank 0's communicator is aborted after its timeout. A graceful
+        # destroy on the other ranks would wait for it forever at NCCL 2.31+'s
+        # teardown barrier, so every rank aborts instead.
+        dist.distributed_c10d._abort_process_group(pg)
+
 
 class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
@@ -738,6 +1297,7 @@ class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_timeout_without_process_abort(self) -> None:
         # NoHandling is how a stock NCCL user opts out of the process being
         # taken down by the watchdog; nccl2 reads the same variable, when the
@@ -766,7 +1326,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
-        dist.destroy_process_group(pg)
+        self._abort_timed_out_group(pg)
         self._check_all_reduce()
 
     @requires_nccl()
@@ -791,7 +1351,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
 
         self._wait_for_rank_zero(pg)
-        dist.destroy_process_group(pg)
+        self._abort_timed_out_group(pg)
         self._check_all_reduce()
 
 
@@ -816,13 +1376,14 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
                 work.wait()
 
         self._wait_for_rank_zero(pg)
-        dist.destroy_process_group(pg)
+        self._abort_timed_out_group(pg)
         self._check_all_reduce()
 
 
 class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dumped_on_timeout(self) -> None:
         # The dump is written by the abort hook c10d::FlightRecorderHook
         # registers, which nccl2 runs when it detects the timeout. NoHandling
@@ -911,7 +1472,7 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertFalse(os.path.exists(path))
 
         dist.destroy_process_group(gloo_pg)
-        dist.destroy_process_group(pg)
+        self._abort_timed_out_group(pg)
         self._check_all_reduce()
 
 
@@ -920,6 +1481,7 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
 class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_atleast_multiprocess((10, 2))  # ROCM-31513
     def test_flight_recorder_dump_is_bounded(self) -> None:
         # Symbolizing a traceback may need the GIL, so the attempt that
         # includes stack traces is made under a bounded wait and abandoned for
@@ -958,7 +1520,7 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
                 self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
             self._wait_for_rank_zero(pg)
 
-        dist.destroy_process_group(pg)
+        self._abort_timed_out_group(pg)
         self._check_all_reduce()
 
 
@@ -1116,6 +1678,65 @@ class ProcessGroupNCCL2MemPoolTest(MultiProcContinuousTest):
         backend = self._backend()
         pool = torch.cuda.MemPool(backend.mem_allocator)
         with self.assertRaisesRegex(RuntimeError, "not previously registered"):
+            backend.deregister_mem_pool(pool)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_conflicting_symm_raises(self) -> None:
+        backend = self._backend()
+        pool = torch.cuda.MemPool(backend.mem_allocator)
+        backend.register_mem_pool(pool, symm=False)
+        try:
+            backend.register_mem_pool(pool, symm=False)
+            with self.assertRaisesRegex(RuntimeError, "already registered with symm"):
+                backend.register_mem_pool(pool, symm=True)
+        finally:
+            backend.deregister_mem_pool(pool)
+
+
+class ProcessGroupNCCL2MemPoolNoWindowTest(MultiProcContinuousTest):
+    """register_mem_pool(symm=True) with NCCL window registration disabled, so
+    every NCCL_WIN_COLL_SYMMETRIC registration fails."""
+
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl2"
+
+    @classmethod
+    def device_type(cls) -> str:
+        return "cuda"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # NCCL reads its environment once per process, before the first comm.
+        os.environ["NCCL_WIN_ENABLE"] = "0"
+        torch.cuda.set_device(rank)
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl_version((2, 28), "Need NCCL 2.28+ for NCCL_WIN_ENABLE")
+    @unittest.skipIf(
+        torch.version.hip is not None,
+        "RCCL window registration succeeds with NCCL_WIN_ENABLE=0",
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_register_mem_pool_symmetric_later_allocation_raises(self) -> None:
+        dist.all_reduce(torch.zeros(1, device=self.device))
+        backend = dist.get_backend_impl(device=self.device)
+        pool = torch.cuda.MemPool(backend.mem_allocator)
+        backend.register_mem_pool(pool, symm=True)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "does not support symmetric"):
+                with torch.cuda.use_mem_pool(pool):
+                    torch.ones(1024 * 1024, device=self.device)
+            # The failed allocation must not leave the communicator unusable.
+            t = torch.ones(4, device=self.device)
+            dist.all_reduce(t)
+            self.assertEqual(t, torch.full_like(t, self.world_size))
+        finally:
             backend.deregister_mem_pool(pool)
 
 
@@ -1373,12 +1994,9 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         child_options = child._get_backend(self.device).options
         self.assertEqual(child_options.global_ranks_in_group, halves)
         if hasattr(child_options.config, "comm_name"):
-            # split() used to store a commName pointer into the caller's
-            # group_name string, which the child outlived.
-            self.assertEqual(
-                child_options.config.comm_name,
-                f"{child.group_desc}:{child.group_name}",
-            )
+            # The generated name stays out of the child's Options so that
+            # splitting the child computes its own.
+            self.assertIsNone(child_options.config.comm_name)
 
         # Splitting the child again must map its ranks through the parent's map
         # rather than treating them as world ranks.

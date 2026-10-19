@@ -750,7 +750,7 @@ CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
+static CuBLASReductionOption inline get_reduction_option(bool allow_reduced_precision, bool allow_splitk) {
   TORCH_CHECK(
       !(allow_reduced_precision && !allow_splitk),
       "allow_splitk=False is not supported when reduced precision reductions are enabled");
@@ -851,7 +851,7 @@ at::QEngine Context::qEngine() const {
     qengine = at::kONEDNN;
 #endif
 
-#if defined(USE_FBGEMM) && (defined(__x86_64__) || defined(_M_X64))
+#ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       /* X86 is enabled if and only if fbgemm is available.
        * It combines goodness of fbgemm and onednn by dispatching.
@@ -890,7 +890,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     engines.push_back(at::kONEDNN);
 #endif
 
-#if defined(USE_FBGEMM) && (defined(__x86_64__) || defined(_M_X64))
+#ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);
       // The X86 qengine is available if and only if FBGEMM is available

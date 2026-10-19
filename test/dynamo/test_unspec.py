@@ -245,6 +245,42 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_random_float_draws_inductor(self, dtype):
+        # Float draws reach the graph as float64 tensors, so the graph input must
+        # be traced as float64 too; otherwise Inductor reads them as float32.
+        # The products stay separate: summed, Inductor rounds once where eager
+        # rounds per op, which costs low-precision dtypes their tolerance.
+        def fn(x, rng):
+            return x * rng.random(), x * rng.uniform(0, 1), x * random.random()
+
+        x = torch.arange(4.0, dtype=dtype)
+        random.seed(0)
+        expected = fn(x, random.Random(0))
+        random.seed(0)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(opt_fn(x, random.Random(0)), expected)
+
+    def test_numpy_scalar_inputs_inductor(self):
+        def fn(x, a, b):
+            return x * a + x * b
+
+        x = torch.arange(4.0)
+        a, b = np.float32(0.5), np.float64(0.25)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
+    # The draw is a 0-dim float64 tensor in the graph, so it promotes an integer
+    # tensor to float64, while eager treats it as a Python float (float32).
+    @unittest.expectedFailure
+    def test_random_float_draw_integer_tensor_dtype(self):
+        def fn(x, rng):
+            return x * rng.random()
+
+        x = torch.arange(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, random.Random(0)), fn(x, random.Random(0)))
+
     @parametrize("clock_name,clock_args", _TIME_FUNCTION_TEST_CASES)
     def test_time_function_unused_no_warning(self, clock_name, clock_args):
         torch._dynamo.reset()
