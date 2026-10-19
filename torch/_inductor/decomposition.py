@@ -164,6 +164,80 @@ def register_decomposition(
     return decomp.register_decomposition(ops, decompositions)
 
 
+@register_decomposition(aten.topk.default)
+def topk_small_k(self, k, dim=-1, largest=True, sorted=True):
+    """
+    Small-k topk as k rounds of argmax-and-remove over the last dim, which
+    Inductor fuses into a single persistent reduction instead of falling back
+    to ATen's radix-select/sort kernels.
+
+    Small k is common in MoE routers, where each token picks its top 1 to 16
+    experts (possibly after a group-limited selection), over short rows of
+    experts. A general radix select or sort is a poor fit there, so emitting
+    a selection specialized for small k pays off.
+
+    Each round must return a value and its index with a deterministic
+    tie-break, and must then remove the picked element. Removing it by
+    overwriting the value with -inf is not enough, because the row may already
+    hold -inf (MoE routers mask out experts with -inf), and a later round could
+    pick the same element again. Instead, each element gets an int32 order key
+    with the same ordering as its value: the bit pattern of a non-negative
+    float already sorts correctly as an integer, and flipping the magnitude
+    bits of negative floats reverses theirs. This is the same conversion
+    ATen's radix-select topk uses (TopKTypeConfig<float>::convert), and as
+    there NaN ranks above every number and +0 ranks above -0.
+
+    Each round takes argmax of the keys, which returns the lowest index among
+    equal keys, gathers the value from the input, and sets that key to
+    INT32_MIN. Every real key is above INT32_MIN: -inf maps to -2139095041,
+    and the only pattern that would map to INT32_MIN is a negative NaN, which
+    is canonicalized first. So a removed element is never picked again. Results
+    come out in descending order, so the decomposition also serves sorted=True.
+    """
+    if (
+        config.triton.decompose_sort_ops
+        or self.device.type != "cuda"
+        # Not measured on ROCm yet.
+        or torch.version.hip is not None
+        or self.dtype not in (torch.float16, torch.bfloat16, torch.float32)
+        or not largest
+        or self.dim() == 0
+    ):
+        return NotImplemented
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    n = self.shape[dim]
+    # Only the last dim: over a non-last dim with few outputs, the rounds read
+    # strided columns and can be slower than ATen. k must be a plain int since
+    # it sets the number of rounds; a symbolic n decomposes only when it is
+    # known to be in range (e.g. bounded by an export Dim max).
+    if not (
+        dim == self.dim() - 1
+        and isinstance(k, int)
+        and 1 <= k <= 16
+        and statically_known_true(k <= n)
+        and statically_known_true(n <= 1024)
+    ):
+        return NotImplemented
+
+    x = self.float()
+    # One canonical (positive) NaN, so every NaN ranks highest.
+    x = torch.where(torch.isnan(x), float("nan"), x)
+    bits = x.view(torch.int32)
+    # Order-preserving float -> int: flip the magnitude bits of negatives.
+    key = torch.where(bits < 0, bits ^ 0x7FFFFFFF, bits)
+    index = torch.arange(n, device=self.device)
+
+    values, indices = [], []
+    for _ in range(k):
+        selected = key.argmax(dim, keepdim=True)
+        indices.append(selected)
+        # Take the value from the input so its original bits (e.g. a NaN
+        # payload) are returned.
+        values.append(torch.gather(self, dim, selected))
+        key = torch.where(index == selected, torch.iinfo(torch.int32).min, key)
+    return torch.cat(values, dim), torch.cat(indices, dim)
+
+
 @register_decomposition(aten.adaptive_max_pool3d.default)
 def adaptive_max_pool3d(input, output_size):
     result = decomp_adaptive_max_pool3d(input, output_size)
