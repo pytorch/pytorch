@@ -157,7 +157,7 @@ inline T chbevl(T x, const float array[], const int len) {
 
 template <typename T>
 inline T i0(T _x) {
-  auto x = ::metal::fabs(_x);
+  const auto x = ::metal::fabs(static_cast<float>(_x));
 
   if (x <= 8.0) {
     /* Chebyshev coefficients for exp(-x) I0(x)
@@ -262,7 +262,7 @@ inline T i0e(T _x) {
 
 template <typename T>
 inline T i1(T _x) {
-  const auto x = ::metal::fabs(_x);
+  const auto x = ::metal::fabs(static_cast<float>(_x));
 
   if (x <= 8.0) {
     // Chebyshev coefficients for exp(-x) i1(x) in the internal [0, 8]
@@ -449,7 +449,7 @@ inline float log_gamma(const T x) {
   float rc;
 
   const auto abs_x = ::metal::abs(static_cast<float>(x));
-  if (abs_x == 0) {
+  if (abs_x == 0 || ::metal::isinf(abs_x)) {
     return INFINITY;
   }
   if (abs_x < 12.0) {
@@ -475,12 +475,14 @@ inline float log_gamma(const T x) {
   if (x >= 0) {
     return rc;
   }
+  if (x == ::metal::trunc(x)) {
+    return INFINITY;
+  }
 
-  // Reflection formula
-  // Compute arg first to workaround Metal compiler bgg of sorts on M4
-  // See https://github.com/pytorch/pytorch/pull/145740 for more details
-  auto log_arg = abs_x * ::metal::abs(::metal::sinpi(abs_x));
-  return LOG_PI - rc - ::metal::log(log_arg);
+  // Reflection formula, with separate logs as abs_x * sinpi(abs_x) underflows
+  // for tiny abs_x
+  auto log_sin = ::metal::log(::metal::abs(::metal::sinpi(abs_x)));
+  return LOG_PI - rc - ::metal::log(abs_x) - log_sin;
 }
 
 inline float zeta(float x, float q) {
@@ -600,14 +602,9 @@ inline float digamma(T0 x) {
       // If the argument is a negative integer, NaN is returned
       return NAN;
     } else {
-      // Extracts the fractional part of x as r, since tan(pi * r) is more
-      // numerically accurate than tan(pi * x). While these operations are
-      // mathematically equivalent since both x and r are in radians and tan()
-      // has a periodicity of pi, in practice the computation of pi * x is a
-      // source of error (when |x| > 1).
-      float r = ::metal::fract(x);
+      // tanpi avoids the rounding error of computing pi * x near the poles
       return calc_digamma_positive_domain(1.0f - x) -
-          M_PI_F / ::metal::tan(M_PI_F * r);
+          M_PI_F / ::metal::precise::tanpi(x);
     }
   } else if (x == 0.0f) {
     // As per C++ standard for gamma related functions and SciPy,
@@ -816,7 +813,8 @@ inline T entr(T a) {
 
 // Copy-n-paste from aten/src/ATen/native/cuda/Math.cuh lines 1463-1915
 template <typename T>
-inline float bessel_j0_forward(T x) {
+inline float bessel_j0_forward(T x_) {
+  float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.96936729297347051624e-04,
       +8.28352392107440799803e-02,
@@ -876,12 +874,12 @@ inline float bessel_j0_forward(T x) {
       +1.71086294081043136091e+18,
   };
 
-  if (x < T(0)) {
+  if (x < 0) {
     x = -x;
   }
 
-  if (x <= T(5.0)) {
-    if (x < T(0.00001)) {
+  if (x <= 5.0) {
+    if (x < 0.00001) {
       return 1.0 - x * x / 4.0;
     }
 
@@ -898,7 +896,7 @@ inline float bessel_j0_forward(T x) {
     }
 
     return (x * x - 5.78318596294678452118e+00) *
-        (x * x - T(3.04712623436620863991e+01)) * rp / rq;
+        (x * x - 3.04712623436620863991e+01) * rp / rq;
   }
 
   float pp = 0.0;
@@ -927,7 +925,7 @@ inline float bessel_j0_forward(T x) {
 
   return (pp / pq *
               ::metal::precise::cos(
-                  x - T(0.785398163397448309615660845819875721)) -
+                  x - 0.785398163397448309615660845819875721) -
           5.0 / x * (qp / qq) *
               ::metal::precise::sin(
                   x - 0.785398163397448309615660845819875721)) *
@@ -935,7 +933,8 @@ inline float bessel_j0_forward(T x) {
 } // bessel_j0_forward(T x)
 
 template <typename T>
-inline float bessel_y0_forward(T x) {
+inline float bessel_y0_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.96936729297347051624e-04,
       +8.28352392107440799803e-02,
@@ -998,12 +997,12 @@ inline float bessel_y0_forward(T x) {
       +2.50596256172653059228e+17,
   };
 
-  if (x <= T(5.0)) {
-    if (x == T(0.0)) {
+  if (x <= 5.0) {
+    if (x == 0.0) {
       return -INFINITY;
     }
 
-    if (x < T(0.0)) {
+    if (x < 0.0) {
       return NAN;
     }
 
@@ -1058,7 +1057,8 @@ inline float bessel_y0_forward(T x) {
 } // bessel_y0_forward(T x)
 
 template <typename T>
-inline float bessel_j1_forward(T x) {
+inline float bessel_j1_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.62125616208173112003e-04,
       +7.31397056940917570436e-02,
@@ -1118,11 +1118,11 @@ inline float bessel_j1_forward(T x) {
       +5.32278620332680085395e+18,
   };
 
-  if (x < T(0.0)) {
+  if (x < 0.0) {
     return -bessel_j1_forward(-x);
   }
 
-  if (x <= T(5.0)) {
+  if (x <= 5.0) {
     float rp = 0.0;
 
     for (auto index = 0; index <= 3; index++) {
@@ -1173,7 +1173,8 @@ inline float bessel_j1_forward(T x) {
 } // bessel_j1_forward(T x)
 
 template <typename T>
-inline float bessel_y1_forward(T x) {
+inline float bessel_y1_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float PP[] = {
       +7.62125616208173112003e-04,
       +7.31397056940917570436e-02,
@@ -1235,12 +1236,12 @@ inline float bessel_y1_forward(T x) {
       +3.97270608116560655612e+18,
   };
 
-  if (x <= T(5.0)) {
-    if (x == T(0.0)) {
+  if (x <= 5.0) {
+    if (x == 0.0) {
       return -INFINITY;
     }
 
-    if (x <= T(0.0)) {
+    if (x <= 0.0) {
       return NAN;
     }
 
@@ -1295,7 +1296,8 @@ inline float bessel_y1_forward(T x) {
 } // bessel_y1_forward(T x)
 
 template <typename T>
-inline float modified_bessel_i0_forward(T x) {
+inline float modified_bessel_i0_forward(T x_) {
+  const float x = static_cast<float>(x_);
   constexpr float A[] = {
       -4.41534164647933937950e-18, +3.33079451882223809783e-17,
       -2.43127984654795469359e-16, +1.71539128555513303061e-15,
@@ -1342,7 +1344,7 @@ inline float modified_bessel_i0_forward(T x) {
       a = (.5 * ::metal::fabs(x) - 2.0) * q - p + A[index];
     }
 
-    return ::metal::exp(::metal::fabs(x)) * (T(0.5) * (a - p));
+    return ::metal::exp(::metal::fabs(x)) * (0.5 * (a - p));
   }
 
   float b = B[0];
@@ -3128,7 +3130,8 @@ inline T erfcx_y100(T y100) {
 }
 
 template <typename T>
-float erfcx(T x) {
+float erfcx(T x_) {
+  const float x = static_cast<float>(x_);
   if (x != x) {
     return x;
   }
@@ -3155,6 +3158,164 @@ float erfcx(T x) {
     }
   }
 }
+
+// Copy-n-paste from airy_ai_forward in aten/src/ATen/native/Math.h
+// See note [3-Clause BSD License for the Cephes Math Library].
+template <typename T>
+inline float airy_ai_forward(T x_) {
+  constexpr float AN[] = {
+      +3.46538101525629032477e-01,
+      +1.20075952739645805542e+01,
+      +7.62796053615234516538e+01,
+      +1.68089224934630576269e+02,
+      +1.59756391350164413639e+02,
+      +7.05360906840444183113e+01,
+      +1.40264691163389668864e+01,
+      +9.99999999999999995305e-01,
+  };
+
+  constexpr float AD[] = {
+      +5.67594532638770212846e-01,
+      +1.47562562584847203173e+01,
+      +8.45138970141474626562e+01,
+      +1.77318088145400459522e+02,
+      +1.64234692871529701831e+02,
+      +7.14778400825575695274e+01,
+      +1.40959135607834029598e+01,
+      +1.00000000000000000470e+00,
+  };
+
+  constexpr float AFN[] = {
+      -1.31696323418331795333e-01,
+      -6.26456544431912369773e-01,
+      -6.93158036036933542233e-01,
+      -2.79779981545119124951e-01,
+      -4.91900132609500318020e-02,
+      -4.06265923594885404393e-03,
+      -1.59276496239262096340e-04,
+      -2.77649108155232920844e-06,
+      -1.67787698489114633780e-08,
+  };
+
+  constexpr float AFD[] = {
+      +1.33560420706553243746e+01,
+      +3.26825032795224613948e+01,
+      +2.67367040941499554804e+01,
+      +9.18707402907259625840e+00,
+      +1.47529146771666414581e+00,
+      +1.15687173795188044134e-01,
+      +4.40291641615211203805e-03,
+      +7.54720348287414296618e-05,
+      +4.51850092970580378464e-07,
+  };
+
+  constexpr float AGN[] = {
+      +1.97339932091685679179e-02,
+      +3.91103029615688277255e-01,
+      +1.06579897599595591108e+00,
+      +9.39169229816650230044e-01,
+      +3.51465656105547619242e-01,
+      +6.33888919628925490927e-02,
+      +5.85804113048388458567e-03,
+      +2.82851600836737019778e-04,
+      +6.98793669997260967291e-06,
+      +8.11789239554389293311e-08,
+      +3.41551784765923618484e-10,
+  };
+
+  constexpr float AGD[] = {
+      +9.30892908077441974853e+00,
+      +1.98352928718312140417e+01,
+      +1.55646628932864612953e+01,
+      +5.47686069422975497931e+00,
+      +9.54293611618961883998e-01,
+      +8.64580826352392193095e-02,
+      +4.12656523824222607191e-03,
+      +1.01259085116509135510e-04,
+      +1.17166733214413521882e-06,
+      +4.91834570062930015649e-09,
+  };
+
+  const float x = static_cast<float>(x_);
+
+  if (::metal::isinf(x)) {
+    return NAN;
+  }
+
+  if (x > 103.892) {
+    return 0.0;
+  }
+
+  if (x < -2.09) {
+    const float z = 1.0 / (-2.0 * x * ::metal::precise::sqrt(-x) / 3.0);
+
+    float afn = 0.0;
+    float afd = 0.0;
+    for (auto index = 0; index <= 8; index++) {
+      afn = afn * (z * z) + AFN[index];
+      afd = afd * (z * z) + AFD[index];
+    }
+
+    float agn = 0.0;
+    for (auto index = 0; index <= 10; index++) {
+      agn = agn * (z * z) + AGN[index];
+    }
+
+    float agd = 0.0;
+    for (auto index = 0; index <= 9; index++) {
+      agd = agd * (z * z) + AGD[index];
+    }
+
+    const float t = -2.0 * x * ::metal::precise::sqrt(-x) / 3.0 + 0.25 * M_PI_F;
+
+    return 5.64189583547756286948e-01 /
+        ::metal::precise::sqrt(::metal::precise::sqrt(-x)) *
+        (::metal::precise::sin(t) * (1.0 + z * z * afn / afd) -
+         ::metal::precise::cos(t) * (z * agn / agd));
+  }
+
+  if (x >= 2.09) {
+    const float zeta = 2.0 * x * ::metal::precise::sqrt(x) / 3.0;
+
+    float an = 0.0;
+    float ad = 0.0;
+    for (auto index = 0; index <= 7; index++) {
+      an = an * (1.0 / zeta) + AN[index];
+      ad = ad * (1.0 / zeta) + AD[index];
+    }
+
+    return 5.64189583547756286948e-01 * (an / ad) /
+        (2.0 * ::metal::precise::sqrt(::metal::precise::sqrt(x)) *
+         ::metal::precise::exp(zeta));
+  }
+
+  float f = 1.0;
+  float g = x;
+  float k = 1.0;
+
+  float m = 1.0;
+  float n = x;
+  float t = 1.0;
+  const float z = x * x * x;
+
+  while (t > ::metal::numeric_limits<float>::epsilon()) {
+    m *= z;
+    k += 1.0;
+    m /= k;
+    n *= z;
+    k += 1.0;
+    n /= k;
+    m /= k;
+    f += m;
+    k += 1.0;
+    n /= k;
+    g += n;
+
+    t = ::metal::fabs(m / f);
+  }
+
+  return 0.355028053887817239260 * f - 0.258819403792806798405 * g;
+} // airy_ai_forward(T x)
 
 } // namespace metal
 } // namespace c10
