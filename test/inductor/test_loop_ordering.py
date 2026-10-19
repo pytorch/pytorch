@@ -313,6 +313,7 @@ class ImplDetailTest(MockSchedulerTest):
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
         original_state = snode.snapshot_loop_state()
+        original_read_writes_gen = snode._read_writes_gen
         tracker = _LoopMutationTracker.create((snode,))
 
         snode.expand_dimension_for_pointwise_node(0, 64)
@@ -320,6 +321,7 @@ class ImplDetailTest(MockSchedulerTest):
         tracker.finish(rollback=True)
 
         self.assertEqual(snode.snapshot_loop_state(), original_state)
+        self.assertEqual(snode._read_writes_gen, original_read_writes_gen)
 
     def test_foreach_nested_fused_loop_state_rollback(self):
         snodes = [
