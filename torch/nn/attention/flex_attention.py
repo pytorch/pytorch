@@ -274,6 +274,14 @@ class FlexKernelOptions(TypedDict, total=False):
     the control for callers that cannot reach this option, and it does not
     affect NVIDIA or Intel selection."""
 
+    FLYDSL_DQ_ACCUM_FP32: NotRequired[bool]
+    """Use FP32 for the private dQ accumulation workspace in FlyDSL backward.
+    Specify as ``bwd_FLYDSL_DQ_ACCUM_FP32`` with ``BACKEND="FLYDSL"``.
+    Default: True. False uses BF16 intermediate storage to reduce workspace
+    traffic, rounding after each KV owner and potentially increasing gradient
+    error for long sequences. Both modes use fixed-order, non-atomic accumulation
+    and return gradients in the input dtype. This option does not affect forward."""
+
     # ROCm-specific options
 
     kpack: NotRequired[int]
@@ -294,10 +302,13 @@ class FlexKernelOptions(TypedDict, total=False):
         - "TRITON": Standard Triton flex_attention kernel
         - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
-        - "FLYDSL": Experimental FlyDSL FlexAttention forward kernel
+        - "FLYDSL": Experimental FlyDSL FlexAttention forward and backward kernels
+          for BF16 on ROCm gfx950, requiring the optional FlyDSL dependency.
+          Unsupported backward configurations fall back to Triton, including GQA,
+          decode, gradients through LSE, and shapes exceeding the dQ workspace limit.
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
-    Raises an error if the requested backend cannot be used. Default: "AUTO"
+    Raises an error if the requested forward backend cannot be used. Default: "AUTO"
     """
 
 
@@ -2198,9 +2209,6 @@ def _apply_kernel_options(
             # CPU/MPS support inference only, no LSE/backward yet.
             # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
-        if any_inputs_on_mps_device:
-            # MPS supports inference only; backward / LSE not yet implemented
-            kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     # If forward kernel needs to return max is decided by this rule internally.
     if "OUTPUT_MAX" in kernel_options:
@@ -2243,10 +2251,19 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
         raise NotImplementedError(
             "FlexAttention does not support backward on MPS. Please set the input requires_grad to False or use another device."
         )
-    supported_devices = {"cuda", "cpu", "xpu", "hpu", "mps"}
+    # Read the PrivateUse1 name per call: backends rename it after torch import.
+    supported_devices = {
+        "cuda",
+        "cpu",
+        "xpu",
+        "hpu",
+        "mps",
+        torch._C._get_privateuse1_backend_name(),
+    }
     if query.device.type not in supported_devices:
         raise ValueError(
-            "FlexAttention is only supported on CUDA, CPU, HPU, or MPS devices. "
+            "FlexAttention is only supported on CUDA, CPU, XPU, HPU, MPS, or "
+            "PrivateUse1 devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
@@ -2296,7 +2313,8 @@ def _enforce_mem_layouts(
     gemm_precision = query.dtype
 
     should_enforce_mem_layout = (
-        gemm_precision in fp8_dtypes
+        query.device.type == "cuda"
+        and gemm_precision in fp8_dtypes
         and torch.version.cuda is not None
         and torch.cuda.get_device_capability("cuda") >= (8, 9)
         and torch.cuda.get_device_capability("cuda") < (10, 0)
