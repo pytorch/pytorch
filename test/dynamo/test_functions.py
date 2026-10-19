@@ -45,6 +45,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -7316,12 +7317,12 @@ class GraphModule(torch.nn.Module):
 class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
+    @onlyCUDA
     def test_get_device_properties_tensor_device(self, device):
         def fn(a):
             x = a.to(device)
             prop = torch.get_device_module(device).get_device_properties(x.device)
-            if prop.major == 8 or prop.max_threads_per_multi_processor is None:
+            if prop.major == 8:
                 return x + prop.multi_processor_count
             return x + prop.max_threads_per_multi_processor
 
@@ -7330,7 +7331,7 @@ class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
         )
 
     @onlyAccelerator
-    def test_cuda_manual_seed(self, device):
+    def test_device_manual_seed(self, device):
         import torch._inductor.config as inductor_config
 
         device_mod = torch.get_device_module(device)
@@ -7355,7 +7356,7 @@ class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
                     self.assertEqual(foo(), foo())
 
 
-instantiate_device_type_tests(FunctionAcceleratorTests, globals())
+instantiate_device_type_tests(FunctionAcceleratorTests, globals(), allow_xpu=True)
 
 
 class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
@@ -7368,7 +7369,9 @@ class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
             m = a.to(device)
             return m + b.type(m.type())
 
-        return fn(self)
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=2, expected_frame_count=1
+        )
 
     @onlyAccelerator
     def test_tensor_type5(self, device):
@@ -7377,7 +7380,9 @@ class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
             m = a.to(device).half()
             return b.type(m.type())
 
-        return fn(self)
+        torch._dynamo.testing.standard_test(
+            self, fn=fn, nargs=2, expected_frame_count=1
+        )
 
 
 instantiate_device_type_tests(
