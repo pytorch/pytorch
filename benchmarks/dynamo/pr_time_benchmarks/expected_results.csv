@@ -46,7 +46,7 @@ symint_sum,compile_time_instruction_count,3427000000,0.1
 
 
 
-symint_sum_loop,compile_time_instruction_count,7597000000,0.1
+symint_sum_loop,compile_time_instruction_count,7784000000,0.1
 
 
 
@@ -62,7 +62,7 @@ aotdispatcher_partitioner_cpu,compile_time_instruction_count,7585000000,0.1
 
 
 
-aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1856000000,0.1
+aotdispatcher_partitioner_cpu2,compile_time_instruction_count,1818000000,0.1
 
 
 
@@ -154,15 +154,15 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_inductor,instruction_count,147100,0.1
+runtime_overhead_inductor,instruction_count,139700,0.1
 
 
 
-runtime_overhead_inductor_inference_mode,instruction_count,157500,0.1
+runtime_overhead_inductor_inference_mode,instruction_count,149700,0.1
 
 
 
-runtime_overhead_inductor_requires_grad,instruction_count,179800,0.1
+runtime_overhead_inductor_requires_grad,instruction_count,171300,0.1
 
 
 
@@ -170,15 +170,15 @@ runtime_overhead_inductor_requires_grad_backward,instruction_count,107500,0.1
 
 
 
-runtime_overhead_inductor_dynamic,instruction_count,145100,0.1
+runtime_overhead_inductor_dynamic,instruction_count,137700,0.1
 
 
 
-runtime_overhead_inductor_inference_mode_dynamic,instruction_count,155300,0.1
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,147600,0.1
 
 
 
-runtime_overhead_inductor_requires_grad_dynamic,instruction_count,178300,0.1
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,171200,0.1
 
 
 
@@ -186,7 +186,7 @@ runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,10830
 
 
 
-runtime_overhead_eager_cpu,instruction_count,107600,0.1
+runtime_overhead_eager_cpu,instruction_count,104600,0.1
 
 
 
