@@ -1334,8 +1334,8 @@ Options for :meth:`Window.put`.
 Attributes:
     timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
         sentinel, meaning the process group's timeout.
-    hints (dict[str, str]): Backend-specific hints; no current backend uses
-        them for window operations.
+    hints (dict[str, str]): Backend-specific hints; backends ignore
+        hints they don't recognize.
 )")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::PutOptions::timeout)
@@ -1347,8 +1347,8 @@ Options for :meth:`Window.signal`.
 Attributes:
     timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
         sentinel, meaning the process group's timeout.
-    hints (dict[str, str]): Backend-specific hints; no current backend uses
-        them for window operations.
+    hints (dict[str, str]): Backend-specific hints; backends ignore
+        hints they don't recognize.
 )")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::SignalOptions::timeout)
@@ -1360,8 +1360,8 @@ Options for :meth:`Window.wait_signal`.
 Attributes:
     timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
         sentinel, meaning the process group's timeout.
-    hints (dict[str, str]): Backend-specific hints; no current backend uses
-        them for window operations.
+    hints (dict[str, str]): Backend-specific hints; backends ignore
+        hints they don't recognize.
 )")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::WaitSignalOptions::timeout)
@@ -1423,10 +1423,8 @@ Args:
           R"(
 Forget the registered tensor so another can be registered. This is
 collective. Backends may keep the underlying memory registered until it is
-freed; with NCCL, every rank must then free it in the same order. To avoid
-that, register the pool with ``register_mem_pool`` and, on every rank,
-synchronize, call this, call ``deregister_mem_pool``, then free the memory
-and call ``destroy_process_group``.
+freed; with NCCL, see the one-sided communication docs for the teardown
+order.
 )")
       .def(
           "put",
