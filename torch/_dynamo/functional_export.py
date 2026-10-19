@@ -18,6 +18,7 @@ from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_tr
 from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
+from torch._dynamo.graph_bytecode_inputs import install_captured_registry
 from torch._dynamo.source import GetItemSource
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
@@ -1014,6 +1015,9 @@ def _dynamo_graph_capture_for_export(
                     raise AssertionError(
                         "output_graph must not be None after fullgraph_capture"
                     )
+                # The returned graph is re-traced directly, without the
+                # pre-graph bytecode that would fill the user object table.
+                install_captured_registry(out.graph_capture_output.user_objects)
 
                 example_inputs: list[Any] = []
                 if out.backend_input is not None:
