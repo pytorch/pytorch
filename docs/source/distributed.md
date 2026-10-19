@@ -613,11 +613,12 @@ The window API is experimental and may change without notice.
 ```
 
 A window exposes a tensor on every rank of a group for one-sided (RMA) writes:
-a rank can write into a peer's tensor with {meth}`Window.put` without the peer
-posting a matching receive. Peers synchronize with {meth}`Window.signal` and
-{meth}`Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
-windows with NCCL 2.29 or later; `nccl-legacy` does not.
-{func}`_supports_window` only checks the backend and NCCL version:
+a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed_c10d.Window.put` without the peer
+posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
+{meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
+windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
+when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation.
+{func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
 
@@ -625,12 +626,12 @@ With `nccl`, the window tensor must be allocated from the backend's memory
 pool, `torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
 tensor's whole allocator segment, so all ranks must register matching
 segments; allocating the same sizes in the same order on every rank satisfies
-this. The source of {meth}`Window.put` must lie in an already registered
+this. The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must lie in an already registered
 segment, e.g. a slice of a registered tensor.
-Each {meth}`Window.put` also signals the destination rank, so the
-destination can wait for the data with a single {meth}`Window.wait_signal`.
-{meth}`Window.map_remote_tensor` only supports the local rank, and
-{meth}`Window.get_attr` always reports `SEPARATE`.
+Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank, so the
+destination can wait for the data with a single {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`.
+{meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank, and
+{meth}`~torch.distributed.distributed_c10d.Window.get_attr` always reports `SEPARATE`.
 
 The example below runs a ring: each rank writes its slice into the next rank's
 window and waits for the previous rank's slice to arrive in its own. The
@@ -675,8 +676,10 @@ assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
 win.tensor_deregister()
 ```
 
-As with collectives, `async_op=False` enqueues the operation on the current
-stream, and `async_op=True` returns a `Work` handle to wait on.
+All operations return a `Work` handle. With `async_op=False` the operation is
+enqueued on the current stream; with `async_op=True` it is enqueued on an
+internal stream ordered after the current stream, and `Work.wait()` makes the
+current stream wait for it.
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.distributed_c10d._supports_window
