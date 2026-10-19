@@ -617,7 +617,9 @@ a rank can write into a peer's tensor with {meth}`~torch.distributed.distributed
 posting a matching receive. Peers synchronize with {meth}`~torch.distributed.distributed_c10d.Window.signal` and
 {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
 windows with NCCL 2.29 or later. `nccl-legacy` does not, nor does `nccl`
-when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation.
+when `TORCH_DIST_USE_NCCL2=0` selects the legacy implementation or
+`TORCH_DISTRIBUTED_DEBUG=DETAIL` wraps it in a debug wrapper, which does not
+forward windows.
 {func}`~torch.distributed.distributed_c10d._supports_window` only checks the backend and NCCL version:
 registration can still fail if no transport between the ranks supports
 symmetric memory (e.g. no NVLink or InfiniBand).
