@@ -6267,14 +6267,15 @@ class GraphModule(torch.nn.Module):
 
         f5()
         old_get_device_module = torch.get_device_module
+        patched_module = types.SimpleNamespace(synchronize=lambda: None)
 
         def new_get_device_module(requested_device=None):
             if requested_device:
                 return old_get_device_module(requested_device)
-            return torch.cpu
+            return patched_module
 
         with patch("torch.get_device_module", new_get_device_module):
-            self.assertEqual(f5(), torch.cpu)
+            self.assertIs(f5(), patched_module)
 
         @torch.compile(backend="eager")
         def f6():
@@ -7299,6 +7300,8 @@ class GraphModule(torch.nn.Module):
 
 
 class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
+    """Tests CUDA-only device properties unavailable on other accelerators."""
+
     hw_classification = HardwareClassification.CUDA
 
     def test_get_device_properties_tensor_device(self, device):
@@ -7332,25 +7335,17 @@ class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
             return torch.get_device_module()
 
         f5()
-        device_type = torch.device(device).type
-        new_device = (
-            "cpu"
-            if torch._C._get_accelerator().type == device_type
-            else device_type
-        )
-
         old_get_device_module = torch.get_device_module
 
         def new_get_device_module(requested_device=None):
             if requested_device:
                 return old_get_device_module(requested_device)
-            return getattr(torch, new_device)
+            return torch.cpu
 
         # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
         # torch.get_device_module
         with patch("torch.get_device_module", new_get_device_module):
-            print(torch.get_device_module())
-            self.assertEqual(f5(), getattr(torch, new_device))
+            self.assertEqual(f5(), torch.cpu)
 
         # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
