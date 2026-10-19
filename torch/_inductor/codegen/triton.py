@@ -5463,7 +5463,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self._reject_if_template_host_tma(var)
                 self._host_tma_non_materializable.add(var)
                 self._discard_host_tma_descriptor(var)
-                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
+                index_str = indexing.index_str
+                if has_tmpmask and indexing.has_mask():
+                    index_str = f"tl.where({indexing.mask_str}, {index_str}, 0)"
+                line = f"tl.load({var} + ({index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
 
                 # The block shape of tl.load depends on the indexing expression.
                 # Inferring shape solely from the mask may miss cases where the mask is constant.
