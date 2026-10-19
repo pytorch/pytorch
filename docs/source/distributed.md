@@ -606,6 +606,114 @@ as they should never be created manually, but they are guaranteed to support two
 .. autoclass:: P2POp
 ```
 
+## One-sided communication (experimental)
+
+```{warning}
+The window API is experimental and may change without notice.
+```
+
+A window exposes a tensor on every rank of a group for one-sided (RMA) writes:
+a rank can write into a peer's tensor with {meth}`Window.put` without the peer
+posting a matching receive. Peers synchronize with {meth}`Window.signal` and
+{meth}`Window.wait_signal`. The `nccl` and `nccl-lazy` backends support
+windows with NCCL 2.29 or later; use {func}`_supports_window` to check.
+
+With `nccl`, both the window tensor and the source of {meth}`Window.put` must
+be allocated from the backend's memory pool, `torch.cuda.MemPool(backend.mem_allocator)`.
+Each {meth}`Window.put` also signals the destination rank, so the destination
+can wait for the data with a single {meth}`Window.wait_signal`.
+
+The example below runs a ring: each rank writes its slice into the next rank's
+window and waits for the previous rank's slice to arrive in its own.
+
+```python
+import os
+
+import torch
+import torch.distributed as dist
+
+local_rank = int(os.environ["LOCAL_RANK"])
+dist.init_process_group("nccl", device_id=torch.device("cuda", local_rank))
+rank, world_size = dist.get_rank(), dist.get_world_size()
+device = torch.device("cuda", local_rank)
+assert dist._supports_window()
+
+backend = dist.get_backend_impl(device=device)
+pool = torch.cuda.MemPool(backend.mem_allocator)
+count = 1024
+with torch.cuda.use_mem_pool(pool):
+    src = torch.full((count,), rank, dtype=torch.float, device=device)
+    buf = torch.zeros(count * world_size, dtype=torch.float, device=device)
+
+# Collective: every rank registers its buffer.
+win = dist._new_window(buf)
+
+next_rank = (rank + 1) % world_size
+prev_rank = (rank - 1) % world_size
+# Write src into slot `rank` of the next rank's buffer and signal it.
+win.put(src, next_rank, rank * count, async_op=False)
+# Wait until the previous rank's put has landed in this rank's buffer.
+win.wait_signal(prev_rank, async_op=False)
+torch.cuda.synchronize()
+assert buf[prev_rank * count : (prev_rank + 1) * count].eq(prev_rank).all()
+
+# Collective: ranks synchronize before releasing the buffer.
+win.tensor_deregister()
+```
+
+As with collectives, `async_op=False` enqueues the operation on the current
+stream, and `async_op=True` returns a `Work` handle to wait on.
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d._supports_window
+.. autofunction:: torch.distributed.distributed_c10d._new_window
+
+.. py:class:: Window
+
+   One-sided communication window returned by :func:`_new_window`. Backends
+   implement a subset of these methods; unsupported methods raise
+   ``RuntimeError``.
+
+   .. py:method:: tensor_register(tensor, owning=True)
+
+      Register ``tensor`` as this rank's window memory. Collective: every rank
+      in the group must call it, in the same order relative to other
+      collectives. Ranks may register tensors of different sizes. If
+      ``owning`` is ``True``, the window keeps ``tensor`` alive until
+      :meth:`tensor_deregister`.
+
+   .. py:method:: tensor_deregister()
+
+      Release the registered tensor. Collective.
+
+   .. py:method:: put(tensor, dst_rank, target_offset_nelems, async_op, opts=PutOptions())
+
+      Write ``tensor`` into the window of ``dst_rank``, starting at element
+      ``target_offset_nelems``. ``tensor`` must match the destination's dtype
+      and fit within its window. Returns a ``Work`` handle.
+
+   .. py:method:: signal(peer_rank, async_op, opts=SignalOptions())
+
+      Send a signal to ``peer_rank``. Returns a ``Work`` handle.
+
+   .. py:method:: wait_signal(peer_rank, async_op, opts=WaitSignalOptions())
+
+      Wait for one signal from ``peer_rank``, sent by :meth:`signal` or
+      :meth:`put`. Returns a ``Work`` handle.
+
+   .. py:method:: map_remote_tensor(rank)
+
+      Return a tensor view of ``rank``'s window memory. ``nccl`` only supports
+      the local rank.
+
+   .. py:method:: get_attr(peer_rank)
+
+      Return the ``WindowAttr`` of ``peer_rank``'s window. Its ``access_type``
+      is ``WindowAccessType.UNIFIED`` for a single coherent view of the window,
+      or ``SEPARATE`` for separate copies that need explicit synchronization.
+      ``nccl`` always reports ``SEPARATE``.
+```
+
 ## Synchronous and asynchronous collective operations
 
 Every collective operation function supports the following two kinds of operations,
