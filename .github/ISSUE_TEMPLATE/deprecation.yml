@@ -1,7 +1,7 @@
 name: Deprecation tracking
 description: Track a deprecation, freeze, or removal of a PyTorch API or component
 title: "[deprecation] "
-labels: ["module: deprecation", "slowroll"]
+labels: ["module: deprecation"]
 
 body:
 - type: markdown
@@ -46,7 +46,7 @@ body:
   id: next-step
   attributes:
     label: Next step
-    description: The next action and the release it ships in, e.g. `remove in 2.17`, `error in 2.16`. Used to assign milestones.
+    description: Next action and target release, e.g. `remove in 2.18`, `error in 2.17`. Use `none` for a frozen component with no planned action. Used to assign milestones.
   validations:
     required: true
 - type: textarea

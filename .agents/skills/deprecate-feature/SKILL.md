@@ -5,64 +5,64 @@ description: Deprecate, freeze, or remove a PyTorch API or component and track i
 
 # Deprecating a Feature in PyTorch
 
-Every deprecation, freeze, and removal is tracked by its own issue, filed with the deprecation issue form (`.github/ISSUE_TEMPLATE/deprecation.yml`) and attached as a sub-issue of the umbrella https://github.com/pytorch/pytorch/issues/201298. Deprecations without a target and a tracking issue tend to stay forever (main still warns about removals planned for 1.6).
-
-The work is not done until every item in the [Done checklist](#done-checklist) holds. If one is missing, report it as unfinished instead of finishing.
+Use one tracking issue for the whole lifecycle of a deprecation, freeze, or removal. File it with the deprecation form (`.github/ISSUE_TEMPLATE/deprecation.yml`) and attach it as a sub-issue of the umbrella https://github.com/pytorch/pytorch/issues/201298. Report any unmet [Done checklist](#done-checklist) item as unfinished work.
 
 ## Lifecycle
 
 This follows the [backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) for stable components; if this skill and the wiki disagree, follow the wiki. Prototype and beta components may break without a deprecation period.
 
-1. **Deprecate (release N).** Warn on use, point to the replacement, update docs, and stop using the API inside PyTorch itself.
-2. **Keep warning for at least two releases** (and 180 days of nightlies). The earliest removal target is N+2.
-3. **Remove (release >= N+2).** Delete the code, its tests, and its docs.
-4. **Silent behavior changes** (e.g. changing a default) must be made loud first: after the warning period, the old behavior raises an error for another two releases (N+2 to N+4) before the new behavior is enabled.
+1. **Deprecate in release N.** Warn on use, point to the replacement, update docs, and migrate PyTorch's own callers.
+2. **Warn for at least two releases and 180 days of nightlies.** The earliest removal target is N+2.
+3. **Remove** once both windows have passed and the announced target has arrived.
+4. **Silent behavior changes** (e.g. changing a default) must be made loud first: after the warning period, the old behavior raises an error for at least two more releases and 180 more days of nightlies before the new behavior is enabled.
 
-Release N is the release that will ship the change: read `version.txt` (e.g. `2.15.0a0` means the change ships in 2.15, so the earliest removal is 2.17).
+N is the release that will ship the change: read `version.txt` (`2.16.0a0` means the change ships in 2.16, so the earliest removal is 2.18).
 
 ## Adding a deprecation
 
-Python, prefer `typing_extensions.deprecated` with `FutureWarning` (user-facing; `DeprecationWarning` is hidden by default outside `__main__`):
+The message must state:
+- the start version and the removal target as concrete numbers, never "a future release";
+- the replacement, or how to keep the current behavior if there is none;
+- the tracking issue URL.
+
+Warn at most once per process so users are not spammed.
+
+Python: emit a `FutureWarning` (`DeprecationWarning` is hidden by default outside `__main__`) behind a module-level once flag. The default warnings filter only deduplicates per call site, so an API reached from many places would otherwise warn repeatedly:
 
 ```python
-from typing_extensions import deprecated
+_foo_warned = False
 
-@deprecated(
-    "`torch.foo` is deprecated since 2.15 and will be removed in 2.17. Use `torch.bar` instead.",
-    category=FutureWarning,
-)
-def foo(...): ...
+def foo(...):
+    global _foo_warned
+    if not _foo_warned:
+        _foo_warned = True
+        warnings.warn(
+            "`torch.foo` is deprecated since 2.16 and will be removed in 2.18. Use `torch.bar` instead. "
+            "See https://github.com/pytorch/pytorch/issues/NNNN",
+            FutureWarning,
+            stacklevel=2,
+        )
 ```
 
-For a deprecated argument or behavior inside a function, use `warnings.warn(msg, FutureWarning, stacklevel=2)` so the warning points at user code.
+To also get type-checker diagnostics, add `@typing_extensions.deprecated(msg, category=None)`. Do not pass a warning category to `@deprecated`: it warns on every call, independently of the once flag.
 
-C++: `TORCH_WARN_ONCE(...)` with the same message shape.
-
-Do not spam users. Warn at most once per process:
-- C++: use `TORCH_WARN_ONCE`, not `TORCH_WARN`.
-- Python: the default filter shows a warning once per call site, which still repeats when the deprecated path is reached from many places (or under filters that reset the registry). For APIs that can be hit repeatedly, such as per-op, per-step, or per-module calls, guard the warning with a module-level flag so it fires once per process.
-- Warn where the user opts into the deprecated behavior (the call or argument), not in hot internal paths.
-- PyTorch itself must not trigger the warning: migrate internal callers so users only see warnings for their own code.
-
-The message must state:
-- the start version and the removal version as concrete numbers (`since 2.15 ... removed in 2.17`), never "a future release";
-- the replacement, or how to keep the current behavior if there is none;
-- the tracking issue (`See https://github.com/pytorch/pytorch/issues/NNNN`).
+C++: `TORCH_WARN_ONCE(...)`, not `TORCH_WARN`. It surfaces in Python as a `UserWarning`.
 
 Also:
-- Add `.. deprecated:: 2.15` to the docstring.
-- Add a test that the warning fires (`self.assertWarnsRegex(FutureWarning, ...)`), and silence it in other tests that still exercise the old path.
+- Warn where the user opts into the deprecated behavior (the call or argument), not in hot internal paths.
+- Add `.. deprecated:: 2.16` to the docstring.
+- Test that the warning fires with the expected text (reset the once flag in the test), and silence it in other tests that still exercise the old path.
 - Label the PR `topic: deprecation` so it lands in the release notes.
 
 ## Freezing a component
 
-Some components are frozen rather than scheduled for removal (e.g. the C++ frontend `torch::nn`/`torch::optim`). Frozen means: no new features, bugs closed as won't-fix unless they are security or crash issues. The component gets a tracking issue (Kind: Frozen component, Removal target: `none` if unplanned); link it when closing issues against the component.
+Some components are frozen rather than scheduled for removal (e.g. the C++ frontend `torch::nn`/`torch::optim`). Frozen means: no new features, and bugs are closed as won't-fix unless they are security or crash issues. The component gets a tracking issue (Kind: Frozen component; Removal target and Next step: `none` if no removal is planned); link it when closing issues against the component.
 
 ## Tracking issue
 
 1. Search for an existing tracking issue: sub-issues of #201298 and `gh issue list -R pytorch/pytorch -l "module: deprecation" --search "<api>"`.
-2. If none exists, draft one using the fields of `.github/ISSUE_TEMPLATE/deprecation.yml`: API or component, Kind, Deprecated in, Removal target, Next step, Replacement and migration, Owner, PRs. Render each field as a `### <label>` heading followed by its value, matching what the form produces, so automation can parse it. Title: `[deprecation] <api>`.
-3. Show the exact title and body to the user and wait for approval before creating anything (see `AI_POLICY.md`). Then create it with labels `module: deprecation` and `slowroll`.
+2. If none exists, draft one with the form's fields: API or component, Kind, Deprecated in, Removal target, Next step, Replacement and migration, Owner, PRs. Render each field as a `### <label>` heading followed by its value, as the form does, so automation can parse it. Title: `[deprecation] <api>`.
+3. Get user approval of the exact title and body before creating the issue, and of the exact change before editing any existing issue (see `AI_POLICY.md`). Create it with the `module: deprecation` label. Add `slowroll` only for a staged BC rollout behind an opt-in flag (e.g. #191236).
 4. Attach it as a sub-issue of #201298. The API takes the issue's internal `id`, not its number:
 
    ```bash
@@ -70,20 +70,20 @@ Some components are frozen rather than scheduled for removal (e.g. the C++ front
    gh api -X POST repos/pytorch/pytorch/issues/201298/sub_issues -F sub_issue_id="$id"
    ```
 
-5. Keep `Next step` current: it holds the next action and the release it ships in (e.g. `remove in 2.17`). Milestones are assigned from it at each branch cut, so do not set future milestones by hand.
-
-## Done checklist
-
-- [ ] Warning text names the start version, the removal version (>= start + 2), and the tracking issue URL.
-- [ ] Tracking issue exists, is labeled `module: deprecation` and `slowroll`, has an up-to-date `Next step`, and is a sub-issue of #201298.
-- [ ] PR body contains `Part of #<tracking issue>`; PR is labeled `topic: deprecation` (or `topic: bc breaking` for a removal).
+5. Keep `Next step` current, e.g. `remove in 2.18`. Milestones are assigned from it at each branch cut, so do not set future milestones by hand.
 
 ## Removing a deprecated feature
 
-1. Check the start version in the warning, the docstring, or `git log -S '<warning text>'`. Removal is allowed only once `version.txt` is at least start + 2.
-2. Delete the implementation, the warning, its tests, and its docs. Search for remaining references, including C++, `.pyi.in` stubs, `docs/source`, and `torch/overrides.py`.
-3. Label the PR `topic: bc breaking`, describe the migration in the release-notes section, and reference the tracking issue (`Fixes #<N>` for the final step, otherwise `Part of #<N>`).
-4. If steps remain (e.g. enabling new behavior), update `Next step` on the tracking issue (after user approval).
+1. Find the start version in the tracking issue, the warning, or `git log -S '<warning text>'`. Verify the warning has shipped for at least two releases and 180 days of nightlies, and that the announced removal target has arrived.
+2. Remove the implementation, the warning, and its tests. Search for remaining references, including C++, `.pyi.in` stubs, `docs/source`, and `torch/overrides.py`. Where docs remain (e.g. for a behavior change), add `.. versionchanged:: <version>` with migration guidance.
+3. Label the PR `topic: bc breaking` and describe the migration in the release-notes section.
+4. If steps remain (e.g. enabling new behavior), update `Next step` on the tracking issue; otherwise the PR closes it.
+
+## Done checklist
+
+- [ ] A new warning names the start version, the removal target, and the tracking issue URL, and fires at most once per process.
+- [ ] The tracking issue is labeled `module: deprecation`, has an up-to-date `Next step`, and is a sub-issue of #201298.
+- [ ] The PR body contains `Part of #<tracking issue>`, or `Fixes #<tracking issue>` for the final step, and the PR is labeled `topic: deprecation` (or `topic: bc breaking` for a removal).
 
 ## Auditing overdue removals
 
@@ -94,4 +94,4 @@ cat version.txt
 git grep -nIE "(removed|deleted|dropped|become an error) (in|by|after) (PyTorch |version |release |v)?[0-9]+\.[0-9]+" -- torch aten c10
 ```
 
-Every hit with a version at or below the current one is overdue: either remove it or retarget it with a reason. Make sure each one has a tracking issue under #201298.
+Every hit at or below the current version is overdue: remove it, or retarget it with a reason. Each one needs a tracking issue under #201298.

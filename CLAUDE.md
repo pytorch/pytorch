@@ -41,12 +41,14 @@ follow the /deprecate-feature skill, which implements the
 The wiki policy is the source of truth for warning periods. The change is not
 complete until:
 
-- the warning names the start version, the removal version (at least two
-  releases later), and its tracking issue URL;
+- a new warning names the start version, the removal target (at least two
+  releases later), and its tracking issue URL, and fires at most once per
+  process;
 - the tracking issue, filed with the deprecation issue form, is labeled
-  `module: deprecation` and `slowroll`, has an up-to-date `Next step`, and is a
+  `module: deprecation`, has an up-to-date `Next step`, and is a
   sub-issue of the umbrella https://github.com/pytorch/pytorch/issues/201298;
-- the PR body says `Part of #<tracking issue>`.
+- the PR body says `Part of #<tracking issue>` (or `Fixes #<tracking issue>`
+  for the final step).
 
 If any of these is missing, report it as unfinished work.
 
