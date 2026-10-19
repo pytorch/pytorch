@@ -502,7 +502,9 @@ def odict_update(
 ) -> None:
     # CPython's mutablemapping_update_arg in Objects/odictobject.c snapshots
     # exact dicts, but dispatches keys/__getitem__ and destination __setitem__.
-    if type(data) is dict:
+    if type(data) is dict or (
+        torch._has_frozendict and type(data) is torch._frozendict
+    ):
         data = list(data.items())
     else:
         try:
