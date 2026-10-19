@@ -1385,6 +1385,7 @@ def _one_hot_sum_selector(match):
         not isinstance(dims, (list, tuple))
         or len(dims) != 1
         or not isinstance(one_hot_val, torch.Tensor)
+        or one_hot_val.dim() == 0
         or not one_hot_val.dtype.is_floating_point
     ):
         return None
