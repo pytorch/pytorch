@@ -42,7 +42,7 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
 
   size_t get_buffer_size() override;
 
-  std::string get_group_name();
+  std::string get_group_name() override;
 
   bool has_multicast_support() override;
 
