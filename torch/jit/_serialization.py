@@ -17,7 +17,7 @@ import torch
 from torch._jit_internal import _get_model_id
 from torch._utils_internal import log_torchscript_usage
 from torch.jit._recursive import wrap_cpp_module
-from torch.serialization import validate_cuda_device
+from torch.serialization import _validate_device
 
 
 def save(m, f, _extra_files=None) -> None:
@@ -222,8 +222,12 @@ def validate_map_location(map_location=None):
             "but got type: " + str(type(map_location))
         )
 
-    if str(map_location).startswith("cuda"):
-        validate_cuda_device(map_location)
+    if (
+        map_location is not None
+        and map_location.type != "cpu"
+        and hasattr(torch, map_location.type)
+    ):
+        _validate_device(map_location, map_location.type)
 
     return map_location
 
