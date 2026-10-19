@@ -222,45 +222,48 @@ instantiate_layer_norm(float);
 instantiate_layer_norm(half);
 instantiate_layer_norm(bfloat);
 
-inline uint2 batch_norm_offset(constant packed_uint3* dims, uint ndim, uint o) {
-  uint2 off = 0;
+template <typename I>
+inline vec<I, 2> batch_norm_offset(
+    constant packed_long3* dims,
+    uint ndim,
+    I o) {
+  vec<I, 2> off = 0;
   for (uint d = 1; d < ndim; ++d) {
-    off += (o % dims[d].x) * dims[d].yz;
-    o /= dims[d].x;
+    off += (o % I(dims[d].x)) * vec<I, 2>(dims[d].yz);
+    o /= I(dims[d].x);
   }
-  return off + o * dims[ndim].yz;
+  return off + o * vec<I, 2>(dims[ndim].yz);
 }
 
-template <typename T, bool STRIDED>
+template <typename T, bool STRIDED, typename I>
 [[max_total_threads_per_threadgroup(BN_MAX_THREADS)]]
 kernel void batch_norm_reduce(
     device const T* x [[buffer(0)]],
     device packed_float3* out [[buffer(1)]],
-    constant uint2& sizes [[buffer(2)]],
-    constant packed_uint3* dims [[buffer(3)]],
+    constant ulong2& sizes [[buffer(2)]],
+    constant packed_long3* dims [[buffer(3)]],
     uint3 tg [[threadgroup_position_in_grid]],
     uint3 ntg [[threadgroups_per_grid]],
     uint3 pos [[thread_position_in_threadgroup]],
     uint3 tptg [[threads_per_threadgroup]]) {
-  const uint ndim = sizes.x, outer = sizes.y, inner = dims[0].x,
-             C = dims[ndim + 1].x;
+  const uint ndim = sizes.x, C = dims[ndim + 1].x;
+  const I outer = sizes.y, inner = dims[0].x;
   const bool channels_last = inner == 1;
   const uint c = channels_last ? tg.x * tptg.x + pos.x : tg.x;
-  const uint o0 = tg.y * tptg.y + pos.y,
-             r0 = channels_last ? 0 : tg.z * tptg.x + pos.x;
-  const uint cr =
-      STRIDED ? c * dims[ndim + 1].y + r0 * dims[0].y : c * inner + r0;
-  const uint step = tptg.x * ntg.z * (STRIDED ? dims[0].y : 1);
+  const I o0 = tg.y * tptg.y + pos.y,
+          r0 = channels_last ? 0 : tg.z * tptg.x + pos.x;
+  const I cr =
+      STRIDED ? c * I(dims[ndim + 1].y) + r0 * I(dims[0].y) : c * inner + r0;
+  const I step = tptg.x * ntg.z * (STRIDED ? I(dims[0].y) : 1);
   float3 acc = 0;
   if (c < C && o0 < outer && r0 < inner) {
-    const float k = float(
-        x[cr +
-          (STRIDED ? batch_norm_offset(dims, ndim, o0).x : o0 * C * inner)]);
+    const I first =
+        cr + (STRIDED ? batch_norm_offset(dims, ndim, o0).x : o0 * C * inner);
+    const float k = float(x[first]);
     float3 sum = 0;
-    for (uint o = o0; o < outer; o += tptg.y * ntg.y) {
-      uint i =
-          cr + (STRIDED ? batch_norm_offset(dims, ndim, o).x : o * C * inner);
-      for (uint r = r0; r < inner; r += tptg.x * ntg.z, i += step) {
+    for (I o = o0; o < outer; o += tptg.y * ntg.y) {
+      I i = cr + (STRIDED ? batch_norm_offset(dims, ndim, o).x : o * C * inner);
+      for (I r = r0; r < inner; r += tptg.x * ntg.z, i += step) {
         const float v = float(x[i]) - k;
         sum += float3(v, v * v, 1);
       }
@@ -278,55 +281,80 @@ kernel void batch_norm_reduce(
   }
 }
 
+template <typename P>
 kernel void batch_norm_stats(
     device const packed_float3* part [[buffer(0)]],
-    device const float* weight [[buffer(1)]],
-    device const float* bias [[buffer(2)]],
-    device float* stats [[buffer(3)]],
-    constant uint* sizes [[buffer(4)]],
-    constant float& eps [[buffer(5)]],
+    device float* stats [[buffer(1)]],
+    constant uint* sizes [[buffer(2)]],
+    constant float& eps [[buffer(3)]],
+    constant float& momentum [[buffer(4)]],
+    constant uint* strides [[buffer(5)]],
+    device const P* weight [[buffer(6)]],
+    device const P* bias [[buffer(7)]],
+    device P* running_mean [[buffer(8)]],
+    device P* running_var [[buffer(9)]],
+    device P* save_mean [[buffer(10)]],
+    device P* save_invstd [[buffer(11)]],
     uint c [[thread_position_in_grid]]) {
-  float3 acc = part[c];
+  device P* rm = running_mean + c * strides[2];
+  device P* rv = running_var + c * strides[3];
+  float3 acc =
+      part != nullptr ? float3(part[c]) : float3(float(*rm), float(*rv), 1);
   for (uint i = 1; i < sizes[1]; ++i) {
     acc = welford_combine(acc, float3(part[i * sizes[0] + c]));
   }
   const float invstd = metal::precise::rsqrt(acc.y / acc.z + eps);
   device float* s = stats + BN_NUM_STATS * c;
   s[BN_MEAN] = acc.x;
-  s[BN_SCALE] = weight != nullptr ? invstd * weight[c] : invstd;
-  s[BN_SHIFT] = bias != nullptr ? bias[c] : 0;
-  s[BN_INVSTD] = invstd;
-  s[BN_VAR] = acc.y / (acc.z - 1);
+  s[BN_SCALE] =
+      weight != nullptr ? invstd * float(weight[c * strides[0]]) : invstd;
+  s[BN_SHIFT] = bias != nullptr ? float(bias[c * strides[1]]) : 0;
+  if (part != nullptr) {
+    save_mean[c * strides[4]] = static_cast<P>(acc.x);
+    save_invstd[c * strides[5]] = static_cast<P>(invstd);
+  }
+  if (part != nullptr && running_mean != nullptr) {
+    *rm = static_cast<P>(mix(float(*rm), acc.x, momentum));
+    *rv = static_cast<P>(mix(float(*rv), acc.y / (acc.z - 1), momentum));
+  }
 }
 
-template <typename T, bool STRIDED>
+template <typename T, bool STRIDED, typename I>
 kernel void batch_norm_elemt(
     device T* out [[buffer(0)]],
     device const T* x [[buffer(1)]],
     device const float* stats [[buffer(2)]],
-    constant packed_uint3* dims [[buffer(3)]],
-    constant uint2& sizes [[buffer(4)]],
+    constant packed_long3* dims [[buffer(3)]],
+    constant ulong2& sizes [[buffer(4)]],
     uint3 pos [[thread_position_in_grid]],
     uint3 size [[threads_per_grid]]) {
-  uint2 i = (pos.z * size.y + pos.y) * size.x + pos.x;
-  if IF_CONSTEXPR (STRIDED) {
-    i = batch_norm_offset(dims, sizes.x, pos.z) + pos.y * dims[sizes.x + 1].yz +
-        pos.x * dims[0].yz;
-  }
   device const float* k = stats + pos.y * BN_NUM_STATS;
-  out[i.y] =
-      static_cast<T>((float(x[i.x]) - k[BN_MEAN]) * k[BN_SCALE] + k[BN_SHIFT]);
+  I o = pos.z;
+  do {
+    vec<I, 2> i = (o * size.y + pos.y) * size.x + pos.x;
+    if IF_CONSTEXPR (STRIDED) {
+      i = batch_norm_offset(dims, sizes.x, o) +
+          pos.y * vec<I, 2>(dims[sizes.x + 1].yz) +
+          pos.x * vec<I, 2>(dims[0].yz);
+    }
+    out[i.y] = static_cast<T>(
+        (float(x[i.x]) - k[BN_MEAN]) * k[BN_SCALE] + k[BN_SHIFT]);
+    o += size.z;
+  } while (is_same_v<I, ulong> && o < I(sizes.y));
 }
 
-#define REGISTER_BATCH_NORM_OPS(T)                                   \
-  template [[host_name("batch_norm_reduce_" #T)]] [[kernel]]         \
-  decltype(batch_norm_reduce<T, false>) batch_norm_reduce<T, false>; \
-  template [[host_name("batch_norm_reduce_strided_" #T)]] [[kernel]] \
-  decltype(batch_norm_reduce<T, true>) batch_norm_reduce<T, true>;   \
-  template [[host_name("batch_norm_elemt_" #T)]] [[kernel]]          \
-  decltype(batch_norm_elemt<T, false>) batch_norm_elemt<T, false>;   \
-  template [[host_name("batch_norm_elemt_strided_" #T)]] [[kernel]]  \
-  decltype(batch_norm_elemt<T, true>) batch_norm_elemt<T, true>
+#define REGISTER_BATCH_NORM_KERNELS(T, SUFFIX, STRIDED, I)                     \
+  template [[host_name("batch_norm_reduce_" SUFFIX #T)]] [[kernel]]            \
+  decltype(batch_norm_reduce<T, STRIDED, I>) batch_norm_reduce<T, STRIDED, I>; \
+  template [[host_name("batch_norm_elemt_" SUFFIX #T)]] [[kernel]]             \
+  decltype(batch_norm_elemt<T, STRIDED, I>) batch_norm_elemt<T, STRIDED, I>
+
+#define REGISTER_BATCH_NORM_OPS(T)                           \
+  REGISTER_BATCH_NORM_KERNELS(T, "", false, uint);           \
+  REGISTER_BATCH_NORM_KERNELS(T, "strided_", true, uint);    \
+  REGISTER_BATCH_NORM_KERNELS(T, "strided64_", true, ulong); \
+  template [[host_name("batch_norm_stats_" #T)]] [[kernel]]  \
+  decltype(batch_norm_stats<T>) batch_norm_stats<T>
 
 REGISTER_BATCH_NORM_OPS(float);
 REGISTER_BATCH_NORM_OPS(half);
