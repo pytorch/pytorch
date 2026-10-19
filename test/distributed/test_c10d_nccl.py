@@ -7852,6 +7852,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
+@unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
 class CollectiveAnnotationTest(MultiProcContinuousTest):
     world_size = 2
 
@@ -7864,7 +7865,6 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
         return torch.device("cuda", self.rank)
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_captured_collective_is_annotated(self):
         if not TEST_CUDA_GRAPH_TOOLS_ID:
             self.skipTest("CUDA graph annotations are unavailable")
@@ -7888,7 +7888,6 @@ class CollectiveAnnotationTest(MultiProcContinuousTest):
             self.assertEqual(annotation["In msg nelems"], 1024)
 
     @skipIfRocm
-    @skip_if_lt_x_gpu(2)
     def test_cuspy_collective_is_annotated(self):
         if not TEST_CUPTI_V13_3:
             self.skipTest("requires libcupti >= 13.3")
