@@ -14,6 +14,8 @@
 #include <ATen/native/xnnpack/Engine.h>
 #endif
 #include <ATen/core/DistributionsHelper.h>
+#include <ATen/native/Resize.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
@@ -585,12 +587,14 @@ static void _rrelu_with_noise_train(
     const Scalar& upper_,
     const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
+  at::assert_no_internal_overlap(noise);
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
   scalar_t* output_data = tmp_tensor.mutable_data_ptr<scalar_t>();
   const scalar_t* input_data = input.const_data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
+  Tensor tmp_noise = noise.contiguous();
+  scalar_t* noise_data = tmp_noise.mutable_data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
   for (const auto i : c10::irange(input.numel())) {
@@ -607,6 +611,9 @@ static void _rrelu_with_noise_train(
   if (!output.is_contiguous()) {
     output.copy_(tmp_tensor);
   }
+  if (!noise.is_contiguous()) {
+    noise.copy_(tmp_noise);
+  }
 }
 
 Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
@@ -618,6 +625,8 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     Tensor& output) {
   TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(), "noise tensor shape must match self tensor shape. Got self.shape = ", self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
   if (training) {
+    // Not a structured op, so nothing else has sized output for us.
+    resize_output(output, self.sizes());
     AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });
