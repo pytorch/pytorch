@@ -723,17 +723,17 @@ stream, and `Work.wait()` makes the current stream wait for it.
 .. autofunction:: torch.distributed.distributed_c10d._new_window
 
 .. autoclass:: torch.distributed.distributed_c10d.Window
-   :members:
+    :members:
 .. autoclass:: torch.distributed.distributed_c10d.PutOptions
-   :members:
+    :members:
 .. autoclass:: torch.distributed.distributed_c10d.SignalOptions
-   :members:
+    :members:
 .. autoclass:: torch.distributed.distributed_c10d.WaitSignalOptions
-   :members:
+    :members:
 .. autoclass:: torch.distributed.distributed_c10d.WindowAttr
-   :members:
+    :members:
 .. autoclass:: torch.distributed.distributed_c10d.WindowAccessType
-   :members:
+    :members:
 ```
 
 ## Synchronous and asynchronous collective operations
