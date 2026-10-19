@@ -222,28 +222,46 @@ instantiate_layer_norm(float);
 instantiate_layer_norm(half);
 instantiate_layer_norm(bfloat);
 
-template <typename T>
+inline uint2 batch_norm_offset(constant packed_uint3* dims, uint ndim, uint o) {
+  uint2 off = 0;
+  for (uint d = 1; d < ndim; ++d) {
+    off += (o % dims[d].x) * dims[d].yz;
+    o /= dims[d].x;
+  }
+  return off + o * dims[ndim].yz;
+}
+
+template <typename T, bool STRIDED>
 [[max_total_threads_per_threadgroup(BN_MAX_THREADS)]]
 kernel void batch_norm_reduce(
     device const T* x [[buffer(0)]],
     device packed_float3* out [[buffer(1)]],
-    constant uint* sizes [[buffer(2)]],
+    constant uint2& sizes [[buffer(2)]],
+    constant packed_uint3* dims [[buffer(3)]],
     uint3 tg [[threadgroup_position_in_grid]],
     uint3 ntg [[threadgroups_per_grid]],
     uint3 pos [[thread_position_in_threadgroup]],
     uint3 tptg [[threads_per_threadgroup]]) {
-  const uint C = sizes[0], inner = sizes[1], outer = sizes[2];
+  const uint ndim = sizes.x, outer = sizes.y, inner = dims[0].x,
+             C = dims[ndim + 1].x;
   const bool channels_last = inner == 1;
   const uint c = channels_last ? tg.x * tptg.x + pos.x : tg.x;
   const uint o0 = tg.y * tptg.y + pos.y,
              r0 = channels_last ? 0 : tg.z * tptg.x + pos.x;
+  const uint cr =
+      STRIDED ? c * dims[ndim + 1].y + r0 * dims[0].y : c * inner + r0;
+  const uint step = tptg.x * ntg.z * (STRIDED ? dims[0].y : 1);
   float3 acc = 0;
   if (c < C && o0 < outer && r0 < inner) {
-    const float k = float(x[(o0 * C + c) * inner + r0]);
+    const float k = float(
+        x[cr +
+          (STRIDED ? batch_norm_offset(dims, ndim, o0).x : o0 * C * inner)]);
     float3 sum = 0;
     for (uint o = o0; o < outer; o += tptg.y * ntg.y) {
-      for (uint r = r0; r < inner; r += tptg.x * ntg.z) {
-        const float v = float(x[(o * C + c) * inner + r]) - k;
+      uint i =
+          cr + (STRIDED ? batch_norm_offset(dims, ndim, o).x : o * C * inner);
+      for (uint r = r0; r < inner; r += tptg.x * ntg.z, i += step) {
+        const float v = float(x[i]) - k;
         sum += float3(v, v * v, 1);
       }
     }
@@ -281,24 +299,34 @@ kernel void batch_norm_stats(
   s[BN_VAR] = acc.y / (acc.z - 1);
 }
 
-template <typename T>
+template <typename T, bool STRIDED>
 kernel void batch_norm_elemt(
     device T* out [[buffer(0)]],
     device const T* x [[buffer(1)]],
     device const float* stats [[buffer(2)]],
+    constant packed_uint3* dims [[buffer(3)]],
+    constant uint2& sizes [[buffer(4)]],
     uint3 pos [[thread_position_in_grid]],
     uint3 size [[threads_per_grid]]) {
-  const uint i = (pos.z * size.y + pos.y) * size.x + pos.x;
+  uint2 i = (pos.z * size.y + pos.y) * size.x + pos.x;
+  if IF_CONSTEXPR (STRIDED) {
+    i = batch_norm_offset(dims, sizes.x, pos.z) + pos.y * dims[sizes.x + 1].yz +
+        pos.x * dims[0].yz;
+  }
   device const float* k = stats + pos.y * BN_NUM_STATS;
-  out[i] =
-      static_cast<T>((float(x[i]) - k[BN_MEAN]) * k[BN_SCALE] + k[BN_SHIFT]);
+  out[i.y] =
+      static_cast<T>((float(x[i.x]) - k[BN_MEAN]) * k[BN_SCALE] + k[BN_SHIFT]);
 }
 
-#define REGISTER_BATCH_NORM_OPS(T)                           \
-  template [[host_name("batch_norm_reduce_" #T)]] [[kernel]] \
-  decltype(batch_norm_reduce<T>) batch_norm_reduce<T>;       \
-  template [[host_name("batch_norm_elemt_" #T)]] [[kernel]]  \
-  decltype(batch_norm_elemt<T>) batch_norm_elemt<T>
+#define REGISTER_BATCH_NORM_OPS(T)                                   \
+  template [[host_name("batch_norm_reduce_" #T)]] [[kernel]]         \
+  decltype(batch_norm_reduce<T, false>) batch_norm_reduce<T, false>; \
+  template [[host_name("batch_norm_reduce_strided_" #T)]] [[kernel]] \
+  decltype(batch_norm_reduce<T, true>) batch_norm_reduce<T, true>;   \
+  template [[host_name("batch_norm_elemt_" #T)]] [[kernel]]          \
+  decltype(batch_norm_elemt<T, false>) batch_norm_elemt<T, false>;   \
+  template [[host_name("batch_norm_elemt_strided_" #T)]] [[kernel]]  \
+  decltype(batch_norm_elemt<T, true>) batch_norm_elemt<T, true>
 
 REGISTER_BATCH_NORM_OPS(float);
 REGISTER_BATCH_NORM_OPS(half);
