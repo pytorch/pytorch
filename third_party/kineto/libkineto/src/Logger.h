@@ -332,11 +332,10 @@ struct __to_constant__ {
 #define UST_LOGGER_STAGE_SCOPE(stage) \
   libkineto::USTLoggerStageGuard LOCAL_VARNAME(ust_stage_guard)(stage)
 
-#define USDT_LOGGER_EMIT_MESSAGE(usdt_type)                      \
-  libkineto::VoidLogger() &                                      \
-      libkineto::Logger(                                         \
-          libkineto::LoggerOutputType::USDT, __LINE__, __FILE__) \
-              .stream()                                          \
+#define USDT_LOGGER_EMIT_MESSAGE(usdt_type)                                    \
+  libkineto::VoidLogger() &                                                    \
+      libkineto::Logger(libkineto::LoggerOutputType::USDT, __LINE__, __FILE__) \
+              .stream()                                                        \
           << usdt_type
 #define USDT_EMIT_START_TRACE() USDT_LOGGER_EMIT_MESSAGE("profiler_start")
 #define USDT_EMIT_STOP_TRACE() USDT_LOGGER_EMIT_MESSAGE("profiler_stop")
