@@ -7779,6 +7779,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         imports = IndentedBuffer()
         imports.splice(
             """
+            import torch
             import triton
             import triton.language as tl
             """
