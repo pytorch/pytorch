@@ -634,6 +634,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
+  // Folds a *_coalesced op's per-tensor works into the last one.
+  c10::intrusive_ptr<WorkNCCL> coalesceWorks(
+      std::vector<c10::intrusive_ptr<WorkNCCL>> works,
+      std::vector<at::Tensor> outputs);
   bool getGraphCaptureMode();
   cudaStream_t getOperationStream(bool async_op);
   void ensureTensorContiguous(const at::Tensor& tensor);
@@ -757,7 +761,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
-  c10::intrusive_ptr<WorkNCCL> coalesced_work_;
+  // Works enqueued while coalescing_batch_ is engaged; endCoalescing()
+  // returns a work covering all of them.
+  std::vector<c10::intrusive_ptr<WorkNCCL>> coalescing_works_;
 
   // Configs issued between startTimeEstimate() and endTimeEstimate().
   bool time_estimate_active_ = false;
