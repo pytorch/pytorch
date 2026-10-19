@@ -1328,40 +1328,100 @@ Example:
       .def_readwrite("timeout", &::c10d::ReconfigureOptions::timeout)
       .def_readwrite("hints", &::c10d::ReconfigureOptions::hints);
 
-  py::class_<::c10d::PutOptions>(module, "PutOptions")
+  py::class_<::c10d::PutOptions>(module, "PutOptions", R"(
+Options for :meth:`Window.put`.
+
+Attributes:
+    timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
+        sentinel, meaning the process group's timeout.
+    hints (dict[str, str]): Backend-specific hints.
+)")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::PutOptions::timeout)
       .def_readwrite("hints", &::c10d::PutOptions::hints);
 
-  py::class_<::c10d::SignalOptions>(module, "SignalOptions")
+  py::class_<::c10d::SignalOptions>(module, "SignalOptions", R"(
+Options for :meth:`Window.signal`.
+
+Attributes:
+    timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
+        sentinel, meaning the process group's timeout.
+    hints (dict[str, str]): Backend-specific hints.
+)")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::SignalOptions::timeout)
       .def_readwrite("hints", &::c10d::SignalOptions::hints);
 
-  py::class_<::c10d::WaitSignalOptions>(module, "WaitSignalOptions")
+  py::class_<::c10d::WaitSignalOptions>(module, "WaitSignalOptions", R"(
+Options for :meth:`Window.wait_signal`.
+
+Attributes:
+    timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
+        sentinel, meaning the process group's timeout.
+    hints (dict[str, str]): Backend-specific hints.
+)")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::WaitSignalOptions::timeout)
       .def_readwrite("hints", &::c10d::WaitSignalOptions::hints);
 
-  py::enum_<::c10d::WindowAccessType>(module, "WindowAccessType")
+  py::enum_<::c10d::WindowAccessType>(module, "WindowAccessType", R"(
+How a rank accesses a peer's window: ``UNIFIED`` for a single coherent view,
+``SEPARATE`` for separate copies that need explicit synchronization.
+)")
       .value("UNIFIED", ::c10d::WindowAccessType::UNIFIED)
       .value("SEPARATE", ::c10d::WindowAccessType::SEPARATE);
 
-  py::class_<::c10d::WindowAttr>(module, "WindowAttr")
+  py::class_<::c10d::WindowAttr>(module, "WindowAttr", R"(
+Window attributes returned by :meth:`Window.get_attr`.
+
+Attributes:
+    access_type (WindowAccessType): How the window is accessed.
+)")
       .def(py::init<>())
       .def_readwrite("access_type", &::c10d::WindowAttr::access_type);
 
-  intrusive_ptr_class_<::c10d::Window>(module, "Window")
+  intrusive_ptr_class_<::c10d::Window>(
+      module,
+      "Window",
+      R"(
+.. warning::
+    The window API is experimental and may change without notice.
+
+One-sided communication window returned by
+:func:`~torch.distributed.distributed_c10d._new_window`. Each rank in the group
+registers a tensor that peers can write into with :meth:`put`. Backends
+implement a subset of these methods; unsupported methods raise
+``RuntimeError``.
+)")
       .def(
           "tensor_register",
           &::c10d::Window::tensor_register,
           py::arg("tensor"),
           py::arg("owning") = true,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Register ``tensor`` as this rank's window memory.
+
+This is collective: every rank in the group must call it, in the same order
+relative to other collectives. Backends may register more than ``tensor``
+itself (e.g. its whole allocation), in which case ranks must register
+matching allocations. A window holds one tensor at a time: call
+:meth:`tensor_deregister` before registering another.
+
+Args:
+    tensor (torch.Tensor): Tensor to expose to peers.
+    owning (bool, optional): If ``True``, the window keeps ``tensor`` alive
+        until :meth:`tensor_deregister`. Default: ``True``.
+)")
       .def(
           "tensor_deregister",
           &::c10d::Window::tensor_deregister,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Forget the registered tensor so another can be registered. This is
+collective. Backends may keep the underlying memory registered until it is
+freed; with NCCL, every rank must then free it in the same order.
+)")
       .def(
           "put",
           &::c10d::Window::put,
@@ -1370,31 +1430,102 @@ Example:
           py::arg("target_offset_nelems"),
           py::arg("async_op"),
           py::arg("opts") = ::c10d::PutOptions(),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
+``dst_rank`` on completion; such signals are indistinguishable from
+:meth:`signal`, see :meth:`wait_signal`.
+
+Args:
+    tensor (torch.Tensor): Source tensor. Must match the destination's dtype
+        and fit within its window. Backends may require it to be
+        contiguous and to lie in an allocator segment that has a window,
+        e.g. a slice of this window's tensor or any tensor from a pool
+        registered with ``register_mem_pool(pool, symm=True)``.
+    dst_rank (int): Destination rank in the group.
+    target_offset_nelems (int): Element offset into the destination window.
+    async_op (bool): Whether this op should be an async op.
+    opts (PutOptions, optional): Options with ``timeout``
+        (``datetime.timedelta``) and backend ``hints`` (``dict[str, str]``).
+
+Returns:
+    A ``Work`` handle.
+)")
       .def(
           "map_remote_tensor",
           &::c10d::Window::map_remote_tensor,
           py::arg("rank"),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Return the tensor registered with ``rank``'s window, not its whole allocator
+segment. Backends may only support the local rank, and may require the tensor
+to have been registered with ``owning=True``.
+
+Args:
+    rank (int): Rank whose window to map.
+
+Returns:
+    A ``torch.Tensor`` over the registered window memory.
+)")
       .def(
           "signal",
           &::c10d::Window::signal,
           py::arg("peer_rank"),
           py::arg("async_op"),
           py::arg("opts") = ::c10d::SignalOptions(),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Send a signal to ``peer_rank``.
+
+Args:
+    peer_rank (int): Rank to signal.
+    async_op (bool): Whether this op should be an async op.
+    opts (SignalOptions, optional): Options with ``timeout``
+        (``datetime.timedelta``) and backend ``hints`` (``dict[str, str]``).
+
+Returns:
+    A ``Work`` handle.
+)")
       .def(
           "wait_signal",
           &::c10d::Window::wait_signal,
           py::arg("peer_rank"),
           py::arg("async_op"),
           py::arg("opts") = ::c10d::WaitSignalOptions(),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Wait for one signal from ``peer_rank``, sent by :meth:`signal` or, on
+backends where :meth:`put` signals, by :meth:`put`. Signals are counted:
+call this once per signal or put from that peer. Signals and puts from the
+same peer are not distinguished, so after a :meth:`signal` followed by a
+:meth:`put` the first wait can return before the put's data arrives.
+
+Args:
+    peer_rank (int): Rank to wait on.
+    async_op (bool): Whether this op should be an async op.
+    opts (WaitSignalOptions, optional): Options with ``timeout``
+        (``datetime.timedelta``) and backend ``hints`` (``dict[str, str]``).
+
+Returns:
+    A ``Work`` handle.
+)")
       .def(
           "get_attr",
           &::c10d::Window::get_attr,
           py::arg("peer_rank"),
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Return the attributes of ``peer_rank``'s window.
+
+Args:
+    peer_rank (int): Rank to query.
+
+Returns:
+    A ``WindowAttr`` whose ``access_type`` is ``WindowAccessType.UNIFIED``
+    for a single coherent view of the window, or
+    ``WindowAccessType.SEPARATE`` for separate copies that need explicit
+    synchronization.
+)");
 
   py::enum_<::c10d::HookOpName>(module, "HookOpName")
       .value("SEND", ::c10d::HookOpName::SEND)
@@ -4520,6 +4651,22 @@ Returns:
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
             self.getPrimary()->performNocolorSplit(device);
           })
+      .def(
+          "register_mem_pool",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
+             at::cuda::MemPool* pool,
+             bool symm) { self.getPrimary()->registerMemPool(pool, symm); },
+          py::arg("pool"),
+          py::arg("symm") = false,
+          R"(Register ``pool``'s segments with the primary communicator.)")
+      .def(
+          "deregister_mem_pool",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
+             at::cuda::MemPool* pool) {
+            self.getPrimary()->deregisterMemPool(pool);
+          },
+          py::arg("pool"),
+          R"(Deregister ``pool`` from the primary communicator.)")
       .def(
           "_comm_ptr",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {

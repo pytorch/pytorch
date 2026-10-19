@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 WINDOW_BACKENDS = [
     ("nccl2", "cuda"),
+    ("nccl-lazy", "cuda"),
 ]
 
 
@@ -138,6 +139,39 @@ class AbstractWindowTest:
         win.wait_signal((self.rank - 1) % self.world_size, False)
         torch.cuda.synchronize()
         win.tensor_deregister()
+
+    def test_symmetric_mem_pool_teardown(self):
+        # register_mem_pool(symm=True) before allocating upgrades each segment
+        # to a symmetric window; deregister_mem_pool tears them down on every
+        # rank before the pool frees them.
+        self._init_backend()
+        # Probe before register_mem_pool: allocating from a symm=True pool
+        # raises, rather than skips, without a symmetric-memory transport.
+        # Probing this pool keeps its window segment under deregister_mem_pool.
+        pool = self._make_pool()
+        self._probe_window_support(pool)
+        self.backend.register_mem_pool(pool, symm=True)
+        try:
+            with torch.cuda.use_mem_pool(pool):
+                win_buf = torch.zeros(self.world_size, device=self.device)
+            win = dist._new_window(win_buf)
+            # A large allocation lands in a new segment, which symm=True
+            # registers, so it is a valid put source outside the window.
+            with torch.cuda.use_mem_pool(pool):
+                src_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
+            src = src_seg[:1]
+            next_rank = (self.rank + 1) % self.world_size
+            prev_rank = (self.rank - 1) % self.world_size
+            win.put(src, next_rank, self.rank, False)
+            win.wait_signal(prev_rank, False)
+            torch.cuda.synchronize()
+            self.assertEqual(win_buf[prev_rank].item(), prev_rank)
+            win.tensor_deregister()
+            del win, src, src_seg, win_buf
+        finally:
+            self.backend.deregister_mem_pool(pool)
+        del pool
+        torch.cuda.synchronize()
 
     def test_put_dtypes_and_sizes(self):
         self._init_backend()
@@ -289,7 +323,8 @@ def _make_window_test_class(backend_name, device_type):
 
     WindowTest.backend_name = backend_name
     WindowTest.device_type = device_type
-    WindowTest.__name__ = f"{backend_name.capitalize()}WindowTest"
+    class_name = backend_name.replace("-", " ").title().replace(" ", "")
+    WindowTest.__name__ = f"{class_name}WindowTest"
     WindowTest.__qualname__ = WindowTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend_name),
@@ -304,9 +339,10 @@ def _make_window_test_class(backend_name, device_type):
 
 
 for backend_name, device_type in WINDOW_BACKENDS:
-    globals()[f"{backend_name.capitalize()}WindowTest"] = _make_window_test_class(
-        backend_name, device_type
-    )
+    test_class = _make_window_test_class(backend_name, device_type)
+    globals()[test_class.__name__] = test_class
+# Unbound so the last class isn't collected a second time as `test_class`.
+del test_class
 
 
 if __name__ == "__main__":
