@@ -1457,15 +1457,15 @@ Returns:
           py::arg("rank"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Return a tensor view of ``rank``'s window memory. Backends may only support
-the local rank, and may require the tensor to have been registered with
-``owning=True``.
+Return the tensor registered with ``rank``'s window, not its whole allocator
+segment. Backends may only support the local rank, and may require the tensor
+to have been registered with ``owning=True``.
 
 Args:
     rank (int): Rank whose window to map.
 
 Returns:
-    A ``torch.Tensor`` view of the window memory.
+    A ``torch.Tensor`` over the registered window memory.
 )")
       .def(
           "signal",
