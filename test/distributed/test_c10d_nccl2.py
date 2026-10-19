@@ -1041,6 +1041,28 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
         )
         dist.destroy_process_group(user)
         dist.destroy_process_group(named)
+        # ProcessGroup.split_group children are not registered with dist.
+        for group in (grandchild, default_child, user_child):
+            group.shutdown()
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
+    @skip_if_lt_x_gpu(2)
+    def test_shrink_comm_name(self) -> None:
+        group = dist.new_group(device_id=self.device, group_desc="zzz_shrink")
+        dist.barrier(group=group)
+        excluded = list(range(1, self.world_size))
+        if self.rank in excluded:
+            dist.destroy_process_group(group)
+            return
+
+        before = len(self._logged_comm_names())
+        shrunk = dist.shrink_group(excluded, group=group)
+        # Like stock, the shrunk comm keeps the group's name.
+        self.assertEqual(
+            self._logged_comm_names()[before:], [f"zzz_shrink:{group.group_name}"]
+        )
+        dist.destroy_process_group(shrunk)
 
     @requires_nccl()
     @requires_nccl_version((2, 27, 3), "Need NCCL 2.27.3+ for commName")
