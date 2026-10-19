@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -79,6 +80,29 @@ class TestBits(TestCase):
                 z = torch.cat([x, y_b], dim=dim)
                 self.assertEqual(z_ref, z.view(view_type))
 
+
+    def test_shell_dtype_cast_raises(self, device):
+        # Casts to or from bits and sub-byte int dtypes used to device-assert
+        # on CUDA; they must raise on the host, in eager and while tracing.
+        x = torch.zeros(4, 8, dtype=torch.uint8, device=device)
+        for shell_dtype in (torch.bits8, torch.uint4, torch.int4):
+            msg = rf"(?i){str(shell_dtype).removeprefix('torch.')} is a shell dtype"
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                x.view(shell_dtype).float()
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                torch.zeros(4, 8, device=device).to(shell_dtype)
+        with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+            x.view(torch.bits8).to(torch.uint4)
+        with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+            torch.empty(0, device=device).to(torch.uint4)
+        with FakeTensorMode():
+            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+                torch.empty(4, 8, device=device).to(torch.uint4)
+            x_bits = torch.empty(4, 8, dtype=torch.bits8, device=device)
+            with self.assertRaisesRegex(NotImplementedError, "shell dtype"):
+                torch.ops.prims.convert_element_type(x_bits, torch.uint4)
+        # the device is still usable afterwards
+        self.assertEqual((torch.ones(3, device=device) + 1).sum().item(), 6)
 
     def test_subclass(self):
         t = torch.zeros(20, dtype=torch.int16).view(torch.bits16)
