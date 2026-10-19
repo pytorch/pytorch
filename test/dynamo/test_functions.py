@@ -7372,7 +7372,6 @@ class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
 
     @onlyAccelerator
     def test_tensor_type2(self, device):
-        @make_test
         def fn(a, b):
             m = a.to(device)
             return m + b.type(m.type())
@@ -7383,7 +7382,6 @@ class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
 
     @onlyAccelerator
     def test_tensor_type5(self, device):
-        @make_test
         def fn(a, b):
             m = a.to(device).half()
             return b.type(m.type())
