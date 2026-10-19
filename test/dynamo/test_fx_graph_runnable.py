@@ -207,7 +207,6 @@ class FxGraphRunnableTestBase:
 
 
 @instantiate_parametrized_tests
-@mock.patch.dict(os.environ, {"TRITON_ALLOW_NON_CONSTEXPR_GLOBALS": "1"})
 class FxGraphRunnableTest(FxGraphRunnableTestBase, TestCase):
     hw_classification = HardwareClassification.GENERIC
 
