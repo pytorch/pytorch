@@ -545,6 +545,7 @@ class TestCKBackend(TestCase):
                     "max_autotune_conv_backends": "CK",
                     "compile_threads": 4,
                     "rocm.ck_dir": self.ck_dir,
+                    "rocm.ck_max_profiling_configs": 4,
                 }
             ),
             tf32_off(),
