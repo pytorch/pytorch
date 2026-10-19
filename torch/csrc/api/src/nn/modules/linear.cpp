@@ -21,6 +21,29 @@ Tensor IdentityImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+BiasImpl::BiasImpl(const BiasOptions& options_) : options(options_) {
+  BiasImpl::reset();
+}
+
+void BiasImpl::reset() {
+  bias = register_parameter("bias", torch::empty(options.num_features()));
+  reset_parameters();
+}
+
+void BiasImpl::reset_parameters() {
+  torch::nn::init::normal_(bias);
+}
+
+void BiasImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Bias(num_features=" << options.num_features() << ')';
+}
+
+Tensor BiasImpl::forward(const Tensor& input) {
+  return F::bias(input, bias);
+}
+
+// ============================================================================
+
 LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
   LinearImpl::reset();
 }

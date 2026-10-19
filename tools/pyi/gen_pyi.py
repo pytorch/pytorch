@@ -527,6 +527,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "bias": [defs("bias", ["input: Tensor", "bias: Tensor"], "Tensor")],
             "linear": [
                 defs(
                     "linear",
@@ -888,6 +889,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     c_nn_imports = [
         "avg_pool2d",
         "avg_pool3d",
+        "bias",
         "elu_",
         "gelu",
         "hardtanh_",

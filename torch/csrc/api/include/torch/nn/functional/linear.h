@@ -4,6 +4,10 @@
 
 namespace torch::nn::functional {
 
+inline Tensor bias(const Tensor& input, const Tensor& bias) {
+  return torch::bias(input, bias);
+}
+
 inline Tensor bilinear(
     const Tensor& input1,
     const Tensor& input2,
