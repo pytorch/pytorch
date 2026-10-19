@@ -52,7 +52,9 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 def _make_post_grad_fx(f, *inps):
