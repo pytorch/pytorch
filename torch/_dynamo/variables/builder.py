@@ -1345,13 +1345,13 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            use_const_keys = all(ConstantVariable.is_literal(k) for k in value)
 
-            # For all_const, we don't have to guard on anything yet. We guard on
+            # For use_const_keys, we don't have to guard on anything yet. We guard on
             # keys lazily by adding a dict_getitem entry for each accessed key.
             # For cases where we need to guard on all keys, we lazily put guards
             # during the dict call_method (check dicts.py)
-            if not all_const:
+            if not use_const_keys:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -1376,8 +1376,15 @@ class VariableBuilder:
                 i: int, k: object, v: object
             ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
-                if all_const:
-                    key = ConstantVariable.create(k)
+                if use_const_keys:
+                    # Keep OrderedDict keys sourced for replay, but read values by
+                    # literal key so read-only access does not guard input order.
+                    key_source = (
+                        ConstDictKeySource(base, i)
+                        if istype(value, collections.OrderedDict)
+                        else None
+                    )
+                    key = ConstantVariable.create(k, source=key_source)
                     source_key = k
                 else:
                     source_key = ConstDictKeySource(base, i)
