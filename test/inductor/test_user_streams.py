@@ -198,7 +198,7 @@ class TestStreamCodegen(InductorTestCase):
                 CUDADeviceOpOverrides(),
                 """\
 with torch.cuda._DeviceGuard(0):
-    torch._C._cuda_setDevice(0)
+    torch.cuda.set_device(0)
     default_stream = torch.cuda.current_stream()
     stream1 = _get_stream_by_index(3)
     with stream1:
@@ -209,7 +209,7 @@ with torch.cuda._DeviceGuard(0):
                 XPUDeviceOpOverrides(),
                 """\
 with torch.xpu._DeviceGuard(0):
-    pass
+    torch.xpu.set_device(0)
     default_stream = torch.xpu.current_stream()
     stream1 = _get_stream_by_index(3)
     with stream1:

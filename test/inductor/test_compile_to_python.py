@@ -7,7 +7,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._inductor import compile_to_python, config, load_from_python
-from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.standalone_compile import NoRunnableInductorModuleError
 from torch._inductor.utils import fresh_cache
@@ -211,10 +210,6 @@ class TestInductorCompileToPythonGPUCodegen(TestCase):
     # (no option overrides); ``_extract_call`` normalizes the entry-point signature so the
     # golden is independent of the graph_partition default (Runner method in OSS, flat
     # ``def call`` in fbcode).
-    def setUp(self):
-        super().setUp()
-        self.set_device = get_device_op_overrides(GPU_TYPE).set_device(0)
-
     def _inner_call(self, m, x):
         gm = _capture(m, x)
         src, _cache = compile_to_python(gm, _flat_inputs(m, x))
@@ -232,7 +227,7 @@ def call(args):
     args.clear()
     assert_size_stride(flat_1, (128, 64), (64, 1), 'input')
     with torch.{GPU_TYPE}._DeviceGuard(0):
-        {self.set_device}
+        torch.{GPU_TYPE}.set_device(0)
         flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_{GPU_TYPE}((128, 64), (64, 1), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
@@ -268,7 +263,7 @@ def call(args):
     args.clear()
     assert_size_stride(flat_1, (64, 256), (256, 1), 'input')
     with torch.{GPU_TYPE}._DeviceGuard(0):
-        {self.set_device}
+        torch.{GPU_TYPE}.set_device(0)
         flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_{GPU_TYPE}((64, ), (1, ), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
@@ -309,7 +304,7 @@ def call(args):
     args.clear()
     assert_size_stride_grouped((flat_3, flat_1), ((5, 4), (3, 4)), ((4, 1), (4, 1)), 'input')
     with torch.{GPU_TYPE}._DeviceGuard(0):
-        {self.set_device}
+        torch.{GPU_TYPE}.set_device(0)
         flat_3 = copy_if_misaligned(flat_3)
         flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_{GPU_TYPE}((5, 3), (3, 1), torch.float32)
