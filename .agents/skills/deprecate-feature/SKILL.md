@@ -22,19 +22,19 @@ The [BC policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Front
 
   def foo():
       global _warned
-      if not _warned:
-          _warned = True
+      if not _warned or torch.is_warn_always_enabled():
           warnings.warn(message, FutureWarning, stacklevel=2)
+          _warned = True
   ```
 
 - Use `@deprecated` only with `category=None` for type-checker diagnostics.
 - C++: prefer `TORCH_WARN_ONCE`; `TORCH_WARN_DEPRECATION` repeats and maps to hidden `DeprecationWarning` (#72948).
-- Add docstring `.. deprecated:: <N>`, migrate internal callers, test the warning (reset the flag), and label the PR `topic: deprecation`.
-- Frozen components (e.g. the C++ frontend) also need tracking issues. Frozen means no new features; bugs are won't-fix except security/crash issues. Use Kind: Frozen component, with Removal target and Next step: `none` if no removal is planned.
+- Add docstring `.. deprecated:: <N>`, migrate internal callers, test the warning (under `set_warn_always_context(True)`), and label the PR `topic: deprecation`.
+- Frozen components also need tracking issues that record the freeze decision; link it when closing issues against the component. Use Kind: Frozen component, with Removal target and Next step: `none` if no removal is planned.
 
 ## Track
 
-- Reuse or create one issue per item via `.github/ISSUE_TEMPLATE/deprecation.yml`. Keep its `### <field>` headings so automation can parse it.
+- Reuse or create one issue per item via `.github/ISSUE_TEMPLATE/deprecation.yml`. Keep its `### <field>` headings.
 - Get user approval of the exact text before creating or editing any issue (`AI_POLICY.md`). Label it `module: deprecation`; use `slowroll` only for staged opt-in rollouts (#191236).
 - Attach it as a sub-issue of #201298 using its internal **id**, not number:
 
@@ -43,7 +43,7 @@ The [BC policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Front
   gh api -X POST repos/pytorch/pytorch/issues/201298/sub_issues -F sub_issue_id="$id"
   ```
 
-- Keep `Next step` current (e.g. `remove in 2.18`); milestones come from it at branch cuts, not manual future assignments.
+- Keep `Next step` current (e.g. `remove in 2.18`).
 - Link PRs with `Part of #N`, or `Fixes #N` for the final step.
 
 ## Remove or audit
