@@ -1083,6 +1083,8 @@ if has_triton():
         Notes:
             - Performs compile-time type checking between dest and source tensors.
             - This is a collective operation that must be called by all PEs in the team.
+            - All threads in the participating block must call with identical arguments.
+            - Exactly one block per team per rank must participate.
             - Requires a cooperative grid launch.
 
         Example:
@@ -1176,7 +1178,7 @@ if has_triton():
             )
 
         # Generate NVSHMEM function name
-        nvshmem_func = f"nvshmem_{nvshmem_typename}_{op_name}_reduce"
+        nvshmem_func = f"nvshmemx_{nvshmem_typename}_{op_name}_reduce_block"
 
         # Define function signature - all parameters are int64 in Triton (they are just ptrs)
         signature = (
