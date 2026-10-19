@@ -1286,10 +1286,12 @@ class OutputGraph(OutputGraphCommon):
         self,
         fn: Callable[..., Any],
         args: tuple[Any, ...],
-        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        ctor_arg_sources: tuple[Source | VariableTracker | None, ...] | None = None,
     ) -> VariableTracker:
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
+        Each arg is codegen'd from its entry in ctor_arg_sources (a Source, or a
+        VariableTracker that reconstructs it), or as a constant if that is None.
         """
         example_value = fn(*args)
         varname = self.new_var()
@@ -1311,7 +1313,11 @@ class OutputGraph(OutputGraphCommon):
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
-        self.synthetic_source_ctor_info[source] = (fn, args, ctor_arg_sources)
+        # invoke_subgraph re-creates synthetic inputs from these sources, which it
+        # can't do for a VariableTracker.
+        if not any(isinstance(s, VariableTracker) for s in ctor_arg_sources or ()):
+            sources = cast(tuple[Source | None, ...] | None, ctor_arg_sources)
+            self.synthetic_source_ctor_info[source] = (fn, args, sources)
         result = VariableTracker.build(self.root_tx, example_value, source)
         # Realize the VT because we will delete the guards on it in the next line.
         result = result.realize()

@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.config
-from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    InductorAndRecordGraphs,
+    normalize_gm,
+)
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -331,6 +338,109 @@ x = add_1, y = add_2);  getitem = None
 
         self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
         self.assertEqual(orig_out, opt_out)
+
+    def _run_and_capture(self, fn, *args):
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            fn(*args)
+            return mock_stdout.getvalue().strip()
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_symbolic_str_no_recompile(self, backend):
+        def f(x, fmt, s, t):
+            torch._higher_order_ops.print(fmt, s, k=t)
+            torch._higher_order_ops.print("[" + fmt + "]", s, k=t)
+            return x.sin()
+
+        cnt = CompileCounterWithBackend(backend)
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+        for fmt, s, t in [("a {} {k}", "b", "c"), ("d {} {k}", "e", "f")]:
+            out = self._run_and_capture(opt_f, x, fmt, s, t)
+            self.assertEqual(out, f"{fmt.format(s, k=t)}\n[{fmt.format(s, k=t)}]")
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_symbolic_str_graph(self):
+        def f(x, s):
+            torch._higher_order_ops.print(s)
+            torch._higher_order_ops.print(s + "!", s)
+            return x.sin()
+
+        backend = EagerAndRecordGraphs()
+        torch.compile(f, backend=backend, fullgraph=True)(torch.randn(2), "moo")
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2]", SYNTHETIC_LOCAL_tmp_0_ : torch._library.opaque_object.OpaqueStr, SYNTHETIC_LOCAL_tmp_2_ : torch._library.opaque_object.OpaqueStr):
+        l_x_ = L_x_
+        synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
+        synthetic_local_tmp_2_ = SYNTHETIC_LOCAL_tmp_2_
+
+        print_1 = torch.ops.higher_order.print(synthetic_local_tmp_0_);  print_1 = None
+
+        print_2 = torch.ops.higher_order.print(synthetic_local_tmp_2_, synthetic_local_tmp_0_);  synthetic_local_tmp_2_ = synthetic_local_tmp_0_ = print_2 = None
+
+        sin: "f32[2]" = l_x_.sin();  l_x_ = None
+        return (sin,)
+""",
+        )
+
+    def test_symbolic_str_not_in_inductor_code(self):
+        def f(x, s):
+            torch._higher_order_ops.print(s + "!")
+            return x.sin()
+
+        _, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), torch.randn(2), "moo"
+        )
+        self.assertNotIn("moo", code)
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_symbolic_str_recompiles(self, backend):
+        def type_guarded(x, s):
+            torch._higher_order_ops.print("{}", s)
+            return x.sin()
+
+        def value_guarded(x, s):
+            torch._higher_order_ops.print(s)
+            return x.sin() if s == "a" else x.cos()
+
+        x = torch.randn(2)
+        for fn, inputs, expected in [
+            (type_guarded, ["a", 1], ["a", "1"]),
+            (value_guarded, ["a", "b"], ["a", "b"]),
+        ]:
+            cnt = CompileCounterWithBackend(backend)
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            for s, exp in zip(inputs, expected):
+                self.assertEqual(self._run_and_capture(opt_fn, x, s), exp)
+                self.assertEqual(opt_fn(x, s), fn(x, s))
+            self.assertEqual(cnt.frame_count, 2)
+
+    def test_symbolic_str_specialized_in_subgraph(self):
+        @torch.compiler.nested_compile_region
+        def region(x, s):
+            torch._higher_order_ops.print(s)
+            return x.sin()
+
+        def f(x, s):
+            return region(x, s)
+
+        cnt = CompileCounter()
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+        for s in ["a", "b"]:
+            self.assertEqual(self._run_and_capture(opt_f, x, s), s)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_symbolic_str_specialized_in_export(self):
+        class M(torch.nn.Module):
+            def forward(self, x, s):
+                torch._higher_order_ops.print(s)
+                return x.sin()
+
+        ep = torch.export.export(M(), (torch.randn(2), "moo"))
+        self.assertIn("torch.ops.higher_order.print('moo')", ep.graph_module.code)
 
     @skipIfTorchDynamo("Skipped under Dynamo")
     def test_inductor_python_wrapper_uses_python_print(self):
