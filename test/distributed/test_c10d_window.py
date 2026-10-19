@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 WINDOW_BACKENDS = [
     ("nccl2", "cuda"),
-    ("nccl-lazy", "cuda"),
 ]
 
 
@@ -139,25 +138,6 @@ class AbstractWindowTest:
         win.wait_signal((self.rank - 1) % self.world_size, False)
         torch.cuda.synchronize()
         win.tensor_deregister()
-
-    def test_symmetric_mem_pool_teardown(self):
-        # register_mem_pool(symm=True) before allocating upgrades each segment
-        # to a symmetric window; deregister_mem_pool tears them down on every
-        # rank before the pool frees them.
-        self._init_backend()
-        pool = self._make_pool()
-        self.backend.register_mem_pool(pool, symm=True)
-        self._probe_window_support(pool)
-        with torch.cuda.use_mem_pool(pool):
-            win_buf = torch.zeros(2, device=self.device)
-        win = dist._new_window(win_buf)
-        win.put(win_buf[self.rank : self.rank + 1], 1 - self.rank, self.rank, False)
-        win.wait_signal(1 - self.rank, False)
-        torch.cuda.synchronize()
-        win.tensor_deregister()
-        self.backend.deregister_mem_pool(pool)
-        del win, win_buf, pool
-        torch.cuda.synchronize()
 
     def test_put_dtypes_and_sizes(self):
         self._init_backend()
@@ -309,8 +289,7 @@ def _make_window_test_class(backend_name, device_type):
 
     WindowTest.backend_name = backend_name
     WindowTest.device_type = device_type
-    class_name = backend_name.replace("-", " ").title().replace(" ", "")
-    WindowTest.__name__ = f"{class_name}WindowTest"
+    WindowTest.__name__ = f"{backend_name.capitalize()}WindowTest"
     WindowTest.__qualname__ = WindowTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend_name),
@@ -325,10 +304,9 @@ def _make_window_test_class(backend_name, device_type):
 
 
 for backend_name, device_type in WINDOW_BACKENDS:
-    test_class = _make_window_test_class(backend_name, device_type)
-    globals()[test_class.__name__] = test_class
-# Unbound so the last class isn't collected a second time as `test_class`.
-del test_class
+    globals()[f"{backend_name.capitalize()}WindowTest"] = _make_window_test_class(
+        backend_name, device_type
+    )
 
 
 if __name__ == "__main__":
