@@ -507,14 +507,18 @@ sycl::event scaled_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result,
-    const Tensor& scale_a,
+    const std::optional<Tensor>& scale_a,
     const Tensor& scale_b,
-    at::blas::ScalingType scaling_choice_a,
+    std::optional<at::blas::ScalingType> scaling_choice_a,
     at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
     bool use_fast_accum,
     const std::optional<at::Tensor>& alpha) {
+  TORCH_CHECK(
+      scale_a.has_value() == scaling_choice_a.has_value(),
+      "scaled_matmul: scale_a and scaling_choice_a must be specified together");
+  const bool with_src_scale = scale_a.has_value();
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
@@ -524,14 +528,11 @@ sycl::event scaled_matmul(
   // 3. execute
 
   const int64_t M = mat1.size(0);
-  const bool is_fp4 = (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
-  if (is_fp4) {
-    TORCH_INTERNAL_ASSERT(
-        mat2.scalar_type() == at::ScalarType::Float4_e2m1fn_x2,
-        "Both mat1 and mat2 must be Float4_e2m1fn_x2 when FP4 path is used");
-  }
-  // Packed FP4 format means actual-K = 2 * reported-K -- adjust
-  const int64_t K_multiplier = is_fp4 ? 2 : 1;
+  const bool mat1_is_fp4 =
+      (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
+  const bool mat2_is_fp4 =
+      (mat2.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
+  const int64_t K_multiplier = mat1_is_fp4 ? 2 : 1;
   const int64_t K = mat1.size(1) * K_multiplier;
   const int64_t N = mat2.size(1);
 
@@ -546,8 +547,10 @@ sycl::event scaled_matmul(
   // get_onednn_md separately requires the K dim to be contiguous (stride-1).
   std::optional<int> mat1_packed_dim;
   std::optional<int> mat2_packed_dim;
-  if (is_fp4) {
+  if (mat1_is_fp4) {
     mat1_packed_dim = 1;
+  }
+  if (mat2_is_fp4) {
     mat2_packed_dim = 0;
   }
   dnnl::memory::desc src_md = get_onednn_md(mat1, mat1_packed_dim);
@@ -578,8 +581,11 @@ sycl::event scaled_matmul(
   bool bias_as_post_op = with_bias && with_alpha;
 
   // 1.2 Create primitive descriptor and set scales mask
-  const ScaleSpec src_spec =
-      make_scale_spec(scaling_choice_a, M, K, N, "src", scale_a.scalar_type());
+  std::optional<ScaleSpec> src_spec;
+  if (with_src_scale) {
+    src_spec = make_scale_spec(
+        *scaling_choice_a, M, K, N, "src", scale_a->scalar_type());
+  }
   const ScaleSpec wei_spec =
       make_scale_spec(scaling_choice_b, M, K, N, "wei", scale_b.scalar_type());
 
@@ -592,8 +598,10 @@ sycl::event scaled_matmul(
 #endif
 
   std::vector<int64_t> default_groups;
-  op_attr.set_scales(
-      DNNL_ARG_SRC, src_spec.mask, src_spec.groups, src_spec.dtype);
+  if (with_src_scale) {
+    op_attr.set_scales(
+        DNNL_ARG_SRC, src_spec->mask, src_spec->groups, src_spec->dtype);
+  }
   op_attr.set_scales(
       DNNL_ARG_WEIGHTS, wei_spec.mask, wei_spec.groups, wei_spec.dtype);
   // scale_result tensor currently only supports scalar(TensorWise Scaling).
@@ -673,13 +681,17 @@ sycl::event scaled_matmul(
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
-  auto src_sc_mem = make_scale_mem_from_spec(
-      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
+  auto src_sc_mem = with_src_scale
+      ? std::optional<dnnl::memory>{make_scale_mem_from_spec(
+            *src_spec, src_spec->expected_numel(M, K, "src"), *scale_a)}
+      : std::nullopt;
 
   auto wei_sc_mem = make_scale_mem_from_spec(
       wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
 
-  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
+  if (with_src_scale) {
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, *src_sc_mem});
+  }
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
 
   // Bind post-op operands in the same order they were appended above.
