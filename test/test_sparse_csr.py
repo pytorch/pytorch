@@ -1395,8 +1395,6 @@ class TestSparseCSRDevice(TestCase):
     @dtypes(torch.float, torch.bool)
     @all_sparse_compressed_layouts()
     def test_resize_as_sparse_compressed(self, device, dtype, layout):
-        device_type = torch.device(device).type
-
         def _check_resize_b_as_a(b, a):
             br = b.clone()
             br.resize_as_sparse_(a)
@@ -1476,21 +1474,6 @@ class TestSparseCSRDevice(TestCase):
                                                nnz=nnz * 2,
                                                blocksize=tuple(2 * bi for bi in blocksize))
             _check_resize_b_as_a(b, a)
-
-            # different device, only check on accelerators as we know we are testing in an
-            # environment that has multiple devices
-
-            # TODO: .cpu() does not seem to work correctly for sparse. Causes a call to `copy_` which
-            # complains about incompatible nnz between src and self?
-            if device_type != 'cpu' and (layout not in (torch.sparse_bsc, torch.sparse_bsr)):
-                a_cpu = self.genSparseCompressedTensor(shape,
-                                                       layout=layout,
-                                                       device='cpu',
-                                                       index_dtype=index_dtype,
-                                                       dtype=dtype,
-                                                       nnz=nnz,
-                                                       blocksize=blocksize)
-                _check_resize_b_as_a(b, a)
 
             # error on a strided
             a_strided = a.to_dense()
@@ -3051,7 +3034,8 @@ class TestSparseCSRDevice(TestCase):
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @ops(binary_ops_with_dense_output, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, ])
     def test_autograd_dense_output(self, device, dtype, op):
-        if op.name == "mv" and no_mkl_sparse and self.device_type == 'cpu':
+        device_type = torch.device(device).type
+        if op.name == "mv" and no_mkl_sparse and device_type == 'cpu':
             self.skipTest("MKL Sparse is not available")
 
         samples = list(op.sample_inputs(device, dtype, requires_grad=True))
