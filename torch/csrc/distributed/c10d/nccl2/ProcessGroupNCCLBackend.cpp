@@ -11,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
@@ -534,8 +535,12 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::coalesceWorks(
   // The coalesced work stands in for its per-tensor works in the coalescing
   // window, so a window holding one *_coalesced op returns that op's work.
   if (coalescing_batch_) {
+    std::unordered_set<const WorkNCCL*> folded;
+    for (const auto& w : works) {
+      folded.insert(w.get());
+    }
     std::erase_if(coalescing_works_, [&](const auto& w) {
-      return std::find(works.begin(), works.end(), w) != works.end();
+      return folded.count(w.get());
     });
   }
   work->setChildren(std::move(works));
