@@ -392,6 +392,7 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = HashableTracker(arg)
         if key not in self.items:
+            self.install_dict_contains_guard(tx, [arg])
             raise_observed_exception(KeyError, tx, args=[arg])
         return self.items[key]
 

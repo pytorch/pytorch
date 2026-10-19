@@ -2305,7 +2305,32 @@ class DictTests(torch._dynamo.test_case.TestCase):
         obj = Obj(3)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(Obj(3)), opt_fn(obj))
+    
+    def test_getitem_keyerror_guard_recompiles(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201369
+        # d[key] raising KeyError inside a try/except must still guard on
+        # whether `key` is present, just like d.get(key) and `key in d` do.
+        # Otherwise the compiled graph is reused once the key appears, and
+        # the function silently returns the stale except-branch result.
+        def fn(d, t):
+            try:
+                v = d["x"]
+            except KeyError:
+                return t - 1
+            return v.sum()
 
+        t = torch.tensor(0.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        d = {}
+        self.assertEqual(opt_fn(d, t), fn(d, t))
+        self.assertEqual(cnt.frame_count, 1)
+
+        d = {"x": torch.ones(3)}
+        self.assertEqual(opt_fn(d, t), fn(d, t))
+        self.assertEqual(cnt.frame_count, 2)
+        
     def test_dunder_dict_getitem_guard_recompiles(self):
         class Obj:
             def __init__(self):
