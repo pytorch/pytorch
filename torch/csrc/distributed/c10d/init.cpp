@@ -4291,12 +4291,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
               py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows.)")
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, they are registered as NCCL symmetric windows instead, when NCCL supports them.)")
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool,
               py::arg("pool"),
-              R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
+              R"(Deregister ``pool``'s segments from this communicator.)")
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
