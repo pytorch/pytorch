@@ -37,8 +37,8 @@
 #define USDT_EMIT_STOP_TRACE()
 
 #else // !USE_GOOGLE_LOG
-#include <stdio.h>
 #include <atomic>
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <ostream>
@@ -95,7 +95,7 @@ class Logger {
   }
   static constexpr uint64_t hash(const char* s) {
     uint64_t hash = hash_rec(s, 0);
-    return hash & rol(0x41a0240682483014ull, hash & 63);
+    return hash & rol(0x41a0240682483014ull, static_cast<int>(hash & 63));
   }
   static constexpr uint64_t hash_rec(const char* s, int off) {
     // Random constants!
@@ -171,8 +171,8 @@ class Logger {
 
 class VoidLogger {
  public:
-  VoidLogger() {}
-  void operator&(std::ostream&) {}
+  VoidLogger() = default;
+  void operator&(std::ostream& /*unused*/) {}
 };
 
 // RAII helper used to ensure a UST stage row is emitted on every exit from a
@@ -180,6 +180,7 @@ class VoidLogger {
 // up by the emitted row as usual.
 class USTLoggerStageGuard {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit USTLoggerStageGuard(const std::string& stage) : stage_(stage) {}
   ~USTLoggerStageGuard();
 
@@ -331,11 +332,10 @@ struct __to_constant__ {
 #define UST_LOGGER_STAGE_SCOPE(stage) \
   libkineto::USTLoggerStageGuard LOCAL_VARNAME(ust_stage_guard)(stage)
 
-#define USDT_LOGGER_EMIT_MESSAGE(usdt_type)                      \
-  libkineto::VoidLogger() &                                      \
-      libkineto::Logger(                                         \
-          libkineto::LoggerOutputType::USDT, __LINE__, __FILE__) \
-              .stream()                                          \
+#define USDT_LOGGER_EMIT_MESSAGE(usdt_type)                                    \
+  libkineto::VoidLogger() &                                                    \
+      libkineto::Logger(libkineto::LoggerOutputType::USDT, __LINE__, __FILE__) \
+              .stream()                                                        \
           << usdt_type
 #define USDT_EMIT_START_TRACE() USDT_LOGGER_EMIT_MESSAGE("profiler_start")
 #define USDT_EMIT_STOP_TRACE() USDT_LOGGER_EMIT_MESSAGE("profiler_stop")
