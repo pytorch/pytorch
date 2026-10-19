@@ -12,9 +12,9 @@ Use one tracking issue for the whole lifecycle of a deprecation, freeze, or remo
 This follows the [backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy) for stable components; if this skill and the wiki disagree, follow the wiki. Prototype and beta components may break without a deprecation period.
 
 1. **Deprecate in release N.** Warn on use, point to the replacement, update docs, and migrate PyTorch's own callers.
-2. **Warn for at least two releases and 180 days of nightlies.** The earliest removal target is N+2.
-3. **Remove** once both windows have passed and the announced target has arrived.
-4. **Silent behavior changes** (e.g. changing a default) must be made loud first: after the warning period, the old behavior raises an error for at least two more releases and 180 more days of nightlies before the new behavior is enabled.
+2. **Warn for at least two releases** (180 days for nightly users). The earliest removal target is N+2.
+3. **Remove** in N+2 or later, once the announced target has arrived.
+4. **Silent behavior changes** (e.g. changing a default) must be made loud first: after the warning period, the old behavior raises an error for at least two more releases (180 days for nightly users) before the new behavior is enabled.
 
 N is the release that will ship the change: read `version.txt` (`2.16.0a0` means the change ships in 2.16, so the earliest removal is 2.18).
 
@@ -74,7 +74,7 @@ Some components are frozen rather than scheduled for removal (e.g. the C++ front
 
 ## Removing a deprecated feature
 
-1. Find the start version in the tracking issue, the warning, or `git log -S '<warning text>'`. Verify the warning has shipped for at least two releases and 180 days of nightlies, and that the announced removal target has arrived.
+1. Find the start version in the tracking issue, the warning, or `git log -S '<warning text>'`. Verify the warning has shipped in at least two releases and that the announced removal target has arrived.
 2. Remove the implementation, the warning, and its tests. Search for remaining references, including C++, `.pyi.in` stubs, `docs/source`, and `torch/overrides.py`. Where docs remain (e.g. for a behavior change), add `.. versionchanged:: <version>` with migration guidance.
 3. Label the PR `topic: bc breaking` and describe the migration in the release-notes section.
 4. If steps remain (e.g. enabling new behavior), update `Next step` on the tracking issue; otherwise the PR closes it.
