@@ -2,8 +2,10 @@
 name: inductor-perf-nightly-macos
 
 on:
-  schedule:
-    - cron: 0 7 * * *
+  # TODO: re-enable the nightly schedule once the macos-m2-26 fleet grows from
+  # 8 to 28 runners (pytorch-gha-infra#1558), see https://github.com/pytorch/test-infra/issues/8964
+  # schedule:
+  #   - cron: 0 7 * * *
   workflow_dispatch:
     inputs:
       training:
