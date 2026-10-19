@@ -1968,16 +1968,36 @@ def schedule_overlap_bucketing(
     ):
         return gm
 
-    if custom_runtime_estimation is None and not has_collective_cost_model():
-        # No calibrated collective cost model for this backend and no
-        # user-provided estimations: the cost-based optimizations would
-        # consume invalid values, so disable the pass instead.
+    # Skip the pass only when no estimation source can produce collective
+    # runtimes for this backend: no custom callback, no profile-guided
+    # estimation, no registered analytical cost model for the device type,
+    # and no usable benchmark. Benchmark-based estimation is disabled in
+    # deterministic mode (mirrors OverlapScheduler.__init__) and requires an
+    # initialized, non-fake process group.
+    if collective_estimator == "benchmark" and not config.deterministic:
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            can_benchmark_collective,
+        )
+
+        benchmark_available = can_benchmark_collective()
+    else:
+        benchmark_available = False
+    if (
+        custom_runtime_estimation is None
+        and pge_profile_path is None
+        and not has_collective_cost_model()
+        and not benchmark_available
+    ):
+        # The cost-based optimizations would consume invalid values, so
+        # disable the pass instead.
         warning_once(
             log,
-            "Skipping overlap scheduling: no collective cost model is "
-            "available for device type %r. Register a backend-specific "
+            "Skipping overlap scheduling: no collective runtime estimation "
+            "is available for device type %r. Register a backend-specific "
             "estimator via torch._inductor.comm_analysis."
-            "register_collective_cost_estimator() to enable it.",
+            "register_collective_cost_estimator(), or select "
+            "collective_estimator='benchmark' with an initialized process "
+            "group, to enable the pass.",
             _get_device_type_str(),
         )
         return gm

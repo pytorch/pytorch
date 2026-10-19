@@ -762,10 +762,8 @@ class ProfileGuidedEstimator:
                 }
                 if _is_collective_node(node):
                     try:
-                        analytical_ms = (
-                            torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                                node
-                            )
+                        analytical_ms = torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+                            node
                         )
                         # None: no calibrated cost model for this backend.
                         if analytical_ms is not None:

@@ -23,7 +23,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache
+_accelerator_device_type: str | None = None
+
+
 def _get_device_type_str() -> str:
     """Return the device type of the current accelerator (e.g. "cuda", "npu").
 
@@ -32,13 +34,26 @@ def _get_device_type_str() -> str:
     does not shadow the actually-available accelerator. When no accelerator
     is available, fall back to "cuda" to preserve the pre-existing CUDA
     fallback semantics.
+
+    Only successful probes are cached: the "cuda" fallback is returned
+    uncached so that a transient probe failure does not permanently pin the
+    device type to "cuda" (which would silently mask a registered estimator
+    once the accelerator becomes available).
     """
+    global _accelerator_device_type
+    if _accelerator_device_type is not None:
+        return _accelerator_device_type
     try:
         acc = torch.accelerator.current_accelerator(check_available=True)
     except RuntimeError:
-        # Accelerator without a usable torch.<type> device module.
+        # Accelerator without a usable torch.<type> device module; re-probe
+        # on the next call in case the failure was transient.
         return "cuda"
-    return acc.type if acc is not None else "cuda"
+    if acc is None:
+        # Same as above: do not cache the fallback.
+        return "cuda"
+    _accelerator_device_type = acc.type
+    return _accelerator_device_type
 
 
 def _get_device_module() -> Any:
@@ -164,7 +179,11 @@ def _has_nvlink() -> bool:
 @functools.lru_cache
 def get_gpu_type() -> NVIDIA_GPU_TYPE:
     # Prefer compute capability (works for all NVIDIA GPUs, including H200, L40, etc.)
-    if _get_device_type_str() == "cuda" and torch.cuda.is_available() and torch.cuda.device_count() > 0:
+    if (
+        _get_device_type_str() == "cuda"
+        and torch.cuda.is_available()
+        and torch.cuda.device_count() > 0
+    ):
         major = torch.cuda.get_device_properties(0).major
         if major >= 10:
             return NVIDIA_GPU_TYPE.BLACKWELL

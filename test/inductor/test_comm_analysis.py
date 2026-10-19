@@ -134,8 +134,8 @@ class TestCollectiveCostEstimatorRegistry(TestCase):
 
     def test_registered_estimator_takes_precedence(self):
         from torch._inductor.comm_analysis import (
-            NCCL_COLL,
             estimate_nccl_collective_runtime_impl,
+            NCCL_COLL,
             register_collective_cost_estimator,
         )
 
@@ -161,8 +161,8 @@ class TestCollectiveCostEstimatorRegistry(TestCase):
         # group_size <= 1 and UNSUPPORTED collectives return 0 without
         # consulting the registry.
         from torch._inductor.comm_analysis import (
-            NCCL_COLL,
             estimate_nccl_collective_runtime_impl,
+            NCCL_COLL,
             register_collective_cost_estimator,
         )
 
@@ -195,9 +195,9 @@ class TestCollectiveCostEstimatorRegistry(TestCase):
         # model: estimation returns None so callers can disable cost-based
         # optimizations until a backend-specific estimator is registered.
         from torch._inductor.comm_analysis import (
-            NCCL_COLL,
             estimate_nccl_collective_runtime_impl,
             has_collective_cost_model,
+            NCCL_COLL,
         )
 
         self.assertIsNone(
