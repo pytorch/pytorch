@@ -408,9 +408,7 @@ def _build_scatter_memory_state(graph: fx.Graph) -> "ScatterMemoryState | None":
     Returns None when CUDA/XPU is unavailable or the profile can't be built;
     the pass then runs unconstrained by the memory budget.
     """
-    has_cuda = torch.cuda.is_available()
-    has_xpu = torch.xpu.is_available()
-    if not (has_cuda or has_xpu):
+    if not torch.accelerator.is_available():
         return None
 
     _, total_gpu = torch.xpu.mem_get_info() if has_xpu else torch.cuda.mem_get_info()
