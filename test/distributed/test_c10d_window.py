@@ -141,17 +141,25 @@ class AbstractWindowTest:
         win.tensor_deregister()
 
     def test_symmetric_mem_pool_teardown(self):
-        # register_mem_pool(symm=True) before allocating upgrades each segment
-        # to a symmetric window; deregister_mem_pool tears them down on every
-        # rank before the pool frees them.
+        # register_mem_pool(symm=True) before allocating upgrades each new
+        # segment to a symmetric window; deregister_mem_pool tears them down.
         self._init_backend()
         # Probe before register_mem_pool: allocating from a symm=True pool
         # raises, rather than skips, without a symmetric-memory transport.
         # Probing this pool keeps its window segment under deregister_mem_pool.
         pool = self._make_pool()
         self._probe_window_support(pool)
+        # A window outside the symm pool, to check put's source validation
+        # after deregister_mem_pool.
+        other_pool = self._make_pool()
+        with torch.cuda.use_mem_pool(other_pool):
+            other_buf = torch.zeros(1, device=self.device)
+        other_win = dist._new_window(other_buf)
+        next_rank = (self.rank + 1) % self.world_size
+        prev_rank = (self.rank - 1) % self.world_size
         self.backend.register_mem_pool(pool, symm=True)
         try:
+            # Reuses the probe's segment, registered before symm=True.
             with torch.cuda.use_mem_pool(pool):
                 win_buf = torch.zeros(self.world_size, device=self.device)
             win = dist._new_window(win_buf)
@@ -160,17 +168,21 @@ class AbstractWindowTest:
             with torch.cuda.use_mem_pool(pool):
                 src_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
             src = src_seg[:1]
-            next_rank = (self.rank + 1) % self.world_size
-            prev_rank = (self.rank - 1) % self.world_size
             win.put(src, next_rank, self.rank, False)
             win.wait_signal(prev_rank, False)
             torch.cuda.synchronize()
             self.assertEqual(win_buf[prev_rank].item(), prev_rank)
             win.tensor_deregister()
-            del win, src, src_seg, win_buf
+            del win, win_buf
         finally:
             self.backend.deregister_mem_pool(pool)
-        del pool
+        # put validates its source locally, so this raises on every rank
+        # without communicating.
+        unregistered = "not in a registered symmetric window"
+        with self.assertRaisesRegex(RuntimeError, unregistered):
+            other_win.put(src, next_rank, 0, False)
+        other_win.tensor_deregister()
+        del src, src_seg, pool, other_win, other_buf, other_pool
         torch.cuda.synchronize()
 
     def test_put_dtypes_and_sizes(self):

@@ -1334,7 +1334,8 @@ Options for :meth:`Window.put`.
 Attributes:
     timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
         sentinel, meaning the process group's timeout.
-    hints (dict[str, str]): Backend-specific hints.
+    hints (dict[str, str]): Backend-specific hints; no current backend uses
+        them for window operations.
 )")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::PutOptions::timeout)
@@ -1346,7 +1347,8 @@ Options for :meth:`Window.signal`.
 Attributes:
     timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
         sentinel, meaning the process group's timeout.
-    hints (dict[str, str]): Backend-specific hints.
+    hints (dict[str, str]): Backend-specific hints; no current backend uses
+        them for window operations.
 )")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::SignalOptions::timeout)
@@ -1358,7 +1360,8 @@ Options for :meth:`Window.wait_signal`.
 Attributes:
     timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
         sentinel, meaning the process group's timeout.
-    hints (dict[str, str]): Backend-specific hints.
+    hints (dict[str, str]): Backend-specific hints; no current backend uses
+        them for window operations.
 )")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::WaitSignalOptions::timeout)
@@ -1429,7 +1432,7 @@ freed; with NCCL, every rank must then free it in the same order.
           py::arg("dst_rank"),
           py::arg("target_offset_nelems"),
           py::arg("async_op"),
-          py::arg("opts") = ::c10d::PutOptions(),
+          py::arg_v("opts", ::c10d::PutOptions(), "PutOptions()"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
@@ -1440,8 +1443,9 @@ Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
         and fit within its window. Backends may require it to be
         contiguous and to lie in an allocator segment that has a window,
-        e.g. a slice of this window's tensor or any tensor from a pool
-        registered with ``register_mem_pool(pool, symm=True)``.
+        e.g. a slice of this window's tensor or any tensor allocated from
+        a pool after registering it with
+        ``register_mem_pool(pool, symm=True)``.
     dst_rank (int): Destination rank in the group.
     target_offset_nelems (int): Element offset into the destination window.
     async_op (bool): Whether this op should be an async op.
@@ -1472,7 +1476,7 @@ Returns:
           &::c10d::Window::signal,
           py::arg("peer_rank"),
           py::arg("async_op"),
-          py::arg("opts") = ::c10d::SignalOptions(),
+          py::arg_v("opts", ::c10d::SignalOptions(), "SignalOptions()"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Send a signal to ``peer_rank``.
@@ -1491,7 +1495,7 @@ Returns:
           &::c10d::Window::wait_signal,
           py::arg("peer_rank"),
           py::arg("async_op"),
-          py::arg("opts") = ::c10d::WaitSignalOptions(),
+          py::arg_v("opts", ::c10d::WaitSignalOptions(), "WaitSignalOptions()"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Wait for one signal from ``peer_rank``, sent by :meth:`signal` or, on
