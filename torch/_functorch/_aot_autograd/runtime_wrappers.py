@@ -579,40 +579,19 @@ class _RuntimeCompiledFnInvoker:
     def run(self, args: list[Any], *, on_before_call: Callable[[], None]) -> list[Any]:
         with self.first_invocation_ctx():
             if self.trace_joint:
-                args_ = list(args)
+                args = list(args)
                 # See Note [Detaching inputs that never need gradients]
                 for idx in self.indices_of_inps_to_detach:
-                    if isinstance(args_[idx], torch.Tensor):
-                        args_[idx] = args_[idx].detach()
+                    if isinstance(args[idx], torch.Tensor):
+                        args[idx] = args[idx].detach()
 
-                # It's possible to have trace_joint inside user specified with no_grad() region,
-                # if there is a nested with enable_grad(), that forces some outputs to require gradients.
-                # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-                prev_view_replay_enabled = torch._C._is_view_replay_enabled()
-                try:
-                    if not prev_view_replay_enabled:
-                        torch._C._set_view_replay_enabled(True)
-                    with torch.enable_grad():
-                        on_before_call()
-                        return call_func_at_runtime_with_args(
-                            self.compiled_fn,
-                            args_,
-                            disable_amp=self.disable_amp,
-                            steal_args=True,
-                        )
-                finally:
-                    if torch._C._is_view_replay_enabled() != prev_view_replay_enabled:
-                        torch._C._set_view_replay_enabled(prev_view_replay_enabled)
-
-            # When we have an inference graph, we run with grad disabled.
-            # It's possible to get an inference graph with inputs that require grad,
-            # in which case we want to make sure autograd is disabled
-            # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
-            grad_enabled = torch.is_grad_enabled()
+            # The joint graph runs with grad and view replay enabled, even inside a
+            # user no_grad() region: a nested enable_grad() can force some outputs
+            # to require gradients. An inference graph runs with grad disabled,
+            # even if inputs require grad (e.g. inductor emits aten.addmm.out
+            # calls, which autograd would reject).
+            prior = torch._C._aot_runtime_enter(self.trace_joint)
             try:
-                if grad_enabled:
-                    torch._C._set_grad_enabled(False)
                 on_before_call()
                 return call_func_at_runtime_with_args(
                     self.compiled_fn,
@@ -621,8 +600,7 @@ class _RuntimeCompiledFnInvoker:
                     steal_args=True,
                 )
             finally:
-                if grad_enabled:
-                    torch._C._set_grad_enabled(True)
+                torch._C._aot_runtime_exit(prior)
 
 
 @dataclass
@@ -876,10 +854,15 @@ def _codegen_compiled_fn_invocation(
     # Call an unboxed compiled_fn (e.g. CompiledFunction.apply) directly rather
     # than through make_boxed_func's extra frame.
     star = "" if boxed else "*"
+    # trace_joint is known at codegen time. _aot_runtime_enter_ enables grad
+    # mode and view replay for the joint/training path and disables grad mode
+    # for inference; _aot_runtime_exit_ restores the prior state.
+    buf.add_global("_aot_runtime_enter_", torch._C._aot_runtime_enter)
+    buf.add_global("_aot_runtime_exit_", torch._C._aot_runtime_exit)
     buf.emit("with _first_ctx_():", indent=1)
-    # trace_joint is known at codegen time. Only the joint/training path needs
-    # forced view replay; inference wrappers should not touch this TLS state.
+    call_args = "args"
     if trace_joint:
+        call_args = "args_"
         buf.emit("args_ = list(args)", indent=2)
         for idx in indices_of_inps_to_detach:
             buf.emit(
@@ -887,48 +870,18 @@ def _codegen_compiled_fn_invocation(
                 f"args_[{idx}] = args_[{idx}].detach()",
                 indent=2,
             )
-        buf.emit(
-            "prev_view_replay_enabled = torch._C._is_view_replay_enabled()", indent=2
-        )
-        buf.emit("prev_grad_enabled = torch.is_grad_enabled()", indent=2)
-        buf.emit("try:", indent=2)
-        buf.emit(
-            "if not prev_view_replay_enabled: torch._C._set_view_replay_enabled(True)",
-            indent=3,
-        )
-        buf.emit("if not prev_grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
-        buf.emit("_on_before_call_()", indent=3)
-        if disable_amp:
-            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=3)
-            buf.emit(f"all_outs = _compiled_fn_({star}args_)", indent=4)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
-        else:
-            buf.emit(f"all_outs = _compiled_fn_({star}args_)", indent=3)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
-        buf.emit("finally:", indent=2)
-        buf.emit(
-            "if not prev_view_replay_enabled: torch._C._set_view_replay_enabled(False)",
-            indent=3,
-        )
-        buf.emit(
-            "if not prev_grad_enabled: torch._C._set_grad_enabled(False)", indent=3
-        )
-    else:
-        buf.emit("grad_enabled = torch.is_grad_enabled()", indent=2)
-        buf.emit("try:", indent=2)
-        buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
-        buf.emit("_on_before_call_()", indent=3)
-        if disable_amp:
-            buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
-            buf.emit("with _DisableAutocast_():", indent=3)
-            buf.emit(f"all_outs = _compiled_fn_({star}args)", indent=4)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=4)
-        else:
-            buf.emit(f"all_outs = _compiled_fn_({star}args)", indent=3)
-            _codegen_normalize_as_list(buf, "all_outs", indent_level=3)
-        buf.emit("finally:", indent=2)
-        buf.emit("if grad_enabled: torch._C._set_grad_enabled(True)", indent=3)
+    buf.emit(f"prior = _aot_runtime_enter_({trace_joint})", indent=2)
+    buf.emit("try:", indent=2)
+    buf.emit("_on_before_call_()", indent=3)
+    call_indent = 3
+    if disable_amp:
+        buf.add_global("_DisableAutocast_", torch._C._DisableAutocast)
+        buf.emit("with _DisableAutocast_():", indent=3)
+        call_indent = 4
+    buf.emit(f"all_outs = _compiled_fn_({star}{call_args})", indent=call_indent)
+    _codegen_normalize_as_list(buf, "all_outs", indent_level=call_indent)
+    buf.emit("finally:", indent=2)
+    buf.emit("_aot_runtime_exit_(prior)", indent=3)
     buf.emit("del args", indent=1)
 
 
