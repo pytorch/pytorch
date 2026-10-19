@@ -1,13 +1,19 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gc
+import sys
+import weakref
 
 import torch
 import torch.distributed as dist
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import MultiProcContinuousTest
+from torch.testing._internal.common_distributed import (
+    MultiProcContinuousTest,
+    TEST_SKIPS,
+)
 from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.utils.checkpoint import checkpoint
 
@@ -36,6 +42,63 @@ class RecoveryModel(nn.Module):
         return live, HiddenOutput(dead)
 
 
+class CheckpointedBranches(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.live = nn.Linear(8, 8)
+        self.dead = nn.Linear(8, 8)
+
+    def forward(self, x):
+        live = checkpoint(self.live, x, use_reentrant=True)
+        return live, HiddenOutput(checkpoint(self.dead, x, use_reentrant=True))
+
+
+class CPUOutputCheckpoints(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(8, 8)
+
+    def forward(self, x):
+        def run(x):
+            return self.linear(x).cpu()
+
+        live = checkpoint(run, x, use_reentrant=True)
+        return live + checkpoint(run, 2 * x, use_reentrant=True)
+
+
+class ReentrantBackward(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, module, fail):
+        ctx.save_for_backward(x)
+        ctx.module = module
+        ctx.fail = fail
+        with torch.no_grad():
+            return module(x)
+
+    @staticmethod
+    def backward(ctx, grad):
+        (x,) = ctx.saved_tensors
+        x = x.detach().requires_grad_()
+        with torch.enable_grad():
+            torch.autograd.backward(ctx.module(x), grad)
+        if ctx.fail[0]:
+            raise RuntimeError("outer backward failed")
+        return x.grad, None, None
+
+
+class FailingReentrant(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(8, 8)
+        self.fail = [False]
+        self.last_output = None
+
+    def forward(self, x):
+        # Lets the test run backward without DDP's output sink.
+        self.last_output = ReentrantBackward.apply(x, self.linear, self.fail)
+        return self.last_output
+
+
 class TestDDPStaticGraphRecovery(MultiProcContinuousTest):
     world_size = 2
 
@@ -46,7 +109,10 @@ class TestDDPStaticGraphRecovery(MultiProcContinuousTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         if cls.device_type != "cpu":
-            torch.get_device_module(cls.device_type).set_device(rank)
+            device_module = torch.get_device_module(cls.device_type)
+            if device_module.device_count() < world_size:
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
+            device_module.set_device(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 
     def _rank_device(self, device):
@@ -200,6 +266,72 @@ class TestDDPStaticGraphRecovery(MultiProcContinuousTest):
             self._assert_grads(model, reference)
             ddp._check_reducer_finalized()
 
+    @parametrize("checkpointed", [False, True])
+    @parametrize("asymmetric", [False, True])
+    def test_hidden_output_only_loss(self, device, asymmetric, checkpointed):
+        device = self._rank_device(device)
+        model = (CheckpointedBranches() if checkpointed else RecoveryModel()).to(device)
+        reference = copy.deepcopy(model)
+        ddp = DDP(model, static_graph=True)
+        ddp._set_static_graph_recovery()
+        for step in range(3):
+            ddp.zero_grad()
+            reference.zero_grad()
+            uses_live = [
+                step < 2 or (asymmetric and rank != 0)
+                for rank in range(self.world_size)
+            ]
+            x = self._input(device, self.rank, step).requires_grad_()
+            live, dead = ddp(x)
+            loss = dead.tensor.sum()
+            if uses_live[self.rank]:
+                loss = loss + live.sum()
+            loss.backward()
+            for rank in range(self.world_size):
+                x = self._input(device, rank, step).requires_grad_()
+                live, dead = reference(x)
+                loss = uses_live[rank] * live.sum() + dead.tensor.sum()
+                (loss / self.world_size).backward()
+            self._assert_grads(model, reference)
+            ddp._check_reducer_finalized()
+
+    def test_reentrant_backward_ends_on_other_device(self, device):
+        device = self._rank_device(device)
+        if self.device_type == "cpu":
+            self.skipTest("Needs an accelerator.")
+        model = CPUOutputCheckpoints().to(device)
+        reference = copy.deepcopy(model)
+        ddp = DDP(model, static_graph=True)
+        ddp._set_static_graph_recovery()
+        for step in range(3):
+            ddp.zero_grad()
+            reference.zero_grad()
+            ddp(self._input(device, self.rank, step).requires_grad_()).sum().backward()
+            for rank in range(self.world_size):
+                x = self._input(device, rank, step).requires_grad_()
+                (reference(x).sum() / self.world_size).backward()
+            self._assert_grads(model, reference)
+            ddp._check_reducer_finalized()
+
+    def test_deferred_hook_after_reducer_deleted(self, device):
+        device = self._rank_device(device)
+        model = FailingReentrant().to(device)
+        ddp = DDP(model, static_graph=True)
+        ddp._set_static_graph_recovery()
+        x = self._input(device, self.rank).requires_grad_()
+        ddp(x).sum().backward()
+        model.fail[0] = True
+        ddp(x)
+        # Skip the output sink so the inner backward installs the deferred hook.
+        with self.assertRaisesRegex(RuntimeError, "outer backward failed"):
+            model.last_output.sum().backward(retain_graph=True)
+        ddp_ref = weakref.ref(ddp)
+        del ddp
+        gc.collect()
+        self.assertIsNone(ddp_ref())
+        model.fail[0] = False
+        model.last_output.sum().backward()
+
     def test_comm_hook_once_per_bucket(self, device):
         device = self._rank_device(device)
         model = RecoveryModel().to(device)
@@ -290,13 +422,14 @@ class TestDDPStaticGraphRecovery(MultiProcContinuousTest):
         with self.assertRaisesRegex(RuntimeError, "does not support"):
             ddp._set_static_graph_recovery()
 
-    def test_no_parameter_hooks(self, device):
+    @parametrize("leaf_output", [False, True])
+    def test_no_parameter_hooks(self, device, leaf_output):
         device = self._rank_device(device)
         model = nn.Linear(8, 8).to(device)
         ddp = DDP(model, static_graph=True)
         ddp._set_static_graph_recovery()
         ddp(self._input(device, self.rank)).sum().backward()
-        model.forward = lambda x: x.sin()
+        model.forward = (lambda x: x) if leaf_output else (lambda x: x.sin())
         x = self._input(device, self.rank).requires_grad_()
         for _ in range(2):
             ddp.zero_grad()

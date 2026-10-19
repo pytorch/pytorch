@@ -184,6 +184,9 @@ class TORCH_API Reducer {
   // Finish pending buckets after the outer backward completes.
   void recover_unused_parameters();
 
+  // Called by an output sink. Its backward ends after all of DDP's gradients.
+  void queue_recovery_from_output();
+
   void set_mixed_precision_param_dtype(c10::ScalarType dtype);
 
   // Weak reference to associated DDP logger. The reference is weak to avoid
@@ -551,6 +554,18 @@ class TORCH_API Reducer {
   bool static_graph_;
 
   bool static_graph_recovery_{false};
+
+  // Last graph task that queued recovery.
+  int recovery_graph_task_id_{-1};
+
+  // An output sink queued recovery in this iteration.
+  bool output_recovery_queued_{false};
+
+  // Expires with the reducer so deferred recovery hooks become no-ops.
+  std::shared_ptr<bool> recovery_alive_ = std::make_shared<bool>(true);
+
+  // Queue recovery at the end of the top-level backward. Requires mutex_.
+  void queue_static_graph_recovery();
 
   bool skip_all_reduce_unused_params_;
 

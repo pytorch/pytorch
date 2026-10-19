@@ -74,7 +74,7 @@ class Reducer:
     def _set_ddp_runtime_logging_sample_rate(self, sample_rate: int) -> None: ...
     def _set_static_graph(self) -> None: ...
     def _set_static_graph_recovery(self) -> None: ...
-    def _recover_unused_parameters(self) -> None: ...
+    def _queue_recovery_from_output(self) -> None: ...
     def _run_comm_hook(self, bucket: GradBucket) -> Future: ...
     def set_logger(self, logger: Logger) -> None: ...
     def _remove_autograd_hooks(self) -> None: ...
@@ -172,12 +172,14 @@ class BroadcastOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllreduceOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
+    config: object | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -187,15 +189,18 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class GatherOptions:
     rootRank: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ScatterOptions:
     rootRank: int
@@ -206,6 +211,7 @@ class ReduceScatterOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class BarrierOptions:
     device_ids: list[int]
@@ -216,6 +222,7 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ReconfigureOptions:
     uuid: int
@@ -918,6 +925,7 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
         host_cft_mode: int
+        nvls_host_mode: int
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):

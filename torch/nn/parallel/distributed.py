@@ -417,9 +417,7 @@ class _DDPRecoverySink(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        Variable._execution_engine.queue_callback(
-            ctx.ddp_weakref().reducer._recover_unused_parameters
-        )
+        ctx.ddp_weakref().reducer._queue_recovery_from_output()
         return None, *grad_outputs
 
 
@@ -1921,7 +1919,7 @@ class DistributedDataParallel(Module, Joinable):
         elif self._static_graph_recovery and self.require_backward_grad_sync:
             tensors, treespec, output_is_rref = _tree_flatten_with_rref(output)
             for i, tensor in enumerate(tensors):
-                if isinstance(tensor, torch.Tensor) and tensor.grad_fn is not None:
+                if isinstance(tensor, torch.Tensor) and tensor.requires_grad:
                     # Separate nodes preserve each output's backward dependencies.
                     tensors[i] = _DDPRecoverySink.apply(weakref.ref(self), tensor)
             output = _tree_unflatten_with_rref(tensors, treespec, output_is_rref)
@@ -2765,6 +2763,10 @@ class DistributedDataParallel(Module, Joinable):
         delayed all-reduce, native mixed precision, the Python reducer, and
         optimizer in backward are not supported. ``skip_all_reduce_unused_params``
         must be false. Manual finalization must run after backward returns.
+        Each synchronized backward must reach a visible differentiable output
+        or a DDP parameter. Reentrant backward that no visible output depends
+        on must end on the thread that runs its outer node and nest at most 60
+        levels.
         """
         if self._use_python_reducer:
             raise RuntimeError("Static graph recovery requires the C++ reducer.")

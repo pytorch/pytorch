@@ -756,6 +756,52 @@ void Reducer::recover_unused_parameters() {
   }
 }
 
+void Reducer::queue_recovery_from_output() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  output_recovery_queued_ = true;
+  torch::autograd::Engine::get_default_engine().queue_callback(
+      [this] { recover_unused_parameters(); });
+}
+
+void Reducer::queue_static_graph_recovery() {
+  const auto graph_task_id = torch::autograd::get_current_graph_task_id();
+  if (graph_task_id == -1 || graph_task_id == recovery_graph_task_id_) {
+    return;
+  }
+  recovery_graph_task_id_ = graph_task_id;
+  torch::autograd::Engine::get_default_engine().queue_callback([this] {
+    {
+      // A missing node does not prove this is the outer backward, so prefer
+      // the output sink's callback.
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (output_recovery_queued_) {
+        return;
+      }
+    }
+    const auto node = torch::autograd::get_current_node();
+    if (!node) {
+      recover_unused_parameters();
+      return;
+    }
+    // A reentrant backward ends inside an outer node. Queue recovery on the
+    // outer backward after that node. The hook runs once, and a retained graph
+    // can outlive the reducer.
+    auto fired = std::make_shared<bool>(false);
+    node->add_post_hook(
+        std::make_unique<torch::autograd::utils::LambdaPostHook>(
+            [this, fired, alive = std::weak_ptr<bool>(recovery_alive_)](
+                const torch::autograd::variable_list& outputs,
+                const torch::autograd::variable_list& /* inputs */) {
+              if (!*fired && !alive.expired()) {
+                *fired = true;
+                std::lock_guard<std::mutex> lock(mutex_);
+                queue_static_graph_recovery();
+              }
+              return outputs;
+            }));
+  });
+}
+
 // The function `autograd_hook` is called after the gradient for a
 // model parameter has been accumulated into its gradient tensor.
 // This function is only to be called from the autograd thread.
@@ -796,6 +842,11 @@ void Reducer::autograd_hook(size_t index) {
   // for number of iterations before reducing them.
   if (!expect_autograd_hooks_) {
     return;
+  }
+
+  // Output sinks miss losses that use no visible output.
+  if (static_graph_recovery_) {
+    queue_static_graph_recovery();
   }
 
   grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
@@ -1650,6 +1701,7 @@ void Reducer::prepare_for_backward(
 
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
+  output_recovery_queued_ = false;
   // Reset per iteration marked ready parameters.
   perIterationReadyParams_.clear();
 
