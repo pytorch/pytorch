@@ -119,7 +119,12 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check, pyodict_check
+from .dicts import (
+    ConstDictVariable,
+    OrderedDictVariable,
+    pyanydict_check,
+    pyodict_check,
+)
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -5360,7 +5365,7 @@ class DefaultDictVariable(ConstDictVariable):
         if not isinstance(self_, DefaultDictVariable):
             raise AssertionError(f"Expected DefaultDictVariable, got {type(self_)}")
 
-        if not pydict_check(other_):
+        if not pyanydict_check(other_):
             return variables.ConstantVariable.create(NotImplemented)
 
         cls = VariableTracker.build(tx, type).call_function(tx, [self_], {})
