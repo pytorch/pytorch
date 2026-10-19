@@ -1414,7 +1414,8 @@ matching allocations. A window holds one tensor at a time: call
 Args:
     tensor (torch.Tensor): Tensor to expose to peers.
     owning (bool, optional): If ``True``, the window keeps ``tensor`` alive
-        until :meth:`tensor_deregister`. Default: ``True``.
+        until :meth:`tensor_deregister`. If ``False``, the caller must keep
+        it alive until then. Default: ``True``.
 )")
       .def(
           "tensor_deregister",
@@ -1443,8 +1444,8 @@ Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
         and fit within its window. Backends may require it to be
         contiguous and to lie in an allocator segment that has a window
-        on the same process group, e.g. a slice of this window's tensor or any tensor allocated from
-        a pool after registering it with
+        on the same process group, e.g. a slice of this window's tensor
+        or any tensor allocated from a pool after registering it with
         ``register_mem_pool(pool, symm=True)``.
     dst_rank (int): Destination rank in the group.
     target_offset_nelems (int): Element offset into the destination window.
@@ -4200,7 +4201,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
               py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, they are registered as NCCL symmetric windows instead; ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, unregistered segments are registered as NCCL symmetric windows instead; already registered segments are left as is. ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool,
@@ -4580,7 +4581,7 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
               py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows.)")
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
           .def(
               "deregister_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
@@ -4670,7 +4671,7 @@ Returns:
              bool symm) { self.getPrimary()->registerMemPool(pool, symm); },
           py::arg("pool"),
           py::arg("symm") = false,
-          R"(Register ``pool``'s segments with the primary communicator. With ``symm=True``, its segments also get symmetric windows.)")
+          R"(Register ``pool``'s segments with the primary communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
       .def(
           "deregister_mem_pool",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
