@@ -157,16 +157,22 @@ jobs:
             sleep 300
           done
           echo "Found ${repo}:${tag}"
-  # Preview is optional during bootstrap: its missing public image must not
-  # redirect or block the stable CPU/CUDA/ROCm/XPU lanes.
+  # A missing preview image must not redirect or block the stable lanes. PRs
+  # that change .ci/docker (e.g. pin bumps) build and extract from their own
+  # ECR image; ROCm test runners cannot pull ECR, so preview tests are skipped.
   get-preview-docker-tag:
     needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') }}
     name: get-preview-docker-tag
     runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
-      image_available: ${{ steps.calc.outputs.image_available }}
+      docker_registry_host: ${{ steps.ecr.outputs.docker_registry_host }}
+      image_available: ${{ steps.ecr.outputs.image_available || steps.calc.outputs.image_available }}
+      test_available: ${{ steps.ecr.outputs.test_available || steps.calc.outputs.test_available }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -214,8 +220,9 @@ jobs:
               break
             fi
             if [[ "${status}" == "404" && "${GITHUB_REF}" == refs/tags/ciflow/* ]]; then
-              echo "::warning::Preview builder ${repo}:${tag} is not published; skipping preview jobs."
+              echo "docker.io/${repo}:${tag} not on Docker Hub; checking ECR"
               available=false
+              use_ecr=true
               break
             fi
             remaining=$((deadline - SECONDS))
@@ -233,6 +240,40 @@ jobs:
           done
           echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
           echo "image_available=${available}" >> "${GITHUB_OUTPUT}"
+          echo "test_available=${available}" >> "${GITHUB_OUTPUT}"
+          echo "use_ecr=${use_ecr:-false}" >> "${GITHUB_OUTPUT}"
+      - name: Login to ECR
+        if: ${{ steps.calc.outputs.use_ecr == 'true' }}
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
+      - name: Wait for preview builder image in ECR
+        id: ecr
+        if: ${{ steps.calc.outputs.use_ecr == 'true' }}
+        env:
+          DOCKER_IMAGE_SUFFIX: ${{ steps.calc.outputs.docker_image_suffix }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="pytorch/manylinux2_28-builder"
+          tag="rocm-preview${DOCKER_IMAGE_SUFFIX}"
+          # Only the PR's ciflow/docker run pushes this tag; skip preview without it.
+          deadline=$(( SECONDS + 60 * 60 ))
+          until aws ecr describe-images \
+              --region us-east-1 \
+              --repository-name "${repo}" \
+              --image-ids imageTag="${tag}" >/dev/null 2>&1; do
+            if (( SECONDS > deadline )); then
+              echo "::warning::Preview builder ${repo}:${tag} is not in Docker Hub or ECR; skipping preview jobs."
+              echo "image_available=false" >> "${GITHUB_OUTPUT}"
+              echo "test_available=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "  ${repo}:${tag} not in ECR yet; retrying in 5 min..."
+            sleep 300
+          done
+          echo "Found ${repo}:${tag} in ECR; preview tests are skipped (no ECR access on ROCm runners)."
+          echo "docker_registry_host=308535385114.dkr.ecr.us-east-1.amazonaws.com/" >> "${GITHUB_OUTPUT}"
+          echo "image_available=true" >> "${GITHUB_OUTPUT}"
+          echo "test_available=false" >> "${GITHUB_OUTPUT}"
 
   manywheel-cpu-build:
     name: manywheel-cpu-build
@@ -889,7 +930,7 @@ jobs:
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
-      DOCKER_IMAGE_REGISTRY_HOST: ""
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-preview-docker-tag.outputs.docker_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}
@@ -1360,7 +1401,7 @@ jobs:
 
   manywheel-test-rocm-preview:
     name: ${{ matrix.build_name }}-test
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.test_available == 'true' }}
     needs: [get-label-type, get-preview-docker-tag, manywheel-build-rocm-preview]
     uses: ./.github/workflows/_binary-test-rocm-linux.yml
     strategy:
@@ -1929,7 +1970,7 @@ jobs:
 
   manywheel-rocm-preview-upload:
     name: ${{ matrix.build_name }}-upload
-    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.image_available == 'true' }}
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') && needs.get-preview-docker-tag.outputs.test_available == 'true' }}
     permissions:
       id-token: write
       contents: read
@@ -2259,7 +2300,7 @@ jobs:
     needs: [get-preview-docker-tag, manywheel-build-rocm-preview]
     runs-on: "mt-l-x86iavx512-16-128"
     container:
-      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
+      image: ${{ needs.get-preview-docker-tag.outputs.docker_registry_host }}pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
