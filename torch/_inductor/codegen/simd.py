@@ -1483,6 +1483,11 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         log.warning(msg)
 
     def welford_reduce_fallback(self, dtype, value):
+        # TODO: Triton no longer reaches this; its persistent reductions now
+        # emit welford directly. Halide and Pallas still use it, and this
+        # two-pass form squares the rounding error in `mean`, so constant input
+        # gets a nonzero variance. Either move them onto welford as well, or
+        # subtract the sum(dx)**2 / rnumel bias as var_mean_sum_ does.
         sum_ = ops.reduction(dtype, dtype, "sum", value)
         self.inside_reduction = False
         rnumel = ops.index_expr(self.features.reduction_numel, dtype)

@@ -7544,15 +7544,29 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     if return_mean:
         x_mean.realize()
 
-    diffs = square(sub(x, x_mean))
-    sum_result = sum_(diffs, axis, keepdim)
+    diffs = sub(x, x_mean)
+    sum_result = sum_(square(diffs), axis, keepdim)
 
-    denom = sympy_product(size[i] for i in axis)
-    if correction:
-        denom = Max(denom - correction, 0)
+    # `x_mean` is inexact: it rounds, and on Triton fp32 `/` lowers to the
+    # approximate div.full unless eager_numerics.division_rounding is set.
+    # Every diff is shifted by that same error, so sum(diff**2) alone bottoms
+    # out around rnumel * err**2 rather than 0, giving constant input a nonzero
+    # variance. Welford has no such floor. sum(diff)**2 / rnumel is that shared
+    # bias to first order, so subtracting it cancels it.
+    rnumel = sympy_product(size[i] for i in axis)
+    rnumel_const = ir.IndexingConstant(
+        index=rnumel, dtype=x.get_dtype(), device=x.get_device()
+    )
+    rnumel_const = ExpandView.create(rnumel_const, list(sum_result.get_size()))
+    bias = div(square(sum_(diffs, axis, keepdim)), rnumel_const)
+    m2 = make_pointwise(
+        lambda a, b: ops.maximum(ops.constant(0, x.get_dtype()), a - b)
+    )(sum_result, bias)
+
+    denom = Max(rnumel - correction, 0) if correction else rnumel
     denom = ir.IndexingConstant(index=denom, dtype=x.get_dtype(), device=x.get_device())
-    denom = ExpandView.create(denom, list(sum_result.get_size()))
-    x_var = div(sum_result, denom)
+    denom = ExpandView.create(denom, list(m2.get_size()))
+    x_var = div(m2, denom)
     if not return_mean:
         return (x_var,)
 
@@ -7561,6 +7575,10 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim, input_dtype):
+    # TODO: the bf16/fp16 window below benchmarks neutral against welford on
+    # H100, and it is the only regime where the correction in var_mean_sum_
+    # costs anything (~6%). Consider dropping it and keeping the two-step form
+    # only for the tiny unrolled reductions, where it is worth 20%.
     # The two-step algorithm can be faster for non-split reductions because
     # Welford does more work per element. Preserve the old tiny-reduction
     # two-step path, keep Welford for the rest of the small reductions where

@@ -6203,17 +6203,46 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     argreduce_result_kind(),
                     whole_tile=True,
                 )
+            elif reduction_type == "welford_reduce" and self.cooperative_reduction:
+                # cooperative reductions combine across blocks, which needs the
+                # looped welford accumulator rather than a single tree combine
+                result_var = self.welford_reduce(
+                    result_var, reduction_type, value, where_cond, acc_type, dtype
+                )
             elif reduction_type == "welford_reduce":
-                if self.cooperative_reduction:
-                    # cooperative reductions require full welford for correctness
-                    result_var = self.welford_reduce(
-                        result_var, reduction_type, value, where_cond, acc_type, dtype
+                if not isinstance(masked_value, CSEVariable):
+                    raise AssertionError(
+                        f"expected CSEVariable, got {type(masked_value)}"
                     )
-                else:
-                    # For persistent reductions, don't bother with
-                    # welford's algorithm since it uses more registers, and
-                    # taking two reductions doesn't increase memory usage.
-                    result_var = self.welford_reduce_fallback(dtype, value)
+                # The whole reduction already lives in registers, so welford
+                # over it is a tree combine of the per-element triples
+                # (mean=x, m2=0, weight=1). Masked lanes carry weight 0, which
+                # welford_combine propagates as a no-op. Going through welford
+                # rather than a two-pass sum/mean/sum((x-mean)**2) matters for
+                # accuracy: the two-pass form squares the rounding error in
+                # `mean`, so constant input gets a nonzero variance.
+                # TODO: masked lanes still make delta**2 overflow fp32 inside
+                # welford_combine, so constant input with |x| > ~1.8e19 yields
+                # nan. Pre-existing, and shared with the looped welford path.
+                tt = triton_type(dtype)
+                m2 = self.cse.generate(
+                    self.compute,
+                    f"tl.full({masked_value}.shape, 0, {tt})",
+                    dtype=dtype,
+                    shape=masked_value.shape,
+                )
+                weight = self.cse.generate(
+                    self.compute,
+                    where_cond(f"tl.full({masked_value}.shape, 1, {tt})", "0.0"),
+                    dtype=dtype,
+                    shape=masked_value.shape,
+                )
+                result_var = tuple(
+                    self.cse.generate(self.compute, v, dtype=dtype, shape=shape)
+                    for v, shape in self._welford(
+                        self.compute, masked_value, m2, weight, dim, dtype
+                    )
+                )
             elif reduction_type == "welford_combine":
                 if not isinstance(masked_value, Sequence):
                     raise AssertionError(f"expected Sequence, got {type(masked_value)}")
