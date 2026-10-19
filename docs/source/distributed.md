@@ -947,6 +947,70 @@ Please refer to the [profiler documentation](https://pytorch.org/docs/main/profi
 .. autofunction:: torch.distributed.distributed_c10d.record_comm
 ```
 
+## Hooks
+
+Process groups can run callbacks around the operations issued through them, for
+monitoring and debugging.
+
+{meth}`ProcessGroup.register_pre_hook <torch.distributed.ProcessGroup.register_pre_hook>`
+and {meth}`ProcessGroup.register_post_hook <torch.distributed.ProcessGroup.register_post_hook>`
+register hooks that run before and after each operation is issued, for every
+backend. A post-hook runs once the operation is issued, not when it completes.
+`op_id` pairs a pre-hook call with its post-hook call.
+
+```python
+import torch
+import torch.distributed as dist
+from torch.distributed.distributed_c10d import HookOpName
+
+pg = dist.group.WORLD
+
+def pre_hook(args):
+    if args.name == HookOpName.ALLREDUCE:
+        print(f"all_reduce {args.op_id}: {[t.shape for t in args.input_tensors]}")
+
+pg.register_pre_hook(0, pre_hook)
+dist.all_reduce(torch.ones(4))
+pg.unregister_pre_hook(0)
+```
+
+{meth}`ProcessGroup.register_abort_hook <torch.distributed.ProcessGroup.register_abort_hook>`
+registers a hook that runs before the backend aborts on a timeout or error. Check
+{attr}`~torch.distributed.ProcessGroup.supports_abort_hooks` first.
+
+PyTorch attaches these built-in hooks to new process groups:
+
+- {class}`~torch.distributed.distributed_c10d.FlightRecorderHook` records
+  operations into the flight recorder for backends without native recording.
+  Disabled by `TORCH_FR_BUFFER_SIZE=0`.
+- {class}`~torch.distributed.distributed_c10d.NanCheckHook` checks operation
+  inputs for NaNs. Enabled by `TORCH_DIST_NAN_CHECK=1`.
+- {class}`~torch.distributed.distributed_c10d.HealthCheckHook` reports aborted
+  backends through the `/c10d_health_check` debug server endpoint.
+
+```{eval-rst}
+.. automethod:: torch.distributed.ProcessGroup.register_pre_hook
+.. automethod:: torch.distributed.ProcessGroup.unregister_pre_hook
+.. automethod:: torch.distributed.ProcessGroup.register_post_hook
+.. automethod:: torch.distributed.ProcessGroup.unregister_post_hook
+.. autoattribute:: torch.distributed.ProcessGroup.supports_abort_hooks
+.. automethod:: torch.distributed.ProcessGroup.register_abort_hook
+.. automethod:: torch.distributed.ProcessGroup.unregister_abort_hook
+
+.. autoclass:: torch.distributed.distributed_c10d.PreHookArgs
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.PostHookArgs
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.HookOpName
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.FlightRecorderHook
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.NanCheckHook
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.HealthCheckHook
+   :members:
+```
+
 ## Optimization with Symmetric Memory
 
 ### NCCL Symmetric Kernels
