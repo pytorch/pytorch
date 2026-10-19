@@ -23,12 +23,20 @@ __all__ = [
     "register_rng_tracker",
 ]
 
-_rng_tracker: Optional["_RNGStateTracker"] = None
+# The active tracker. Pre-existing call sites in ``_dispatch.py`` and
+# ``_api.py`` read this module-level variable directly, so it is kept and
+# always mirrors the most recently created tracker. The trackers themselves
+# are cached per device type in ``_rng_trackers`` below.
+_rng_tracker: Optional["OffsetBasedRNGTracker"] = None
+_rng_trackers: dict[str, "OffsetBasedRNGTracker"] = {}
 
 # Registry of RNG tracker factories per device type, populated by third-party
 # backends via ``register_rng_tracker``. Devices without an entry keep the
-# default ``OffsetBasedRNGTracker`` behavior.
-RNGTrackerFactory = Callable[[DeviceMesh, bool], "_RNGStateTracker"]
+# default ``OffsetBasedRNGTracker`` behavior. Factories must produce
+# ``OffsetBasedRNGTracker`` instances: random ops without an explicit
+# generator on the accelerator device go through the higher-order-op path in
+# ``_dispatch.py``, which relies on offset-based RNG semantics.
+RNGTrackerFactory = Callable[[DeviceMesh, bool], "OffsetBasedRNGTracker"]
 _RNG_TRACKER_REGISTRY: dict[str, RNGTrackerFactory] = {}
 
 
@@ -38,29 +46,67 @@ def register_rng_tracker(device_type: str, factory: RNGTrackerFactory) -> None:
     Third-party backends whose RNG does not follow the CUDA philox
     counter/offset semantics of the default :class:`OffsetBasedRNGTracker`
     can register a factory here. It is called as
-    ``factory(device_mesh, run_state_sync)`` at every DTensor RNG tracker
-    creation point. This follows the same registration pattern as
+    ``factory(device_mesh, run_state_sync)`` the first time a tracker is
+    needed for ``device_type`` (and again after re-registration). This
+    follows the same registration pattern as
     ``register_graphsafe_rng_dispatch`` in ``torch/_prims/rng_prims.py``.
+
+    The factory must return an :class:`OffsetBasedRNGTracker` (subclass):
+    random ops without an explicit generator on the accelerator device run
+    through the higher-order-op path in ``torch/distributed/tensor/_dispatch.py``,
+    which only consumes ``_compute_rng_offsets`` and requires offset-based
+    RNG semantics. Override ``_compute_rng_offsets`` to customize the offset
+    computation -- it is honored by both the eager ``_distribute_region``
+    path and the compiled higher-order-op path; overriding
+    ``_distribute_region`` itself only affects the eager path.
+
+    Registering a factory discards a previously created tracker for
+    ``device_type``, so the next tracker creation point re-invokes the new
+    factory.
     """
+    if isinstance(factory, type) and not issubclass(factory, OffsetBasedRNGTracker):
+        raise TypeError(
+            "register_rng_tracker factories must produce OffsetBasedRNGTracker "
+            f"instances, got {factory.__name__}. The DTensor RNG higher-order-op "
+            "path requires offset-based RNG semantics; subclass "
+            "OffsetBasedRNGTracker and override _compute_rng_offsets instead."
+        )
     _RNG_TRACKER_REGISTRY[device_type] = factory
+    # A previously created tracker for this device type may predate the new
+    # factory; drop it so the next creation point picks the factory up.
+    _rng_trackers.pop(device_type, None)
 
 
 def _get_or_create_rng_tracker(
     device_mesh: DeviceMesh, run_state_sync: bool
-) -> "_RNGStateTracker":
-    """Return the active RNG tracker, creating it if it does not exist yet.
+) -> "OffsetBasedRNGTracker":
+    """Return the RNG tracker for ``device_mesh``'s device type, creating it if needed.
 
     Centralizes the DTensor RNG tracker creation points (``manual_seed``,
     ``_dispatch.py`` and ``_api.py``): a device type without a registered
-    factory keeps the default :class:`OffsetBasedRNGTracker`.
+    factory keeps the default :class:`OffsetBasedRNGTracker`. Trackers are
+    cached per device type, so requesting a tracker for another device type
+    (or after re-registering a device type's factory) resolves to the right
+    tracker.
     """
     global _rng_tracker
-    if not _rng_tracker:
-        factory = _RNG_TRACKER_REGISTRY.get(
-            device_mesh.device_type, OffsetBasedRNGTracker
-        )
-        _rng_tracker = factory(device_mesh, run_state_sync)
-    return _rng_tracker
+    device_type = device_mesh.device_type
+    if (tracker := _rng_trackers.get(device_type)) is None:
+        factory = _RNG_TRACKER_REGISTRY.get(device_type, OffsetBasedRNGTracker)
+        tracker = factory(device_mesh, run_state_sync)
+        if not isinstance(tracker, OffsetBasedRNGTracker):
+            raise TypeError(
+                "register_rng_tracker factories must produce "
+                f"OffsetBasedRNGTracker instances, got {type(tracker).__name__}. "
+                "The DTensor RNG higher-order-op path requires offset-based "
+                "RNG semantics; subclass OffsetBasedRNGTracker and override "
+                "_compute_rng_offsets instead."
+            )
+        _rng_trackers[device_type] = tracker
+    # Keep the module-level tracker (read directly by pre-existing call
+    # sites) pointing at the most recently created one.
+    _rng_tracker = tracker
+    return tracker
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
