@@ -1723,6 +1723,9 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
+    def supports_graph_breaks(self) -> bool:
+        return bool(self.target_values)
+
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         if self.target_values:
             return super().reconstruct_type(codegen)
