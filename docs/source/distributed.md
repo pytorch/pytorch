@@ -632,7 +632,7 @@ With `nccl` and `nccl-lazy`:
   register matching segments; allocating the same sizes in the same order on
   every rank satisfies this.
 - **Put sources.** The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must be contiguous and lie
-  in an allocator segment that has a window, e.g. a slice of this window's
+  in an allocator segment that has a window on the same process group, e.g. a slice of this window's
   tensor. `backend.register_mem_pool(pool, symm=True)` gives every segment the
   pool allocates afterwards a symmetric window, so any tensor allocated from
   the pool after the call is a valid source. Each new segment is then
@@ -733,7 +733,6 @@ stream, and `Work.wait()` makes the current stream wait for it.
 .. autoclass:: torch.distributed.distributed_c10d.WindowAttr
     :members:
 .. autoclass:: torch.distributed.distributed_c10d.WindowAccessType
-    :members:
 ```
 
 ## Synchronous and asynchronous collective operations

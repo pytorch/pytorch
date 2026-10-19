@@ -172,10 +172,10 @@ class AbstractWindowTest:
         other_win = dist._new_window(other_buf)
         next_rank = (self.rank + 1) % self.world_size
         prev_rank = (self.rank - 1) % self.world_size
-        # Large allocations get their own segments. This one exists before
-        # symm=True, so registration upgrades it.
+        # Allocations of at least 10 MiB get their own segments. This one
+        # exists before symm=True, so registration upgrades it.
         with torch.cuda.use_mem_pool(pool):
-            old_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
+            old_seg = torch.full((3 << 20,), float(self.rank), device=self.device)
         self.backend.register_mem_pool(pool, symm=True)
         # Reuses the probe's segment.
         with torch.cuda.use_mem_pool(pool):
@@ -183,7 +183,7 @@ class AbstractWindowTest:
         win = dist._new_window(win_buf)
         # A new segment, which symm=True registers as it is allocated.
         with torch.cuda.use_mem_pool(pool):
-            new_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
+            new_seg = torch.full((3 << 20,), float(self.rank), device=self.device)
         opts = PutOptions()
         opts.timeout = timedelta(seconds=60)
         win.put(old_seg[:1], next_rank, self.rank, False, opts=opts)
