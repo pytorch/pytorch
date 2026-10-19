@@ -22,6 +22,7 @@ from torch.distributed.distributed_c10d import (
     PutOptions,
     SignalOptions,
     WaitSignalOptions,
+    WindowAccessType,
 )
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
@@ -244,8 +245,6 @@ class AbstractWindowTest:
             win_buf = torch.ones(16, dtype=torch.float, device=self.device)
         win = dist._new_window(win_buf)
         dist.barrier()
-        from torch.distributed.distributed_c10d import WindowAccessType
-
         attr = win.get_attr((self.rank + 1) % self.world_size)
         self.assertIsInstance(attr.access_type, WindowAccessType)
         win.tensor_deregister()
