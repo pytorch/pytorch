@@ -881,9 +881,9 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
         listings = [
             c for c in gh.calls if c[0] == "GET" and "/pulls/1/comments" in c[1]
         ]
-        # One for discussion links and one for the whole backfill: not one per
-        # hidden review, and none for hide_earlier with nothing to take down.
-        self.assertEqual(len(listings), 2)
+        # One for the whole backfill: none for discussion links with no
+        # findings, none per hidden review, none for an empty hide_earlier.
+        self.assertEqual(len(listings), 1)
         self.assertEqual(len(deleted(gh)), 15)
 
     def test_a_reply_on_a_page_before_a_failed_page_is_remembered(self):
@@ -925,6 +925,27 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
         go(gh)
         self.assertIsNone(gh.deadline)
         self.assertEqual(deleted(gh), [30])
+
+    def test_a_hidden_request_is_emptied_once_a_newer_request_replaces_it(self):
+        old = old_review(5, state="CHANGES_REQUESTED")
+        old["minimized"] = True
+        gh = FakeGitHub(reviews=[old])
+        go(gh)  # changes_requested: posts REQUEST_CHANGES
+        self.assertEqual((deleted(gh), folds(gh)), ([50], [5]))
+
+    def test_a_hidden_request_survives_a_request_downgraded_to_a_comment(self):
+        class NoRequestChanges(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                if body and body.get("event") == "REQUEST_CHANGES":
+                    raise GitHubError(422, "cannot request changes")
+                return super().request(method, path, body)
+
+        old = old_review(5, state="CHANGES_REQUESTED")
+        old["minimized"] = True
+        gh = NoRequestChanges(reviews=[old])
+        go(gh)
+        # The COMMENT leaves 5 standing, so the backfill must not empty it.
+        self.assertEqual((deleted(gh), folds(gh)), ([], []))
 
     def test_a_comment_someone_reacted_to_is_kept(self):
         reacted = {**comment(50, 5), "reactions": {"total_count": 1}}
@@ -1058,7 +1079,8 @@ class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
         self.assertNotIn("comments", body)
         self.assertIn(f"{BLOB}/torch/x.py#L3\n\n\U0001f534 Off by one.\n", body["body"])
         self.assertIn(
-            "Discussed earlier: https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
+            "An earlier comment near this line has replies: "
+            "https://github.com/o/r/pull/1#discussion_r50",  # @lint-ignore
             body["body"],
         )
         self.assertNotIn("attached to the code below", body["body"])
@@ -1076,7 +1098,7 @@ class TestADiscussedFindingIsNotRepeatedOnTheLine(unittest.TestCase):
         body = gh.posted()[0]
         self.assertEqual([c["path"] for c in body["comments"]], ["torch/y.py"])
         self.assertIn("1 blocking finding is attached", body["body"])
-        self.assertIn("Discussed earlier:", body["body"])
+        self.assertIn("An earlier comment near this line has replies:", body["body"])
 
     def test_only_a_replied_nearby_current_comment_of_ours_counts(self):
         cases = {

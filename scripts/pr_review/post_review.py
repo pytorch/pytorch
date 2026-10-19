@@ -17,7 +17,9 @@ Invariants:
   Files tab and in GitHub Mobile, hence the deleting. A change request is
   hidden only once it no longer stands.
 - A blocking finding next to an earlier inline comment someone replied to
-  goes in the body with a link to that discussion, not on the line again.
+  goes in the body with a link to that thread, not on the line again. The
+  match is by position only, so the link says where, not that it is the same
+  finding.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissal is a run retracting its own review because the
@@ -295,7 +297,10 @@ def finding_blocks(
             message = marked(mark, message)
         lines += [permalink(repo, sha, f), "", *message, ""]
         if f.get("discussion"):
-            lines += [f"Discussed earlier: {f['discussion']}", ""]
+            lines += [
+                f"An earlier comment near this line has replies: {f['discussion']}",
+                "",
+            ]
     return lines
 
 
@@ -497,6 +502,8 @@ def with_discussions(gh: GitHub, pr: int, author: str, findings: list[dict]):
     """`findings`, each linked to an earlier finding of ours next to it that
     someone replied to, so the reply is not answered by a fresh comment on the
     line. Unchanged if the PR could not be read."""
+    if not findings:
+        return findings
     comments = pr_comments(gh, pr)
     if not comments:
         return findings
