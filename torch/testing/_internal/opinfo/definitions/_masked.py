@@ -1218,14 +1218,6 @@ op_db: list[OpInfo] = [
         "masked.log_softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.half, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.half,
-            torch.bfloat16,
-            torch.uint8,
-            torch.int32,
-            torch.int16,
-            torch.int8,
-        ),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(

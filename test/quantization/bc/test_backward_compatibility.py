@@ -21,6 +21,7 @@ from torch.testing._internal.common_quantized import (
 
 # Testing utils
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_AVX512_VNNI_SUPPORTED,
     raise_on_run_directly,
     TestCase,
@@ -69,6 +70,8 @@ def get_filenames(self, subname):
 
 class TestSerialization(TestCase):
     """Test backward compatibility for serialization and numerics"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     # Copy and modified from TestCase.assertExpected
     def _test_op(

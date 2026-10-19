@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -12,11 +13,12 @@ import operator
 import os
 import re
 import secrets
+import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from enum import Enum
 from itertools import chain, count
-from typing import Any, Literal, Protocol, TYPE_CHECKING
+from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
@@ -31,6 +33,7 @@ from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch._logging import trace_structured
+from torch.fx.experimental._size_hinting import consistent_hints, ConsistentHintState
 from torch.fx.experimental.proxy_tensor import (
     _coor_check_current_accelerator,
     _coor_current_accelerator,
@@ -49,12 +52,12 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CleanDiv, Max, Min
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+from torch.utils._triton import get_triton_constexpr_function_type
 
 from .. import async_compile, config, debug as inductor_debug, ir
-from ..codecache import output_code_log
+from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
-from ..runtime.hints import DeviceProperties, TritonMeta
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -67,9 +70,13 @@ from ..utils import (
     DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
+    get_constexpr_repr_children,
     get_dtype_size,
+    get_importable_constexpr_types,
+    GPU_ALIGN_BYTES,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
+    is_gpu,
     is_using_cudagraph_partition,
     LineContext,
     make_codegen_buffer,
@@ -89,16 +96,23 @@ from .common import (
 )
 from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
-from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
+from .triton_utils import (
+    config_of,
+    should_unwrap_unspec_arg,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
+    from types import BuiltinFunctionType, FunctionType
 
     import triton
 
     from ..graph import GraphLowering
     from ..ir import ExternKernel
+    from ..runtime.hints import TritonMeta
     from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
 
@@ -106,6 +120,186 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 pexpr = PythonPrinter().doprint
+
+
+def _constant_offload_targets(
+    device: torch.device,
+) -> tuple[list[tuple[Any, int]], int]:
+    """Unique storages backing the graph constants on `device`.
+
+    Deduped by data pointer: constants are deduplicated by value, so several
+    names can share one storage and offloading per name would copy the same
+    bytes repeatedly. Constants can span devices (see
+    GraphLowering.constant_name), so only one device's are taken.
+
+    Non-resizable storages are excluded. resize_ raises on them even for a
+    zero-size resize, and discovering that mid-free would leave earlier
+    constants already freed.
+    """
+    targets: list[tuple[Any, int]] = []
+    seen: OrderedSet[int] = OrderedSet()
+    for tensor in V.graph.constants.values():
+        if not isinstance(tensor, torch.Tensor) or tensor.device != device:
+            continue
+        storage = tensor.untyped_storage()
+        ptr, nbytes = storage.data_ptr(), storage.nbytes()
+        if ptr == 0 or nbytes == 0 or ptr in seen or not storage.resizable():
+            continue
+        seen.add(ptr)
+        targets.append((storage, nbytes))
+    return targets, sum(nbytes for _, nbytes in targets)
+
+
+@contextlib.contextmanager
+def _constants_offloaded_to_disk() -> Iterator[None]:
+    """Free the graph constants from device memory across the autotune block.
+
+    The block benchmarks kernels against freshly generated random tensors and
+    reads only size/stride/dtype/device off the constants, so their bytes are
+    not needed while it runs. They are parked in an mmap'd file rather than
+    anonymous host memory: file-backed pages are clean page cache the kernel can
+    evict and re-read, where anonymous pages are reclaimable only to swap and
+    have been observed to drive an OOM kill on an already memory-heavy lowering.
+    """
+    state = None
+
+    # autotune_at_compile_time is reachable from plain JIT compile too, but the
+    # reasoning here -- that constant values are only needed until AOTI
+    # serialization reads them back -- is specific to AOT, as is the config this
+    # is gated on. Constants can span devices; spill only the one being lowered
+    # for, so the capacity the fraction is measured against matches what is freed.
+    # Read `current_device` rather than get_current_device_or_throw(): it is set
+    # only while codegen'ing a device-specific kernel, so a graph can reach here
+    # with none set -- the cpp_wrapper path does. That means there is nothing to
+    # offload, not that something is wrong.
+    device = V.graph.current_device
+    if (
+        device is not None
+        and device.type != "cpu"
+        and V.graph.aot_mode
+        # The constant-folding subgraph has no kernels to autotune and no
+        # allocator growth to relieve, so spilling it is pure wall clock.
+        and not V.graph.is_const_graph
+    ):
+        targets, total = _constant_offload_targets(device)
+        fraction = config.aot_inductor.autotune_offload_constants_min_device_fraction
+        if targets and total >= fraction * torch.accelerator.get_memory_info(device)[1]:
+            state = _spill_constants(targets, total)
+
+    try:
+        yield
+    finally:
+        # Captured before the restore's own handler, which would otherwise
+        # overwrite what sys.exc_info() reports.
+        block_failed = sys.exc_info()[0] is not None
+        if state is not None:
+            try:
+                _restore_constants(*state)
+            except Exception as exc:
+                # The spill file is the only copy of these bytes, and a partial
+                # restore leaves some constants at size zero -- codegen would then
+                # emit silently wrong results rather than fail. Nothing can
+                # recover that, so surface it as a clear fatal error instead of
+                # letting a bare exception escape the finally block.
+                log.exception(
+                    "Failed to restore %d offloaded constant storages to device",
+                    len(state[0]),
+                )
+                # Raising here when the block itself already failed would
+                # bury the original cause. A partial restore is still fatal, but
+                # the in-flight exception is the one worth surfacing.
+                if not block_failed:
+                    raise RuntimeError(
+                        "Graph constants could not be restored to device after "
+                        "the autotune offload; the graph is no longer usable"
+                    ) from exc
+
+
+def _spill_constants(
+    targets: list[tuple[Any, int]], total: int
+) -> tuple[list[tuple[Any, int]], list[int], Any] | None:
+    """Copy constants into an mmap'd file and free their device storage.
+
+    Returns None if the copy could not be completed, in which case no device
+    storage has been freed and lowering proceeds unchanged.
+
+    The free loop is deliberately outside that handler. Once a storage has been
+    resized away the spill file is the only copy, so a failure there has to
+    restore rather than report -- returning None would leave the caller with no
+    state to restore from.
+    """
+    # Not tempfile.gettempdir(): /tmp is tmpfs on many hosts, which would make
+    # the mapping anonymous RAM and defeat the point of spilling to disk.
+    path = os.path.join(
+        cache_dir(), f"inductor_const_spill_{os.getpid()}_{id(V.graph)}"
+    )
+    backing = None
+    offsets = []
+    try:
+        with dynamo_timed("offload_constants_spill", log_pt2_compile_event=True):
+            backing = torch.UntypedStorage.from_file(path, shared=True, nbytes=total)
+            # Unlink while the mapping holds the inode. The bytes stay readable
+            # and the space is reclaimed on process exit by any route, including
+            # the SIGKILL under which cleanup code would never run.
+            os.unlink(path)
+            offset = 0
+            # Copy everything before freeing anything, so a failure here leaves
+            # every constant intact on device.
+            for storage, nbytes in targets:
+                backing[offset : offset + nbytes].copy_(storage)
+                offsets.append(offset)
+                offset += nbytes
+    except (OSError, RuntimeError):
+        log.warning(
+            "Could not spill %.1f GiB of constants to %s; "
+            "continuing without the autotune offload",
+            total / 2**30,
+            path,
+            exc_info=True,
+        )
+        backing = None
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+
+    freed = 0
+    try:
+        for storage, _ in targets:
+            storage.resize_(0)
+            freed += 1
+        torch.accelerator.empty_cache()
+    except Exception:
+        log.exception(
+            "Failed to free constant %d of %d after spilling; restoring",
+            freed,
+            len(targets),
+        )
+        _restore_constants(targets[:freed], offsets[:freed], backing)
+        raise
+
+    # Warning rather than info: this is an automatic, default-on behaviour that
+    # materially changes peak memory and adds wall clock, and the inductor logger
+    # sits at WARNING in the lowering harness, so info would be invisible to
+    # anyone debugging a run. Fires at most once per graph, and only for models
+    # large enough to clear the threshold.
+    log.warning(
+        "Offloaded %d constant storages (%.1f GiB) to disk for autotuning",
+        len(targets),
+        total / 2**30,
+    )
+    return (targets, offsets, backing)
+
+
+def _restore_constants(
+    targets: list[tuple[Any, int]], offsets: list[int], backing: Any
+) -> None:
+    with dynamo_timed("offload_constants_restore", log_pt2_compile_event=True):
+        for (storage, nbytes), offset in zip(targets, offsets):
+            storage.resize_(nbytes)
+            storage.copy_(backing[offset : offset + nbytes])
+    del backing
 
 
 def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
@@ -116,21 +310,20 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     return CleanDiv(numerator, denominator)
 
 
-def _sanitize_for_repr(obj: Any) -> Any:
+def _sanitize_for_repr(obj: object) -> object:
     """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, dict):
-        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize_for_repr(v) for v in obj]
-    # For namedtuples (have _fields), reconstruct to preserve the type
-    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return getattr(type(obj), "_make")(  # noqa: B009
-            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
-        )
-    if isinstance(obj, tuple):
-        return tuple(_sanitize_for_repr(v) for v in obj)
     if isinstance(obj, Enum):
         return _sanitize_for_repr(obj.value)
+    repr_children = get_constexpr_repr_children(obj)
+    if repr_children is not None:
+        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if all(
+            child is original for child, original in zip(children, repr_children.values)
+        ):
+            return obj
+        return repr_children.rebuild(children)
     return obj
 
 
@@ -147,6 +340,39 @@ class BenchmarkStorageGroup:
     device: Any
     dtype: Any
     inputs: dict[str, tuple[list[int], list[int]]]
+
+
+@dataclasses.dataclass(frozen=True)
+class AutotuneStorageArg:
+    """Storage information for one logical kernel argument."""
+
+    # Supplies the logical argument's size, stride, and offset.
+    tensor: ir.IRNode
+    # Owns the allocation shared by this argument and any aliases.
+    base_buffer: ir.Buffer
+
+
+@dataclasses.dataclass(frozen=True)
+class AutotuneStorage:
+    """Entry in an autotune backing-storage cache."""
+
+    # Python variable holding the generated one-dimensional storage tensor.
+    name: str
+    # The allocation is deleted after this kernel's autotune call.
+    last_kernel: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AutotuneExampleArg:
+    """Entry in the wrapper-wide example-argument cache."""
+
+    # Python variable passed to the generated autotune kernel call.
+    name: str
+    # The logical tensor is deleted after this kernel's autotune call.
+    last_kernel: str
+    # Owning buffer name used to find shared storage, or None when this
+    # argument has its own independent allocation.
+    storage_key: str | None = None
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -245,6 +471,21 @@ def codegen_reinterpret_view_helper(data):
 
     base_lay = cur.get_layout()
     return base_lay.size, base_lay.stride, base_lay.offset, base_lay.dtype, True
+
+
+def codegen_reinterpret_view_layout_match(data, size, stride, offset):
+    """Whether wrapper codegen reuses `data`, and its dtype before any cast."""
+    d_size, d_stride, d_offset, d_dtype, collapsible = codegen_reinterpret_view_helper(
+        data
+    )
+    if collapsible and offset == d_offset:
+        return size == d_size and stride == d_stride, d_dtype
+    return (
+        size == data.layout.size
+        and stride == data.layout.stride
+        and offset == data.layout.offset,
+        data.dtype,
+    )
 
 
 # TODO: Move to a well known place
@@ -368,31 +609,82 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-def user_defined_triton_kernel_transitive_closure_source_code(
+@dataclasses.dataclass(frozen=True)
+class TritonKernelSource:
+    """A source fragment and the kernel-global names that refer to its symbols.
+
+    symbol_map maps names used by the kernel to names defined by source.
+    """
+
+    module_name: str | None
+    source: str
+    symbol_map: dict[str, str]
+
+
+def user_defined_triton_kernel_transitive_closure(
     kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
-) -> str:
+) -> list[TritonKernelSource]:
     """
     Given a triton kernel function pointer collect the transitive closure of
-    its dependencies
+    its dependencies.
 
-    epilogue_fusion: Optional[(fused epilogue node, modified kerel src code)]
+    epilogue_fusion: Optional[(fused epilogue node, modified kernel src code)]
     """
-    compile_wrapper = IndentedBuffer()
-    kernel_src = kernel.src
-    if epilogue_fusion:
-        kernel_src = epilogue_fusion[1]
-    compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
-    import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
     from triton.language.core import dtype as triton_dtype
 
+    ConstexprFunction = get_triton_constexpr_function_type()
+    source_modules: list[TritonKernelSource] = []
+
+    def add_source_module(
+        source_owner: JITFunction
+        | triton.runtime.jit.ConstexprFunction
+        | FunctionType
+        | BuiltinFunctionType
+        | type
+        | triton_dtype
+        | None,
+        source: IndentedBuffer,
+        symbol_name: str | None = None,
+    ) -> None:
+        if isinstance(source_owner, JITFunction) or (
+            ConstexprFunction is not None
+            and isinstance(source_owner, ConstexprFunction)
+        ):
+            source_owner = source_owner.fn
+        module_name = source_owner.__module__ if source_owner is not None else None
+        source_name = (
+            source_owner.__name__
+            if source_owner is not None and not isinstance(source_owner, triton_dtype)
+            else None
+        )
+        source_modules.append(
+            TritonKernelSource(
+                module_name=module_name,
+                source=source.getvalue(),
+                symbol_map=(
+                    {symbol_name: source_name}
+                    if symbol_name is not None
+                    and source_name is not None
+                    and symbol_name != source_name
+                    else {}
+                ),
+            )
+        )
+
+    kernel_src = kernel.src
+    if epilogue_fusion:
+        kernel_src = epilogue_fusion[1]
+    source = IndentedBuffer()
+    source.splice(kernel_src, strip=True)
+    add_source_module(None, source)
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
 
-    def traverse(cur_kernel):
+    def traverse(cur_kernel) -> None:
         # here we extract the unqualified names (i.e., not attributes and
         # without prepended module name) loaded in the kernel code, which
         # are matched with the co_names and __globals__ below to codegen
@@ -409,14 +701,15 @@ def user_defined_triton_kernel_transitive_closure_source_code(
             if symbol_name in cur_kernel.fn.__globals__:
                 symbol = cur_kernel.fn.__globals__[symbol_name]
                 if isinstance(symbol, JITFunction):
-                    compile_wrapper.newline()
-                    compile_wrapper.writeline("@triton.jit")
-                    compile_wrapper.splice(symbol.src, strip=True)
+                    source = IndentedBuffer()
+                    source.newline()
+                    source.writeline("@triton.jit")
+                    source.splice(symbol.src, strip=True)
+                    add_source_module(symbol, source, symbol_name)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
-                elif hasattr(triton, "constexpr_function") and isinstance(
-                    symbol,
-                    triton.runtime.jit.ConstexprFunction,
+                elif ConstexprFunction is not None and isinstance(
+                    symbol, ConstexprFunction
                 ):
                     # Import dtype class if used in type annotations
                     if "dtype" in symbol.src and "dtype" not in symbols_included:
@@ -426,21 +719,22 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                             and hasattr(dtype_symbol, "__module__")
                             and dtype_symbol.__module__.startswith("triton")
                         ):
-                            compile_wrapper.writeline(
+                            source = IndentedBuffer()
+                            source.writeline(
                                 f"from {dtype_symbol.__module__} import dtype as dtype"
                             )
+                            add_source_module(dtype_symbol, source)
                             symbols_included.add("dtype")
-                    compile_wrapper.newline()
-                    compile_wrapper.writeline("@triton.constexpr_function")
-                    compile_wrapper.splice(symbol.src, strip=True)
-                    if symbol_name != symbol.fn.__name__:
-                        compile_wrapper.writeline(
-                            f"{symbol_name} = {symbol.fn.__name__}"
-                        )
+                    source = IndentedBuffer()
+                    source.newline()
+                    source.writeline("@triton.constexpr_function")
+                    source.splice(symbol.src, strip=True)
+                    add_source_module(symbol, source, symbol_name)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif isinstance(symbol, (int, str, bool, constexpr)):
-                    compile_wrapper.newline()
+                    source = IndentedBuffer()
+                    source.newline()
                     if isinstance(symbol, constexpr):
                         symbol_str = f"tl.constexpr({symbol.value!r})"
                     else:
@@ -452,11 +746,27 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                             )
                         else:
                             annotation_code = f": {annotation!r}"
-                        compile_wrapper.writeline(
+                        source.writeline(
                             f"{symbol_name}{annotation_code} = {symbol_str}"
                         )
                     else:
-                        compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
+                        source.writeline(f"{symbol_name} = {symbol_str}")
+                    add_source_module(cur_kernel, source)
+                    symbols_included.add(symbol_name)
+                elif (
+                    symbol_name in unqualified_loads
+                    and symbol_name not in ("triton", "tl")
+                    and inspect.ismodule(symbol)
+                    and (
+                        symbol.__name__ == "triton"
+                        or symbol.__name__.startswith("triton.")
+                    )
+                ):
+                    # Module objects have __name__ but not __module__, so they
+                    # need a qualified import rather than a from-import.
+                    source = IndentedBuffer()
+                    source.writeline(f"import {symbol.__name__} as {symbol_name}")
+                    add_source_module(None, source)
                     symbols_included.add(symbol_name)
                 elif (
                     symbol_name in unqualified_loads
@@ -472,16 +782,118 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     # of `tl.store`): need to codegen an import
 
                     # Triton dtype instances have .name instead of .__name__
+                    source = IndentedBuffer()
                     if isinstance(symbol, triton_dtype):
-                        compile_wrapper.writeline(f"{symbol_name} = tl.{symbol.name}")
+                        source.writeline(f"{symbol_name} = tl.{symbol.name}")
                     elif hasattr(symbol, "__name__"):
-                        compile_wrapper.writeline(
-                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                        source.writeline(
+                            f"from {symbol.__module__} import "
+                            f"{symbol.__name__} as {symbol_name}"
                         )
+                    add_source_module(symbol, source)
                     symbols_included.add(symbol_name)
 
     traverse(kernel)
-    return compile_wrapper.getvalue()
+    return source_modules
+
+
+def render_user_defined_triton_kernel_transitive_closure(
+    source_modules: Sequence[TritonKernelSource],
+    *,
+    imported_modules: Sequence[str] = (),
+) -> str:
+    """Render collected Triton sources and their required global bindings."""
+
+    rendered: list[str] = []
+    for source_module in source_modules:
+        if source_module.module_name not in imported_modules:
+            rendered.append(source_module.source)
+        rendered.extend(
+            f"{symbol_name} = {source_name}\n"
+            for symbol_name, source_name in source_module.symbol_map.items()
+        )
+    return "".join(rendered)
+
+
+def user_defined_triton_kernel_transitive_closure_source_code(
+    kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
+) -> str:
+    """Collect and render a Triton kernel's transitive closure."""
+
+    source_modules = user_defined_triton_kernel_transitive_closure(
+        kernel, epilogue_fusion
+    )
+    return render_user_defined_triton_kernel_transitive_closure(source_modules)
+
+
+def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) -> str:
+    """Make what a kernel's source binds at its top level unique to the kernel.
+
+    The def named subs_name becomes kernel_name, and every other def and assignment
+    (helpers, and globals like ``BLOCK = tl.constexpr(64)`` from a user kernel's
+    closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
+    def, which a user kernel's closure emits (``from triton.language import exp as
+    op``). The imports above it are the common kernel header, the same in every
+    kernel. A name is renamed only where it refers to the global, so a parameter or
+    local that shares it keeps its name: autotune configs and launches pass parameters
+    by name.
+    """
+    defs = re.findall(r"^def (\w+)\(", src, re.MULTILINE)
+    assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
+    body = src[src.find("\ndef ") :]
+    imports = re.search(r"^(from|import) ", body, re.MULTILINE)
+    if defs == [subs_name] and not assigns and not imports:
+        # Nearly every kernel inductor generates: one def, after its imports.
+        return src.replace(f"\ndef {subs_name}(", f"\ndef {kernel_name}(", 1)
+    tree = ast.parse(src)
+    renames: dict[str, str] = {}
+    aliases: list[ast.alias] = []
+    seen_def = False
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef):
+            seen_def = True
+            renames[stmt.name] = ""
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+            renames.update((t.id, "") for t in targets if isinstance(t, ast.Name))
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and seen_def:
+            # `import a.b` binds `a`, which cannot be renamed in place; the closure
+            # only emits aliased imports (`from a import b as c`, `import a.b as c`).
+            bound = [a for a in stmt.names if a.asname or "." not in a.name]
+            aliases += bound
+            renames.update((a.asname or a.name, "") for a in bound)
+    for name in renames:
+        renames[name] = kernel_name if name == subs_name else f"{name}_{kernel_name}"
+    # ast column offsets are in UTF-8 bytes, so edit the lines as bytes.
+    lines = [line.encode() for line in src.splitlines(keepends=True)]
+    spans: list[tuple[int, int, str, str]] = []  # (line, start, old, new)
+    for a in aliases:
+        line, start = a.lineno - 1, a.col_offset
+        old = lines[line][start : a.end_col_offset].decode()
+        spans.append((line, start, old, f"{a.name} as {renames[a.asname or a.name]}"))
+    for stmt in tree.body:
+        local: OrderedSet[str] = OrderedSet()
+        if isinstance(stmt, ast.FunctionDef):
+            args = stmt.args
+            params = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+            params += [a for a in (args.vararg, args.kwarg) if a is not None]
+            local.update(a.arg for a in params)
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    local.add(node.id)
+            line = stmt.lineno - 1
+            start = lines[line].index(f"def {stmt.name}(".encode()) + len("def ")
+            spans.append((line, start, stmt.name, renames[stmt.name]))
+        globals_here = renames.keys() - local
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Name) and node.id in globals_here:
+                spans.append(
+                    (node.lineno - 1, node.col_offset, node.id, renames[node.id])
+                )
+    for line, start, old, new in sorted(spans, reverse=True):
+        end = start + len(old.encode())
+        lines[line] = lines[line][:start] + new.encode() + lines[line][end:]
+    return b"".join(lines).decode()
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
@@ -579,6 +991,43 @@ class EnterSubgraphLine(WrapperLine):
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_subgraph
+
+
+@dataclasses.dataclass
+class EnterKernelProfileScopeLine(WrapperLine):
+    """Opens the `{` of a kernel profiling block.
+
+    The block is a real C++ scope, so everything a kernel call declares inside
+    it dies at the closing brace. Every memo that decides whether a
+    declaration is emitted has to be scoped with it, or a later line outside
+    the block names a variable that no longer exists: the buffer reuse pool
+    (a workspace freed inside would be handed to an allocation outside as
+    `auto new = std::move(inner)`), the precomputed-size memo, and the int
+    array cache.
+    """
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.push_computed_sizes(self.wrapper.computed_sizes)
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.push_kernel_profile_scope_state()
+        code.writeline("{")
+
+
+@dataclasses.dataclass
+class ExitKernelProfileScopeLine(WrapperLine):
+    """Closes the `{` that EnterKernelProfileScopeLine opened."""
+
+    wrapper: PythonWrapperCodegen
+
+    def __post_init__(self) -> None:
+        self.wrapper.computed_sizes = self.wrapper.pop_computed_sizes()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.pop_kernel_profile_scope_state()
+        code.writeline("}")
 
 
 @dataclasses.dataclass
@@ -724,6 +1173,109 @@ class ExternKernelAllocLine(WrapperLine):
         return converter._generate_extern_kernel_alloc
 
 
+def kernel_profile_enabled() -> bool:
+    """Whether the C shim emits kernel-profiling instrumentation.
+
+    The RAIIAtenRecordFunctionHandle declaration reaches the generated code
+    through an include that only these platforms emit. Callers that build
+    profiling metadata must use this rather than the config flag alone:
+    `_get_profiling_args` emits codegen for ReinterpretView arguments, so
+    building metadata the shim then declines to emit would leak a handle.
+
+    `config.memory_planning` disables it: every record sits in a `{}` block,
+    and those blocks are a boundary only to memory_plan_reuse. MemoryPlanner
+    runs in its place and does not see them, so a pool first created inside one
+    would be declared there and named by a line after it."""
+    return (
+        config.cpp.enable_kernel_profile
+        and sys.platform in ("linux", "win32")
+        and not config.memory_planning
+    )
+
+
+def _profiling_arg_entry(value: Any) -> str | None:
+    """Profiling metadata for one argument value: an expression yielding a
+    tensor handle, or None for a value the C shim records as a placeholder.
+
+    A ReinterpretView re-derives its codegen expression so the recorded shape
+    is the logical view shape; get_name() would name the base buffer, which a
+    trace consumer would read as a real but wrong shape.
+
+    Generators, torchbind objects and the stand-ins for a None or SymInt
+    argument are IRNodes that no tensor handle can be made from, so they take
+    a placeholder like any other non-tensor."""
+    if isinstance(value, ReinterpretView):
+        return value.codegen_reference()
+    if isinstance(
+        value, (ir.NonTensorObj, ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)
+    ):
+        return None
+    if isinstance(value, IRNode):
+        return value.get_name()
+    return None
+
+
+def _profiling_arg_entries(values: Sequence[Any]) -> list[str | None]:
+    """One entry per value, except that a tensor list expands to one entry per
+    element so the element shapes survive. Eager records a list as a single
+    IValue; expanding it is the one deliberate deviation, and it keeps the
+    shape data for ops like cat, whose list is its only tensor argument. A
+    list holding no tensor, such as a SymInt[] stride, stays a single
+    placeholder."""
+    entries: list[str | None] = []
+    for value in values:
+        if isinstance(value, (list, tuple)) and any(
+            isinstance(element, IRNode) for element in value
+        ):
+            entries.extend(_profiling_arg_entry(element) for element in value)
+        else:
+            entries.append(_profiling_arg_entry(value))
+    return entries
+
+
+def _get_profiling_args(node: ir.ExternKernel) -> list[str | None]:
+    """Profiling metadata for an extern kernel: one entry per operator schema
+    argument, in schema order, except for a tensor list, which expands per
+    element. `out` is left out, so a caller holding an output buffer can append
+    it last, where eager records it.
+
+    The argument list is rebuilt the same way the kernel's own call arguments
+    are, which is what keeps the two in step. A FallbackKernel restores the
+    original interleaving of tensor and non-tensor arguments through
+    unflatten_args, since partitioning into inputs and constant_args discards
+    it; every other ExternKernel follows the tensors-before-constants
+    convention that ExternKernel.codegen_args relies on. Filling in unprovided
+    positional arguments matches the call the shim actually makes; those
+    arguments are then skipped in the keyword pass, because
+    ordered_kwargs_for_cpp_kernel can name a positional argument that was
+    supplied as a keyword (convolution passes its whole stride/padding/groups
+    tail that way) and it must still be recorded once."""
+    if isinstance(node, ir.FallbackKernel):
+        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    else:
+        args, kwargs = [*node.inputs, *node.constant_args], node.kwargs
+    arg_properties = node.arg_properties or []
+    schema_args: Sequence[Any] = (
+        node.fill_non_provided_args(args, kwargs)
+        if arg_properties and isinstance(node.op_overload, torch._ops.OpOverload)
+        else args
+    )
+    profiling_args = _profiling_arg_entries(schema_args)
+    positional_names = OrderedSet(
+        [
+            arg_property.get("name")
+            for arg_property in arg_properties[: len(schema_args)]
+        ]
+    )
+    for arg_name in node.ordered_kwargs_for_cpp_kernel:
+        if arg_name == "out" or arg_name in positional_names:
+            continue
+        profiling_args.append(
+            _profiling_arg_entry(node.get_kwargs_value(arg_name, **kwargs))
+        )
+    return profiling_args
+
+
 @dataclasses.dataclass
 class ExternKernelOutLine(WrapperLine):
     wrapper: PythonWrapperCodegen
@@ -742,6 +1294,12 @@ class ExternKernelOutLine(WrapperLine):
         else:
             kernel_name = node.get_kernel_name()
         device = d.type if (d := node.get_device()) else V.graph.device_type
+        # profiling_args is consumed only inside the C shim's
+        # enable_kernel_profile branch, so build it only when the C++ wrapper
+        # is generating code and profiling is on.
+        profiling_args = None
+        if V.graph.cpp_wrapper and kernel_profile_enabled():
+            profiling_args = _get_profiling_args(node)
         self.wrapper._generate_extern_kernel_out_helper(
             kernel_name,
             node.codegen_reference(),
@@ -749,6 +1307,8 @@ class ExternKernelOutLine(WrapperLine):
             args,
             device,
             self.node.get_stack_traces(),
+            profiling_args=profiling_args,
+            tunable_dyn_dims_mask=node.tunable_dyn_dims_mask,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -839,6 +1399,8 @@ class KernelDefinitionLine(WrapperLine):
     metadata: str | None = None
     gpu: bool = True
     cpp_definition: str | None = None
+    standalone: bool = False
+    autotune_body: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._define_kernel_helper(
@@ -847,6 +1409,8 @@ class KernelDefinitionLine(WrapperLine):
             metadata=self.metadata,
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
+            standalone=self.standalone,
+            autotune_body=self.autotune_body,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1037,6 +1601,10 @@ class AllocateLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # The index is only meaningful within this scheduler's node list: an inlined
+        # subgraph emits its lines into the parent's list while V.graph is the
+        # SUBGRAPH. See should_reuse_buffer.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1044,6 +1612,21 @@ class AllocateLine(MemoryPlanningLine):
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
             return True
+        if free_line.scheduler is not self.scheduler:
+            # A parent free paired with an allocation from an inlined invoke_subgraph
+            # region. codegen_invoke_subgraph inlines without the EnterSubgraphLine /
+            # ExitSubgraphLine bracket codegen_switch and codegen_while_loop wrap their
+            # branches in, and only that bracket makes memory_plan_reuse push a fresh
+            # MemoryPlanningState and swap estimate_peak. So the region's lines land in
+            # the parent's pool, scored against the parent's tree, and the two
+            # scheduler_node_index values index different node lists: the adjacency
+            # test below is meaningless and summarize_range raises on the inverted
+            # range. Bailing out costs regions the cross-boundary reuse that cond and
+            # while_loop keep.
+            # TODO: bracket the region instead. EnterSubgraphLine.codegen calls
+            # code.do_indent(), which needs an enclosing Python block statement -- an
+            # if/while branch emits one, a region does not.
+            return False
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
@@ -1107,7 +1690,7 @@ class AllocateLine(MemoryPlanningLine):
         device = self.node.get_device()
         if not (device is not None and device.index is not None):
             raise AssertionError(
-                f"Comm buffer requires a valid CUDA device with index, got {device}"
+                f"Comm buffer requires a valid accelerator device with index, got {device}"
             )
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
@@ -1122,9 +1705,12 @@ class AllocateLine(MemoryPlanningLine):
             # [device-as-parameter] under compile-on-one-rank the comm buffer must follow
             # the running rank's device, not the compile-time index.
             if _coor_enabled():
-                device_arg = f'torch.device("cuda", {V.graph.device_ops.current_device_idx_expr()})'
+                device_arg = (
+                    f'torch.device("{device.type}", '
+                    f"{V.graph.device_ops.current_device_idx_expr()})"
+                )
             else:
-                device_arg = f'torch.device("cuda:{device.index}")'
+                device_arg = f'torch.device("{device.type}:{device.index}")'
             line = (
                 f"{name} = empty_strided_p2p("
                 f"{self.wrapper.codegen_shape_tuple(shape)}, "
@@ -1161,6 +1747,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # See AllocateLine.__post_init__ -- the index is only meaningful
+        # relative to this scheduler's node list.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1174,6 +1763,11 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             raise AssertionError("expected line to not be reused")
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
+        if self.node.get_name() in V.graph.never_reuse_but_free_buffers:
+            # Emit the free but keep the storage out of the reuse pool: freeing
+            # only drops inductor's own reference, so a tensor retained behind
+            # inductor's back (stashed away by an effectful op) survives.
+            return self
         if config.allow_buffer_reuse:
             if self.comm_buffer:
                 # Comm buffers use separate pool (comm-comm reuse only)
@@ -1327,10 +1921,23 @@ class IndexPutFallbackLine(WrapperLine):
             idx.codegen_reference() if idx else self.wrapper.none_str
             for idx in self.indices
         ]
-
-        self.wrapper._generate_index_put_fallback(
-            node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+        # index_put_ takes (self, indices, values, accumulate), but the index
+        # list is spread across inputs and the wrapper hook passes it as a
+        # flattened array, so the profiling metadata is built here rather than
+        # from the node's inputs. Each entry gets its own expression instead of
+        # reusing the one passed to the kernel: a reinterpret view's expression
+        # owns the handle it names, so the same one used in two statements
+        # would be freed by the first.
+        profiling_args = self.wrapper.make_profiling_args(
+            [node.inputs[0], *self.indices, node.inputs[1], None]
         )
+
+        with self.wrapper.profiled_kernel_scope(
+            node.get_kernel_name(), node, profiling_args
+        ):
+            self.wrapper._generate_index_put_fallback(
+                node.get_kernel_name(), x, indices, values, *node.codegen_const_args()
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_index_put_fallback
@@ -1351,16 +1958,35 @@ class ScatterFallbackLine(WrapperLine):
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
         device = d.type if (d := node.get_device()) else V.graph.device_type
-        self.wrapper._generate_scatter_fallback(
-            x,
-            [x, node.constant_args[0], index, src],
-            node.cpp_kernel_name,
-            node.python_kernel_name,
-            node.src_is_tensor,
-            node.kwargs["reduce"],
-            node.codegen_kwargs(),
-            device,
+        kwargs = node.codegen_kwargs()
+        # scatter keeps `dim` in constant_args between its tensors, so the
+        # profiling metadata is built here, in the schema order the wrapper
+        # hook passes: (self, dim, index, src) followed by one entry per
+        # argument codegen_kwargs emits. `src` is a scalar for the value
+        # overloads.
+        profiling_args = self.wrapper.make_profiling_args(
+            [
+                node.inputs[0],
+                None,
+                node.inputs[1],
+                node.inputs[2] if node.src_is_tensor else None,
+                *([None] * len(kwargs)),
+            ]
         )
+        # Record the shim the hook actually calls, not the ATen symbol the node
+        # carries: a trace consumer keys on the emitted name.
+        record_name = self.wrapper.scatter_fallback_kernel_name(node.get_kernel_name())
+        with self.wrapper.profiled_kernel_scope(record_name, node, profiling_args):
+            self.wrapper._generate_scatter_fallback(
+                x,
+                [x, node.constant_args[0], index, src],
+                node.cpp_kernel_name,
+                node.python_kernel_name,
+                node.src_is_tensor,
+                node.kwargs["reduce"],
+                kwargs,
+                device,
+            )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_scatter_fallback
@@ -1371,9 +1997,12 @@ class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
     graph: GraphLowering
+    in_profile_scope: bool = False
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._generate_symbolic_call_arg_helper(self.arg, self.graph)
+        self.wrapper._generate_symbolic_call_arg_helper(
+            self.arg, self.graph, self.in_profile_scope
+        )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_symbolic_call_arg
@@ -1431,6 +2060,23 @@ class GroupedAssertSizeStrideLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class AssertAlignmentLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    alignment: int
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_alignment(
+            code, self.name, self.alignment, self.op_name
+        )
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_alignment
+
+
+@dataclasses.dataclass
 class AssertDivByZeroLine(WrapperLine):
     """Deferred AOTI runtime check that a sizevar divisor is non-zero.
 
@@ -1451,12 +2097,57 @@ BufferName = str
 Line = MemoryPlanningLine | LineContext
 
 
+def _resolve_nested_output(
+    outputs: Any, keypath: pytree.KeyPath
+) -> tuple[ir.IRNode, pytree.KeyPath]:
+    """Follow ``SequenceKey`` entries into (possibly nested) custom-op outputs
+    until reaching the IR node an unbacked symbol is bound to, returning that
+    node together with the keypath entries that still apply to it.
+    """
+    # Fast path for a single output. When a fallback kernel returns a list
+    # consisting of a single tensor, the output is a MultiOutput with non-empty
+    # indices, and we strip the leading keypath entry.
+    if len(outputs) == 1 and isinstance(outputs[0], ir.IRNode):
+        single_output = outputs[0]
+        remaining = (
+            keypath[1:]
+            if isinstance(single_output, ir.MultiOutput) and single_output.indices
+            else keypath
+        )
+        return single_output, remaining
+
+    # Otherwise descend through nested list/tuple containers via SequenceKeys.
+    current_output = outputs
+    remaining_keypath = keypath
+    while isinstance(current_output, (list, tuple)):
+        if not remaining_keypath or not isinstance(
+            remaining_keypath[0], pytree.SequenceKey
+        ):
+            raise AssertionError(
+                "expected SequenceKey while traversing nested "
+                f"outputs, got {remaining_keypath}"
+            )
+        key = remaining_keypath[0]
+        if not 0 <= key.idx < len(current_output):
+            raise AssertionError(
+                f"output index {key.idx} is out of range for "
+                f"{type(current_output).__name__} with "
+                f"{len(current_output)} elements"
+            )
+        current_output = current_output[key.idx]
+        remaining_keypath = remaining_keypath[1:]
+    if not isinstance(current_output, ir.IRNode):
+        raise AssertionError(f"expected IRNode output, got {type(current_output)}")
+    return current_output, remaining_keypath
+
+
 class PythonWrapperCodegen(CodeGen):
     """
     Generate outer wrapper in Python that calls the kernels.
     """
 
     supports_caching: bool = True  # Whether the output code is cacheable.
+    preserve_zero_dim_tensor_args: bool = False
 
     def __init__(self):
         super().__init__()
@@ -1486,15 +2177,38 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
+        # Each module-level Triton kernel's (name in source, source), which
+        # AsyncCompile compiles it from; see PyCodeCache.load_by_key_path.
+        self.kernel_sources: dict[str, tuple[str, str]] = {}
+        # Cache keys of the kernel modules whose benchmark harness
+        # emit_triton_kernel_definition cut from the module-level kernel.
+        self.kernel_harness_modules: list[str] = []
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
-        # Map key is the kernel argument name; value is a tuple of the resulting example
-        # tensor name with the kernel where that tensor was most recently used.
-        self.kernel_autotune_example_args: dict[str, tuple[str, str]] = {}
+        # Kernel argument name -> cached tensor and its lifetime/storage metadata.
+        self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
+        # Base buffer name -> generated backing tensor and its last consuming kernel.
+        self.kernel_autotune_storage_cache: dict[str, AutotuneStorage] = {}
         self.kernel_autotune_tmp_arg_idx: int = 0
+        self.kernel_autotune_storage_idx: int = 0
+        # Values chosen for unbacked symbols in the autotune block, so all
+        # example values agree; created on first use.
+        self.kernel_autotune_hint_state: ConsistentHintState | None = None
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
+        # Nesting depth of the kernel-profiling {} scope blocks currently open.
+        # A symbolic numel emitted inside one is block-scoped, so it has to be
+        # redeclared rather than assigned. Only the guard begin/end pair keeps
+        # this up to date, so a block opened any other way -- the C shim writes
+        # its own braces -- does not register; anything emitting a numel inside
+        # one has to maintain the depth too.
+        self.kernel_profile_scope_depth: int = 0
+        # Index in self.lines of the `{` opening the outermost profiling block
+        # currently being collected, or None when there is none. A declaration
+        # that has to stay visible after the block closes is inserted there,
+        # which puts it in front of the brace, instead of appended.
+        self.kernel_profile_scope_hoist_index: int | None = None
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -1795,8 +2509,16 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
+        # Graph partition returns the mutated buffer, so the mutating op's name is
+        # only bound inside the partition function.
+        scheduler = V.graph.scheduler
+        mutations = scheduler.mutation_real_name.items() if scheduler else ()
+        # A mutated graph input may already be freed, since only the mutating op's
+        # buffer is tracked for liveness.
+        real_names = {k: v for k, v in mutations if v in V.graph.name_to_buffer}
         return [
-            x.codegen_reference(self.wrapper_call) for x in self.get_graph_outputs()
+            real_names.get(ref := x.codegen_reference(self.wrapper_call), ref)
+            for x in self.get_graph_outputs()
         ]
 
     def mark_output_type(self) -> None:
@@ -1922,8 +2644,27 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
             self.codegen_input_size_asserts()
+        if config.alignment_asserts_inputs:
+            self.codegen_input_alignment_asserts()
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
+
+    def codegen_input_alignment_asserts(self) -> None:
+        # Partition prefixes are generated after their kernels.
+        body = self.lines
+        self.lines = []
+        inputs = self.get_graph_inputs()
+        for name, buf in V.graph.graph_inputs.items():
+            if (
+                name not in inputs
+                or name in V.graph.unaligned_buffers
+                or not isinstance(buf, ir.TensorBox)
+            ):
+                continue
+            device = buf.get_device()
+            if device is not None and is_gpu(device.type):
+                self.write_assert_alignment(name, GPU_ALIGN_BYTES, "input")
+        self.lines.extend(body)
 
     # Input size/stride assertions are deferred from the top of call() to just
     # before the first kernel that uses each input. This avoids a block of N
@@ -2011,6 +2752,16 @@ class PythonWrapperCodegen(CodeGen):
         code.writeline(
             f"assert_size_stride_grouped(({names}), ({sizes}), ({strides}), {op_name!r})"
         )
+
+    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
+        """Queue an assert_alignment for emission during replay."""
+        self.writeline(AssertAlignmentLine(self, name, alignment, op_name))
+
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        """Emit one assert_alignment line to `code` (replay-phase target)."""
+        code.writeline(f"assert_alignment({name}, {alignment}, {op_name!r})")
 
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
@@ -2111,6 +2862,30 @@ class PythonWrapperCodegen(CodeGen):
 
     def pop_codegened_graph(self):
         return self.codegened_graph_stack.pop()
+
+    def push_kernel_profile_scope_state(self):
+        """Save the declaration memos a profiling block is about to shadow.
+
+        Nothing to save for the Python wrapper, which has no block scope.
+        """
+
+    def pop_kernel_profile_scope_state(self):
+        """Restore what push_kernel_profile_scope_state saved."""
+
+    def writeline_outside_kernel_profile_scope(self, line):
+        """Emit a declaration that has to outlive every open profiling block,
+        such as a workspace allocated once per graph and never freed.
+
+        The line is hoisted in front of the outermost block, not the enclosing
+        one, so this is only correct for something whose lifetime is the whole
+        graph. A block-local declaration hoisted this way would be lifted too
+        far."""
+        index = self.kernel_profile_scope_hoist_index
+        if index is None:
+            self.writeline(line)
+        else:
+            self.lines.insert(index, line)
+            self.kernel_profile_scope_hoist_index = index + 1
 
     def push_computed_sizes(self, computed_sizes):
         from copy import deepcopy
@@ -2364,7 +3139,12 @@ class PythonWrapperCodegen(CodeGen):
         args: list[str],
         device: str,
         stack_traces: OrderedSet[str] | None = None,
+        profiling_args: Sequence[str | None] | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
+        # profiling_args is consumed only by the CppWrapperCpu override (to
+        # record profiling metadata); the Python wrapper ignores it.
+        # tunable_dyn_dims_mask is consumed only by the GPU C++ wrapper.
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -2378,6 +3158,18 @@ class PythonWrapperCodegen(CodeGen):
                 wrapper_name = kernel
             self.writeline(f"{wrapper_name}({', '.join(args)})")
 
+    def _tma_descriptor_tensor_ref(self, desc, in_autotune_block):
+        """Reference to the descriptor's source tensor.
+
+        The compile-time autotune block is Python even when the wrapper emits C++,
+        and it already materializes an example tensor in the descriptor tensor's
+        own layout. Referring to that buffer by name keeps the block valid Python;
+        codegen_reference() would emit a C++ reinterpret (e.g. a `0L` literal).
+        """
+        if in_autotune_block:
+            return desc.get_tensor().get_name()
+        return desc.tensor.codegen_reference()
+
     def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
@@ -2385,7 +3177,7 @@ class PythonWrapperCodegen(CodeGen):
             dims = V.graph.sizevars.optimization_hint(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
-        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
         dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
         block_dims = ", ".join(
@@ -2403,9 +3195,15 @@ class PythonWrapperCodegen(CodeGen):
         if apply_size_hints:
             block_shape = V.graph.sizevars.optimization_hints(block_shape)
 
-        prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
+        import_line = f"import {desc.descriptor_module}"
+        if not V.graph.cpp_wrapper:
+            self.add_import_once(import_line)
+        elif config.triton.autotune_at_compile_time:
+            self.kernel_autotune_calls.writeline(import_line)
+        prefix = f"{desc.descriptor_module}.{desc.descriptor_class}"
         fn = f"{prefix}.from_tensor"
-        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
 
@@ -2426,6 +3224,16 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_scatter_fallback(self, node: ir.ScatterFallback):
         self.writeline(ScatterFallbackLine(self, node))
+
+    def scatter_fallback_kernel_name(self, kernel_name: str) -> str:
+        """The name the scatter fallback is emitted under, given the name the
+        wrapper resolves the node to.
+
+        The Python wrapper calls the ATen op under that name; CppWrapperCpu
+        calls the `_out` variant of the C shim symbol, which is what its
+        RecordFunction has to say.
+        """
+        return kernel_name
 
     def _generate_scatter_fallback(
         self,
@@ -2676,10 +3484,11 @@ class PythonWrapperCodegen(CodeGen):
             payload_fn=lambda: tuning_code,
         )
         # Execute the code to autotune kernels
-        try:
-            exec(tuning_code, scope)
-        except Exception as e:
-            raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        with _constants_offloaded_to_disk():
+            try:
+                exec(tuning_code, scope)
+            except Exception as e:
+                raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
@@ -2717,6 +3526,15 @@ class PythonWrapperCodegen(CodeGen):
                 past_planning_states.append(planning_states.pop())
                 if config.allow_buffer_reuse:
                     self.estimate_peak = peak_estimate_stack.pop()
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A buffer freed inside the block must not be offered to an
+                # allocation after it, and one freed before it must not be
+                # reused inside: either way the ReuseLine declares its new name
+                # on the wrong side of a brace. The state is the same graph's,
+                # so estimate_peak is left alone.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
+                past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:
             raise AssertionError(
@@ -3094,10 +3912,6 @@ class PythonWrapperCodegen(CodeGen):
         # In this case, x.data.layout == x.layout is (10, 10), the reinterpret view will return buf0,
         # but buf0 need to be viewed from (2, 5, 10) to (10, 10).
         # So we need to dig into the chain to find the innermost buffer's layout.
-        d_size, d_stride, d_offset, d_dtype, collapsible = (
-            codegen_reinterpret_view_helper(data)
-        )
-
         def apply_reinterpret(
             name, tgt_size, tgt_stride, tgt_offset, cast_dtype, base_dtype
         ):
@@ -3110,17 +3924,9 @@ class PythonWrapperCodegen(CodeGen):
             return expr
 
         name = data.get_name()
-        collapsed = collapsible and offset == d_offset
-        if collapsed:
-            same_layout = size == d_size and stride == d_stride
-            base_dtype = d_dtype
-        else:
-            same_layout = (
-                size == data.layout.size
-                and stride == data.layout.stride
-                and offset == data.layout.offset
-            )
-            base_dtype = data.dtype
+        same_layout, base_dtype = codegen_reinterpret_view_layout_match(
+            data, size, stride, offset
+        )
 
         if same_layout:
             if dtype is not None and dtype != base_dtype:
@@ -3392,6 +4198,10 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.benchmark_compiled_module(output)
+        # A module-level kernel's harness stays in its own module, which a run of this
+        # one as a script does not otherwise load (see emit_triton_kernel_definition).
+        kernel_modules = self.kernel_harness_modules
+        modules_arg = f", kernel_modules={kernel_modules!r}" if kernel_modules else ""
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
@@ -3401,7 +4211,8 @@ class PythonWrapperCodegen(CodeGen):
                     "args = get_args()",
                     (
                         f"compiled_module_main('{get_benchmark_name()}', "
-                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat))"
+                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat)"
+                        f"{modules_arg})"
                     ),
                 ]
             )
@@ -3413,6 +4224,8 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         self.writeline(
             KernelDefinitionLine(
@@ -3422,18 +4235,27 @@ class PythonWrapperCodegen(CodeGen):
                 metadata=metadata,
                 gpu=gpu,
                 cpp_definition=cpp_definition,
+                standalone=standalone,
+                autotune_body=autotune_body,
             )
         )
 
     @staticmethod
     def _format_kernel_definition(
-        kernel_name: str, kernel_body: str, metadata: str | None = None
+        kernel_name: str,
+        kernel_body: str,
+        metadata: str | None = None,
+        standalone: bool = False,
     ):
         if config.triton.autotune_at_compile_time and metadata:
             # Generating autotune block
             # Need to replace C++ comment starter with Python comment starter
             metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
+        # A standalone body already binds kernel_name itself (it is a decorated def, not
+        # an expression), so assigning it would be a syntax error rather than a rebind.
+        if standalone:
+            return f"\n\n{metadata_comment}{kernel_body}"
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
 
@@ -3444,10 +4266,18 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if config.triton.autotune_at_compile_time and gpu:
+            # The autotune block is exec'd rather than emitted, so it wants whichever
+            # form runs there, not the one meant to be read: a standalone kernel carries
+            # filename=__file__, which is undefined in that exec.
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=metadata
+                kernel_name,
+                autotune_body if autotune_body is not None else kernel_body,
+                metadata=metadata,
+                standalone=standalone and autotune_body is None,
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -3455,9 +4285,102 @@ class PythonWrapperCodegen(CodeGen):
                 return
 
         body = self._format_kernel_definition(
-            kernel_name, kernel_body, metadata=metadata
+            kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
         self.header.splice(body)
+
+    def emit_triton_kernel_definition(
+        self,
+        kernel_name: str,
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        metadata: str | None = None,
+    ) -> None:
+        """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
+
+        The default form hands the kernel to AsyncCompile as a source string, which is
+        what lets compilation fan out to the worker pool. When
+        ``defines_triton_kernels_as_code()`` the kernel is defined as code instead.
+        """
+        if not self.defines_triton_kernels_as_code():
+            self.define_kernel(
+                kernel_name,
+                self.async_compile_triton_body(subs_name, src_code, device_type),
+                metadata,
+            )
+            return
+        # When inductor loads this module, the def binds the kernel AsyncCompile built
+        # from this source rather than compiling itself in process, so the worker pool
+        # can start on it now, as it does for a string kernel. It gets the source the
+        # string form would have compiled, so both forms share every compile cache.
+        self.kernel_sources[kernel_name] = (subs_name, src_code)
+        kernel_key = get_hash(src_code.strip())
+        kernel_file = f"{kernel_key}.py"
+        if async_compile.AsyncCompile.use_process_pool():
+            async_compile.AsyncCompile().triton(subs_name, src_code)
+        autotune_body = (
+            self.async_compile_triton_body(
+                subs_name,
+                _escape_triton_kernel_source_for_wrapper(src_code),
+                device_type,
+            )
+            if config.triton.autotune_at_compile_time
+            else None
+        )
+        # benchmark_kernel and benchmark_combo_kernel append a get_args()/call()/__main__
+        # harness to every kernel. It stays in the per-kernel modules the pool builds,
+        # which is where benchmark_all_kernels looks for it, but at module level each
+        # kernel's __main__ block would run whenever the wrapper does.
+        if harness := re.search(r"^def get_args\(\):$", src_code, re.MULTILINE):
+            src_code = src_code[: harness.start()]
+            self.kernel_harness_modules.append(kernel_key)
+        if "if __name__ == '__main__':" in src_code:
+            raise AssertionError(f"kernel {kernel_name} kept its benchmark harness")
+        # The string form passes filename=__file__ from its own module, which is named by
+        # the hash of this source, and the autotune cache keys on that basename. Here
+        # __file__ is the wrapper, which every kernel shares, so name the module the
+        # string form would have used, in the wrapper's directory.
+        if "filename=__file__" in src_code:
+            path = f"os.path.join(os.path.dirname(__file__), {kernel_file!r})"
+            src_code = src_code.replace("filename=__file__", f"filename={path}")
+            src_code = f"import os\n{src_code}"
+        # src_code is already a complete module: the triton imports, the
+        # @triton_heuristics.* decorator that builds the CachingAutotuner, and the
+        # @triton.jit def. Spliced at module level it binds kernel_name to the same
+        # object async_compile.triton would have returned, so the launch site
+        # (KERNEL.run(...)) is unchanged. Its def is named subs_name, which is `triton_`
+        # for every kernel without unique_kernel_names, and kernels bind other top-level
+        # names that are only unique per kernel: @triton.jit helpers (scan combine_fns,
+        # flex attention's forward_inner, ...) and, from a user kernel's closure, helper
+        # defs and constants. In one shared namespace the later binding would win for
+        # all of them, so _rename_kernel_module_globals makes each kernel-unique.
+        src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
+        self.define_kernel(
+            kernel_name,
+            src_code,
+            metadata,
+            standalone=True,
+            # The compile-time autotune block execs its kernels instead of emitting
+            # them, and a module-level kernel there has no __file__ to name itself by,
+            # so that block keeps the AsyncCompile form. It runs at compile time only
+            # and is not carried in the emitted module.
+            autotune_body=autotune_body,
+        )
+
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Off until module-level kernels compile as fast as string ones; tests patch it.
+        return False
+
+    @staticmethod
+    def async_compile_triton_body(
+        subs_name: str, src_code: str, device_type: str
+    ) -> str:
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
@@ -3485,7 +4408,8 @@ class PythonWrapperCodegen(CodeGen):
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
-        Emits the ``async_compile.triton(...)`` wrapper, assigns a graph-unique
+        Emits the kernel's definition (see ``emit_triton_kernel_definition``, or an
+        ``async_compile.triton(...)`` source string), assigns a graph-unique
         name (with a leading dunder stripped to avoid Python class-based name
         mangling at the call site), and records the kernel in
         ``user_defined_kernel_cache``. Returns ``(name, triton_meta,
@@ -3625,7 +4549,7 @@ class PythonWrapperCodegen(CodeGen):
             use_fp64_for_python_float=False,
         )
         device = V.graph.get_current_device_or_throw()
-        device_props = DeviceProperties.create(device)
+        device_props = triton_meta_device_props(device)
         triton_meta: TritonMeta = {
             "signature": triton_signature,
             "device": device_props,
@@ -3765,17 +4689,23 @@ class PythonWrapperCodegen(CodeGen):
         if name.startswith("__") and not name.endswith("__"):
             name = name[1:]
 
-        compile_wrapper = IndentedBuffer()
-        if config.triton.unique_user_kernel_names:
-            compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
-        else:
-            compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
-
+        subs_name = name if config.triton.unique_user_kernel_names else original_name
         inductor_meta["kernel_name"] = name
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
+        as_code = self.defines_triton_kernels_as_code()
+        compile_wrapper = IndentedBuffer()
+        if not as_code:
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        for type_spec in get_importable_constexpr_types(
+            triton_meta.get("constants", {}).values()
+        ):
+            compile_wrapper.writeline(
+                f"from {type_spec.module} import "
+                f"{type_spec.root_name} as {type_spec.root_name}"
+            )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
@@ -3799,19 +4729,20 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
-        kernel_src = _escape_triton_kernel_source_for_wrapper(kernel_src)
-        compile_wrapper.splice(kernel_src)
 
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
+        device_type = V.graph.get_current_device_or_throw().type
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
-        self.define_kernel(
-            name,
-            compile_wrapper.getvalue(),
-            metadata,
-        )
+        if as_code:
+            compile_wrapper.splice(kernel_src)
+            self.emit_triton_kernel_definition(
+                name, subs_name, compile_wrapper.getvalue(), device_type, metadata
+            )
+        else:
+            compile_wrapper.splice(_escape_triton_kernel_source_for_wrapper(kernel_src))
+            compile_wrapper.writeline(f"''', device_str='{device_type}')")
+            self.define_kernel(name, compile_wrapper.getvalue(), metadata)
         # Add to the cache for the next use
         self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
         return name, triton_meta, inductor_meta, extra_launcher_call_args
@@ -3833,12 +4764,19 @@ class PythonWrapperCodegen(CodeGen):
 
         is_benchmark_kernel = kernel_name == ""
         if not is_benchmark_kernel:
-            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+            self.writeline(
+                SymbolicCallArgLine(
+                    self,
+                    arg,
+                    V.graph,
+                    in_profile_scope=self.kernel_profile_scope_depth > 0,
+                )
+            )
 
         return arg
 
     def _generate_symbolic_call_arg_helper(
-        self, arg: SymbolicCallArg, graph: GraphLowering
+        self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False
     ) -> None:
         self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
@@ -3863,8 +4801,12 @@ class PythonWrapperCodegen(CodeGen):
                 # expand existing allocation
                 prior.node = WorkspaceArg.maximum(prior.node, ws)
             else:
-                self.writeline(line)
-                self.writeline(self.make_zero_buffer(name))
+                # Allocated once at first use and never freed, so it has to be
+                # declared outside any profiling block: the first kernel to
+                # need it may sit inside one, and every later kernel that
+                # names it sits in a different block.
+                self.writeline_outside_kernel_profile_scope(line)
+                self.writeline_outside_kernel_profile_scope(self.make_zero_buffer(name))
                 self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
@@ -3969,37 +4911,264 @@ class PythonWrapperCodegen(CodeGen):
 
         return [wrap_arg(arg) for arg in call_args]
 
-    def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
+    def _get_tensor_arg_ir_node(
+        self,
+        arg: str,
+        raw_arg: ir.IRNode | ir.TMADescriptor | None,
+    ) -> ir.IRNode | None:
+        """Return the IR tensor that supplies storage for a kernel argument."""
+        buffer = self.args_to_buffers.get(arg)
+        if buffer is not None:
+            return buffer
+        # A TMA raw argument is a descriptor, not its underlying tensor, and
+        # descriptor generation requires that tensor to be registered above.
+        if isinstance(raw_arg, ir.TMADescriptor):
+            raise AssertionError(f"No underlying buffer found for TMA argument {arg}")
+        return raw_arg
+
+    @staticmethod
+    def _get_autotune_storage_arg(buf: ir.IRNode, raw_arg) -> AutotuneStorageArg | None:
+        if isinstance(raw_arg, ir.TMADescriptor):
+            return None
+
+        def unwrap_alias_layouts(node: ir.IRNode) -> ir.IRNode:
+            # These layouts describe aliasing without adding a view transform.
+            # Strip them from both the logical-tensor and owner paths.
+            while isinstance(node, ir.Buffer):
+                layout = node.get_layout()
+                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                    node = layout.target
+                elif isinstance(layout, ir.NonOwningLayout):
+                    node = layout.view
+                else:
+                    break
+            return node
+
+        # The logical tensor supplies the kernel argument's size, stride, and
+        # offset after transparent alias layouts are removed.
+        tensor = unwrap_alias_layouts(buf)
+
+        # torch.as_strided requires the logical tensor to expose an affine
+        # layout. Owner resolution below rejects unsupported view types.
+        if not isinstance(
+            tensor.get_layout(),
+            (ir.FixedLayout, ir.FlexibleLayout),
+        ):
+            return None
+
+        # The owner is the terminal Buffer supplying physical storage. Resolve
+        # it from the logical tensor, stripping alias layouts along the way.
+        # More than one ReinterpretView requires composing their offsets.
+        owner: ir.IRNode = tensor
+        seen_reinterpret_view = False
+        while True:
+            if isinstance(owner, ir.MutableBox):
+                owner = owner.data
+            elif isinstance(owner, ir.ReinterpretView):
+                if seen_reinterpret_view:
+                    return None
+                seen_reinterpret_view = True
+                owner = owner.data
+            elif isinstance(owner, ir.Buffer):
+                break
+            else:
+                return None
+            owner = unwrap_alias_layouts(owner)
+
+        if not isinstance(owner, ir.Buffer):
+            return None
+        # Only an explicitly owning affine layout can back shared storage.
+        if not isinstance(
+            owner.get_layout(),
+            (ir.FixedLayout, ir.FlexibleLayout),
+        ):
+            return None
+        # torch.as_strided interprets offsets in units of the backing dtype.
+        if tensor.get_dtype() != owner.get_dtype():
+            return None
+
+        return AutotuneStorageArg(tensor, owner)
+
+    def _collect_autotune_storage_args(
+        self,
+        call_args: Sequence[Any],
+        arg_types: Sequence[Any],
+        raw_keys: Sequence[Any],
+        raw_args: Sequence[Any],
+        autotune_args: dict[Any, Any] | None,
+    ) -> dict[str, AutotuneStorageArg]:
+        """Collect backing-storage information for supported tensor arguments."""
+        storage_args: dict[str, AutotuneStorageArg] = {}
+        for arg, arg_type, raw_key, raw_arg in zip(
+            call_args, arg_types, raw_keys, raw_args
+        ):
+            # Scalar and symbolic arguments have no tensor storage to collect.
+            if not isinstance(arg_type, torch_dtype):
+                continue
+            # Normalize keyword-style call arguments such as "out=buf0".
+            if isinstance(arg, str) and "=" in arg:
+                _, arg = arg.split("=", 1)
+            # Literal arguments have no stable buffer name, while workspaces and
+            # semaphores are allocated separately by TritonKernel.call_kernel().
+            if not isinstance(arg, str) or re.match(r"^(workspace|semaphore)", arg):
+                continue
+            # TMA descriptors and their underlying tensors are constructed by
+            # the dedicated descriptor-generation path.
+            if isinstance(raw_arg, ir.TMADescriptor):
+                continue
+            # Captured user-defined Triton inputs are bound directly into the
+            # autotuning scope and bypass synthetic storage generation.
+            if autotune_args and raw_key in autotune_args:
+                if self.get_autotuning_input_name(  # type: ignore[attr-defined]
+                    autotune_args[raw_key]
+                ):
+                    continue
+
+            ir_node = self._get_tensor_arg_ir_node(arg, raw_arg)
+            if ir_node is None:
+                continue
+            storage_arg = self._get_autotune_storage_arg(ir_node, raw_arg)
+            if storage_arg is not None:
+                storage_args[arg] = storage_arg
+
+        return storage_args
+
+    def _get_or_create_autotune_storage(
+        self,
+        storage_arg: AutotuneStorageArg,
+        *,
+        kernel_name: str,
+        storage_cache: dict[str, AutotuneStorage],
+    ) -> tuple[str, str]:
+        base_buffer = storage_arg.base_buffer
+        storage_key = base_buffer.get_name()
+        storage: AutotuneStorage | None = storage_cache.get(storage_key)
+        if storage is None:
+            storage_name = f"_autotune_storage_{self.kernel_autotune_storage_idx}"
+            self.kernel_autotune_storage_idx += 1
+            storage_size = V.graph.sizevars.optimization_hint(
+                V.graph.get_allocation_storage_size(base_buffer)
+            )
+            device = base_buffer.get_device()
+            dtype = base_buffer.get_dtype()
+            value = f"generate_example_value(({storage_size},), (1,), '{coor_device_str(device)}', {dtype}, 0, ({storage_size},))"
+            self.kernel_autotune_calls.writeline(f"{storage_name} = {value}")
+        else:
+            storage_name = storage.name
+
+        storage_cache[storage_key] = AutotuneStorage(storage_name, kernel_name)
+        return storage_key, storage_name
+
+    def _get_autotune_tensors_to_delete(self, kernel_name: str) -> OrderedSet[str]:
+        tensors_to_delete = OrderedSet(
+            example_arg.name
+            for example_arg in self.kernel_autotune_example_arg_cache.values()
+            if example_arg.last_kernel == kernel_name
+        )
+        tensors_to_delete.update(
+            storage.name
+            for storage in self.kernel_autotune_storage_cache.values()
+            if storage.last_kernel == kernel_name
+        )
+        return tensors_to_delete
+
+    def generate_example_arg_value(
+        self,
+        arg,
+        arg_type,
+        raw_arg=None,
+        *,
+        kernel_name: str | None = None,
+        storage_cache: dict[str, AutotuneStorage] | None = None,
+        storage_arg: AutotuneStorageArg | None = None,
+    ):
+        """Emit code that creates one synthetic argument for autotuning.
+
+        Tensor arguments use shared backing storage when ``storage_arg`` is
+        provided; unsupported arguments retain independent allocation.
+        """
+        # Example values must agree with each other: a view must fit its
+        # backing storage and scalars must match tensor shapes.
+        if self.kernel_autotune_hint_state is None:
+            self.kernel_autotune_hint_state = ConsistentHintState(
+                V.graph.sizevars.shape_env
+            )
+        with consistent_hints(self.kernel_autotune_hint_state):
+            return self._generate_example_arg_value(
+                arg,
+                arg_type,
+                raw_arg,
+                kernel_name=kernel_name,
+                storage_cache=storage_cache,
+                storage_arg=storage_arg,
+            )
+
+    def _generate_example_arg_value(
+        self,
+        arg,
+        arg_type,
+        raw_arg=None,
+        *,
+        kernel_name: str | None = None,
+        storage_cache: dict[str, AutotuneStorage] | None = None,
+        storage_arg: AutotuneStorageArg | None = None,
+    ):
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
                 buf_name = raw_arg.get_tensor().get_name()
-                buf = self.args_to_buffers[arg]
             elif self.args_to_buffers.get(arg):
                 buf_name = arg
-                buf = self.args_to_buffers[arg]
             else:
                 if raw_arg is None:
                     raise AssertionError(
                         "V.graph.get_buffer(arg) and raw_arg can't be None at the same time"
                     )
                 buf_name = f"tmp_arg_{self.kernel_autotune_tmp_arg_idx}"
-                buf = raw_arg
                 self.kernel_autotune_tmp_arg_idx += 1
 
+            buf = self._get_tensor_arg_ir_node(arg, raw_arg)
             if buf is None:
                 raise AssertionError(f"Failed to find a buffer for arg {arg}")
-            size = V.graph.sizevars.optimization_hints(buf.get_size())
-            allocation_size = V.graph.sizevars.optimization_hints(
-                V.graph.get_allocation_size(buf)
-            )
-            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
 
-            device = buf.get_device()
-            dtype = buf.get_dtype()
-            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
-            value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
-            self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+            if storage_arg is not None:
+                if kernel_name is None:
+                    raise AssertionError(
+                        "kernel_name is required for shared autotune storage"
+                    )
+                if storage_cache is None:
+                    raise AssertionError(
+                        "storage_cache is required for shared storage arguments"
+                    )
+                _, storage_name = self._get_or_create_autotune_storage(
+                    storage_arg,
+                    kernel_name=kernel_name,
+                    storage_cache=storage_cache,
+                )
+                tensor = storage_arg.tensor
+                size = V.graph.sizevars.optimization_hints(tensor.get_size())
+                stride = V.graph.sizevars.optimization_hints(tensor.get_stride())
+                offset = V.graph.sizevars.optimization_hint(tensor.get_layout().offset)
+                self.kernel_autotune_calls.writeline(
+                    f"{buf_name} = torch.as_strided({storage_name}, {size}, {stride}, {offset})"
+                )
+            else:
+                layout = buf.get_layout()
+                size = V.graph.sizevars.optimization_hints(buf.get_size())
+                allocation_node = cast(
+                    ir.TensorBox | ir.StorageBox | ir.Buffer | ir.TorchBindObject,
+                    buf,
+                )
+                allocation_size = V.graph.sizevars.optimization_hints(
+                    V.graph.get_allocation_size(allocation_node)
+                )
+                stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+
+                device = buf.get_device()
+                dtype = buf.get_dtype()
+                offset = V.graph.sizevars.optimization_hint(layout.offset)
+                value = f"generate_example_value({size}, {stride}, '{coor_device_str(device)}', {dtype}, {offset}, {allocation_size})"
+                self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             if isinstance(raw_arg, ir.TMADescriptor):
                 # generate another line initializing a host-side TMA
@@ -4167,11 +5336,7 @@ class PythonWrapperCodegen(CodeGen):
 
             def get_autotune_deletion_call() -> str:
                 """Returns del for tensors whose last consumer is this kernel."""
-                tensors_to_delete = [
-                    tensor
-                    for tensor, kn in self.kernel_autotune_example_args.values()
-                    if kn == kernel_name
-                ]
+                tensors_to_delete = self._get_autotune_tensors_to_delete(kernel_name)
                 if tensors_to_delete:
                     return f"del {', '.join(tensors_to_delete)}\n"
                 return ""
@@ -4211,6 +5376,8 @@ class PythonWrapperCodegen(CodeGen):
 
             all_args = []
             tensor_arg_strs = []  # used only when _per_kernel is True
+            # Base buffer name -> backing tensor generated for this kernel.
+            per_kernel_storage_cache: dict[str, AutotuneStorage] = {}
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
                 if raw_keys is not None:
@@ -4218,8 +5385,23 @@ class PythonWrapperCodegen(CodeGen):
                 raw_keys = [None] * len(call_args)
                 raw_args = [None] * len(call_args)
             else:
+                if raw_keys is None:
+                    raise AssertionError("raw_keys must be provided with raw_args")
                 if len(raw_args) != len(call_args):
                     raise AssertionError("call_args and raw_args do not match")
+
+            # Kernel argument name -> its logical tensor and canonical backing buffer.
+            # Arguments omitted from this map use independent synthetic storage and
+            # do not share a backing allocation with other arguments.
+            autotune_storage_args: dict[str, AutotuneStorageArg] = (
+                self._collect_autotune_storage_args(
+                    call_args,
+                    arg_types,
+                    raw_keys,
+                    raw_args,
+                    autotune_args,
+                )
+            )
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
@@ -4256,18 +5438,60 @@ class PythonWrapperCodegen(CodeGen):
                     if re.match(r"^(workspace|semaphore)", arg):
                         arg_str = arg
                     elif _per_kernel:
+                        # Generate a fresh argument for this kernel.
+                        storage_plan = autotune_storage_args.get(arg)
                         arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg
+                            arg,
+                            arg_type,
+                            raw_arg,
+                            kernel_name=kernel_name,
+                            storage_cache=per_kernel_storage_cache,
+                            storage_arg=storage_plan,
                         )
                         tensor_arg_strs.append(arg_str)
-                    elif arg not in self.kernel_autotune_example_args:
-                        arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg
-                        )
                     else:
-                        arg_str = self.kernel_autotune_example_args[arg][0]
-                    if not _per_kernel:
-                        self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
+                        cached_example_arg = self.kernel_autotune_example_arg_cache.get(
+                            arg
+                        )
+                        if cached_example_arg is not None:
+                            arg_str = cached_example_arg.name
+                            storage_key = cached_example_arg.storage_key
+                            # A cache hit skips _get_or_create_autotune_storage(),
+                            # so record this kernel as the backing allocation's
+                            # last consumer here.
+                            if storage_key is not None:
+                                storage = self.kernel_autotune_storage_cache[
+                                    storage_key
+                                ]
+                                self.kernel_autotune_storage_cache[storage_key] = (
+                                    AutotuneStorage(
+                                        storage.name,
+                                        kernel_name,
+                                    )
+                                )
+                        else:
+                            storage_plan = autotune_storage_args.get(arg)
+                            arg_str = self.generate_example_arg_value(
+                                arg,
+                                arg_type,
+                                raw_arg,
+                                kernel_name=kernel_name,
+                                storage_cache=self.kernel_autotune_storage_cache,
+                                storage_arg=storage_plan,
+                            )
+                            storage_key = (
+                                storage_plan.base_buffer.get_name()
+                                if storage_plan is not None
+                                else None
+                            )
+
+                        self.kernel_autotune_example_arg_cache[arg] = (
+                            AutotuneExampleArg(
+                                arg_str,
+                                kernel_name,
+                                storage_key,
+                            )
+                        )
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
 
@@ -4293,8 +5517,12 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.do_unindent()
 
             if _per_kernel and tensor_arg_strs:
+                tensors_to_delete = OrderedSet(tensor_arg_strs)
+                tensors_to_delete.update(
+                    storage.name for storage in per_kernel_storage_cache.values()
+                )
                 self.kernel_autotune_calls.writeline(
-                    f"del {', '.join(tensor_arg_strs)}"
+                    f"del {', '.join(tensors_to_delete)}"
                 )
             elif not _per_kernel:
                 self.kernel_autotune_calls.writeline(
@@ -4567,13 +5795,13 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(FreeIfNotReusedLine(self, buffer, comm_buffer=True))
             return
 
-        if not self.can_reuse(buffer):
+        if not self.can_free(buffer):
             return
         self.freed.add(name)
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
-    def can_reuse(self, input_buffer, output_buffer=None):
+    def can_free(self, input_buffer):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
@@ -4587,6 +5815,11 @@ class PythonWrapperCodegen(CodeGen):
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
+        )
+
+    def can_reuse(self, input_buffer, output_buffer=None):
+        return self.can_free(input_buffer) and (
+            input_buffer.get_name() not in V.graph.never_reuse_but_free_buffers
         )
 
     def did_reuse(self, buffer, reused_buffer):
@@ -4686,23 +5919,8 @@ class PythonWrapperCodegen(CodeGen):
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
-                    if len(outputs) == 1:
-                        out = outputs[0]
-                        # When fallback kernel returns a list consisting of a single tensor,
-                        # the output is represented as a MultiOutput with non empty indices.
-                        # In this case, we strip the first key path away.
-                        return go(
-                            outputs[0].get_name(),
-                            keypath[1:]
-                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
-                            else keypath,
-                        )
-                    else:
-                        if not isinstance(keypath[0], pytree.SequenceKey):
-                            raise AssertionError(
-                                f"expected SequenceKey, got {type(keypath[0])}"
-                            )
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                    node, remaining_keypath = _resolve_nested_output(outputs, keypath)
+                    return go(node.get_name(), remaining_keypath)
                 else:
                     return go(output_name, keypath)
 
@@ -5086,28 +6304,98 @@ class PythonWrapperCodegen(CodeGen):
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
 
-    def write_kernel_context_guard(
+    @contextlib.contextmanager
+    def kernel_profile_scope(
         self,
         kernel_name: str,
         node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        enabled: bool | None = None,
+    ):
+        """Emit a kernel call inside a profiling {} scope block.
+
+        A profiling block is a C++ construct, so this does nothing for the
+        Python wrapper; CppWrapperCpu overrides it to emit the real block.
+        There, `enabled` left as None means "read the config", which is not the
+        same as False: a caller that also records a RecordFunction passes
+        kernel_profile_enabled() so the block opens on the same condition as
+        the handle.
+        """
+        yield
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
     ):
         return
 
-    def write_kernel_context_guard_begin(
-        self,
-    ):
-        """
-        Mark the beginning of kernel context guard
-        """
-        return
+    def records_profiling_args(self) -> bool:
+        """Whether write_record_function_handle consumes argument metadata.
 
-    def write_kernel_context_guard_end(
+        Building that metadata is not free: a reinterpret view mints a tensor
+        handle whose only owner is the expression handed back, so a wrapper
+        that discards the list leaks the handle. Such a wrapper says so here
+        instead, and nothing is built for it.
+        """
+        return False
+
+    def make_profiling_args(self, values: Sequence[Any]) -> list[str | None] | None:
+        """Profiling metadata for a caller whose wrapper hook reorders the
+        kernel's arguments, so `_get_profiling_args` cannot derive it.
+
+        Values are the IR nodes in the order the hook passes them, with None
+        for each non-tensor. Returns None when nothing would record the result,
+        which is what keeps a reinterpret view from emitting an owner-less
+        handle.
+        """
+        if not (self.records_profiling_args() and kernel_profile_enabled()):
+            return None
+        return _profiling_arg_entries(values)
+
+    @contextlib.contextmanager
+    def profiled_kernel_scope(
         self,
+        kernel_name: str,
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        profiling_args: Sequence[str | None] | None = None,
     ):
-        """
-        Mark the end of kernel context guard
-        """
-        return
+        """A kernel_profile_scope that also records a
+        RAIIAtenRecordFunctionHandle for the kernel.
+
+        The record function only exists on the platforms
+        kernel_profile_enabled() accepts, so that is the gate, and it is passed
+        down so the surrounding block opens on the same condition.
+
+        A caller whose codegen reorders the kernel's arguments passes
+        profiling_args itself; otherwise the metadata is derived from
+        node_schedule."""
+        enabled = kernel_profile_enabled()
+        with self.kernel_profile_scope(kernel_name, node_schedule, enabled=enabled):
+            if enabled:
+                # Deriving the metadata emits codegen for ReinterpretView
+                # arguments, so it is skipped for a wrapper that records none.
+                if not self.records_profiling_args():
+                    profiling_args = None
+                elif profiling_args is None:
+                    profiling_args = self._get_extern_kernel_profiling_args(
+                        node_schedule
+                    )
+                self.write_record_function_handle(kernel_name, profiling_args)
+            yield
+
+    @staticmethod
+    def _get_extern_kernel_profiling_args(
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+    ) -> list[str | None] | None:
+        """Profiling metadata for an ExternKernel codegen'd through a dedicated
+        wrapper hook instead of the C shim helper.
+
+        This covers the kernels whose argument order the shared builder already
+        reproduces; the ones that reorder their arguments on the way to the
+        shim supply their own metadata."""
+        if not isinstance(node_schedule, ir.ExternKernel):
+            return None
+        return _get_profiling_args(node_schedule)
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
@@ -5140,6 +6428,9 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.src_to_kernel = root.src_to_kernel
         # Same here, only define user-defined Triton kernels in the main graph
         self.user_defined_kernel_cache = root.user_defined_kernel_cache
+        # This subgraph's kernels are spliced into the root module.
+        self.kernel_sources = root.kernel_sources
+        self.kernel_harness_modules = root.kernel_harness_modules
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of

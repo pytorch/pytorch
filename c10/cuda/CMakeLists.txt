@@ -31,6 +31,7 @@ set(C10_CUDA_SRCS
     CUDADeviceAssertionHost.cpp
     CUDAException.cpp
     CUDAFunctions.cpp
+    CUDAGraphMemory.cpp
     CUDAMallocAsyncAllocator.cpp
     CUDAMiscFunctions.cpp
     CUDAStream.cpp
@@ -52,6 +53,7 @@ set(C10_CUDA_HEADERS
     CUDAMiscFunctions.h
     CUDAStream.h
     PeerToPeerAccess.h
+    impl/CUDAGraphMemory.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
@@ -61,7 +63,7 @@ if(NOT BUILD_LIBTORCHLESS)
   torch_compile_options(c10_cuda)
   torch_optimize_layout_if_enabled(c10_cuda)
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+  target_compile_definitions(c10_cuda PRIVATE C10_CUDA_BUILD_MAIN_LIB)
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
