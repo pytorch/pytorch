@@ -823,6 +823,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_static_graph_recovery",
+          &::c10d::Reducer::set_static_graph_recovery,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_queue_recovery_from_output",
+          &::c10d::Reducer::queue_recovery_from_output,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_autograd_hook",
           [](::c10d::Reducer& reducer, int index) -> void {
             reducer.autograd_hook(index);

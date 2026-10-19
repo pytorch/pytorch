@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
+#include <algorithm>
 #include <functional>
 #include <unordered_set>
 
@@ -691,6 +692,116 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
   logger_ = std::move(logger);
 }
 
+void Reducer::set_static_graph_recovery() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  REDUCER_CHECK(
+      static_graph_ && num_iterations_ == 0,
+      logger_,
+      "Enable static graph recovery before the first forward with static_graph=True.");
+  REDUCER_CHECK(
+      !optim_in_backward_ && !skip_all_reduce_unused_params_ &&
+          std::none_of(
+              expect_sparse_gradients_.begin(),
+              expect_sparse_gradients_.end(),
+              [](bool sparse) { return sparse; }),
+      logger_,
+      "Static graph recovery does not support sparse gradients, optimizer in "
+      "backward, or skip_all_reduce_unused_params.");
+  static_graph_recovery_ = true;
+}
+
+void Reducer::recover_unused_parameters() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!static_graph_recovery_ || !expect_autograd_hooks_ ||
+      next_bucket_ == buckets_.size()) {
+    return;
+  }
+  if (!first_autograd_hook_called_) {
+    first_autograd_hook_called_ = true;
+    ++num_bwd_calls_;
+  }
+  if (!static_graph_after_first_iteration()) {
+    return;
+  }
+
+  if (!has_marked_unused_parameters_) {
+    has_marked_unused_parameters_ = true;
+    for (const auto index : unused_parameters_) {
+      mark_variable_ready(index);
+    }
+  }
+
+  const auto missing = getUnmarkedParamIndicesForIteration();
+  if (!missing.empty()) {
+    std::ostringstream names;
+    for (const auto index : missing) {
+      const auto name = param_names_.find(index);
+      if (name != param_names_.end()) {
+        names << name->second << ' ';
+      }
+      names << '(' << index << ") ";
+    }
+    TORCH_WARN_ONCE(
+        "DDP static graph recovery found missing gradient hooks for: ",
+        names.str(),
+        "Existing gradients are preserved. Missing contributions are zero.");
+  }
+  for (const auto index : missing) {
+    numGradHooksTriggeredMapPerIteration_[index] = 0;
+    if (should_rebuild_buckets()) {
+      push_rebuilt_params(index);
+    }
+    // Preserve accumulated grads and zero empty bucket entries.
+    mark_variable_ready(index);
+  }
+}
+
+void Reducer::queue_recovery_from_output() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  output_recovery_queued_ = true;
+  torch::autograd::Engine::get_default_engine().queue_callback(
+      [this] { recover_unused_parameters(); });
+}
+
+void Reducer::queue_static_graph_recovery() {
+  const auto graph_task_id = torch::autograd::get_current_graph_task_id();
+  if (graph_task_id == -1 || graph_task_id == recovery_graph_task_id_) {
+    return;
+  }
+  recovery_graph_task_id_ = graph_task_id;
+  torch::autograd::Engine::get_default_engine().queue_callback([this] {
+    {
+      // A missing node does not prove this is the outer backward, so prefer
+      // the output sink's callback.
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (output_recovery_queued_) {
+        return;
+      }
+    }
+    const auto node = torch::autograd::get_current_node();
+    if (!node) {
+      recover_unused_parameters();
+      return;
+    }
+    // A reentrant backward ends inside an outer node. Queue recovery on the
+    // outer backward after that node. The hook runs once, and a retained graph
+    // can outlive the reducer.
+    auto fired = std::make_shared<bool>(false);
+    node->add_post_hook(
+        std::make_unique<torch::autograd::utils::LambdaPostHook>(
+            [this, fired, alive = std::weak_ptr<bool>(recovery_alive_)](
+                const torch::autograd::variable_list& outputs,
+                const torch::autograd::variable_list& /* inputs */) {
+              if (!*fired && !alive.expired()) {
+                *fired = true;
+                std::lock_guard<std::mutex> lock(mutex_);
+                queue_static_graph_recovery();
+              }
+              return outputs;
+            }));
+  });
+}
+
 // The function `autograd_hook` is called after the gradient for a
 // model parameter has been accumulated into its gradient tensor.
 // This function is only to be called from the autograd thread.
@@ -731,6 +842,11 @@ void Reducer::autograd_hook(size_t index) {
   // for number of iterations before reducing them.
   if (!expect_autograd_hooks_) {
     return;
+  }
+
+  // Output sinks miss losses that use no visible output.
+  if (static_graph_recovery_) {
+    queue_static_graph_recovery();
   }
 
   grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
@@ -1585,6 +1701,7 @@ void Reducer::prepare_for_backward(
 
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
+  output_recovery_queued_ = false;
   // Reset per iteration marked ready parameters.
   perIterationReadyParams_.clear();
 
@@ -2664,7 +2781,7 @@ void Reducer::set_manual_finalization_required(bool required) {
 
 bool Reducer::should_finalize_after_backward() const {
   std::lock_guard<std::mutex> lock(mutex_);
-  return should_rebuild_buckets();
+  return static_graph_recovery_ || should_rebuild_buckets();
 }
 
 void Reducer::finalize_backward_manual() {
