@@ -803,6 +803,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_function(self) -> types.FunctionType:
         return self.fn
 
+    def get_name(self) -> str:
+        # A function's __name__ is a writable attribute (e.g. set by
+        # functools.wraps) and can differ from its code object's co_name.
+        return self.fn.__name__
+
+    def get_qualname(self) -> str:
+        return self.fn.__qualname__
+
     def get_code(self) -> types.CodeType:
         return self.fn.__code__
 
