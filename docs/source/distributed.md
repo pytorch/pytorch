@@ -620,8 +620,10 @@ windows with NCCL 2.29 or later; use {func}`_supports_window` to check.
 
 With `nccl`, both the window tensor and the source of {meth}`Window.put` must
 be allocated from the backend's memory pool, `torch.cuda.MemPool(backend.mem_allocator)`.
-Each {meth}`Window.put` also signals the destination rank, so the destination
-can wait for the data with a single {meth}`Window.wait_signal`.
+Each {meth}`Window.put` also signals the destination rank, so the
+destination can wait for the data with a single {meth}`Window.wait_signal`.
+{meth}`Window.map_remote_tensor` only supports the local rank, and
+{meth}`Window.get_attr` always reports `SEPARATE`.
 
 The example below runs a ring: each rank writes its slice into the next rank's
 window and waits for the previous rank's slice to arrive in its own.
@@ -668,50 +670,8 @@ stream, and `async_op=True` returns a `Work` handle to wait on.
 .. autofunction:: torch.distributed.distributed_c10d._supports_window
 .. autofunction:: torch.distributed.distributed_c10d._new_window
 
-.. py:class:: Window
-
-   One-sided communication window returned by :func:`_new_window`. Backends
-   implement a subset of these methods; unsupported methods raise
-   ``RuntimeError``.
-
-   .. py:method:: tensor_register(tensor, owning=True)
-
-      Register ``tensor`` as this rank's window memory. Collective: every rank
-      in the group must call it, in the same order relative to other
-      collectives. Ranks may register tensors of different sizes. If
-      ``owning`` is ``True``, the window keeps ``tensor`` alive until
-      :meth:`tensor_deregister`.
-
-   .. py:method:: tensor_deregister()
-
-      Release the registered tensor. Collective.
-
-   .. py:method:: put(tensor, dst_rank, target_offset_nelems, async_op, opts=PutOptions())
-
-      Write ``tensor`` into the window of ``dst_rank``, starting at element
-      ``target_offset_nelems``. ``tensor`` must match the destination's dtype
-      and fit within its window. Returns a ``Work`` handle.
-
-   .. py:method:: signal(peer_rank, async_op, opts=SignalOptions())
-
-      Send a signal to ``peer_rank``. Returns a ``Work`` handle.
-
-   .. py:method:: wait_signal(peer_rank, async_op, opts=WaitSignalOptions())
-
-      Wait for one signal from ``peer_rank``, sent by :meth:`signal` or
-      :meth:`put`. Returns a ``Work`` handle.
-
-   .. py:method:: map_remote_tensor(rank)
-
-      Return a tensor view of ``rank``'s window memory. ``nccl`` only supports
-      the local rank.
-
-   .. py:method:: get_attr(peer_rank)
-
-      Return the ``WindowAttr`` of ``peer_rank``'s window. Its ``access_type``
-      is ``WindowAccessType.UNIFIED`` for a single coherent view of the window,
-      or ``SEPARATE`` for separate copies that need explicit synchronization.
-      ``nccl`` always reports ``SEPARATE``.
+.. autoclass:: torch.distributed.distributed_c10d.Window
+   :members:
 ```
 
 ## Synchronous and asynchronous collective operations

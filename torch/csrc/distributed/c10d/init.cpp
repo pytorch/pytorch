@@ -1351,17 +1351,43 @@ Example:
       .def(py::init<>())
       .def_readwrite("access_type", &::c10d::WindowAttr::access_type);
 
-  intrusive_ptr_class_<::c10d::Window>(module, "Window")
+  intrusive_ptr_class_<::c10d::Window>(
+      module,
+      "Window",
+      R"(
+.. warning::
+    The window API is experimental and may change without notice.
+
+One-sided communication window returned by
+:func:`~torch.distributed.distributed_c10d._new_window`. Each rank in the group
+registers a tensor that peers can write into with :meth:`put`. Backends
+implement a subset of these methods; unsupported methods raise
+``RuntimeError``.
+)")
       .def(
           "tensor_register",
           &::c10d::Window::tensor_register,
           py::arg("tensor"),
           py::arg("owning") = true,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Register ``tensor`` as this rank's window memory.
+
+This is collective: every rank in the group must call it, in the same order
+relative to other collectives. Ranks may register tensors of different sizes.
+
+Args:
+    tensor (torch.Tensor): Tensor to expose to peers.
+    owning (bool, optional): If ``True``, the window keeps ``tensor`` alive
+        until :meth:`tensor_deregister`. Default: ``True``.
+)")
       .def(
           "tensor_deregister",
           &::c10d::Window::tensor_deregister,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Release the registered tensor. This is collective.
+)")
       .def(
           "put",
           &::c10d::Window::put,
@@ -1370,31 +1396,85 @@ Example:
           py::arg("target_offset_nelems"),
           py::arg("async_op"),
           py::arg("opts") = ::c10d::PutOptions(),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
+``dst_rank`` on completion; see :meth:`wait_signal`.
+
+Args:
+    tensor (torch.Tensor): Source tensor. Must match the destination's dtype
+        and fit within its window.
+    dst_rank (int): Destination rank in the group.
+    target_offset_nelems (int): Element offset into the destination window.
+    async_op (bool): Whether this op should be an async op.
+    opts (PutOptions, optional): Timeout and backend hints.
+
+Returns:
+    A ``Work`` handle.
+)")
       .def(
           "map_remote_tensor",
           &::c10d::Window::map_remote_tensor,
           py::arg("rank"),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Return a tensor view of ``rank``'s window memory. Backends may only support
+the local rank.
+
+Args:
+    rank (int): Rank whose window to map.
+)")
       .def(
           "signal",
           &::c10d::Window::signal,
           py::arg("peer_rank"),
           py::arg("async_op"),
           py::arg("opts") = ::c10d::SignalOptions(),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Send a signal to ``peer_rank``.
+
+Args:
+    peer_rank (int): Rank to signal.
+    async_op (bool): Whether this op should be an async op.
+    opts (SignalOptions, optional): Timeout and backend hints.
+
+Returns:
+    A ``Work`` handle.
+)")
       .def(
           "wait_signal",
           &::c10d::Window::wait_signal,
           py::arg("peer_rank"),
           py::arg("async_op"),
           py::arg("opts") = ::c10d::WaitSignalOptions(),
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Wait for one signal from ``peer_rank``, sent by :meth:`signal` or, on
+backends where :meth:`put` signals, by :meth:`put`.
+
+Args:
+    peer_rank (int): Rank to wait on.
+    async_op (bool): Whether this op should be an async op.
+    opts (WaitSignalOptions, optional): Timeout and backend hints.
+
+Returns:
+    A ``Work`` handle.
+)")
       .def(
           "get_attr",
           &::c10d::Window::get_attr,
           py::arg("peer_rank"),
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Return the ``WindowAttr`` of ``peer_rank``'s window. Its ``access_type`` is
+``WindowAccessType.UNIFIED`` for a single coherent view of the window, or
+``WindowAccessType.SEPARATE`` for separate copies that need explicit
+synchronization.
+
+Args:
+    peer_rank (int): Rank to query.
+)");
 
   py::enum_<::c10d::HookOpName>(module, "HookOpName")
       .value("SEND", ::c10d::HookOpName::SEND)
