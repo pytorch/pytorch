@@ -145,18 +145,28 @@ class AbstractWindowTest:
         # to a symmetric window; deregister_mem_pool tears them down on every
         # rank before the pool frees them.
         self._init_backend()
+        # Probe with an unregistered pool: allocating from a symm=True pool
+        # raises, rather than skips, without a symmetric-memory transport.
+        self._probe_window_support(self._make_pool())
         pool = self._make_pool()
         self.backend.register_mem_pool(pool, symm=True)
-        self._probe_window_support(pool)
-        with torch.cuda.use_mem_pool(pool):
-            win_buf = torch.zeros(2, device=self.device)
-        win = dist._new_window(win_buf)
-        win.put(win_buf[self.rank : self.rank + 1], 1 - self.rank, self.rank, False)
-        win.wait_signal(1 - self.rank, False)
-        torch.cuda.synchronize()
-        win.tensor_deregister()
-        self.backend.deregister_mem_pool(pool)
-        del win, win_buf, pool
+        try:
+            with torch.cuda.use_mem_pool(pool):
+                win_buf = torch.zeros(self.world_size + 1, device=self.device)
+            win = dist._new_window(win_buf)
+            src = win_buf[self.world_size :]
+            src.fill_(self.rank)
+            next_rank = (self.rank + 1) % self.world_size
+            prev_rank = (self.rank - 1) % self.world_size
+            win.put(src, next_rank, self.rank, False)
+            win.wait_signal(prev_rank, False)
+            torch.cuda.synchronize()
+            self.assertEqual(win_buf[prev_rank].item(), prev_rank)
+            win.tensor_deregister()
+            del win, src, win_buf
+        finally:
+            self.backend.deregister_mem_pool(pool)
+        del pool
         torch.cuda.synchronize()
 
     def test_put_dtypes_and_sizes(self):
