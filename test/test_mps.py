@@ -5817,6 +5817,20 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(ValueError, r'Using a target size \('):
             bceloss(a, b)
 
+    def test_bce_loss_out_of_range(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/201153
+        valid = torch.rand(4, device='mps')
+        for value in (float('nan'), float('inf'), float('-inf'), -0.1, 1.1):
+            invalid = torch.full((4,), value, device='mps')
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of input should be between 0 and 1'):
+                F.binary_cross_entropy(invalid, valid)
+                torch.mps.synchronize()
+            with self.assertRaisesRegex(torch.AcceleratorError, 'all elements of target should be between 0 and 1'):
+                F.binary_cross_entropy(valid, invalid)
+                torch.mps.synchronize()
+        # The failed asserts must not leak into later ops
+        self.assertEqual(F.binary_cross_entropy(valid, valid), F.binary_cross_entropy(valid.cpu(), valid.cpu()))
+
     def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
         x_size = 1024
         y_size = 256

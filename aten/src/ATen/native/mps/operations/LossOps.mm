@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_assert_async.h>
 #include <ATen/ops/_ctc_loss_backward_native.h>
 #include <ATen/ops/_ctc_loss_native.h>
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
@@ -219,7 +220,6 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
                                  Tensor& loss,
                                  const std::optional<Tensor>& grad_output_opt,
                                  const std::string& op_name) {
-  // TODO: add sanity check for the elements of input tensor to be within [0..1]
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
 
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -238,6 +238,13 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
       loss.fill_(reduction == at::Reduction::Mean ? std::numeric_limits<double>::quiet_NaN() : 0.0);
     }
     return loss;
+  }
+
+  // _assert_async avoids a CPU sync, like CUDA_KERNEL_ASSERT does on CUDA. NaN fails both checks
+  if (!grad_output.defined()) {
+    at::_assert_async(input.ge(0).logical_and_(input.le(1)).all(), "all elements of input should be between 0 and 1");
+    at::_assert_async(target.ge(0).logical_and_(target.le(1)).all(),
+                      "all elements of target should be between 0 and 1");
   }
 
   @autoreleasepool {
