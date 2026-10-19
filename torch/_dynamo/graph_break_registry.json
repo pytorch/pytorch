@@ -4040,36 +4040,6 @@
       ]
     }
   ],
-  "GB2440": [
-    {
-      "Gb_type": "Attribute deletion on an unresolvable OrderedDict",
-      "Context": "object={self}, name={name}",
-      "Explanation": "Dynamo cannot inspect the instance attributes of this OrderedDict, so it cannot tell whether the delete raises.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB8061": [
-    {
-      "Gb_type": "non-const attribute name on OrderedDict",
-      "Context": "object={self}, name={args[0]}",
-      "Explanation": "Dynamo does not support setting an attribute of an OrderedDict with a non-constant name.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB5181": [
-    {
-      "Gb_type": "Attribute mutation on a sourced untracked OrderedDict",
-      "Context": "object={self}, name={attr}",
-      "Explanation": "Dynamo does not support setting attributes on this OrderedDict, which is not tracked for mutation.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0224": [
     {
       "Gb_type": "Attempted to call torch in-graph function on only torch.SymInt arguments",
@@ -6755,16 +6725,6 @@
       "Context": "variable: {variable}, parameter: {p}",
       "Explanation": "Pending mutations on a parameter (e.g. due to using closure) require a graph break.",
       "Hints": []
-    }
-  ],
-  "GB7159": [
-    {
-      "Gb_type": "setattr on an OrderedDict data descriptor",
-      "Context": "object={self}, name={attr}",
-      "Explanation": "Dynamo does not model setting attributes that are data descriptors on the type (e.g. __class__, __dict__).",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
     }
   ],
   "GB0359": [
