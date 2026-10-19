@@ -25,6 +25,7 @@ from torch._C._distributed_c10d import (
     ErrorType,
     ReconfigureOptions,
     ReduceScatterOptions,
+    WorkResult,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
@@ -36,6 +37,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -199,6 +201,19 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
         del outputs
 
         self.assertEqual([ref() for ref in output_refs], [None, None])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_future_result(self) -> None:
+        pg = dist.distributed_c10d._get_default_group()
+        tensors = [torch.ones(4, device=self.device) for _ in range(2)]
+        pg._start_coalescing(self.device)
+        for tensor in tensors:
+            dist.all_reduce(tensor, async_op=True)
+        work = pg._end_coalescing(self.device)
+        # Without wait() or is_completed(), only the watchdog completes this.
+        result = WorkResult(work.get_future_result().wait())
+        self.assertEqual(result, WorkResult.SUCCESS)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -1054,6 +1069,41 @@ class ProcessGroupNCCL2EnvironmentConfigTest(_ProcessGroupNCCL2OptionsTest):
         work.wait()
         torch.cuda.synchronize(self.device)
         self.assertGreater(work._get_duration(), 0)
+
+
+class ProcessGroupNCCL2TimingTest(_ProcessGroupNCCL2OptionsTest):
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["TORCH_NCCL_ENABLE_TIMING"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_window_keeps_op_duration(self) -> None:
+        # The sleep and its events run on the current device.
+        torch.cuda.set_device(self.device)
+        pg = dist.distributed_c10d._get_default_group()
+        first = torch.ones(4, device=self.device)
+        last = torch.ones(4, device=self.device)
+        sleep_cycles = int(100 * get_cycles_per_ms())
+        self._check_all_reduce()
+        pg._start_coalescing(self.device)
+        dist.all_reduce(first, async_op=True)
+        # Delay the last op so the window starts well before it does.
+        torch.cuda._sleep(sleep_cycles)
+        last_work = dist.all_reduce(last, async_op=True)
+        window = pg._end_coalescing(self.device)
+        window.wait()
+        torch.cuda.synchronize(self.device)
+        # Compare against the last op rather than a fixed bound: rank skew
+        # lengthens the last op's wait for its peer, not the gap before it.
+        self.assertGreater(window._get_duration() - last_work._get_duration(), 50)
+
+
+class ProcessGroupNCCLLazyTimingTest(ProcessGroupNCCL2TimingTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
 
 
 class ProcessGroupNCCL2NonblockingOptionPrecedenceTest(_ProcessGroupNCCL2OptionsTest):

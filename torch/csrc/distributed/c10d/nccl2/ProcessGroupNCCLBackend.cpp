@@ -995,11 +995,37 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   if (works.empty()) {
     return c10::make_intrusive<CompletedWork>();
   }
-  // All tracked works ran in order on internal_stream_, so the last one
-  // completes after every op in the window.
-  auto work = std::move(works.back());
-  works.pop_back();
-  work->setChildren(std::move(works));
+  if (works.size() == 1) {
+    return works.front();
+  }
+
+  // A fresh work rather than one of the ops' own, whose duration and
+  // completion must stay per op. Async ops ran on internal_stream_, which
+  // getOperationStream orders after the sync ops on the current stream, so
+  // this work completes after every op in the window. It is enqueued so the
+  // watchdog completes its future; no flight recorder entry maps to its
+  // completion key, so its completion is not recorded twice.
+  c10::cuda::CUDAGuard device_guard(device_);
+  bool async_op =
+      std::any_of(works.begin(), works.end(), [this](const auto& w) {
+        return internal_stream_ &&
+            w->state_->stream.stream() == internal_stream_->stream();
+      });
+  cudaStream_t stream = getOperationStream(async_op);
+  auto timeout = works.front()->getTimeout();
+  for (const auto& w : works) {
+    timeout = std::max(timeout, w->getTimeout());
+  }
+  auto work = c10::make_intrusive<WorkNCCL>(
+      this, stream, timeout, std::vector<at::Tensor>{});
+  work->setSequenceNumber(works.back()->getSequencenumber());
+  work->setDurationStart(*works.front());
+  // Under graph capture nothing else may hold the inputs once the caller drops
+  // the ops' works.
+  work->retainInputs(works);
+  work->recordStart("coalesced");
+  work->recordEnd();
+  enqueueWork(work, stream);
   return work;
 }
 

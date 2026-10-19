@@ -469,10 +469,7 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 void ProcessGroupNCCL::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  // Sync ops run on the current stream, which later work is already ordered
-  // after, so only async ops need to be covered by endCoalescing().
-  if (coalescing_batch_ && internal_stream_ &&
-      stream == internal_stream_->stream()) {
+  if (coalescing_batch_) {
     coalescing_works_.push_back(work);
   }
 

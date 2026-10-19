@@ -757,7 +757,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
-  // Async works enqueued while coalescing_batch_ is engaged; endCoalescing()
+  // Works enqueued while coalescing_batch_ is engaged; endCoalescing()
   // returns a work covering all of them.
   std::vector<c10::intrusive_ptr<WorkNCCL>> coalescing_works_;
 
