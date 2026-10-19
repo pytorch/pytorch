@@ -5651,8 +5651,7 @@ class TestMPS(TestCaseMPS):
             if dtype.is_floating_point and dtype != torch.float8_e4m3fn:
                 self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
                 continue
-            error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
-            self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
