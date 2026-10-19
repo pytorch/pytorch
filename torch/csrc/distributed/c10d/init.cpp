@@ -1418,7 +1418,9 @@ Args:
           &::c10d::Window::tensor_deregister,
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Release the registered tensor. This is collective.
+Forget the registered tensor so another can be registered. This is
+collective. Backends may keep the underlying memory registered until it is
+freed; with NCCL, every rank must then free it in the same order.
 )")
       .def(
           "put",
@@ -1431,7 +1433,8 @@ Release the registered tensor. This is collective.
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
-``dst_rank`` on completion; see :meth:`wait_signal`.
+``dst_rank`` on completion; such signals are indistinguishable from
+:meth:`signal`, see :meth:`wait_signal`.
 
 Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
@@ -1491,7 +1494,10 @@ Returns:
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Wait for one signal from ``peer_rank``, sent by :meth:`signal` or, on
-backends where :meth:`put` signals, by :meth:`put`.
+backends where :meth:`put` signals, by :meth:`put`. Signals are counted:
+call this once per signal or put from that peer. Signals and puts from the
+same peer are not distinguished, so after a :meth:`signal` followed by a
+:meth:`put` the first wait can return before the put's data arrives.
 
 Args:
     peer_rank (int): Rank to wait on.
