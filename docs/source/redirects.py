@@ -203,4 +203,16 @@ redirects = {
     # Redirects for documents moved from source/ to source/mtia/
     "mtia.memory": "mtia/memory.html",
     "mtia.mtia_graph": "mtia/mtia_graph.html",
+    # Redirects for documents moved from source/ to source/utils/
+    "benchmark_utils": "utils/benchmark.html",
+    "checkpoint": "utils/checkpoint.html",
+    "cpp_extension": "utils/cpp_extension.html",
+    "data": "utils/data.html",
+    "deterministic": "utils/deterministic.html",
+    "jit_utils": "utils/jit.html",
+    "dlpack": "utils/dlpack.html",
+    "mobile_optimizer": "utils/mobile_optimizer.html",
+    "model_zoo": "utils/model_zoo.html",
+    "tensorboard": "utils/tensorboard.html",
+    "module_tracker": "utils/module_tracker.html",
 }
