@@ -9185,6 +9185,57 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("reduction", ["mean", "sum"])
+    @parametrize_test("mixed_dtype", [False, True])
+    def test_smooth_l1_loss_reduced_storage(self, device, dtype, reduction, mixed_dtype):
+        input_dtype = torch.float16 if mixed_dtype else dtype
+        input = torch.randn(4, 5, 6, device=device, dtype=input_dtype)
+        target = torch.randn_like(input, dtype=dtype)
+        loss = F.smooth_l1_loss(input, target, reduction=reduction)
+
+        self.assertEqual(loss.shape, ())
+        self.assertEqual(loss.dtype, dtype)
+        self.assertEqual(loss.untyped_storage().nbytes(), loss.element_size())
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    @parametrize_test("reduction", [subtest(1, name="mean"), subtest(2, name="sum")])
+    @parametrize_test("out_shape", [(), (0,)])
+    def test_smooth_l1_loss_reduced_out_storage(self, device, dtype, reduction, out_shape):
+        input = torch.randn(4, 5, 6, device=device, dtype=dtype)
+        target = torch.randn_like(input)
+        out = torch.empty(out_shape, device=device, dtype=dtype)
+        result = torch.ops.aten.smooth_l1_loss.out(input, target, reduction, out=out)
+
+        self.assertIs(result, out)
+        self.assertEqual(out.shape, ())
+        expected = F.smooth_l1_loss(input, target, reduction="none")
+        self.assertEqual(out, expected.mean() if reduction == 1 else expected.sum())
+        self.assertEqual(out.untyped_storage().nbytes(), out.element_size())
+
+    @onlyNativeDeviceTypes
+    @skipMPS  # MPS reshapes both inputs using the input shape.
+    @dtypes(torch.float32, torch.float64)
+    @parametrize_test("reduction", [subtest(1, name="mean"), subtest(2, name="sum")])
+    def test_smooth_l1_loss_reduced_broadcast(self, device, dtype, reduction):
+        input = torch.randn(4, 1, device=device, dtype=dtype)
+        target = torch.randn(1, 5, device=device, dtype=dtype)
+        result = torch.ops.aten.smooth_l1_loss.default(input, target, reduction)
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        expected = F.smooth_l1_loss(expanded_input, expanded_target, reduction="none")
+        self.assertEqual(result, expected.mean() if reduction == 1 else expected.sum())
+
+        invalid_input = torch.randn(4, 2, device=device, dtype=dtype)
+        out = torch.empty(0, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r"The size of tensor a \(2\) must match the size of tensor b \(5\)"):
+            torch.ops.aten.smooth_l1_loss.out(invalid_input, target, reduction, out=out)
+        self.assertEqual(out.shape, (0,))
+        self.assertEqual(out.untyped_storage().nbytes(), 0)
+
+    @onlyNativeDeviceTypes
     def test_smooth_l1_loss_vs_huber_loss(self, device):
         def _make_test_tensor(shape, contiguous=True):
             if contiguous:
@@ -10390,16 +10441,20 @@ class TestNNDeviceType(NNTestCase):
             x = torch.randn(shape, device=device, dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
             y.backward(y)
-            with torch.no_grad():
-                xx = x.cpu().requires_grad_()
-            yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
-            yy.backward(yy)
+            yc = y.detach().cpu()
+            yy = F.log_softmax(x.detach().cpu().float(), dim=-1).to(dtype)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
             rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
-            self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
+            self.assertTrue(torch.allclose(yc, yy, rtol=rtol, atol=atol))
+            del yy
+            # The backward reference starts from the device's own forward output. A last-bit
+            # rounding difference in the forward, which the check above allows, is otherwise
+            # amplified past the gradient tolerance.
+            yc = yc.float()
+            grad_ref = torch._log_softmax_backward_data(yc, yc, -1, torch.float32).half()
             # x is half
             rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
-            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
+            self.assertTrue(torch.allclose(x.grad.cpu(), grad_ref, rtol=rtol, atol=1e-3))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
@@ -15483,6 +15538,26 @@ class TestNNDeviceType(NNTestCase):
             loss.backward(grad)
             self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
             self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
+
+    @skipMPS
+    @parametrize_test('reduction', ['mean', 'sum', 'none'])
+    def test_huber_loss_mixed_dtype_grad(self, device, reduction):
+        x = torch.tensor([1.0, 2.0], dtype=torch.float64, requires_grad=True, device=device)
+        y = torch.tensor([1.5, 2.5], dtype=torch.float32, requires_grad=True, device=device)
+        loss = F.huber_loss(x, y, reduction=reduction)
+
+        expected_loss = {
+            'mean': torch.tensor(0.125, dtype=x.dtype, device=device),
+            'sum': torch.tensor(0.25, dtype=x.dtype, device=device),
+            'none': torch.tensor([0.125, 0.125], dtype=x.dtype, device=device),
+        }[reduction]
+        self.assertEqual(loss, expected_loss)
+
+        grad = torch.ones_like(loss) if reduction == 'none' else None
+        loss.backward(grad)
+        scale = 0.5 if reduction == 'mean' else 1.0
+        self.assertEqual(x.grad, torch.full_like(x, -0.5 * scale))
+        self.assertEqual(y.grad, torch.full_like(y, 0.5 * scale))
 
     @skipMPS
     @onlyAccelerator
