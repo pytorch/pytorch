@@ -15,6 +15,7 @@ from torch._dynamo.source import ConstantSource
 from torch._dynamo.utils import count_calls, counters, detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._inductor import metrics
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.fx_passes.replace_random import replace_random_passes
 from torch._inductor.fx_utils import get_node_storage
@@ -1470,6 +1471,48 @@ class TestPatternMatcher(TestCase):
         x = torch.tensor(2.0, device=GPU_TYPE)
         torch._dynamo.reset()
         self.assertEqual(torch.compile(scalar_sum)(a, b, x), scalar_sum(a, b, x))
+
+        # Nor is an arange that only broadcasts to the summed dim.
+        def single_class(selector, val):
+            classes = torch.arange(1, device=selector.device)
+            return torch.where(selector == classes, val, 0.0).sum(0, keepdim=True)
+
+        selector = torch.zeros(1, 8, dtype=torch.int64, device=GPU_TYPE)
+        val = torch.randn(1, 8, device=GPU_TYPE)
+        torch._dynamo.reset()
+        self.assertEqual(
+            torch.compile(single_class)(selector, val), single_class(selector, val)
+        )
+
+        # Signed zeros, NaN and inf come out as from the sum (val == -0 gives
+        # the sum's +0). A low-precision val reaches the sum through an upcast,
+        # as in log_softmax_backward.
+        def upcast_sum(selector, val):
+            classes = torch.arange(1000, device=selector.device)
+            one_hot = torch.where(selector[:, None] == classes, val[:, None], 0.0)
+            return one_hot.float().sum(1, keepdim=True)
+
+        specials = torch.tensor(
+            [-0.0, 0.0, float("nan"), float("inf"), -float("inf"), 1.5, -0.0],
+            device=GPU_TYPE,
+        )
+        selector = torch.tensor([3, 3, 3, 3, 3, 3, -1], device=GPU_TYPE)
+        for val in (specials, specials.bfloat16()):
+            metrics.reset()
+            torch._dynamo.reset()
+            result, (code,) = run_and_get_code(torch.compile(upcast_sum), selector, val)
+            expected = upcast_sum(selector, val)
+            self.assertNotIn("reduction(", code)
+            self.assertEqual(metrics.num_matches_for_one_hot_sum, 1)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.isnan(), expected.isnan())
+            self.assertEqual(result.signbit(), expected.signbit())
+
+        # config.optimize_one_hot_sum turns the rewrite off.
+        with inductor_config.patch(optimize_one_hot_sum=False):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(upcast_sum), selector, specials)
+            self.assertIn("reduction(", code)
 
     def test_splitwithsizes_cat(self):
         # Good case

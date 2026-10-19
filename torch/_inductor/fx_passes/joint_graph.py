@@ -1357,11 +1357,15 @@ def _right_aligned_shape(node, ndim):
 
 def _is_arange_in_dim(node, dim, ndim, length):
     """True if ``node`` is ``iota(length)`` viewed to size ``length`` at ``dim``
-    and 1 elsewhere."""
+    and 1 elsewhere. ``node`` must have ``dim`` itself, not just broadcast to it."""
     shape = _right_aligned_shape(node, ndim)
-    if shape is None or not all(
-        statically_known_true(sz == (length if d == dim else 1))
-        for d, sz in enumerate(shape)
+    if (
+        shape is None
+        or node.meta["val"].dim() < ndim - dim
+        or not all(
+            statically_known_true(sz == (length if d == dim else 1))
+            for d, sz in enumerate(shape)
+        )
     ):
         return False
     while node.target in (aten.view.default, aten.unsqueeze.default):
@@ -1373,16 +1377,32 @@ def _is_arange_in_dim(node, dim, ndim, length):
     )
 
 
+def _one_hot_and_sum_dtype(match):
+    """The matched where node and the dtype the sum reduces in. The sum may
+    read the where through an upcast, as in log_softmax_backward for
+    low-precision inputs."""
+    sum_input = match.output_node().args[0]
+    one_hot = (
+        sum_input.args[0]
+        if sum_input.target is prims.convert_element_type.default
+        else sum_input
+    )
+    return one_hot, sum_input.meta["val"].dtype
+
+
 def _one_hot_sum_selector(match):
     """Returns (selector, classes) if the match sums, over ``dim``,
     ``where(selector == classes, val, 0)`` where classes is arange along
     ``dim``, selector is an integer tensor of full rank and selector and val
     are broadcast along ``dim``; otherwise None."""
+    if not config.optimize_one_hot_sum:
+        return None
     dims = match.kwargs["dim"]
-    one_hot = match.output_node().args[0]
+    one_hot, sum_dtype = _one_hot_and_sum_dtype(match)
     one_hot_val = one_hot.meta.get("val")
     if (
-        not isinstance(dims, (list, tuple))
+        not sum_dtype.is_floating_point
+        or not isinstance(dims, (list, tuple))
         or len(dims) != 1
         or not isinstance(one_hot_val, torch.Tensor)
         or one_hot_val.dim() == 0
@@ -1399,7 +1419,8 @@ def _one_hot_sum_selector(match):
 
     background = match.kwargs["background"]
     if not (
-        background.target is aten.full.default
+        isinstance(background, torch.fx.Node)
+        and background.target is aten.full.default
         and background.args[:2] == ([], 0)
         and is_broadcast(match.kwargs["val"])
     ):
@@ -1423,48 +1444,60 @@ def _one_hot_sum_selector(match):
     return None
 
 
-_one_hot = CallFunction(
-    aten.where.self,
-    CallFunction(aten.eq.Tensor, KeywordArg("lhs"), KeywordArg("rhs")),
-    KeywordArg("val"),
-    KeywordArg("background"),
-    _users=MULTIPLE,
-)
-
-
-@register_graph_pattern(
-    # keepdim=True as in log_softmax_backward; with a full-rank selector the
-    # replacement then has the sum's shape.
-    CallFunction(aten.sum.dim_IntList, _one_hot, KeywordArg("dim"), True),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
-    extra_check=lambda m: _one_hot_sum_selector(m) is not None,
-)
-def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim):
+def one_hot_sum(match: Match, *, lhs, rhs, val, background, dim, dtype=None):
     """
     Replace ``sum(where(selector == arange(N), val, 0), dim, keepdim=True)`` by
-    the single selected term, avoiding a reduction over ``dim``. Exactly one class can
-    match, and only if selector is in [0, N). Selecting ``val != 0`` keeps the
-    sum's +0 for val == -0.
+    the single selected term, avoiding a reduction over ``dim``. Exactly one
+    class can match, and only if selector is in [0, N). Selecting ``val != 0``
+    keeps the sum's +0 for val == -0.
 
     This arises in the cross-entropy backward, where log_softmax_backward sums
     the one-hot gradient from nll_loss_backward over the class dim.
     """
+    from torch._inductor import metrics
+
     selector, classes = _one_hot_sum_selector(match)
-    one_hot = match.output_node().args[0]
-    if not isinstance(one_hot, torch.fx.Node):
-        raise AssertionError(f"expected an fx.Node, got {type(one_hot)}")
-    one_hot_val = one_hot.meta["val"]
-    ndim = one_hot_val.dim()
+    one_hot, sum_dtype = _one_hot_and_sum_dtype(match)
+    ndim = one_hot.meta["val"].dim()
     reduced_dim = dim[0] % ndim
-    dtype = one_hot_val.dtype
 
     # Sizes are read from the inputs inside repl so that they stay symbolic
     # under dynamic shapes.
     def repl(selector, val, classes):
         length = classes.shape[reduced_dim - ndim]
         selected = (selector >= 0) & (selector < length) & (val != 0)
-        return torch.where(selected, val, 0).to(dtype)
+        return torch.where(selected, val, 0).to(sum_dtype)
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [selector, val, classes])
+    metrics.num_matches_for_one_hot_sum += 1
+
+
+def _one_hot_pattern():
+    return CallFunction(
+        aten.where.self,
+        CallFunction(aten.eq.Tensor, KeywordArg("lhs"), KeywordArg("rhs")),
+        KeywordArg("val"),
+        KeywordArg("background"),
+        _users=MULTIPLE,
+    )
+
+
+# keepdim=True as in log_softmax_backward; with a full-rank selector the
+# replacement then has the sum's shape. The second form has the opmath upcast
+# that log_softmax_backward applies to low-precision gradients.
+for _sum_input in (
+    _one_hot_pattern(),
+    CallFunction(
+        prims.convert_element_type.default,
+        _one_hot_pattern(),
+        KeywordArg("dtype"),
+        _users=MULTIPLE,
+    ),
+):
+    register_graph_pattern(
+        CallFunction(aten.sum.dim_IntList, _sum_input, KeywordArg("dim"), True),
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=patterns,
+        extra_check=lambda m: _one_hot_sum_selector(m) is not None,
+    )(one_hot_sum)
