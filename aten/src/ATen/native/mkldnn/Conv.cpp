@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <torch/library.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/Conv.h>
