@@ -4,6 +4,7 @@
 
 import ctypes
 import gc
+import glob
 import json
 import os
 import pickle
@@ -981,6 +982,15 @@ class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
         os.environ["NCCL_DEBUG_SUBSYS"] = "ENV"
         os.environ["NCCL_DEBUG_FILE"] = cls.nccl_debug_file
         super()._init_pg(rank, world_size, rdvz_file)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        try:
+            super().tearDownClass()
+        finally:
+            if cls.rdvz_file is not None:
+                for path in glob.glob(f"{cls.rdvz_file}.nccl_debug.*"):
+                    os.remove(path)
 
     def _logged_comm_names(self) -> list[str]:
         prefix = "Comm config Comm name set to "
