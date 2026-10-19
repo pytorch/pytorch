@@ -4290,10 +4290,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "register_mem_pool",
               &::c10d::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
-              py::arg("symm") = false)
+              py::arg("symm") = false,
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows.)")
           .def(
               "deregister_mem_pool",
-              &::c10d::ProcessGroupNCCL::deregisterMemPool)
+              &::c10d::ProcessGroupNCCL::deregisterMemPool,
+              py::arg("pool"),
+              R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
@@ -4758,7 +4761,7 @@ Returns:
              bool symm) { self.getPrimary()->registerMemPool(pool, symm); },
           py::arg("pool"),
           py::arg("symm") = false,
-          R"(Register ``pool``'s segments with the primary communicator.)")
+          R"(Register ``pool``'s segments with the primary communicator. With ``symm=True``, its segments also get symmetric windows.)")
       .def(
           "deregister_mem_pool",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
@@ -4766,7 +4769,7 @@ Returns:
             self.getPrimary()->deregisterMemPool(pool);
           },
           py::arg("pool"),
-          R"(Deregister ``pool`` from the primary communicator.)")
+          R"(Deregister ``pool`` from the primary communicator and tear down its segment windows.)")
       .def(
           "_comm_ptr",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
