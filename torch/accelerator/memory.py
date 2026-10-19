@@ -10,6 +10,7 @@ from ._utils import _get_device_index
 __all__ = [
     "empty_cache",
     "empty_host_cache",
+    "get_allocator_settings",
     "get_memory_info",
     "max_memory_allocated",
     "max_memory_reserved",
@@ -18,7 +19,74 @@ __all__ = [
     "memory_stats",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
+    "set_allocator_settings",
 ]
+
+
+def get_allocator_settings() -> dict[str, Any]:
+    r"""get_allocator_settings() -> dict
+
+    Return the current caching allocator configuration, including defaults.
+
+    Keys match the options in ``PYTORCH_ALLOC_CONF``. Sizes with an ``_mb``
+    suffix are in MiB; ``None`` denotes an unlimited size or unset reserve
+    override. ``roundup_power2_divisions`` maps power-of-two MiB boundaries to
+    division counts. Backend-specific options are included when registered.
+
+    The result is an independent dictionary that can be passed to
+    :func:`set_allocator_settings` to restore the configuration. Neither function
+    initializes the accelerator runtime.
+
+    .. note::
+        This returns configured options, not the state of existing allocations
+        or pools. Some options are sampled during initialization; see
+        :func:`set_allocator_settings`.
+
+    Examples::
+
+        >>> saved = torch.accelerator.memory.get_allocator_settings()
+        >>> torch.accelerator.memory.set_allocator_settings(saved)
+    """
+    return torch._C._accelerator_getAllocatorSettingsDict()
+
+
+def set_allocator_settings(settings: dict[str, Any]) -> None:
+    r"""set_allocator_settings(settings) -> None
+
+    Update supplied caching allocator options, leaving omitted options unchanged.
+
+    All values are validated before any option is updated. Options apply
+    process-wide. Call this only while other threads are not allocating or
+    freeing memory. The legacy string getter continues to return its last
+    string input; dictionary updates do not change that value.
+
+    Args:
+        settings (dict): options using the keys and value types returned by
+            :func:`get_allocator_settings`. ``roundup_power2_divisions`` also
+            accepts an integer applied to every interval, or a dictionary with
+            power-of-two MiB boundaries and an optional ``">"`` entry for larger
+            allocations. ``None`` restores an unlimited size or the default
+            ``expandable_segments_reserve``. Reserve values are fractions of
+            device memory or strings such as ``"40G"`` for GiB.
+
+    .. note::
+        Updating configuration does not reconstruct existing allocator resources.
+        The backend is fixed at import. ``per_process_memory_fraction`` supplies
+        the initial device memory limit and the early OOM check; use
+        :func:`torch.cuda.set_per_process_memory_fraction` to change an initialized
+        device's limit. ``pinned_reserve_segment_size_mb`` is sampled when the
+        pinned reserve is first created. Disabling ``pinned_use_background_threads``
+        does not stop a background thread that has already started.
+
+    Examples::
+
+        >>> saved = torch.accelerator.memory.get_allocator_settings()
+        >>> torch.accelerator.memory.set_allocator_settings({"max_split_size_mb": 128})
+        >>> torch.accelerator.memory.set_allocator_settings(saved)
+    """
+    if not isinstance(settings, dict):
+        raise TypeError("settings must be a dict")
+    torch._C._accelerator_setAllocatorSettingsDict(settings)
 
 
 def empty_cache() -> None:

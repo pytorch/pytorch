@@ -15,7 +15,124 @@ constexpr size_t kMB = 1024 * 1024ul;
 // size_t is 32 bits; a size_t here would silently wrap the 64GB bound to 0.
 constexpr uint64_t kRoundUpPowerOfTwoStart = 1ull * kMB; // 1MB
 constexpr uint64_t kRoundUpPowerOfTwoEnd = 64ull * 1024 * kMB; // 64GB
+
+using SettingsRegistration = std::function<void(AllocatorSettingsRegistry&)>;
+
+std::vector<SettingsRegistration>& settingsRegistrations() {
+  static std::vector<SettingsRegistration> registrations;
+  return registrations;
+}
+
+AllocatorSettingsRegistry makeSettingsRegistry() {
+  AllocatorSettingsRegistry registry;
+  AcceleratorAllocatorConfig::instance().registerSettings(registry);
+  for (const auto& registration : settingsRegistrations()) {
+    registration(registry);
+  }
+  return registry;
+}
 } // anonymous namespace
+
+void settingTypeError(const std::string& name, const char* expected) {
+  TORCH_CHECK_TYPE(false, name, " must be ", expected);
+}
+
+int64_t settingInteger(const SettingValue& value, const std::string& name) {
+  const auto* integer = std::get_if<int64_t>(&value);
+  if (integer == nullptr) {
+    settingTypeError(name, "a non-negative integer");
+  }
+  TORCH_CHECK_VALUE(*integer >= 0, name, " must be non-negative");
+  return *integer;
+}
+
+double settingDouble(const SettingValue& value, const std::string& name) {
+  double result;
+  if (const auto* number = std::get_if<double>(&value)) {
+    result = *number;
+  } else if (const auto* integer = std::get_if<int64_t>(&value)) {
+    result = static_cast<double>(*integer);
+  } else {
+    settingTypeError(name, "a number");
+  }
+  TORCH_CHECK_VALUE(std::isfinite(result), name, " must be finite");
+  return result;
+}
+
+const SettingDict& settingDict(
+    const SettingValue& value,
+    const std::string& name) {
+  const auto* dictionary = std::get_if<SettingDict>(&value);
+  if (dictionary == nullptr) {
+    settingTypeError(name, "a dictionary");
+  }
+  return *dictionary;
+}
+
+std::recursive_mutex& allocatorSettingsMutex() {
+  static std::recursive_mutex mutex;
+  return mutex;
+}
+
+void AllocatorSettingsRegistry::add(
+    std::string name,
+    Getter getter,
+    Prepare prepare) {
+  const bool inserted =
+      entries_.emplace(name, Entry{std::move(getter), std::move(prepare)})
+          .second;
+  TORCH_CHECK_VALUE(inserted, "Duplicated allocator setting: ", name);
+}
+
+void AllocatorSettingsRegistry::addValidator(
+    std::function<void(const Settings&)> validator) {
+  validators_.push_back(std::move(validator));
+}
+
+Settings AllocatorSettingsRegistry::snapshot() const {
+  Settings settings;
+  for (const auto& [name, entry] : entries_) {
+    settings.emplace(name, entry.getter());
+  }
+  return settings;
+}
+
+std::vector<AllocatorSettingsRegistry::Update> AllocatorSettingsRegistry::
+    prepare(const Settings& settings) const {
+  auto merged = snapshot();
+  std::vector<Update> updates;
+  updates.reserve(settings.size());
+  for (const auto& [name, value] : settings) {
+    const auto entry = entries_.find(name);
+    TORCH_CHECK_VALUE(
+        entry != entries_.end(), "Unrecognized allocator setting: ", name);
+    updates.push_back(entry->second.prepare(value));
+    merged[name] = value;
+  }
+  for (const auto& validator : validators_) {
+    validator(merged);
+  }
+  return updates;
+}
+
+void registerAllocatorSettings(SettingsRegistration registration) {
+  std::lock_guard<std::recursive_mutex> lock(allocatorSettingsMutex());
+  settingsRegistrations().push_back(std::move(registration));
+}
+
+Settings getAllocatorSettingsDict() {
+  std::lock_guard<std::recursive_mutex> lock(allocatorSettingsMutex());
+  return makeSettingsRegistry().snapshot();
+}
+
+void setAllocatorSettingsDict(const Settings& settings) {
+  std::lock_guard<std::recursive_mutex> lock(allocatorSettingsMutex());
+  const auto registry = makeSettingsRegistry();
+  auto updates = registry.prepare(settings);
+  for (const auto& update : updates) {
+    update();
+  }
+}
 
 std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
   static std::unordered_set<std::string> keys{
@@ -56,7 +173,9 @@ AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
         "PYTORCH_ALLOC_CONF"};
     for (const char* var : vars) {
       if (std::optional<std::string> name = c10::utils::get_env(var)) {
-        instance.parseArgs(*name);
+        // The static initialization guard serializes this parse. Taking the
+        // runtime settings lock here would invert its order with that guard.
+        instance.parseArgsImpl(*name);
         return true;
       }
     }
@@ -265,6 +384,11 @@ size_t AcceleratorAllocatorConfig::parsePinnedMaxCachedSize(
 }
 
 void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
+  std::lock_guard<std::recursive_mutex> lock(allocatorSettingsMutex());
+  parseArgsImpl(env);
+}
+
+void AcceleratorAllocatorConfig::parseArgsImpl(const std::string& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
   max_split_size_ = std::numeric_limits<size_t>::max();
@@ -338,6 +462,120 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
         pinned_max_cached_size_ >> 20,
         "). The cache size limit takes precedence: allocations above pinned_max_cached_size_mb are never rounded up.");
   }
+}
+
+void AcceleratorAllocatorConfig::registerSettings(
+    AllocatorSettingsRegistry& registry) {
+  registry.addSize(
+      "large_segment_size_mb",
+      large_segment_size_,
+      kMB,
+      false,
+      [](size_t size) {
+        TORCH_CHECK_VALUE(
+            size > kMinLargeAlloc,
+            "large_segment_size_mb must be greater than ",
+            kMinLargeAlloc / kMB);
+      });
+  registry.addSize("max_split_size_mb", max_split_size_, kMB, true);
+  registry.addSize(
+      "max_non_split_rounding_mb", max_non_split_rounding_size_, kMB, false);
+  registry.addScalar(
+      "garbage_collection_threshold",
+      garbage_collection_threshold_,
+      [](double threshold) {
+        TORCH_CHECK_VALUE(
+            threshold >= 0 && threshold < 1,
+            "garbage_collection_threshold must be in [0, 1)");
+      });
+  registry.addScalar("expandable_segments", use_expandable_segments_);
+  registry.addScalar(
+      "pinned_use_background_threads", pinned_use_background_threads_);
+  registry.addSize(
+      "pinned_max_round_threshold_mb", pinned_max_round_threshold_, kMB, true);
+  registry.addSize(
+      "pinned_max_cached_size_mb", pinned_max_cached_size_, kMB, true);
+  registry.addValidator([](const Settings& settings) {
+    const auto large = settingInteger(
+        settings.at("large_segment_size_mb"), "large_segment_size_mb");
+    for (const auto* name :
+         {"max_split_size_mb", "max_non_split_rounding_mb"}) {
+      const auto& value = settings.at(name);
+      if (!std::holds_alternative<std::monostate>(value)) {
+        TORCH_CHECK_VALUE(
+            settingInteger(value, name) >= large,
+            name,
+            " must be >= large_segment_size_mb");
+      }
+    }
+  });
+  registry.add(
+      "roundup_power2_divisions",
+      [this]() -> SettingValue {
+        SettingDict divisions;
+        for (size_t i = 0; i < roundup_power2_divisions_.size(); ++i) {
+          TORCH_CHECK_VALUE(
+              std::in_range<int64_t>(roundup_power2_divisions_[i]),
+              "roundup_power2_divisions exceeds the supported integer range");
+          divisions.emplace(
+              int64_t{1} << i,
+              static_cast<int64_t>(roundup_power2_divisions_[i]));
+        }
+        return divisions;
+      },
+      [this](const SettingValue& value) -> AllocatorSettingsRegistry::Update {
+        const auto read_divisions = [](const auto& scalar) -> size_t {
+          const auto* divisions = std::get_if<int64_t>(&scalar);
+          if (divisions == nullptr) {
+            settingTypeError("roundup_power2_divisions", "integers");
+          }
+          TORCH_CHECK_VALUE(
+              *divisions >= 0 &&
+                  (*divisions == 0 ||
+                   std::has_single_bit(static_cast<uint64_t>(*divisions))),
+              "roundup_power2_divisions must contain powers of two or zero");
+          TORCH_CHECK_VALUE(
+              std::in_range<size_t>(*divisions),
+              "roundup_power2_divisions exceeds the supported integer range");
+          return static_cast<size_t>(*divisions);
+        };
+        std::vector<size_t> parsed(kRoundUpPowerOfTwoIntervals, 0);
+        if (std::holds_alternative<int64_t>(value)) {
+          std::fill(parsed.begin(), parsed.end(), read_divisions(value));
+        } else {
+          const auto& divisions =
+              settingDict(value, "roundup_power2_divisions");
+          size_t last_index = 0;
+          bool first = true;
+          for (const auto& [boundary, count] : divisions) {
+            const auto factor = read_divisions(count);
+            if (const auto* bound = std::get_if<int64_t>(&boundary)) {
+              TORCH_CHECK_VALUE(
+                  *bound > 0 &&
+                      std::has_single_bit(static_cast<uint64_t>(*bound)),
+                  "roundup_power2_divisions boundaries must be powers of two");
+              const auto index = std::min<size_t>(
+                  std::bit_width(static_cast<uint64_t>(*bound)) - 1,
+                  parsed.size() - 1);
+              if (first) {
+                std::fill(parsed.begin(), parsed.begin() + index, factor);
+                first = false;
+              }
+              parsed[index] = factor;
+              last_index = index;
+            } else {
+              TORCH_CHECK_VALUE(
+                  std::get<std::string>(boundary) == ">",
+                  "roundup_power2_divisions boundaries must be powers of two or '>'");
+              std::fill(parsed.begin() + last_index + 1, parsed.end(), factor);
+            }
+          }
+        }
+        return [this, parsed = std::move(parsed)] {
+          std::copy(
+              parsed.begin(), parsed.end(), roundup_power2_divisions_.begin());
+        };
+      });
 }
 
 } // namespace c10::CachingAllocator

@@ -10,6 +10,7 @@ import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     NoTest,
+    parametrize,
     run_tests,
     TEST_ACCELERATOR,
     TEST_MPS,
@@ -33,6 +34,260 @@ if not TEST_ACCELERATOR:
 
 
 class TestAccelerator(TestCase):
+    def test_allocator_settings_dict(self):
+        saved = torch.accelerator.get_allocator_settings()
+        saved_legacy = torch._C._accelerator_getAllocatorSettings()
+        try:
+            torch._C._accelerator_setAllocatorSettings(
+                "max_split_size_mb:64,expandable_segments:True"
+            )
+            legacy = "garbage_collection_threshold:0.5"
+            torch._C._accelerator_setAllocatorSettings(legacy)
+            self.assertEqual(torch._C._accelerator_getAllocatorSettings(), legacy)
+            settings = torch.accelerator.get_allocator_settings()
+            self.assertIsNone(settings["max_split_size_mb"])
+            self.assertTrue(settings["expandable_segments"])
+            self.assertEqual(settings["garbage_collection_threshold"], 0.5)
+
+            torch.accelerator.set_allocator_settings(
+                {"max_split_size_mb": 128, "pinned_max_cached_size_mb": 64}
+            )
+            updated = torch.accelerator.get_allocator_settings()
+            self.assertEqual(
+                updated,
+                {**settings, "max_split_size_mb": 128, "pinned_max_cached_size_mb": 64},
+            )
+            torch.accelerator.set_allocator_settings({})
+            self.assertEqual(torch.accelerator.get_allocator_settings(), updated)
+            torch.accelerator.set_allocator_settings(updated)
+            self.assertEqual(torch._C._accelerator_getAllocatorSettings(), legacy)
+            torch._C._accelerator_setAllocatorSettings(
+                torch._C._accelerator_getAllocatorSettings()
+            )
+        finally:
+            torch._C._accelerator_setAllocatorSettings(saved_legacy)
+            torch.accelerator.set_allocator_settings(saved)
+        self.assertEqual(torch.accelerator.get_allocator_settings(), saved)
+        self.assertEqual(torch._C._accelerator_getAllocatorSettings(), saved_legacy)
+
+    def test_allocator_settings_defaults(self):
+        saved = torch.accelerator.get_allocator_settings()
+        defaults = {
+            "max_split_size_mb": None,
+            "garbage_collection_threshold": 0.0,
+            "pinned_max_round_threshold_mb": None,
+            "pinned_max_cached_size_mb": None,
+        }
+        if "expandable_segments_reserve" in saved:
+            defaults.update(
+                pinned_reserve_segment_size_mb=0,
+                expandable_segments_reserve=None,
+                expandable_segments_reserve_by_class={},
+            )
+        try:
+            torch.accelerator.set_allocator_settings(defaults)
+            expected = saved | defaults
+            self.assertEqual(torch.accelerator.get_allocator_settings(), expected)
+            torch.accelerator.set_allocator_settings(expected)
+            self.assertEqual(torch.accelerator.get_allocator_settings(), expected)
+        finally:
+            torch.accelerator.set_allocator_settings(saved)
+
+    @parametrize("divisions", [0, 4, {}, {">": 1, 256: 4, 128: 8}])
+    def test_allocator_settings_roundup_dict(self, divisions):
+        saved = torch.accelerator.get_allocator_settings()
+        try:
+            torch.accelerator.set_allocator_settings(
+                {"roundup_power2_divisions": divisions}
+            )
+            settings = torch.accelerator.get_allocator_settings()
+            rounds = settings["roundup_power2_divisions"]
+            if isinstance(divisions, int):
+                self.assertEqual(set(rounds.values()), {divisions})
+            elif not divisions:
+                self.assertEqual(set(rounds.values()), {0})
+            else:
+                self.assertEqual(
+                    (rounds[64], rounds[128], rounds[256], rounds[512]), (8, 8, 4, 1)
+                )
+            torch.accelerator.set_allocator_settings(settings)
+            self.assertEqual(torch.accelerator.get_allocator_settings(), settings)
+            rounds.clear()
+            self.assertTrue(
+                torch.accelerator.get_allocator_settings()["roundup_power2_divisions"]
+            )
+        finally:
+            torch.accelerator.set_allocator_settings(saved)
+
+    @parametrize(
+        "settings,error,message",
+        [
+            ("max_split_size_mb:128", TypeError, "dict"),
+            ({"unknown": 1}, ValueError, "unknown"),
+            ({"expandable_segments": "True"}, TypeError, "expandable_segments"),
+            ({"expandable_segments": 1}, TypeError, "expandable_segments"),
+            ({"expandable_segments": object()}, TypeError, "expandable_segments"),
+            ({"max_split_size_mb": 128.5}, TypeError, "max_split_size_mb"),
+            ({"max_split_size_mb": True}, TypeError, "max_split_size_mb"),
+            (
+                {"roundup_power2_divisions": {3: 4}},
+                ValueError,
+                "roundup_power2_divisions",
+            ),
+            (
+                {"roundup_power2_divisions": {128: 3}},
+                ValueError,
+                "roundup_power2_divisions",
+            ),
+            (
+                {"roundup_power2_divisions": {True: 4}},
+                TypeError,
+                "roundup_power2_divisions",
+            ),
+            (
+                {"roundup_power2_divisions": {128.0: 4}},
+                TypeError,
+                "roundup_power2_divisions",
+            ),
+            (
+                {"roundup_power2_divisions": []},
+                TypeError,
+                "roundup_power2_divisions",
+            ),
+            (
+                {"max_split_size_mb": 128, "garbage_collection_threshold": 2},
+                ValueError,
+                "garbage_collection_threshold",
+            ),
+            (
+                {"garbage_collection_threshold": float("nan")},
+                ValueError,
+                "garbage_collection_threshold",
+            ),
+            (
+                {"garbage_collection_threshold": float("inf")},
+                ValueError,
+                "garbage_collection_threshold",
+            ),
+            (
+                {"max_non_split_rounding_mb": -1},
+                ValueError,
+                "max_non_split_rounding_mb",
+            ),
+            (
+                {"large_segment_size_mb": 40, "max_non_split_rounding_mb": 20},
+                ValueError,
+                "max_non_split_rounding_mb",
+            ),
+        ],
+    )
+    def test_allocator_settings_dict_errors(self, settings, error, message):
+        self._check_allocator_settings_error(settings, error, message)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA-only allocator options")
+    def test_allocator_settings_cuda_dict(self):
+        saved = torch.accelerator.get_allocator_settings()
+        changes = {
+            "release_lock_on_cudamalloc": True,
+            "pinned_reserve_segment_size_mb": 8,
+            "expandable_segments_reserve": 0.5,
+            "expandable_segments_reserve_by_class": {
+                "compute": "4.0G",
+                "communication": 0.25,
+            },
+        }
+        expected = saved | changes
+        try:
+            torch.accelerator.set_allocator_settings(changes)
+            updated = torch.accelerator.get_allocator_settings()
+            self.assertEqual(updated, expected)
+            torch.accelerator.set_allocator_settings(updated)
+            self.assertEqual(torch.accelerator.get_allocator_settings(), updated)
+            updated["expandable_segments_reserve_by_class"].clear()
+            self.assertEqual(torch.accelerator.get_allocator_settings(), expected)
+        finally:
+            torch.accelerator.set_allocator_settings(saved)
+        self.assertEqual(torch.accelerator.get_allocator_settings(), saved)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA-only allocator options")
+    def test_allocator_settings_reserve_class_name(self):
+        saved = torch.accelerator.get_allocator_settings()
+        changes = {
+            "expandable_segments_reserve_by_class": {"large_segment_size_mb": "40.0G"}
+        }
+        expected = saved | changes
+        try:
+            torch.accelerator.set_allocator_settings(changes)
+            self.assertEqual(torch.accelerator.get_allocator_settings(), expected)
+        finally:
+            torch.accelerator.set_allocator_settings(saved)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA-only allocator options")
+    @parametrize(
+        "settings,error,message",
+        [
+            (
+                {"max_split_size_mb": 128, "pinned_num_register_threads": 3},
+                ValueError,
+                "pinned_num_register_threads",
+            ),
+            (
+                {"expandable_segments_reserve": 0},
+                ValueError,
+                "expandable_segments_reserve",
+            ),
+            (
+                {"expandable_segments_reserve": "not-a-size"},
+                ValueError,
+                "expandable_segments_reserve",
+            ),
+            (
+                {"expandable_segments_reserve": "1_0G"},
+                ValueError,
+                "expandable_segments_reserve",
+            ),
+            (
+                {"expandable_segments_reserve": " 10G"},
+                ValueError,
+                "expandable_segments_reserve",
+            ),
+            (
+                {"expandable_segments_reserve_by_class": {"compute": 0}},
+                ValueError,
+                "expandable_segments_reserve_by_class",
+            ),
+            (
+                {"expandable_segments_reserve_by_class": {"compute": None}},
+                TypeError,
+                "expandable_segments_reserve_by_class",
+            ),
+            (
+                {"expandable_segments_reserve_by_class": {128: 0.5}},
+                TypeError,
+                "expandable_segments_reserve_by_class",
+            ),
+            (
+                {"expandable_segments_reserve_by_class": {b"\xff": 0.5}},
+                TypeError,
+                "expandable_segments_reserve_by_class",
+            ),
+            ({"backend": "other"}, ValueError, "backend"),
+        ],
+    )
+    def test_allocator_settings_cuda_dict_errors(self, settings, error, message):
+        self._check_allocator_settings_error(settings, error, message)
+
+    def _check_allocator_settings_error(self, settings, error, message):
+        saved = torch.accelerator.get_allocator_settings()
+        legacy = torch._C._accelerator_getAllocatorSettings()
+        try:
+            with self.assertRaisesRegex(error, message):
+                torch.accelerator.set_allocator_settings(settings)
+            self.assertEqual(torch.accelerator.get_allocator_settings(), saved)
+            self.assertEqual(torch._C._accelerator_getAllocatorSettings(), legacy)
+        finally:
+            torch.accelerator.set_allocator_settings(saved)
+
     def test_current_accelerator(self):
         self.assertTrue(torch.accelerator.is_available())
         self.assertEqual(torch.accelerator.current_accelerator().type, self.device_type)

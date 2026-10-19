@@ -15,6 +15,7 @@ from .graphs import Graph
 from .memory import (
     empty_cache,
     empty_host_cache,
+    get_allocator_settings,
     get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
@@ -23,6 +24,7 @@ from .memory import (
     memory_stats,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_allocator_settings,
 )
 
 
@@ -37,6 +39,7 @@ __all__ = [
     "device_index",
     "empty_cache",
     "empty_host_cache",
+    "get_allocator_settings",
     "get_memory_info",
     "is_available",
     "max_memory_allocated",
@@ -46,6 +49,7 @@ __all__ = [
     "memory_stats",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
+    "set_allocator_settings",
     "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",

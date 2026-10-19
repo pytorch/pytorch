@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <charconv>
 #include <cmath>
 #include <locale>
 #include <sstream>
@@ -12,6 +13,167 @@
 #include <bit>
 
 namespace c10::cuda::CUDACachingAllocator {
+
+namespace {
+
+namespace config = c10::CachingAllocator;
+
+template <typename Value>
+ExpandableSegmentReserveSpec typedReserveSpec(
+    const Value& value,
+    const char* name) {
+  ExpandableSegmentReserveSpec spec;
+  if (const auto* fraction = std::get_if<double>(&value)) {
+    spec.value = *fraction;
+  } else if (const auto* fraction = std::get_if<int64_t>(&value)) {
+    spec.value = static_cast<double>(*fraction);
+  } else if (const auto* text = std::get_if<std::string>(&value)) {
+    spec.is_fraction =
+        text->empty() || (text->back() != 'G' && text->back() != 'g');
+    auto number = spec.is_fraction ? *text : text->substr(0, text->size() - 1);
+    std::istringstream stream(number);
+    stream.imbue(std::locale::classic());
+    stream >> std::noskipws >> spec.value;
+    TORCH_CHECK_VALUE(
+        !number.empty() && !stream.fail() && stream.eof(),
+        name,
+        " contains an invalid reserve: ",
+        *text);
+  } else {
+    config::settingTypeError(name, "a number or GiB string");
+  }
+  TORCH_CHECK_VALUE(
+      std::isfinite(spec.value) && spec.value > 0,
+      name,
+      " reserves must be positive and finite");
+  return spec;
+}
+
+template <typename Value>
+Value reserveSetting(const ExpandableSegmentReserveSpec& spec) {
+  if (spec.is_fraction) {
+    return spec.value;
+  }
+  char buffer[64];
+  auto result = std::to_chars(buffer, buffer + sizeof(buffer), spec.value);
+  TORCH_INTERNAL_ASSERT(result.ec == std::errc{});
+  std::string value(buffer, result.ptr);
+  if (value.find_first_of(".eE") == std::string::npos) {
+    value += ".0";
+  }
+  return value + "G";
+}
+
+const bool registered_settings [[maybe_unused]] = [] {
+  config::registerAllocatorSettings(
+      [](config::AllocatorSettingsRegistry& registry) {
+        CUDAAllocatorConfig::instance().registerSettings(registry);
+      });
+  return true;
+}();
+
+} // namespace
+
+void CUDAAllocatorConfig::registerSettings(
+    config::AllocatorSettingsRegistry& registry) {
+  using Value = config::SettingValue;
+  using Update = config::AllocatorSettingsRegistry::Update;
+  registry.add(
+      "backend",
+      []() -> Value { return get()->name(); },
+      [](const Value& value) -> Update {
+        const auto* backend = std::get_if<std::string>(&value);
+        if (!backend) {
+          config::settingTypeError("backend", "a string");
+        }
+        TORCH_CHECK_VALUE(
+            *backend == get()->name(),
+            "The allocator backend cannot be changed at runtime");
+        return [] {};
+      });
+  registry.addScalar(
+      "release_lock_on_cudamalloc", m_release_lock_on_cudamalloc);
+  registry.addScalar(
+      "pinned_use_cuda_host_register", m_pinned_use_cuda_host_register);
+  registry.addScalar(
+      "graph_capture_record_stream_reuse", m_graph_capture_record_stream_reuse);
+  registry.addScalar("pinned_free_catch_all", m_pinned_free_catch_all);
+  registry.addScalar("throw_on_cudamalloc_oom", m_throw_on_cudamalloc_oom);
+  registry.addScalar(
+      "per_process_memory_fraction",
+      m_per_process_memory_fraction,
+      [](double value) {
+        TORCH_CHECK_VALUE(
+            value >= 0 && value <= 1,
+            "per_process_memory_fraction must be in [0.0, 1.0]");
+      });
+  registry.addScalar(
+      "pinned_num_register_threads",
+      m_pinned_num_register_threads,
+      [](size_t value) {
+        TORCH_CHECK_VALUE(
+            std::has_single_bit(value) &&
+                value <= pinned_max_register_threads(),
+            "pinned_num_register_threads must be a power of two no greater than ",
+            pinned_max_register_threads());
+      });
+  registry.addScalar(
+      "pinned_reserve_segment_size_mb",
+      m_pinned_reserve_segment_size_mb,
+      [](size_t value) {
+        TORCH_CHECK_VALUE(
+            value <= std::numeric_limits<size_t>::max() / (1024 * 1024),
+            "pinned_reserve_segment_size_mb is too large");
+      });
+  registry.add(
+      "expandable_segments_reserve",
+      [this]() -> Value {
+        std::lock_guard<std::mutex> lock(m_reserve_mutex);
+        return m_expandable_segments_reserve_set
+            ? reserveSetting<Value>(m_expandable_segments_reserve)
+            : Value(std::monostate{});
+      },
+      [this](const Value& value) -> Update {
+        const auto spec = std::holds_alternative<std::monostate>(value)
+            ? std::nullopt
+            : std::make_optional(
+                  typedReserveSpec(value, "expandable_segments_reserve"));
+        return [this, spec] {
+          std::lock_guard<std::mutex> lock(m_reserve_mutex);
+          m_expandable_segments_reserve_set = spec.has_value();
+          if (spec) {
+            m_expandable_segments_reserve = *spec;
+          }
+        };
+      });
+  registry.add(
+      "expandable_segments_reserve_by_class",
+      [this]() -> Value {
+        std::lock_guard<std::mutex> lock(m_reserve_mutex);
+        config::SettingDict settings;
+        for (const auto& [name, spec] :
+             m_expandable_segments_reserve_by_class) {
+          settings.emplace(name, reserveSetting<config::SettingScalar>(spec));
+        }
+        return settings;
+      },
+      [this](const Value& value) -> Update {
+        constexpr auto option = "expandable_segments_reserve_by_class";
+        const auto& settings = config::settingDict(value, option);
+        ska::flat_hash_map<std::string, ExpandableSegmentReserveSpec> parsed;
+        for (const auto& [key, reserve] : settings) {
+          const auto* name = std::get_if<std::string>(&key);
+          if (!name) {
+            config::settingTypeError(option, "a dict with string keys");
+          }
+          parsed.emplace(*name, typedReserveSpec(reserve, option));
+        }
+        return [this, parsed = std::move(parsed)]() mutable {
+          std::lock_guard<std::mutex> lock(m_reserve_mutex);
+          m_expandable_segments_reserve_by_class.swap(parsed);
+        };
+      });
+}
 
 bool CUDAAllocatorConfig::expandable_segments() {
   bool enabled = c10::CachingAllocator::AcceleratorAllocatorConfig::
@@ -73,6 +235,11 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
 }
 
 void CUDAAllocatorConfig::parseArgs(const std::string& env) {
+  std::lock_guard<std::recursive_mutex> lock(config::allocatorSettingsMutex());
+  parseArgsImpl(env);
+}
+
+void CUDAAllocatorConfig::parseArgsImpl(const std::string& env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 

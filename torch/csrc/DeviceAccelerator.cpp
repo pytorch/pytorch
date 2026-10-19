@@ -1,9 +1,33 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/AllocatorSettings.h>
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 namespace torch::accelerator {
+
+namespace {
+template <typename Value>
+Value allocatorSettingScalar(py::handle value, const std::string& name) {
+  if (value.is_none()) {
+    return std::monostate{};
+  }
+  if (py::isinstance<py::bool_>(value)) {
+    return value.cast<bool>();
+  }
+  if (py::isinstance<py::int_>(value)) {
+    return value.cast<int64_t>();
+  }
+  if (py::isinstance<py::float_>(value)) {
+    return value.cast<double>();
+  }
+  if (py::isinstance<py::str>(value)) {
+    return value.cast<std::string>();
+  }
+  TORCH_CHECK_TYPE(
+      false, "Unsupported value for allocator setting '", name, "'");
+}
+} // namespace
 
 void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -180,6 +204,52 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_setAllocatorSettings", [](std::string env) {
     c10::CachingAllocator::setAllocatorSettings(env);
+  });
+
+  m.def(
+      "_accelerator_getAllocatorSettingsDict",
+      &c10::CachingAllocator::getAllocatorSettingsDict);
+  m.def("_accelerator_setAllocatorSettingsDict", [](const py::dict& values) {
+    c10::CachingAllocator::Settings settings;
+    for (const auto& [key, value] : values) {
+      TORCH_CHECK_TYPE(
+          py::isinstance<py::str>(key),
+          "Allocator setting names must be strings");
+      auto name = key.cast<std::string>();
+      try {
+        if (py::isinstance<py::dict>(value)) {
+          c10::CachingAllocator::SettingDict nested;
+          for (const auto& [nested_key, scalar] :
+               py::reinterpret_borrow<py::dict>(value)) {
+            c10::CachingAllocator::SettingKey parsed_key;
+            if (py::isinstance<py::str>(nested_key)) {
+              parsed_key = nested_key.cast<std::string>();
+            } else {
+              TORCH_CHECK_TYPE(
+                  py::isinstance<py::int_>(nested_key) &&
+                      !py::isinstance<py::bool_>(nested_key),
+                  name,
+                  " dictionary keys must be strings or integers");
+              parsed_key = nested_key.cast<int64_t>();
+            }
+            nested.emplace(
+                std::move(parsed_key),
+                allocatorSettingScalar<c10::CachingAllocator::SettingScalar>(
+                    scalar, name));
+          }
+          settings.emplace(name, std::move(nested));
+        } else {
+          settings.emplace(
+              name,
+              allocatorSettingScalar<c10::CachingAllocator::SettingValue>(
+                  value, name));
+        }
+      } catch (const py::cast_error&) {
+        TORCH_CHECK_TYPE(
+            false, "Unsupported value for allocator setting '", name, "'");
+      }
+    }
+    c10::CachingAllocator::setAllocatorSettingsDict(settings);
   });
 
   m.def("_accelerator_getDefaultGenerator", [](c10::DeviceIndex device_index) {

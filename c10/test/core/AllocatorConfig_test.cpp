@@ -1,4 +1,5 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/AllocatorSettings.h>
 
 #include <gtest/gtest.h>
 
@@ -18,6 +19,11 @@ struct ExtendedAllocatorConfig {
 
   static const std::unordered_set<std::string>& getKeys() {
     return keys_;
+  }
+
+  void registerSettings(AllocatorSettingsRegistry& registry) {
+    registry.addSize(
+        "device_specific_option_mb", device_specific_option_, kMB, false);
   }
 
   void parseArgs(const std::string& env) {
@@ -46,6 +52,44 @@ struct ExtendedAllocatorConfig {
 };
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(ExtendedAllocatorConfig)
+
+namespace {
+const bool registered_settings [[maybe_unused]] = [] {
+  registerAllocatorSettings([](AllocatorSettingsRegistry& registry) {
+    ExtendedAllocatorConfig::instance().registerSettings(registry);
+  });
+  return true;
+}();
+} // namespace
+
+TEST(AllocatorConfigTest, typed_device_setting) {
+  const auto saved = getAllocatorSettingsDict();
+  const auto legacy = getAllocatorSettings();
+  EXPECT_EQ(
+      std::get<int64_t>(saved.at("device_specific_option_mb")),
+      ExtendedAllocatorConfig::device_specific_option() / kMB);
+
+  setAllocatorSettingsDict({{"device_specific_option_mb", int64_t{80}}});
+  EXPECT_EQ(ExtendedAllocatorConfig::device_specific_option(), 80 * kMB);
+  auto expected = saved;
+  expected["device_specific_option_mb"] = int64_t{80};
+  EXPECT_EQ(getAllocatorSettingsDict(), expected);
+  EXPECT_EQ(getAllocatorSettings(), legacy);
+
+  EXPECT_THROW(
+      setAllocatorSettingsDict(
+          {{"device_specific_option_mb", int64_t{96}}, {"unknown", true}}),
+      c10::Error);
+  EXPECT_EQ(getAllocatorSettingsDict(), expected);
+  EXPECT_THROW(
+      setAllocatorSettingsDict({{"device_specific_option_mb", int64_t{-1}}}),
+      c10::Error);
+  EXPECT_EQ(getAllocatorSettingsDict(), expected);
+
+  setAllocatorSettingsDict(saved);
+  EXPECT_EQ(getAllocatorSettingsDict(), saved);
+  EXPECT_EQ(getAllocatorSettings(), legacy);
+}
 
 TEST(AllocatorConfigTest, allocator_config_test) {
   std::string env =

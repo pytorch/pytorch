@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/AllocatorSettings.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 
@@ -294,8 +295,11 @@ class C10_API AcceleratorAllocatorConfig {
   // "max_split_size_mb:100,max_non_split_rounding_mb:20,garbage_collection_threshold:0.5,roundup_power2_divisions:[64:8,256:4,1024:4,>:1],expandable_segments:true,pinned_use_background_threads:true"
   void parseArgs(const std::string& env);
 
+  void registerSettings(AllocatorSettingsRegistry& registry);
+
  private:
   AcceleratorAllocatorConfig();
+  void parseArgsImpl(const std::string& env);
 
   /* Internal functions for device allocator */
 
@@ -368,6 +372,7 @@ class C10_API AcceleratorAllocatorConfig {
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {
+  std::lock_guard<std::recursive_mutex> lock(allocatorSettingsMutex());
   AcceleratorAllocatorConfig::instance().parseArgs(env);
   AcceleratorAllocatorConfig::callDeviceConfigParserHook(env);
 }

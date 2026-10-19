@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/AllocatorConfig.h>
+#include <c10/core/AllocatorSettings.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Deprecated.h>
@@ -135,6 +136,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
       const std::string& reserve_class,
       ExpandableSegmentReserveSpec spec) {
     auto& self = instance();
+    std::lock_guard<std::recursive_mutex> config_lock(
+        c10::CachingAllocator::allocatorSettingsMutex());
     std::lock_guard<std::mutex> lock(self.m_reserve_mutex);
     if (self.m_expandable_segments_reserve_set) {
       return;
@@ -221,7 +224,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
         env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
       }
       if (env.has_value()) {
-        inst->parseArgs(env.value());
+        inst->parseArgsImpl(env.value());
       }
       return inst;
     })();
@@ -255,8 +258,12 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   void parseArgs(const std::string& env);
 
+  void registerSettings(
+      c10::CachingAllocator::AllocatorSettingsRegistry& registry);
+
  private:
   CUDAAllocatorConfig() = default;
+  void parseArgsImpl(const std::string& env);
 
   size_t parseAllocatorConfig(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
