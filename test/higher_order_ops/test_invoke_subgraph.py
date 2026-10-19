@@ -369,6 +369,20 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_no_tensor_operands(self):
+        # Called twice, so Dynamo doesn't inline the region, and Inductor lowers
+        # a subgraph call with no operands to take the device from.
+        @nested_compile_region
+        def table():
+            return torch.arange(8, dtype=torch.float32).exp()
+
+        def fn(x):
+            return x * table() + table()
+
+        x = torch.randn(8)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(fn(x), res)
+
     @torch._functorch.config.patch("donated_buffer", True)
     @requires_cuda_and_triton
     def test_reused_subgraph_square_backward(self):
