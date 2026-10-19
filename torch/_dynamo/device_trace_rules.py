@@ -46,21 +46,3 @@ def register_device_trace_rules(interface: type) -> None:
     variable_cls = getattr(trace_rules, "TorchInGraphFunctionVariable", None)
     if variable_cls is not None:
         variable_cls._get_handlers.cache_clear()
-
-
-def overridden_device_trace_fns(name: str) -> list[Any]:
-    """Return stream-runtime callables overridden by registered interfaces.
-
-    Indexed keys such as ``npu:0`` stay in the scan. A backend may register
-    only that key. ``dict.fromkeys`` at the handler drops duplicate functions.
-    """
-    from .device_interface import DeviceInterface, get_registered_device_interfaces
-
-    base = getattr(DeviceInterface, name, None)
-    found: list[Any] = []
-    for _, interface in get_registered_device_interfaces():
-        fn = getattr(interface, name, None)
-        if fn is None or fn is base or not callable(fn):
-            continue
-        found.append(fn)
-    return found

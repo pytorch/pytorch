@@ -58,7 +58,7 @@ from ..create_parameter_op import (
     new_parameter_placeholder,
     tracable_create_parameter,
 )
-from ..device_interface import get_registered_device_interfaces
+from ..device_interface import DeviceInterface, get_registered_device_interfaces
 from ..exc import (
     raise_observed_exception,
     raise_type_error,
@@ -2979,15 +2979,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
-        from ..device_trace_rules import overridden_device_trace_fns
-
         @register(
-            *dict.fromkeys(
-                [
-                    torch.accelerator.current_stream,
-                    *overridden_device_trace_fns("current_stream"),
-                ]
-            )
+            torch.accelerator.current_stream,
+            torch.cuda.current_stream,
+            torch.mtia.current_stream,
+            torch.xpu.current_stream,
         )
         def handle_current_stream(
             self,
@@ -3830,6 +3826,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                                 ],
                             )
             return None
+
+        # Register current_stream for third-party PrivateUse1 backends (e.g.
+        # torch_npu) that register a DeviceInterface at import time. Runs last
+        # so the explicit @register entries above always win. _get_handlers is
+        # @functools.cache'd (register before the first torch.compile(); only
+        # _get_handlers.cache_clear() clears it), and backends must also route
+        # their current_stream to TorchInGraphFunctionVariable via trace rules
+        # or Dynamo inlines it and this handler is bypassed.
+        for _, device_interface in get_registered_device_interfaces():
+            # Skip undefined current_stream, the abstract base stub, and
+            # backends already covered by an explicit @register above.
+            current_stream_fn = getattr(device_interface, "current_stream", None)
+            if (
+                current_stream_fn is not None
+                and current_stream_fn is not DeviceInterface.current_stream
+                and current_stream_fn not in handlers
+            ):
+                handlers[current_stream_fn] = handle_current_stream
 
         return handlers
 
