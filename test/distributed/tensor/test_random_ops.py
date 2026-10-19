@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import functools
 import itertools
 
 import torch
@@ -33,6 +34,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.utils._typing_utils import not_none
+from torch.utils.checkpoint import (
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 def get_generator_seed_for_device_type(device_type: str):
@@ -957,6 +962,76 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
 
         for placements in ([Shard(0)], [Replicate()]):
             self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_dropout_under_checkpoint(self):
+        # The backward needs the forward's dropout mask. Rerunning the DTensor
+        # random op there would draw again from wherever the generator is by
+        # then, so the result is saved instead. A replicated result must also
+        # agree across ranks, whatever else each rank has drawn.
+        device_mesh = self.build_device_mesh()
+        p = 0.5
+
+        def dropout(y):
+            return torch.nn.functional.dropout(y, p=p, training=True)
+
+        def rand_like(y):  # returns a tensor, not a (result, mask) tuple
+            return y * (torch.rand_like(y) > p) / (1 - p)
+
+        for drop, placement, backend in itertools.product(
+            (dropout, rand_like), (Shard(0), Replicate()), ("aot_eager", "inductor")
+        ):
+            with self.subTest(drop.__name__, placement=placement, backend=backend):
+
+                def fn(x, w, drop=drop):
+                    def gn(x, w):
+                        return drop(x @ w).sin()
+
+                    return torch.utils.checkpoint.checkpoint(
+                        gn, x, w, use_reentrant=False
+                    )
+
+                torch._dynamo.reset()
+                torch.manual_seed(0)
+                x_full = torch.randn(16, 16, device=self.device_type)
+                w_full = torch.randn(16, 16, device=self.device_type)
+                x = distribute_tensor(x_full, device_mesh, [placement])
+                w = distribute_tensor(w_full, device_mesh, [Replicate()])
+                x.requires_grad_()
+                w.requires_grad_()
+                torch.rand(self.rank + 1)
+                out = torch.compile(fn, backend=backend, fullgraph=True)(x, w)
+                out.sum().backward()
+                local = out.to_local()
+                if placement == Replicate():
+                    self._assert_replicate_cross_rank_equal([local], device_mesh)
+                # Dropped entries come out as sin(0) = 0, so the output shows the mask.
+                mask = (out.full_tensor() != 0).to(x_full.dtype) / (1 - p)
+                grad = torch.cos(x_full @ w_full * mask) * mask
+                self.assertEqual(x.grad.full_tensor(), grad @ w_full.T)
+                self.assertEqual(w.grad.full_tensor(), x_full.T @ grad)
+
+        # A policy that insists on recomputing it can't be honored.
+        def must_recompute(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.MUST_RECOMPUTE
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, must_recompute
+        )
+
+        def fn_must_recompute(x, w):
+            def gn(x, w):
+                return torch.nn.functional.dropout(x @ w, p=p, training=True)
+
+            return torch.utils.checkpoint.checkpoint(
+                gn, x, w, use_reentrant=False, context_fn=context_fn
+            )
+
+        torch._dynamo.reset()
+        compiled = torch.compile(fn_must_recompute, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(Exception, "does not support MUST_RECOMPUTE"):
+            compiled(x, w)
 
     @with_comms
     @skip_unless_torch_gpu
