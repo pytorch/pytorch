@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast,
     largeTensorTest, precisionOverride, dtypes, skipCPUIf, skipCUDAIf, skipXPU, dtypesIfCUDA,
-    dtypesIfCPU, skipMeta, onlyAccelerator, expectedFailureXLA
+    dtypesIfCPU, skipMeta, onlyAccelerator, expectedFailureXLA, onlyCPU
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
@@ -1269,6 +1269,39 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(res_out.select(dim, 0), x, atol=0, rtol=0)
                 self.assertEqual(res_out.select(dim, 1), y, atol=0, rtol=0)
                 self.assertEqual(res_out.select(dim, 2), z, atol=0, rtol=0)
+
+    # [1, 1] column views of a [1, N] row have strides [N, 1] and count as
+    # contiguous, so _stack uses the native serial kernel on CPU. The inputs and
+    # the output sit inside larger buffers, so a wrong copy length stays in
+    # bounds and shows up as wrong values.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test__stack_size_one_dim_strided_inputs(self, device, dtype):
+        width = 566
+        base = torch.arange(4 * width, device=device, dtype=dtype).view(4, width)
+        a = base[0:1, width - 1:width]
+        b = base[2:3, 7:8]
+        self.assertTrue(a.is_contiguous())
+        self.assertEqual(a.stride(), b.stride())
+
+        buffer = torch.full((4 * width,), -1, device=device, dtype=dtype)
+        out = buffer[:2].view(2, 1, 1)
+        torch._stack((a, b), 0, out=out)
+
+        self.assertEqual(out, torch.stack((a, b), 0), atol=0, rtol=0)
+        self.assertEqual(buffer[2:], torch.full_like(buffer[2:], -1), atol=0, rtol=0)
+
+    # A size-1 stack dim may carry any stride and still be contiguous.
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test__stack_out_size_one_dim_strided(self, device, dtype):
+        a = torch.full((1, 1), 3, device=device, dtype=dtype)
+        out = torch.zeros(1000, device=device, dtype=dtype).as_strided((1, 1, 1), (999, 1, 1))
+        self.assertTrue(out.is_contiguous())
+
+        torch._stack((a,), 0, out=out)
+
+        self.assertEqual(out, torch.stack((a,), 0), atol=0, rtol=0)
 
     def test_repeat_interleave(self, device):
         x = torch.tensor([0, 1, 2, 3], device=device)
