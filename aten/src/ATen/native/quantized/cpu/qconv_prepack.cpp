@@ -679,7 +679,7 @@ class QConvPackWeightInt8 final {
       int64_t groups,
       bool transpose) {
     auto& ctx = at::globalContext();
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
@@ -694,7 +694,7 @@ class QConvPackWeightInt8 final {
   } // x86
 #endif // defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
@@ -772,7 +772,7 @@ class QConv1dPackWeightInt8 final {
     output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
@@ -790,7 +790,7 @@ class QConv1dPackWeightInt8 final {
   } // x86
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(
           std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,

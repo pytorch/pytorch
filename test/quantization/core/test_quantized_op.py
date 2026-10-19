@@ -3,6 +3,7 @@
 
 
 import copy
+import io
 import itertools
 import multiprocessing
 import os
@@ -38,6 +39,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
+    skipIfNoFBGEMMFp16Linear,
     skipIfNoONEDNN,
     skipIfNoQNNPACK,
 )
@@ -3683,7 +3685,7 @@ class TestDynamicQuantizedOps(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
     @given(
         input_channels=st.integers(16, 32),
         output_channels=st.integers(4, 8),
@@ -3696,7 +3698,7 @@ class TestDynamicQuantizedOps(TestCase):
         w_fp16 = w.to(torch.float16).to(torch.float32)
         self.assertTrue(torch.equal(w_fp16, w_unpacked_fp16[0]))
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
     def test_qlinear_dynamic_fp16(self):
 
         options = itertools.product(
@@ -3729,7 +3731,34 @@ class TestDynamicQuantizedOps(TestCase):
 
             self.assertEqual(out, ref)
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
+    def test_qlinear_dynamic_fp16_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self, packed):
+                super().__init__()
+                self.packed = packed
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16(x, self.packed)
+
+        qengine = "onednn" if IS_ARM64 else "fbgemm"
+        with override_quantized_engine(qengine):
+            w = torch.randn(8, 4)
+            bias = torch.randn(8)
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            packed = torch.ops.quantized.linear_prepack_fp16(w, bias)
+            unpacked_w, unpacked_b = torch.ops.quantized.linear_unpack_fp16(packed)
+            self.assertEqual(unpacked_w, w_fp16)
+            self.assertEqual(unpacked_b, bias)
+
+            buf = io.BytesIO()
+            torch.jit.save(torch.jit.script(M(packed)), buf)
+            buf.seek(0)
+            loaded = torch.jit.load(buf)
+            x = torch.randn(2, 4)
+            self.assertEqual(loaded(x), F.linear(x, w_fp16, bias))
+
+    @skipIfNoFBGEMMFp16Linear
     def test_unpacked_qlinear_dynamic_fp16(self):
 
         options = itertools.product(
@@ -3754,7 +3783,7 @@ class TestDynamicQuantizedOps(TestCase):
             self.assertEqual(out, ref)
 
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
     def test_unpacked_qlinear_dynamic_fp16_opcheck(self):
         qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight.default
 
@@ -3764,7 +3793,7 @@ class TestDynamicQuantizedOps(TestCase):
 
         opcheck(qlinear_dynamic, (x, w, bias))
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
     def test_wrapped_fbgemm_linear_fp16(self):
         options = itertools.product(
             (2, 4),         # batch_size
@@ -3788,7 +3817,7 @@ class TestDynamicQuantizedOps(TestCase):
 
             self.assertEqual(out, ref)
 
-    @skipIfNoFBGEMM
+    @skipIfNoFBGEMMFp16Linear
     def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
         # We are not using opcheck over here because the output for the op we're testing
         # (_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
@@ -9047,6 +9076,27 @@ class TestQuantizedConv(TestCase):
         torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
+    @override_qengines
+    def test_qconv1d_module_supported_engines(self):
+        # https://github.com/pytorch/pytorch/issues/177254: every engine in
+        # supported_engines must be able to run quantized Conv1d.
+        w = torch.quantize_per_tensor(
+            torch.randn(8, 4, 3), scale=0.05, zero_point=0, dtype=torch.qint8
+        )
+        b = torch.randn(8)
+        qconv1d = torch.ao.nn.quantized.Conv1d(4, 8, 3)
+        qconv1d.set_weight_bias(w, b)
+        qconv1d.scale = 0.1
+        qconv1d.zero_point = 128
+        x = torch.quantize_per_tensor(
+            torch.randn(1, 4, 16), scale=0.05, zero_point=128, dtype=torch.quint8
+        )
+        out = qconv1d(x)
+        ref = torch.quantize_per_tensor(
+            F.conv1d(x.dequantize(), w.dequantize(), b),
+            scale=0.1, zero_point=128, dtype=torch.quint8,
+        )
+        self.assertEqual(out.int_repr(), ref.int_repr(), atol=1, rtol=0)
 
 
 class TestPadding(TestCase):

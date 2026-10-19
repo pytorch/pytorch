@@ -49,7 +49,7 @@ from torch.ao.quantization.quantization_mappings import (
 
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import IS_ARM64, TEST_WITH_ROCM, TestCase
 
 try:
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
@@ -358,6 +358,36 @@ def skipIfNoFBGEMM(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if "fbgemm" not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+
+    return wrapper
+
+
+def _fbgemm_fp16_linear_available():
+    # On AArch64 the fbgemm engine is not registered, but quantized fp16 linear
+    # still uses FBGEMM through the onednn engine.
+    if "fbgemm" in torch.backends.quantized.supported_engines:
+        return True
+    return (
+        IS_ARM64
+        and "onednn" in torch.backends.quantized.supported_engines
+        and "-DUSE_FBGEMM" in torch.__config__.show()
+    )
+
+
+def skipIfNoFBGEMMFp16Linear(fn):
+    reason = "Quantized fp16 linear requires FBGEMM."
+    if isinstance(fn, type):
+        if not _fbgemm_fp16_linear_available():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not _fbgemm_fp16_linear_available():
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
