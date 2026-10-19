@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 #include <ATen/record_function.h>
 #include <c10/core/DispatchKey.h>
@@ -219,7 +220,7 @@ bool aoti_torch_grad_mode_is_enabled() {
 }
 
 void aoti_torch_grad_mode_set_enabled(bool enabled) {
-  return c10::GradMode::set_enabled(enabled);
+  c10::GradMode::set_enabled(enabled);
 }
 
 size_t aoti_torch_dtype_element_size(int32_t dtype) {

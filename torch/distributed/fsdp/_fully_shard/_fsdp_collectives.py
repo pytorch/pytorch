@@ -481,7 +481,11 @@ def _default_all_gather_output_fn(
         )
         fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
-        if fsdp_param.fsdp_placement.dim != 0:
+        if (
+            fsdp_param.fsdp_placement.dim != 0
+            # Post-forward shards are flat chunks of the unsharded data
+            and fsdp_param.sharded_state == ShardedState.SHARDED
+        ):
             # Copy to a temporary and then chunk-cat into the final all-gather
             # output tensors
             param_all_gather_outputs = [
@@ -497,6 +501,16 @@ def _default_all_gather_output_fn(
         world_size,
     )
     _reassemble_all_gather_outputs(shard_i_copy_infos, world_size)
+
+
+def _wait_all_gather(all_gather_result: AllGatherResult) -> None:
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_result.all_gather_output.device
+    device_handle = _get_device_handle(device.type)
+    if (all_gather_event := all_gather_result.all_gather_event) is not None:
+        device_handle.current_stream().wait_event(all_gather_event)
+    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
+        all_gather_work.wait()
 
 
 @torch.no_grad()
@@ -557,13 +571,7 @@ def _reassemble_all_gather_outputs(
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
             ):
-                padded_sharded_size = (
-                    fsdp_param.padded_sharded_param_size
-                    if fsdp_param.sharded_state == ShardedState.SHARDED
-                    else cast(
-                        torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                    ).size()
-                )
+                padded_sharded_size = fsdp_param.padded_sharded_param_size
                 pre_param_size = list(padded_sharded_size)
                 pre_param_size[0] *= world_size
                 chunks = torch.chunk(
@@ -912,8 +920,8 @@ def foreach_reduce_scatter_copy_in(
     # parameter's grad_dtype policy (default: the parameter's dtype), so a group
     # can mix dtypes, e.g. bf16 weights with fp32 norms. Uniform groups run the
     # same _chunk_cat kernels as fsdp.chunk_cat, at the same cost. On CUDA, mixed
-    # bf16/fp32 groups run that kernel once per input dtype, casting during the
-    # copy-in; other mixes cast each gradient first.
+    # bf16/fp32 and fp16/fp32 groups run that kernel once per input dtype, casting
+    # during the copy-in; other mixes cast each gradient first.
     torch.ops.fsdp.chunk_cat_mixed_dtype(
         unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
     )

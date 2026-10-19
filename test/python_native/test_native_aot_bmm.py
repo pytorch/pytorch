@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     lazy_skip_if,
     parametrize,
@@ -79,6 +80,8 @@ def _jit_masked():
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 class TestNativeAotBmmOuter(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _outer(self, B, M, N, dtype=torch.float32, seed=0):
         torch.manual_seed(seed)
         a = torch.randn(B, M, 1, device="cuda", dtype=dtype)
@@ -284,6 +287,8 @@ class TestNativeAotBmmOuter(TestCase):
 
 
 class TestNativeAotBmmOut(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipIfNoNativeAot("bmm")
     @dtypes(torch.float32, torch.bfloat16)
     def test_internally_overlapping_output_raises(self, device, dtype):
@@ -309,6 +314,8 @@ class TestNativeAotBmmOut(TestCase):
 
 
 class TestNativeAotBmmDeclaration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_python_coverage_declines_int32_overflowing_shapes(self):
         bind = _load_covered_axes()
         b = torch.empty(2, 1, 256, device="meta")
@@ -335,6 +342,8 @@ class TestNativeAotBmmDeclaration(TestCase):
 
 
 class TestNativeBmmJit(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipIfNoTritonDSL
     @parametrize("other_op_embedded", [False, True])
     def test_missing_aot_keeps_jit_route(self, device, other_op_embedded):

@@ -2691,6 +2691,150 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn()
         self.assertEqual(((3, 5), (3, 5)), res)
 
+    def _check_named_out_args_shape_change_before_nested_graph_break(
+        self, explicit_overload, dynamic=False, changed_output=None
+    ):
+        op = torch.ops.aten.topk.values if explicit_overload else torch.ops.aten.topk
+
+        def inspect_shapes(*tensors):
+            shapes = tuple(tensor.shape for tensor in tensors)
+            torch._dynamo.graph_break()
+            return shapes
+
+        def fn(x):
+            values_shape = (3, 2) if changed_output == "indices" else (0,)
+            indices_shape = (3, 2) if changed_output == "values" else (0,)
+            values = torch.empty(values_shape)
+            indices = torch.empty(indices_shape, dtype=torch.int64)
+            op(x, 2, values=values, indices=indices)
+            return inspect_shapes(values, indices)
+
+        result = torch.compile(fn, backend="eager", dynamic=dynamic)(torch.randn(3, 4))
+        self.assertEqual(result, ((3, 2), (3, 2)))
+
+    def test_named_out_args_shape_change_before_nested_graph_break(self):
+        self._check_named_out_args_shape_change_before_nested_graph_break(False)
+
+    @parametrize("explicit_overload", [False, True])
+    @parametrize("dynamic", [False, True])
+    @parametrize("changed_output", ["values", "indices"])
+    def test_named_out_args_shape_change_variants(
+        self, explicit_overload, dynamic, changed_output
+    ):
+        self._check_named_out_args_shape_change_before_nested_graph_break(
+            explicit_overload, dynamic, changed_output
+        )
+
+    @parametrize("explicit_overload", [False, True])
+    def test_untagged_out_shape_change(self, explicit_overload):
+        namespace = "test_dynamo_untagged_out"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            lib.define("fill_out(Tensor x, *, Tensor(a!) out) -> ()")
+
+            def fill_impl(x, *, out):
+                out.resize_(x.shape)
+                out.copy_(x * 2)
+
+            def fill_fake(x, *, out):
+                out.resize_(x.shape)
+
+            lib.impl("fill_out", fill_impl, "CompositeExplicitAutograd")
+            torch.library.register_fake(f"{namespace}::fill_out", fill_fake, lib=lib)
+            packet = getattr(torch.ops, namespace).fill_out
+            op = packet.default if explicit_overload else packet
+            self.assertNotIn(torch.Tag.out, packet.default.tags)
+
+            def fn(x, out):
+                op(x, out=out)
+                return out + 1
+
+            counter = CompileCounter()
+            compiled = torch.compile(fn, backend=counter)
+            frame_count = 0
+            for n in (3, 5, 7, 4, 9):
+                x = torch.arange(n)
+                expected_out = torch.empty(0)
+                expected = fn(x, expected_out)
+                out = torch.empty(0)
+                self.assertEqual(compiled(x, out), expected)
+                self.assertEqual(out, expected_out)
+                if n == 5:
+                    frame_count = counter.frame_count
+            self.assertEqual(counter.frame_count, frame_count)
+
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Shape mismatch when calling .* with `out=`",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(
+                    torch.arange(3), torch.empty(0)
+                )
+
+    def test_packet_overload_mutating_kwarg_resolution(self):
+        namespace = "test_dynamo_mutating_kwarg_resolution"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            torch.library.define(
+                f"{namespace}::foo.write",
+                "(Tensor x, *, Tensor(a!) dst) -> Tensor(a!)",
+                lib=lib,
+            )
+            torch.library.define(
+                f"{namespace}::foo.read",
+                "(int n, *, Tensor dst) -> Tensor",
+                lib=lib,
+            )
+            torch.library.impl(
+                f"{namespace}::foo.read",
+                "CompositeImplicitAutograd",
+                lambda n, *, dst: dst + n,
+                lib=lib,
+            )
+            packet = getattr(torch.ops, namespace).foo
+
+            def fn(dst):
+                return packet(1, dst=dst)
+
+            dst = torch.arange(12).reshape(3, 4)[:, ::2]
+            self.assertFalse(dst.is_contiguous())
+            expected = fn(dst)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(dst)
+            self.assertEqual(actual, expected)
+
+    def test_non_out_mutating_kwarg_non_contiguous(self):
+        namespace = "test_dynamo_non_out_mutating_kwarg"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            torch.library.define(
+                f"{namespace}::fill_",
+                "(Tensor x, *, Tensor(a!) buf) -> ()",
+                lib=lib,
+            )
+
+            def fill_impl(x, *, buf):
+                buf.add_(x.sum())
+
+            torch.library.impl(
+                f"{namespace}::fill_",
+                "CompositeExplicitAutograd",
+                fill_impl,
+                lib=lib,
+            )
+            torch.library.register_fake(
+                f"{namespace}::fill_", lambda x, *, buf: None, lib=lib
+            )
+            op = getattr(torch.ops, namespace).fill_
+
+            def fn(x, buf):
+                op(x, buf=buf)
+                return buf + 1
+
+            buf = torch.zeros(4, 4)[:, ::2]
+            result = torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(3), buf
+            )
+            self.assertEqual(buf, torch.full_like(buf, 3))
+            self.assertEqual(result, torch.full_like(buf, 4))
+
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
             def forward(self, listy):
@@ -3667,6 +3811,58 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
+
+    @parametrize("alias", ["contiguous", "to_dtype", "to_device", "type", "mul_"])
+    @parametrize("call", ["method", "function"])
+    def test_inplace_view_on_noop_alias_of_input(self, alias, call):
+        # Each alias is x itself, so the in-place view must graph break like x.unsqueeze_(0).
+        make_alias = {
+            "contiguous": lambda x: x.contiguous(),
+            "to_dtype": lambda x: x.to(x.dtype),
+            "to_device": lambda x: x.to(x.device),
+            "type": lambda x: x.type(x.dtype),
+            "mul_": lambda x: x.mul_(1),
+        }[alias]
+
+        def fn(x):
+            v = make_alias(x)
+            if call == "method":
+                v.unsqueeze_(0)
+            else:
+                torch.Tensor.unsqueeze_(v, 0)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        # fullgraph first: a failed compile caches nothing, so the next call traces again.
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
+        self.assertEqual(opt_x.shape, ref_x.shape)
+
+    def test_inplace_view_on_copy_of_input(self):
+        def fn(x):
+            v = x.clone()
+            v.unsqueeze_(0)
+            return v
+
+        x = torch.arange(24).reshape(4, 6)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_inplace_view_on_subclass_alias_of_input(self):
+        class Subclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            v = x.contiguous().as_subclass(Subclass)
+            v.unsqueeze_(0)
+            return x, v
+
+        ref_x, ref_v = fn(torch.ones(2, 3))
+        x, v = torch.compile(fn, backend="eager")(torch.ones(2, 3))
+        self.assertEqual(x.shape, ref_x.shape)
+        self.assertEqual(v.shape, ref_v.shape)
+        self.assertIsInstance(v, Subclass)
 
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):

@@ -47,6 +47,7 @@ log
 usage_log.txt
 usage_log*
 test-reports/
+torchci-reports/
 test/*.bak
 test/**/*.bak
 test/.hypothesis/

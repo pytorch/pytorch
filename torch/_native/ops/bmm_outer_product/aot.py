@@ -5,9 +5,8 @@ non-CUDA stay with the JIT override."""
 ATEN_OP = "bmm"
 DISPATCH_KEY = "CUDA"
 KERNEL_MODULE = "triton_kernels.py"
-# Stated, or the default claims every KNOWN_ARCHES. Both spellings, since either can
-# appear in TORCH_CUDA_ARCH_LIST and export matches them exactly.
-ARCHS = ("sm_90", "sm_90a", "sm_100", "sm_100a")
+# Triton compiles these capabilities as arch-conditional targets.
+ARCHS = ("sm_90a", "sm_100a")
 
 _DTYPES = {"float32": "at::kFloat", "bfloat16": "at::kBFloat16"}
 # (BLOCK_M, m_lo, m_hi], m_hi None being unbounded: the kernel masks the M tail, so the

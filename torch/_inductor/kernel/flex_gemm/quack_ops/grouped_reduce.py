@@ -66,10 +66,13 @@ Tails and dynamic group counts
 ------------------------------
 The store is predicated on the *runtime* extents of the compressed tensor
 (``limit_groups``) and of the GEMM output (``limit_m`` / ``limit_n``), so a
-ragged last tile writes fewer groups without host-side padding. Groups must not
-straddle the GEMM boundary: ``group`` has to divide both the CTA tile and the
-grouped GEMM dimension (``GroupedReduceBase.host_validate`` checks both host-side
-and the tile divisibility is asserted again at compile time). OOB accumulator
+ragged last tile writes fewer groups without host-side padding. Under varlen_m
+only N groups are allowed (M groups would straddle sequences); the compressed
+``[total_m, groups]`` buffer is offset per sequence and predicated by its
+length. Groups must not straddle the GEMM boundary: ``group`` has to divide both
+the CTA tile and the grouped GEMM dimension (``GroupedReduceBase.host_validate``
+checks both host-side and the tile divisibility is asserted again at compile
+time). OOB accumulator
 lanes are zero, which is the identity for ``add`` only - with ``mul``/``max``/
 ``min`` a partially OOB group would be wrong, and the divisibility rule is what
 makes that unrepresentable.
@@ -197,6 +200,8 @@ def grouped_reduce_supports_config(config, axis: int, group: int) -> bool:
         if axis == 0 or getattr(config, "device_capacity", None) != 10:
             return False
         axis = 1 - axis
+    if axis == 1 and config.device_capacity == 12:
+        return False
     tile = config.tile_m if axis == 0 else config.tile_n
     if config.tile_m < 128 or config.tile_n % GROUPED_FRAGMENT_WIDTH or tile % group:
         return False
@@ -525,7 +530,10 @@ class GroupedReduceBase(EpiOp):
     ``group``), or a callable applied once to the whole reduced fragment as a
     Float32 TensorSSA (the generated FlexGEMM finalizer). ``finalize_operands``
     names epilogue ``Scalar`` operands the callable also receives, as keyword
-    TensorSSAs broadcast to the fragment shape.
+    TensorSSAs broadcast to the fragment shape. ``fragment_reduced`` means the
+    values are already reduced and broadcast within each register fragment;
+    the op skips only that local fold and still combines subtiles, lanes, and
+    warps.
     """
 
     supports_swap_ab = False
@@ -539,6 +547,7 @@ class GroupedReduceBase(EpiOp):
         combine="add",
         finalize=None,
         finalize_operands=(),
+        fragment_reduced=False,
         output_layout: GroupedLocalReduceOutputLayout | None = None,
     ):
         super().__init__(name)
@@ -563,11 +572,16 @@ class GroupedReduceBase(EpiOp):
             raise TypeError("finalize_operands must name Scalar epilogue operands")
         if finalize_operands and not callable(finalize):
             raise TypeError("finalize_operands require a callable finalize")
+        if not isinstance(fragment_reduced, bool):
+            raise TypeError("fragment_reduced must be bool")
+        if fragment_reduced and combine is None:
+            raise ValueError("fragment_reduced requires a cross-fragment combine")
         self.axis = axis
         self.group = group
         self.combine = combine
         self.finalize: Any = finalize
         self.finalize_operands = finalize_operands
+        self.fragment_reduced = fragment_reduced
         self.output_layout = output_layout
 
     def config_key(self):
@@ -587,6 +601,7 @@ class GroupedReduceBase(EpiOp):
                         "combine",
                         "finalize",
                         "finalize_operands",
+                        "fragment_reduced",
                         "output_layout",
                     ]
                 )
@@ -606,6 +621,7 @@ class GroupedReduceBase(EpiOp):
             if self.finalize is None or isinstance(self.finalize, str)
             else _callable_config_key(self.finalize),
             self.finalize_operands,
+            self.fragment_reduced,
             None if self.output_layout is None else self.output_layout.cache_key(),
         )
 
@@ -621,6 +637,8 @@ class GroupedReduceBase(EpiOp):
 
     def config_support_error(self, configs) -> str:
         """Describe an unsupported group or caller-owned output layout."""
+        if self.axis == 1 and all(config.device_capacity == 12 for config in configs):
+            return "grouped N reduce is not supported on SM120"
         if (
             self.output_layout is not None
             and self.output_layout.supports_config_fn is not None
@@ -742,7 +760,13 @@ class GroupedReduceBase(EpiOp):
     ):
         """Validate caller-owned carrier geometry against the GEMM problem."""
         if varlen_m:
-            raise ValueError(f"{self.name}: grouped reductions do not support varlen_m")
+            if self.axis != 1 or self.output_layout is not None:
+                raise ValueError(
+                    f"{self.name}: varlen_m supports compressed N-group reductions only"
+                )
+            # The compressed buffer is [total_m, groups]; the store offsets each
+            # sequence's rows by cu_seqlens_m.
+            batch = None
         if value is None:
             if self.keep_tensorless:
                 return
@@ -1035,6 +1059,10 @@ class GroupedReduceBase(EpiOp):
         batch_idx = tile_coord_mnkl[3]
         if const_expr(cute.rank(param) == 3):
             mReduce = param[batch_idx, None, None]
+        elif const_expr(varlen_manager.varlen_m):
+            mReduce = cute.domain_offset(
+                (varlen_manager.params.cu_seqlens_m[batch_idx], 0), param
+            )
         else:
             mReduce = param[None, None]
         if const_expr(axis == 1):
@@ -1095,9 +1123,11 @@ class GroupedLocalReduce(GroupedReduceBase):
     The fn returns the per-element value under this op's name; the op folds each
     group physically (see the module docstring for the four geometries) and
     stores one element per ``(row, group)`` into the compressed aux tensor.
-    ``combine=None`` skips the fold: the values are expected to be group-reduced
+    ``combine=None`` skips every fold: the values are expected to be group-reduced
     and broadcast already (what FlexGEMM's generated TensorSSA does for N groups
     inside one fragment, and what :class:`GroupedLocalReduceFeed` produces).
+    ``fragment_reduced=True`` skips only the in-fragment fold because TensorSSA
+    or another producer already reduced and broadcast each fragment partial.
     """
 
     fn_port = "sink"
@@ -1223,7 +1253,7 @@ class GroupedLocalReduce(GroupedReduceBase):
         frag = cute.filter_zeros(self._frag_slice(state, epi_coord))
         if const_expr(self.combine_fn is not None):
             if const_expr(geom.axis == 1):
-                if const_expr(geom.chunk > 1):
+                if const_expr(not self.fragment_reduced and geom.chunk > 1):
                     self._fold_fragment(frag, geom)
                 if const_expr(self._is_temporal(geom)):
                     # Only the group's last subtile completes a group value.
@@ -1231,7 +1261,10 @@ class GroupedLocalReduce(GroupedReduceBase):
                         return
                     frag = self._combine_subtiles(state, epi_coord, geom)
             else:
-                if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
+                if const_expr(
+                    not self.fragment_reduced
+                    and any(len(chunk) > 1 for chunk in geom.row_chunks)
+                ):
                     self._fold_rows(frag, geom)
                 if const_expr(min(self.group, geom.lanes_m) > 1):
                     self._butterfly_rows(frag, geom)

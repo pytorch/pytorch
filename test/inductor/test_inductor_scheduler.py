@@ -29,6 +29,7 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
+    _producer_fusion_enabled_inputs,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
@@ -46,9 +47,14 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueGrouping,
     SubParentOutputGroup,
+    WhyNoFuse,
 )
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    snode_args_kwargs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -125,6 +131,21 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_why_no_fuse_names_are_lazy(self):
+        node1 = Mock()
+        node2 = Mock()
+        node1.get_name.return_value = "node1"
+        node2.get_name.return_value = "node2"
+
+        why = WhyNoFuse(node1, node2)
+        with patch("torch._inductor.scheduler.fusion_log.debug") as debug:
+            why("reason %s", "details")
+        debug.assert_called_once_with(why)
+        node1.get_name.assert_not_called()
+        node2.get_name.assert_not_called()
+
+        self.assertEqual(str(why), "cannot fuse node1 with node2: reason details")
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -144,6 +165,32 @@ class TestScheduler(TestCase):
         snode = object.__new__(ExternKernelSchedulerNode)
         snode.node = node
         return snode
+
+    @skipIf(not HAS_GPU, "candidate_tilings is used by the GPU scheduling backends")
+    @inductor_config.patch({"triton.coalesce_tiling_analysis": False})
+    def test_candidate_tilings_cache_cleared_after_codegen(self):
+        # The cache is keyed on scheduler nodes; leaving entries behind keeps
+        # the compiled graph (and e.g. frozen constants) alive after compile.
+        def fn(x):
+            return x.t() + x
+
+        # Record the cache size after each codegen, before it is cleared, to
+        # check that the tiling analysis actually ran in this compile.
+        sizes_before_clear = []
+        orig_codegen = Scheduler._codegen
+
+        def codegen(self, *args, **kwargs):
+            out = orig_codegen(self, *args, **kwargs)
+            info = SIMDScheduling.candidate_tilings.cache_info()
+            sizes_before_clear.append(info.currsize)
+            return out
+
+        torch._dynamo.reset()
+        # A warm FX graph cache would skip scheduler codegen entirely.
+        with fresh_inductor_cache(), patch.object(Scheduler, "_codegen", codegen):
+            torch.compile(fn)(torch.randn(64, 64, device=GPU_TYPE))
+        self.assertGreater(max(sizes_before_clear, default=0), 0)
+        self.assertEqual(SIMDScheduling.candidate_tilings.cache_info().currsize, 0)
 
     def test_stable_topological_sort_schedule(self):
         consumer = self._mock_base_snode("consumer")
@@ -1025,6 +1072,7 @@ class TestScheduler(TestCase):
 
         scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
         scheduler._fusion_memory_state = None
+        scheduler._loop_mutation_trackers = []
         scheduler._can_fuse_impl = Mock(return_value=True)
         scheduler.will_fusion_create_cycle = Mock(return_value=True)
         scheduler.unfusable_node = Mock(return_value=False)
@@ -2283,6 +2331,41 @@ class TestScheduler(TestCase):
             None,
         )
 
+    @inductor_config.patch(reorder_for_peak_memory=True)
+    @parametrize("cpp_wrapper", (False, True))
+    @dtypes(torch.complex64, torch.complex128)
+    @xfailIfNoAcceleratorTriton
+    def test_mutating_fallback_returned_alias_ordering(
+        self, device, dtype, cpp_wrapper
+    ):
+        def fn(x, index, values, replacement):
+            x.index_put_((index,), values)
+            result = x.real[:, None].expand(-1, 128).square()
+            x.copy_(torch.cat((replacement, replacement)))
+            return result, x
+
+        args = (
+            torch.zeros(32, device=device, dtype=dtype),
+            torch.arange(0, 32, 2, device=device),
+            torch.full((16,), 1 + 2j, device=device, dtype=dtype),
+            torch.full((16,), 3 + 4j, device=device, dtype=dtype),
+        )
+        expected = fn(*(arg.clone() for arg in args))
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(cpp_wrapper=cpp_wrapper),
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
+            )
+        self.assertEqual(actual, expected)
+        fallback_call = (
+            'findSchemaOrThrow("aten::index_put_", "")'
+            if cpp_wrapper
+            else "= torch.ops.aten.index_put_.default("
+        )
+        self.assertIn(fallback_call, "\n".join(code))
+
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)
 
@@ -2512,6 +2595,35 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @parametrize(
+        "prologue_enabled,epilogue_enabled,expected",
+        (
+            (True, True, ("load", "both", "store")),
+            (True, False, ("load",)),
+            (False, True, ("store",)),
+            (False, False, ()),
+        ),
+    )
+    def test_producer_fusion_allowed_inputs_respect_placement_flags(
+        self,
+        prologue_enabled: bool,
+        epilogue_enabled: bool,
+        expected: tuple[str, ...],
+    ):
+        template = Mock()
+        template.allow_prologue_fusion = prologue_enabled
+        template.allow_epilogue_fusion = epilogue_enabled
+        template.load_input_fusion_allowed_inputs = OrderedSet(("load", "both"))
+        template.store_output_fusion_allowed_inputs = OrderedSet(("store", "both"))
+
+        template_node = Mock()
+        template_node.get_template_node.return_value = template
+
+        self.assertEqual(
+            _producer_fusion_enabled_inputs(template_node),
+            OrderedSet(expected),
+        )
+
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
             prologue_node = Mock()
@@ -2538,8 +2650,10 @@ class TestScheduler(TestCase):
             input_node.get_name.return_value = "x"
             template.inputs = [input_node]
             template.allow_prologue_fusion = True
-            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
-            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+            template.allow_epilogue_fusion = False
+            template.load_input_fusion_allowed_inputs = OrderedSet(["x"])
+            template.store_output_fusion_allowed_inputs = OrderedSet()
+            template.has_aliasing_or_mutation_for_producer_fusion.return_value = (
                 hook_blocks
             )
             template_node.get_template_node.return_value = template
@@ -2582,7 +2696,7 @@ class TestScheduler(TestCase):
             with V.set_graph_handler(graph), V.set_choices_handler(choices):
                 result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
 
-            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+            template.has_aliasing_or_mutation_for_producer_fusion.assert_called_once_with(
                 template_node
             )
             template_node.has_aliasing_or_mutation.assert_not_called()

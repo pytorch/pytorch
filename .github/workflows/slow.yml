@@ -44,7 +44,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: lf,amd-dpx
+      check_experiments: lf
 
   linux-jammy-cuda13_2-py3_11-gcc11-sm86-build:
     name: linux-jammy-cuda13.2-py3.11-gcc11-sm86
@@ -159,6 +159,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-clang21-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -197,19 +198,20 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1", owners: ["module:rocm"] },
-          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1", owners: ["module:rocm"] },
-          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1", owners: ["module:rocm"] },
+          { config: "slow", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.1", owners: ["module:rocm"] },
+          { config: "slow", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.1", owners: ["module:rocm"] },
+          { config: "slow", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi350.dpx.1", owners: ["module:rocm"] },
         ]}
       python-version: "3.11"
     secrets: inherit
 
   linux-noble-rocm-py3_11-mi350-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-noble-rocm-py3_11-mi350-build
       - target-determination
