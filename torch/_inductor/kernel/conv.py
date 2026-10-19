@@ -752,7 +752,10 @@ def convolution(
                 **cfg.kwargs,
             )
 
-    if use_ck_conv_template(layout):
+    # CKGroupedConvFwdTemplate is a forward convolution. conv_transpose can
+    # share its output shape (k=3, stride=1, pad=1), so a forward instance
+    # would otherwise win autotune and silently return the wrong result.
+    if use_ck_conv_template(layout) and not transposed:
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,
             layout,
