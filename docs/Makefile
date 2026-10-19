@@ -49,4 +49,4 @@ serve:
 
 clean:
 	@echo "Removing everything under 'build' and generated sources.."
-	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(SOURCEDIR)/generated $(SOURCEDIR)/compile/generated $(SOURCEDIR)/distributed/elastic/generated $(BUILDDIR)/auto_gen_aten_op_list.csv
+	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(SOURCEDIR)/generated $(SOURCEDIR)/distributed/elastic/generated $(BUILDDIR)/auto_gen_aten_op_list.csv
