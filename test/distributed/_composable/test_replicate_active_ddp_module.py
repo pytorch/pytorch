@@ -1,11 +1,16 @@
 # Owner(s): ["oncall: distributed"]
+import os
 import tempfile
 
 import torch
 import torch.distributed as dist
 from torch.distributed._composable.replicate import replicate
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class _Boom(torch.nn.Module):
@@ -27,12 +32,16 @@ class _Scale(torch.nn.Module):
 
 
 class ReplicateActiveDDPModuleTest(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def setUp(self):
         super().setUp()
-        self._file = tempfile.NamedTemporaryFile(delete=False)
+        fd, self._store_path = tempfile.mkstemp()
+        os.close(fd)
+        self.addCleanup(os.unlink, self._store_path)
         dist.init_process_group(
             "gloo",
-            store=dist.FileStore(self._file.name, 1),
+            store=dist.FileStore(self._store_path, 1),
             rank=0,
             world_size=1,
         )
