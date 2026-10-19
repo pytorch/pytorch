@@ -1403,8 +1403,56 @@ def _materialize_fx_output_containers(x: Any) -> Any:
     return x
 
 
+def _move_pack_hooks_after_last_use(
+    fw_g: torch.fx.Graph,
+    pack_groups: list[tuple[torch.fx.Node, list[torch.fx.Node]]],
+) -> None:
+    order = {n: i for i, n in enumerate(fw_g.nodes)}
+    hook_nodes = {n for _, nodes in pack_groups for n in nodes}
+    for saved, nodes in pack_groups:
+        if not nodes:
+            continue
+        # Views of the saved tensor keep its storage alive, so their uses count too.
+        last_use = saved
+        aliases = [saved]
+        while aliases:
+            for user in aliases.pop().users:
+                if user.op == "output" or user in hook_nodes:
+                    continue
+                if order[user] > order[last_use]:
+                    last_use = user
+                target = user.target
+                if isinstance(target, torch._ops.OpOverload) and target.is_view:
+                    aliases.append(user)
+        insert_after = (
+            fw_g.find_nodes(op="placeholder")[-1]
+            if last_use.op == "placeholder"
+            else last_use
+        )
+        for n in nodes:
+            if insert_after.next is not n:
+                insert_after.append(n)
+            insert_after = n
+
+
+def _move_unpack_hooks_before_first_use(
+    bw_g: torch.fx.Graph,
+    unpack_groups: list[tuple[torch.fx.Node, list[torch.fx.Node]]],
+) -> None:
+    order = {n: i for i, n in enumerate(bw_g.nodes)}
+    hook_nodes = {n for _, nodes in unpack_groups for n in nodes}
+    for unpacked, nodes in unpack_groups:
+        users = [u for u in unpacked.users if u.op != "output" and u not in hook_nodes]
+        if not nodes or not users:
+            continue
+        first_use = min(users, key=order.__getitem__)
+        for n in nodes:
+            first_use.prepend(n)
+
+
 # Inline Autograd saved_tensors_hooks into epilogue of forward graph
-# and prologue of backward graph.
+# and prologue of backward graph (or next to the uses of each saved tensor,
+# see config.saved_tensors_hooks_place_at_use).
 # This changes forward graph outputs and inputs.
 # Pack hook can return tensors, sym scalars, constants.
 # All tensors to save for backward will be grouped together at front.
@@ -1468,6 +1516,9 @@ def maybe_inline_graph_saved_tensors_hooks(
     fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]  # type: ignore[index]
     fw_outs_packed_tensors = []  # type: ignore[var-annotated]
     fw_outs_packed_syms = []  # type: ignore[var-annotated]
+    # (saved tensor, inlined pack nodes) and (unpacked tensor, inlined unpack nodes)
+    pack_groups: list[tuple[torch.fx.Node, list[torch.fx.Node]]] = []
+    unpack_groups: list[tuple[torch.fx.Node, list[torch.fx.Node]]] = []
 
     # The main use case for saved_tensors_hooks is activation quantization,
     # for memory usage optimization.
@@ -1590,6 +1641,8 @@ def maybe_inline_graph_saved_tensors_hooks(
             )
         env = {pack_g_inputs[0]: saved}
         fw_pack_out_args = None
+        saved_n = saved
+        pack_nodes = []
         with fw_g.inserting_before(fw_out_n):
             for node in pack_g.nodes:
                 if node.op == "placeholder":
@@ -1602,6 +1655,8 @@ def maybe_inline_graph_saved_tensors_hooks(
                 if node.op == "output":
                     fw_pack_out_args = new_n.args[0]
                     fw_g.erase_node(new_n)
+                else:
+                    pack_nodes.append(new_n)
 
         env.clear()
         if not fw_pack_out_args:
@@ -1641,6 +1696,10 @@ def maybe_inline_graph_saved_tensors_hooks(
                 n.meta = copy.copy(_n.meta)
                 _n.replace_all_uses_with(n)
                 fw_g.erase_node(_n)
+                if _n is saved:
+                    saved_n = n
+                else:
+                    pack_nodes[pack_nodes.index(_n)] = n
             if isinstance(n.meta["val"], torch.Tensor):
                 fw_outs_packed_tensors.append(n)
             elif is_sym_node(n):
@@ -1719,6 +1778,7 @@ def maybe_inline_graph_saved_tensors_hooks(
 
         # Inserting unpack hook after placeholders.
         bw_unpack_out_n = None
+        unpack_nodes = []
         with bw_g.inserting_before(bw_g_inputs[-1].next):
             for node in unpack_g.nodes:
                 if node.op == "placeholder":
@@ -1730,6 +1790,8 @@ def maybe_inline_graph_saved_tensors_hooks(
                 # Removed in the end.
                 if node.op == "output":
                     bw_unpack_out_n = new_n
+                else:
+                    unpack_nodes.append(new_n)
 
         if not bw_unpack_out_n:
             raise AssertionError("bw_unpack_out_n must not be None")
@@ -1737,6 +1799,12 @@ def maybe_inline_graph_saved_tensors_hooks(
         if len(_leaves) != 1:
             raise AssertionError(f"expected exactly 1 leaf, got {len(_leaves)}")
         unpack_saved_tensor_n = _leaves[0]
+        if not isinstance(unpack_saved_tensor_n, torch.fx.Node):
+            raise AssertionError(
+                f"expected unpack hook output to be a Node, got {type(unpack_saved_tensor_n)}"
+            )
+        pack_groups.append((saved_n, pack_nodes))
+        unpack_groups.append((unpack_saved_tensor_n, unpack_nodes))
 
         if not bw_g_input_used_directly:
             bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
@@ -1747,6 +1815,10 @@ def maybe_inline_graph_saved_tensors_hooks(
             for use_node in original_bw_g_input_users:
                 use_node._replace_input_with(bw_g_input, unpack_saved_tensor_n)
         bw_g.erase_node(bw_unpack_out_n)
+
+    if torch._functorch.config.saved_tensors_hooks_place_at_use:
+        _move_pack_hooks_after_last_use(fw_g, pack_groups)
+        _move_unpack_hooks_before_first_use(bw_g, unpack_groups)
 
     # Changing forward graph outputs,
     # Inserting packed_tensors and packed_syms on the place of saved tensors.
