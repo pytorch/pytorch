@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 WINDOW_BACKENDS = [
     ("nccl2", "cuda"),
+    ("nccl-lazy", "cuda"),
 ]
 
 

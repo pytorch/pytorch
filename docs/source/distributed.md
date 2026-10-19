@@ -627,8 +627,12 @@ allocated from the backend's memory pool,
 `torch.cuda.MemPool(backend.mem_allocator)`. Registration covers the
 tensor's whole allocator segment, so all ranks must register matching
 segments; allocating the same sizes in the same order on every rank satisfies
-this. The source of {meth}`~torch.distributed.distributed_c10d.Window.put` must lie in an already registered
-segment, e.g. a contiguous slice of a registered tensor.
+this. Pool memory is not enough for the source of
+{meth}`~torch.distributed.distributed_c10d.Window.put`: it must lie in a segment that a window has
+registered, e.g. a contiguous slice of this window's tensor.
+A window holds one tensor at a time; call
+{meth}`~torch.distributed.distributed_c10d.Window.tensor_deregister` before registering another, and note
+that {func}`~torch.distributed.distributed_c10d._new_window` with a tensor already registers it.
 Each {meth}`~torch.distributed.distributed_c10d.Window.put` also signals the destination rank, so the
 destination can wait for the data with a single {meth}`~torch.distributed.distributed_c10d.Window.wait_signal`.
 {meth}`~torch.distributed.distributed_c10d.Window.map_remote_tensor` only supports the local rank and
@@ -689,6 +693,16 @@ stream, and `Work.wait()` makes the current stream wait for it.
 .. autofunction:: torch.distributed.distributed_c10d._new_window
 
 .. autoclass:: torch.distributed.distributed_c10d.Window
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.PutOptions
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.SignalOptions
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.WaitSignalOptions
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.WindowAttr
+   :members:
+.. autoclass:: torch.distributed.distributed_c10d.WindowAccessType
    :members:
 ```
 

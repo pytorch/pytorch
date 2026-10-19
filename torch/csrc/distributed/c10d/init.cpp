@@ -1328,26 +1328,55 @@ Example:
       .def_readwrite("timeout", &::c10d::ReconfigureOptions::timeout)
       .def_readwrite("hints", &::c10d::ReconfigureOptions::hints);
 
-  py::class_<::c10d::PutOptions>(module, "PutOptions")
+  py::class_<::c10d::PutOptions>(module, "PutOptions", R"(
+Options for :meth:`Window.put`.
+
+Attributes:
+    timeout (datetime.timedelta): Operation timeout. If unset, the backend
+        default is used.
+    hints (dict[str, str]): Backend-specific hints.
+)")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::PutOptions::timeout)
       .def_readwrite("hints", &::c10d::PutOptions::hints);
 
-  py::class_<::c10d::SignalOptions>(module, "SignalOptions")
+  py::class_<::c10d::SignalOptions>(module, "SignalOptions", R"(
+Options for :meth:`Window.signal`.
+
+Attributes:
+    timeout (datetime.timedelta): Operation timeout. If unset, the backend
+        default is used.
+    hints (dict[str, str]): Backend-specific hints.
+)")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::SignalOptions::timeout)
       .def_readwrite("hints", &::c10d::SignalOptions::hints);
 
-  py::class_<::c10d::WaitSignalOptions>(module, "WaitSignalOptions")
+  py::class_<::c10d::WaitSignalOptions>(module, "WaitSignalOptions", R"(
+Options for :meth:`Window.wait_signal`.
+
+Attributes:
+    timeout (datetime.timedelta): Operation timeout. If unset, the backend
+        default is used.
+    hints (dict[str, str]): Backend-specific hints.
+)")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::WaitSignalOptions::timeout)
       .def_readwrite("hints", &::c10d::WaitSignalOptions::hints);
 
-  py::enum_<::c10d::WindowAccessType>(module, "WindowAccessType")
+  py::enum_<::c10d::WindowAccessType>(module, "WindowAccessType", R"(
+How a rank accesses a peer's window: ``UNIFIED`` for a single coherent view,
+``SEPARATE`` for separate copies that need explicit synchronization.
+)")
       .value("UNIFIED", ::c10d::WindowAccessType::UNIFIED)
       .value("SEPARATE", ::c10d::WindowAccessType::SEPARATE);
 
-  py::class_<::c10d::WindowAttr>(module, "WindowAttr")
+  py::class_<::c10d::WindowAttr>(module, "WindowAttr", R"(
+Window attributes returned by :meth:`Window.get_attr`.
+
+Attributes:
+    access_type (WindowAccessType): How the window is accessed.
+)")
       .def(py::init<>())
       .def_readwrite("access_type", &::c10d::WindowAttr::access_type);
 
@@ -1376,7 +1405,8 @@ Register ``tensor`` as this rank's window memory.
 This is collective: every rank in the group must call it, in the same order
 relative to other collectives. Backends may register more than ``tensor``
 itself (e.g. its whole allocation), in which case ranks must register
-matching allocations.
+matching allocations. A window holds one tensor at a time: call
+:meth:`tensor_deregister` before registering another.
 
 Args:
     tensor (torch.Tensor): Tensor to expose to peers.
@@ -1406,7 +1436,8 @@ Write ``tensor`` into the window of ``dst_rank``. Backends may also signal
 Args:
     tensor (torch.Tensor): Source tensor. Must match the destination's dtype
         and fit within its window. Backends may require it to reside in
-        memory that is already registered with the window.
+        a tensor registered with a window, e.g. a slice of this window's
+        tensor.
     dst_rank (int): Destination rank in the group.
     target_offset_nelems (int): Element offset into the destination window.
     async_op (bool): Whether this op should be an async op.
