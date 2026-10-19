@@ -45,7 +45,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
+    skipIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -7315,14 +7315,18 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
 
 
-class FunctionCUDATests(torch._dynamo.test_case.TestCase):
+class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @onlyCUDA
+    @skipIf(
+        True,
+        "requires cuda",
+        device_type=("cpu", "mps", "xpu", "hpu", "mtia", "meta"),
+    )
     def test_get_device_properties_tensor_device(self, device):
         def fn(a):
             x = a.to(device)
-            prop = torch.get_device_module(device).get_device_properties(x.device)
+            prop = torch.cuda.get_device_properties(x.device)
             if prop.major == 8:
                 return x + prop.multi_processor_count
             return x + prop.max_threads_per_multi_processor
@@ -7332,10 +7336,10 @@ class FunctionCUDATests(torch._dynamo.test_case.TestCase):
         )
 
 
-instantiate_device_type_tests(FunctionCUDATests, globals(), only_for="cuda")
+instantiate_device_type_tests(FunctionTestsCudaOnly, globals())
 
 
-class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
+class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -7363,13 +7367,6 @@ class FunctionAcceleratorTests(torch._dynamo.test_case.TestCase):
                     self.assertEqual(foo(), foo())
                     self.assertEqual(foo(), foo())
 
-
-instantiate_device_type_tests(FunctionAcceleratorTests, globals(), allow_xpu=True)
-
-
-class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
     @onlyAccelerator
     def test_tensor_type2(self, device):
         def fn(a, b):
@@ -7389,15 +7386,6 @@ class FunctionTensorTypeAcceleratorTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(
             self, fn=fn, nargs=2, expected_frame_count=1
         )
-
-
-instantiate_device_type_tests(
-    FunctionTensorTypeAcceleratorTests, globals(), allow_xpu=True
-)
-
-
-class FunctionTritonAcceleratorTests(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
 
     @xfailIfNoAcceleratorTriton
     @onlyAccelerator
@@ -7464,7 +7452,7 @@ class FunctionTritonAcceleratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, torch.sin(x))
 
 
-instantiate_device_type_tests(FunctionTritonAcceleratorTests, globals(), allow_xpu=True)
+instantiate_device_type_tests(FunctionTestsDevice, globals(), allow_xpu=True)
 
 
 def udf_mul(x, y):
