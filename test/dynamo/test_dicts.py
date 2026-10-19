@@ -4082,7 +4082,7 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
 
 
 class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
-    """Instance attributes of collections.OrderedDict."""
+    """Instance attributes of collections.OrderedDict (regression tests for #201124)."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -4104,14 +4104,17 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         def f(x):
             d = OrderedDict()
             d._metadata = 1
-            return x + d._metadata
+            d["k"] = 2
+            return x + d._metadata, d
 
         x = torch.zeros(1)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt = torch.compile(f, backend=cnt, fullgraph=True)
-        self.assertEqual(opt(x), f(x))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(opt(x), f(x))
+        out, eager = torch.compile(f, backend=cnt, fullgraph=True)(x), f(x)
+        self.assertEqual(out[0], eager[0])
+        # The escaping OrderedDict is reconstructed with its attributes/items.
+        self.assertIs(type(out[1]), OrderedDict)
+        self.assertEqual(dict(out[1]), dict(eager[1]))
+        self.assertEqual(out[1]._metadata, eager[1]._metadata)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_state_dict_values_order_and_metadata(self):
@@ -4161,8 +4164,8 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         od.foo = 7
         x = torch.zeros(1)
 
-        # Reads of a pre-existing OrderedDict attribute keep compiling (deferred
-        # attribute load on the live object) and match eager.
+        # Reads off a pre-existing OrderedDict keep compiling (deferred attribute
+        # load on the live object) and match eager.
         def read_attr(x, d):
             return x + 1, d.foo
 
@@ -4172,7 +4175,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         )
 
         # Writes are not modeled on a pre-existing OrderedDict: graph break under
-        # fullgraph, eager fallback otherwise.
+        # fullgraph, eager fallback otherwise, and the write is not lost.
         def write_attr(x, d):
             d.foo = 1
             return x + len(d)
@@ -4181,9 +4184,11 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
             Unsupported, "setattr\\(\\) on a pre-existing OrderedDict"
         ):
             torch.compile(write_attr, backend="eager", fullgraph=True)(x, od)
-        self.assertEqual(
-            torch.compile(write_attr, backend="eager")(x, OrderedDict(a=1)), x + 1
-        )
+        self.assertEqual(od.foo, 7)
+
+        d = OrderedDict(a=1)
+        self.assertEqual(torch.compile(write_attr, backend="eager")(x, d), x + 1)
+        self.assertEqual(d.foo, 1)
 
         def dict_view(x, d):
             return x + len(d.__dict__)
@@ -4192,6 +4197,152 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
             Unsupported, "__dict__ access on a pre-existing OrderedDict"
         ):
             torch.compile(dict_view, backend="eager", fullgraph=True)(x, od)
+        self.assertEqual(
+            torch.compile(dict_view, backend="eager")(x, od), dict_view(x, od)
+        )
+
+    def test_in_frame_ordereddict_escape_and_cycles(self):
+        def f(x):
+            d = OrderedDict()
+            d.me = d
+            d["self"] = d
+            d["payload"] = OrderedDict()
+            return x, d
+
+        x = torch.zeros(1)
+        out = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(out[1]), OrderedDict)
+        self.assertIs(out[1].me, out[1])
+        self.assertIs(out[1]["self"], out[1])
+        self.assertIs(type(out[1]["payload"]), OrderedDict)
+
+    def test_hop_scope_not_widened(self):
+        # Mutating an outer-scope OrderedDict from a HOP body is an unsafe side
+        # effect: the object's creation scope is preserved.
+        def outer_mutation(x):
+            d = OrderedDict()
+
+            def body(t):
+                d.foo = 1
+                return t * 2
+
+            y = torch.utils.checkpoint.checkpoint(body, x, use_reentrant=False)
+            return y + len(d)
+
+        x = torch.zeros(1)
+        with self.assertRaisesRegex(Unsupported, "HOP: Unsafe side effect"):
+            torch.compile(outer_mutation, backend="eager", fullgraph=True)(x)
+
+        # HOP-local OrderedDicts stay fully supported.
+        def local_mutation(x):
+            def body(t):
+                d = OrderedDict()
+                d.foo = 1
+                d["k"] = 2
+                return t + len(d) + d.foo
+
+            return torch.utils.checkpoint.checkpoint(body, x, use_reentrant=False)
+
+        self.assertEqual(
+            torch.compile(local_mutation, backend="eager", fullgraph=True)(x),
+            local_mutation(x),
+        )
+
+    def test_escaped_dict_view_aliasing(self):
+        def f(x):
+            d = OrderedDict()
+            d.a = 1
+            view = d.__dict__
+            d.b = 2
+            return x, view
+
+        x = torch.zeros(1)
+        self.assertEqual(
+            dict(torch.compile(f, backend="eager", fullgraph=True)(x)[1]),
+            {"a": 1, "b": 2},
+        )
+
+        # A replaced user-object __dict__ is still observed through its view.
+        class C:
+            pass
+
+        def g(x):
+            c = C()
+            c.__dict__ = {"a": 1}
+            return c.__dict__
+
+        self.assertEqual(torch.compile(g, backend="eager", fullgraph=True)(x), {"a": 1})
+
+    def test_dict_read_in_hop_then_attribute_write(self):
+        def f(x):
+            d = OrderedDict()
+
+            def body(t):
+                _ = d.__dict__
+                return t * 2
+
+            y = torch.utils.checkpoint.checkpoint(body, x, use_reentrant=False)
+            d.tag = 5
+            return y, d
+
+        x = torch.zeros(1)
+        eager = f(x)
+        out = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(dict(out[1].__dict__), dict(eager[1].__dict__))
+
+    def test_hasattr_after_deleted_instance_attr(self):
+        def f(x):
+            d = OrderedDict()
+            d.keys = 1
+            del d.__dict__["keys"]
+            return (
+                x + int(hasattr(d, "keys")),
+                x + (1 if getattr(d, "keys", None) is not None else 0),
+            )
+
+        x = torch.zeros(1)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(x), f(x))
+
+    def test_instance_attr_write_errors(self):
+        x = torch.zeros(1)
+
+        def non_str_name(x):
+            d = OrderedDict()
+            d.__setattr__(1, 1)
+            return x
+
+        with self.assertRaises(TypeError):
+            torch.compile(non_str_name, backend="eager")(x)
+
+        def descriptor_write(x):
+            d = OrderedDict()
+            d.__class__ = OrderedDict
+            return x
+
+        with self.assertRaisesRegex(
+            Unsupported, "setattr\\(\\) of a descriptor attribute on OrderedDict"
+        ):
+            torch.compile(descriptor_write, backend="eager", fullgraph=True)(x)
+
+    def test_non_str_instance_dict_keys(self):
+        def f(x):
+            d = OrderedDict()
+            d.__dict__[(1, 2)] = 1
+            d.__dict__[frozenset({3})] = 2
+            d.tag = 3
+            return x, d
+
+        x = torch.zeros(1)
+        eager = f(x)
+        out = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(dict(out[1].__dict__), dict(eager[1].__dict__))
+
+        def g(x):
+            d = OrderedDict()
+            d.__dict__[(1, 2)] = 1
+            return x + (1 if (1, 2) in d.__dict__ else 0) + len(d.__dict__)
+
+        self.assertEqual(torch.compile(g, backend="eager", fullgraph=True)(x), g(x))
 
 
 instantiate_parametrized_tests(DictGuardTests)

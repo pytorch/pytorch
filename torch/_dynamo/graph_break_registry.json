@@ -72,16 +72,6 @@
       ]
     }
   ],
-  "GB2085": [
-    {
-      "Gb_type": "unreplayable key type in instance __dict__",
-      "Context": "key type: {type(name)}",
-      "Explanation": "Dynamo cannot replay an object instance __dict__ write whose key is neither a scalar constant nor a tuple/frozenset of scalar constants.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB6032": [
     {
       "Gb_type": "non-constant key in instance __dict__",
@@ -317,6 +307,26 @@
       "Context": "",
       "Explanation": "We cannot reconstruct a torch.autograd.Function's context object.",
       "Hints": []
+    }
+  ],
+  "GB7693": [
+    {
+      "Gb_type": "non-string key on unsupported instance __dict__ owner",
+      "Context": "object type: {type(item).__name__}, key: {name}",
+      "Explanation": "Dynamo cannot replay a non-string instance __dict__ key for this object type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4765": [
+    {
+      "Gb_type": "non-string key on pre-existing instance __dict__",
+      "Context": "object type: {type(item).__name__}, key: {name}",
+      "Explanation": "Dynamo cannot replay a non-string instance __dict__ key for an object that existed before tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
     }
   ],
   "GB0020": [

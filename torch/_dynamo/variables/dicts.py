@@ -820,20 +820,19 @@ class ConstDictVariable(VariableTracker):
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
         result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            # A data descriptor on the type wins over a deleted instance-dict
-            # entry (e.g. '__class__'/'__dict__' written via the __dict__ view).
-            from .user_defined import type_attr_takes_precedence
-
-            if result.is_constant_match(True) or not type_attr_takes_precedence(
-                self, name
-            ):
-                return result
+        if result is not None and result.is_constant_match(True):
+            return result
+        # A pending False means a shadowing instance entry was deleted; a plain
+        # class attribute or non-data descriptor may still be visible on the
+        # type, so fall through to the class-attribute check below.
         cls = self.python_type()
         if any(
             cls is t for t in (dict, collections.OrderedDict, collections.defaultdict)
         ):
-            if hasattr(cls, name):
+            # Instance attribute lookup follows the type MRO; `hasattr(cls, name)`
+            # would also report attributes that only live on the class object
+            # itself (e.g. metaclass-provided __module__).
+            if mro_lookup(cls, name) is not NO_SUCH_SUBOBJ:
                 return ConstantVariable.create(True)
             if cls is dict:
                 return ConstantVariable.create(False)
@@ -1018,8 +1017,7 @@ class OrderedDictVariable(ConstDictVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         se = tx.output.side_effects
-        if not se.is_attribute_mutation(self):
-            se.track_attribute_mutation_new(self)
+        se.ensure_attribute_mutation(self)
         se.store_instance_dict_attr(self, name, value)
         return ConstantVariable.create(None)
 
@@ -1041,10 +1039,11 @@ class OrderedDictVariable(ConstDictVariable):
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
             se = tx.output.side_effects
-            if not se.is_attribute_mutation(self):
-                # Writes made through the returned mapping land in the same
-                # side-effects compartment as setattr.
-                se.track_attribute_mutation_new(self)
+            # Writes made through the returned mapping land in the same
+            # side-effects compartment as setattr. Registration must be keyed by
+            # id: a HOP body may have registered this VT in a discarded
+            # side-effects snapshot while leaving mutation_type set.
+            se.ensure_attribute_mutation(self)
             return self.get_dict_vt(tx)
         from .misc import DeletedVariable
         from .user_defined import type_attr_takes_precedence
@@ -1688,19 +1687,6 @@ class DictItemsVariable(DictViewVariable):
 kV = HashableTracker | str
 
 
-def _is_replayable_instance_dict_key(value: Any) -> bool:
-    """Whether an object instance-__dict__ mapping key can be replayed.
-
-    Writes through a modeled __dict__ view are replayed as literal bytecode, so
-    keys must be scalar constants or (nested) tuple/frozenset containers of them.
-    """
-    if ConstantVariable.is_base_literal(value):
-        return True
-    if type(value) is tuple or type(value) is frozenset:
-        return all(_is_replayable_instance_dict_key(item) for item in value)
-    return False
-
-
 class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
     """
     A proxy dict that allows us to track mutations to the dict using side
@@ -1830,12 +1816,12 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             raise AssertionError("output_graph weakref is dead")
         return output_graph.side_effects
 
-    def _maybe_unwrap_key(self, key: kV) -> str:
+    def _maybe_unwrap_key(self, key: kV) -> Any:
         Hasher = HashableTracker
         if not istype(key, Hasher):
             return key
         try:
-            name = key.vt.as_python_constant()
+            return key.vt.as_python_constant()
         except NotImplementedError:
             unimplemented(
                 gb_type="non-constant key in instance __dict__",
@@ -1843,15 +1829,6 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
                 explanation="Dynamo models object instance __dict__ keys as constants.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        if not _is_replayable_instance_dict_key(name):
-            unimplemented(
-                gb_type="unreplayable key type in instance __dict__",
-                context=f"key type: {type(name)}",
-                explanation="Dynamo cannot replay an object instance __dict__ write whose key is "
-                "neither a scalar constant nor a tuple/frozenset of scalar constants.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
-        return name
 
     def side_effects_table(self) -> dict[str, VariableTracker]:
         return {
@@ -1877,7 +1854,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
         # instance __dict__ accepts arbitrary hashable keys when set via the
         # mapping API (only attribute access via setattr requires str), and
         # instance-dict mutations replay with object_setattr_ignore_descriptor
-        # (a plain __dict__ store), so a non-str constant key is fine.
+        # (a plain __dict__ store), so a replayable non-str constant key is fine.
         name = self._maybe_unwrap_key(key)
         self.side_effects.store_instance_dict_attr(self.item, name, value)
 
@@ -1952,10 +1929,17 @@ class DunderDictVariable(ConstDictVariable):
         # snapshot so escaped views keep their aliasing semantics. A stale
         # TempLocalSource from a previous codegen pass must not be followed.
         owner = self.items.item
+        # If the whole __dict__ was replaced (`obj.__dict__ = {...}`), the
+        # replacement is replayed as an attribute-mutation suffix *after* this
+        # reconstruction; loading the live view here would observe the stale
+        # dict, so fall back to the snapshot that already includes it.
+        dict_replaced = self.items.side_effects.has_pending_mutation_of_attr(
+            owner, "__dict__", AttrMutationKind.GENERIC_SETATTR
+        )
         is_materialized = codegen.tempvars.get(owner) is not None or (
             owner.source is not None and not isinstance(owner.source, TempLocalSource)
         )
-        if is_materialized:
+        if is_materialized and not dict_replaced:
             codegen(owner)
             codegen.load_attr("__dict__")
             return

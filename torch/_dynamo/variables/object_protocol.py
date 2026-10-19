@@ -2500,13 +2500,12 @@ def generic_getattr(
             pass
         elif not isinstance(obj, variables.UserDefinedObjectVariable):
             value = tx.output.side_effects.load_attr(obj, name)
-            # A pending store of a descriptor onto a class lands in
-            # cls.__dict__, so reading it back has to run tp_descr_get the way
-            # type_getattro does -- otherwise `C.h = staticmethod(f);
-            # type(C.h)` reports staticmethod instead of function.
+            # A pending store of a descriptor onto a class lands in cls.__dict__,
+            # so reading it back has to run tp_descr_get the way type_getattro
+            # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
+            # staticmethod instead of function.
             if isinstance(
-                value,
-                (variables.StaticMethodVariable, variables.ClassMethodVariable),
+                value, (variables.StaticMethodVariable, variables.ClassMethodVariable)
             ):
                 return value.tp_descr_get_impl(tx, obj, obj)
             return value
