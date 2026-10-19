@@ -198,16 +198,13 @@ class TestCOW(TestCase):
 
     @parametrize("captured", [False, True])
     @parametrize("lazy_read", [False, True])
-    @parametrize("complete_first", [False, True])
-    def test_steal_waits_for_readers(self, device, captured, lazy_read, complete_first):
+    def test_steal_waits_for_readers(self, device, captured, lazy_read):
         with _streams(device, 3) as (a, b, c):
             inp = torch.ones(1024, device=device)
             with _capture(a, captured) as graph:
                 x = inp + 0
                 y = x._lazy_clone()
                 ptr = x.const_data_ptr()
-                if complete_first:
-                    torch._C._cow_record_done(x)
                 b.wait_stream(a)
                 c.wait_stream(a)
                 with torch.cuda.stream(b):
@@ -324,27 +321,28 @@ class TestCOW(TestCase):
                     else:
                         x.add_(2)
                     torch._C._cow_record_done(x)
+                    x.add_(3)
                 with torch.cuda.stream(c):
                     y.add_(1)
+                a.wait_stream(b)
                 a.wait_stream(c)
             self.assertEqual(y.const_data_ptr(), ptr)
             self.assertNotEqual(x.const_data_ptr(), ptr)
             for _ in _replays(graph, captured, inp):
-                self.assertEqual(x, inp + (0 if pointer else 2))
+                self.assertEqual(x, inp + (3 if pointer else 5))
                 self.assertEqual(y, inp + 1)
 
     @parametrize("captured", [False, True])
     @parametrize("steal", [False, True])
-    @parametrize("renew", [False, True])
-    def test_all_completion_events_order_stealing_and_reuse(
-        self, device, captured, steal, renew
-    ):
+    @parametrize("op", ["const_data_ptr", "data_ptr", "neg", "zero_", "_lazy_clone"])
+    def test_completion_orders_steal_and_reuse(self, device, captured, steal, op):
         with _streams(device, 4) as (a, b, c, d):
             inp = torch.ones(1024, device=device)
             with _capture(a, captured) as graph:
                 x = inp + 0
                 y = x._lazy_clone()
-                z = x if renew else y._lazy_clone()
+                z = y._lazy_clone()
+                alias = x.view(-1)
                 ptr = y.const_data_ptr()
                 for stream in [b, c, d]:
                     stream.wait_stream(a)
@@ -352,10 +350,13 @@ class TestCOW(TestCase):
                     torch.cuda._sleep(20_000_000)
                     first = x * 2
                     torch._C._cow_record_done(x)
-                del x
+                    torch._C._cow_record_done(alias)
+                for tensor in (x, alias):
+                    with self.assertRaisesRegex(RuntimeError, "completed COW"):
+                        getattr(tensor, op)()
+                del tensor, alias, x
                 with torch.cuda.stream(c):
                     second = z * 3
-                    torch._C._cow_record_done(z)
                     torch._C._cow_record_done(z)
                 del z
                 if steal:
@@ -390,14 +391,15 @@ class TestCOW(TestCase):
                     self.assertEqual(torch._C._is_cow_tensor(x), not materialize)
                 if not materialize:
                     for _ in range(32):
-                        z = x._lazy_clone()
+                        z = y._lazy_clone()
                         self.assertTrue(torch._C._is_cow_tensor(z))
                         torch._C._cow_record_done(z)
                         del z
-                del x
                 before = _capture_ancestors(a)
                 late = torch.ones(1024, device=device)
                 late_nodes = _capture_ancestors(a) - before
+                torch._C._cow_record_done(x)
+                del x
                 with torch.cuda.stream(c):
                     y.add_(1)
                 self.assertTrue(late_nodes)

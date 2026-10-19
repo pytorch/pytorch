@@ -73,7 +73,7 @@ class C10_API COWDeleterContext {
 };
 
 // Each DataPtr has its own reference, which follows it into retired storage
-// metadata on materialization. Access after record_done starts a new use.
+// metadata on materialization. Completion is final for this reference.
 struct C10_API COWReference {
   explicit COWReference(COWDeleterContext* context = nullptr) : ctx(context) {}
   ~COWReference();
@@ -82,7 +82,6 @@ struct C10_API COWReference {
   COWDeleterContext::LastReference release();
 
   COWDeleterContext* ctx;
-  std::atomic<bool> completed = false;
   std::unique_ptr<COWCompletion> completion;
 };
 

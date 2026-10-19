@@ -55,7 +55,9 @@ void check_cow_read(const StorageImpl* storage) {
   c10::DeviceGuard guard(data_ptr.device());
   auto* ref = data_ptr.cast_context<COWReference>(cow_deleter);
   TORCH_INTERNAL_ASSERT(ref != nullptr);
-  ref->completed = false;
+  TORCH_CHECK(
+      !ref->completion,
+      "Cannot access data of a completed COW reference after _cow_record_done()");
   const auto* impl = getDeviceGuardImpl(data_ptr.device().type());
   const auto capture_id =
       impl->getStreamCaptureId(impl->getStream(data_ptr.device()));
@@ -128,7 +130,10 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
         return eager_clone(storage);
       }
     } else {
-      const auto* ctx = data_ptr.cast_context<COWReference>(cow_deleter)->ctx;
+      const auto* ref = data_ptr.cast_context<COWReference>(cow_deleter);
+      TORCH_CHECK(
+          !ref->completion, "Cannot lazily clone a completed COW reference");
+      const auto* ctx = ref->ctx;
       if (ctx->stream() != stream || ctx->capture_id() != capture_id) {
         return eager_clone(storage);
       }

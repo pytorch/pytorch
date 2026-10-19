@@ -3603,13 +3603,12 @@ and materializing copies. Serialize this call with all host accesses to that sto
 GPU waits do not serialize host threads. Missing a use can cause data corruption.
 
 Completion releases the old reference retained after materialization, allowing siblings
-to steal it. The current reference, values, and pointer are unchanged. Independent lazy
-clones have separate completion state; sharing alone preserves source completion.
+to steal it. The materialized tensor remains usable on its new allocation.
 
-Later data access, including ``const_data_ptr()``, cancels current-reference completion.
-Obtain fresh pointers before new work; never reuse pointers covered by this call.
-After new uses, complete again or join them back onto the allocation stream before
-storage release. Renewal preserves the previous completion's dependencies.
+Completion is final for each reference; repeated calls are no-ops. If the current
+reference is COW, later data access (including ``const_data_ptr()``) or lazy cloning
+raises, including through storage aliases. Do not submit further work through saved
+pointers to that reference. Independent lazy clones have separate completion state.
 
 Completion must stay within the context's capture, or outside capture for an eager
 context. It has no effect on CPU storage or storage without COW references.

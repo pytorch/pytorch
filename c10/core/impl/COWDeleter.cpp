@@ -77,8 +77,7 @@ cow::COWReference::~COWReference() {
 
 auto cow::COWReference::release() -> COWDeleterContext::LastReference {
   auto* context = std::exchange(ctx, nullptr);
-  return context->decrement_refcount(
-      completed ? std::move(completion) : nullptr);
+  return context->decrement_refcount(std::move(completion));
 }
 
 void cow::COWReference::record_done() {
@@ -91,22 +90,16 @@ void cow::COWReference::record_done() {
       impl->getStreamCaptureId(stream) == ctx->capture_id() &&
           impl->getStreamCaptureId(reuse_stream) == ctx->capture_id(),
       "Cannot complete COW uses across CUDA graph capture boundaries");
-  if (completed) {
+  if (completion) {
     return;
   }
-  if (!completion) {
-    completion = std::make_unique<COWCompletion>(stream.device_type());
-  } else {
-    // A new use may be on another stream. Preserve the previous completion
-    // before reusing this reference's event.
-    completion->event.block(stream);
-  }
-  completion->event.record(stream);
+  auto done = std::make_unique<COWCompletion>(stream.device_type());
+  done->event.record(stream);
   // Establish reuse ordering here, while capture state is known. Destruction
   // only publishes this fixed event and drops the reference; it enqueues no
   // work.
-  completion->event.block(reuse_stream);
-  completed = true;
+  done->event.block(reuse_stream);
+  completion = std::move(done);
 }
 
 } // namespace c10::impl

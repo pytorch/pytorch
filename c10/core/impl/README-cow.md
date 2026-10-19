@@ -62,11 +62,10 @@ aliases, views, saved pointers, uses before the first lazy clone, and materializ
 Serialize the call with all host access to that storage. These are caller obligations; violating
 them can corrupt data.
 
-Data access through a current COW reference, including `const_data_ptr()`, cancels its completion.
-Obtain a fresh pointer before submitting new work; never reuse saved pointers covered by completion.
-After new uses, complete again or join them back onto A before storage release. Renewal waits on the
-reference's previous event before recording it again, preserving earlier dependencies across
-streams. Lazy sharing alone preserves source completion; each new sibling starts incomplete.
+Completion is final for each reference; repeated calls are no-ops. Subsequent data access or lazy
+cloning through a completed current reference raises, including access through storage aliases.
+Do not submit further work through saved pointers to that reference. Completing a retained reference
+leaves the materialized tensor usable on its new allocation. Lazy siblings remain independent.
 
 Each `DataPtr` owns a `COWReference` pointing to the shared `COWDeleterContext`. Release transfers
 its completion event to the context before decrementing the refcount. The last reference waits on
