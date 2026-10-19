@@ -94,38 +94,39 @@ static std::string_view batch_norm_variant(const Tensor& x, const Tensor& out) {
   return x.is_non_overlapping_and_dense() && out.strides() == x.strides() ? "" : "strided_";
 }
 
-static std::vector<std::array<int64_t, 3>> batch_norm_dims(const Tensor& x, const Tensor& out) {
-  const auto dim = [&](int64_t d) { return std::array<int64_t, 3>{x.size(d), x.stride(d), out.stride(d)}; };
-  std::vector<std::array<int64_t, 3>> sorted, dims;
+static BatchNormLayout<> batch_norm_layout(const Tensor& x, const Tensor& out) {
+  using dim_t = c10::metal::vec3<int64_t>;
+  const auto dim = [&](int64_t d) { return dim_t{x.size(d), x.stride(d), out.stride(d)}; };
+  std::vector<dim_t> sorted, dims;
   for (const auto d : c10::irange(x.dim())) {
     if (d != 1 && x.size(d) != 1) {
       sorted.push_back(dim(d));
     }
   }
-  std::ranges::sort(sorted, {}, [](const auto& e) { return e[1]; });
+  std::ranges::sort(sorted, {}, &dim_t::y);
   for (const auto& e : sorted) {
     const auto& f = dims.empty() ? e : dims.back();
-    if (!dims.empty() && e[1] == f[0] * f[1] && e[2] == f[0] * f[2]) {
-      dims.back()[0] *= e[0];
+    if (!dims.empty() && e.y == f.x * f.y && e.z == f.x * f.z) {
+      dims.back().x *= e.x;
     } else {
       dims.push_back(e);
     }
   }
-  if (dims.empty() || (x.size(1) != 1 && dims[0][1] > x.stride(1))) {
-    dims.insert(dims.begin(), {1, 0, 0});
-  }
-  if (dims.size() == 1) {
-    dims.push_back({1, 0, 0});
-  }
-  dims.push_back(dim(1));
-  return dims;
+  const bool has_inner = !dims.empty() && (x.size(1) == 1 || dims[0].y <= x.stride(1));
+  const auto inner = has_inner ? dims[0] : dim_t{1, 0, 0};
+  BatchNormLayout<> layout{.channel = dim(1),
+                           .inner = inner,
+                           .outer_numel = x.numel() / (x.size(1) * inner.x),
+                           .outer_ndim = static_cast<int32_t>(std::max<size_t>(dims.size() - has_inner, 1))};
+  std::ranges::copy(dims | std::views::drop(has_inner), layout.outer_dims.begin());
+  return layout;
 }
 
 static Tensor batch_norm_reduce(const Tensor& x) {
   constexpr int64_t min_elems_per_thread = 16, groups_per_core = 4;
   static const auto max_groups = groups_per_core * std::max(at::mps::MPSDevice::getInstance()->getCoreCount(), 1u);
-  const auto dims = batch_norm_dims(x, x);
-  const int64_t C = x.size(1), inner = dims[0][0], outer = x.numel() / (C * inner);
+  const auto layout = batch_norm_layout(x, x);
+  const int64_t C = layout.channel.x, inner = layout.inner.x, outer = layout.outer_numel;
   const bool channels_last = inner == 1;
   const auto threads = channels_last
       ? BN_MAX_THREADS
@@ -136,13 +137,12 @@ static Tensor batch_norm_reduce(const Tensor& x) {
   const auto chunks = std::max<int64_t>(1, std::min(max_groups / blocks, c10::metal::ceil_div(outer, ty)));
   const auto splits = std::max<int64_t>(1, std::min(max_groups / (blocks * chunks), c10::metal::ceil_div(inner, tx)));
   auto out = at::empty({chunks * splits, C, BN_PARTIAL_SIZE}, x.options().dtype(kFloat));
-  const std::array<uint64_t, 2> sizes = {dims.size() - 2, uint64_t(outer)};
   const auto name = fmt::format("batch_norm_reduce_{}{}", batch_norm_variant(x, x), scalarToMetalTypeString(x));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
       [encoder setComputePipelineState:lib.getPipelineStateForFunc(name)];
-      mtl_setArgs(encoder, x, out, sizes, dims);
+      mtl_setArgs(encoder, x, out, layout);
       [encoder dispatchThreadgroups:MTLSizeMake(blocks, chunks, splits) threadsPerThreadgroup:MTLSizeMake(tx, ty, 1)];
     }
   });
@@ -151,29 +151,31 @@ static Tensor batch_norm_reduce(const Tensor& x) {
 
 static Tensor batch_norm_stats(const Tensor& x,
                                const std::optional<Tensor>& part,
-                               std::array<std::optional<Tensor>, 6> params,
+                               std::array<std::optional<Tensor>, BN_NUM_PARAMS> tensors,
                                double eps,
                                double momentum) {
   const auto C = x.size(1);
-  for (auto& p : params) {
-    p = p.has_value() && p->defined() ? p : std::nullopt;
+  for (auto& t : tensors) {
+    t = t.has_value() && t->defined() ? t : std::nullopt;
   }
-  const auto first = std::ranges::find_if(params, [](const auto& p) { return p.has_value(); });
-  const auto dtype = first == params.end() ? kFloat : (*first)->scalar_type();
-  for (const auto& p : params) {
-    TORCH_CHECK_TYPE(!p || p->scalar_type() == dtype, "batch_norm: weight, bias and running stats must share a dtype");
+  const auto first = std::ranges::find_if(tensors, [](const auto& t) { return t.has_value(); });
+  const auto dtype = first == tensors.end() ? kFloat : (*first)->scalar_type();
+  for (const auto& t : tensors) {
+    TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "batch_norm: weight, bias and running stats must share a dtype");
   }
-  std::array<uint32_t, 6> strides;
-  std::ranges::transform(params, strides.begin(), [](const auto& p) { return p ? uint32_t(p->stride(0)) : 0; });
+  BatchNormStatsParams<> params{.num_channels = C,
+                                .num_partials = part ? part->size(0) : 0,
+                                .eps = static_cast<float>(eps),
+                                .momentum = static_cast<float>(momentum)};
+  std::ranges::transform(tensors, params.strides.begin(), [](const auto& t) { return t ? t->stride(0) : 0; });
   auto stats = at::empty({C, BN_NUM_STATS}, x.options().dtype(kFloat));
-  const std::array<uint32_t, 2> sizes = {uint32_t(C), part ? uint32_t(part->size(0)) : 0};
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
       auto pso = lib.getPipelineStateForFunc("batch_norm_stats_" + scalarToMetalTypeString(dtype));
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, part, stats, sizes, eps, momentum, strides);
-      std::apply([&](const auto&... p) { mtl_setArgs<6>(encoder, p...); }, params);
+      mtl_setArgs(encoder, part, stats, params);
+      std::apply([&](const auto&... t) { mtl_setArgs<3>(encoder, t...); }, tensors);
       mtl_dispatch1DJob(encoder, pso, C);
     }
   });
@@ -181,17 +183,23 @@ static Tensor batch_norm_stats(const Tensor& x,
 }
 
 static void batch_norm_elemt(const Tensor& out, const Tensor& x, const Tensor& stats) {
-  const auto dims = batch_norm_dims(x, out);
-  const int64_t C = x.size(1), inner = dims[0][0], outer = x.numel() / (C * inner);
-  const std::array<uint64_t, 2> sizes = {dims.size() - 2, uint64_t(outer)};
+  constexpr int64_t max_grid = std::numeric_limits<uint32_t>::max();
+  auto layout = batch_norm_layout(x, out);
+  // A plane wider than the grid is folded into the outer dims, which the 64-bit variant grid-strides over
+  if (layout.inner.x > max_grid) {
+    std::shift_right(layout.outer_dims.begin(), layout.outer_dims.end(), 1);
+    layout.outer_dims[0] = std::exchange(layout.inner, {1, 0, 0});
+    layout.outer_numel *= layout.outer_dims[0].x;
+    layout.outer_ndim++;
+  }
   const auto name = fmt::format("batch_norm_elemt_{}{}", batch_norm_variant(x, out), scalarToMetalTypeString(x));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(name);
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, out, x, stats, dims, sizes);
-      mtl_dispatch3DJob(encoder, pso, inner, C, std::min<int64_t>(outer, std::numeric_limits<uint32_t>::max()));
+      mtl_setArgs(encoder, out, x, stats, layout);
+      mtl_dispatch3DJob(encoder, pso, layout.inner.x, layout.channel.x, std::min(layout.outer_numel, max_grid));
     }
   });
 }
