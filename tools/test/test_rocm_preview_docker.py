@@ -98,6 +98,18 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
                     ("--build-arg", f"THEROCK_INDEX_URL={nightly_index}"),
                     build_args,
                 )
+                if "manywheel" in str(script):
+                    matrix = load_module(
+                        "generate_binary_build_matrix",
+                        REPO_ROOT / ".github/scripts/generate_binary_build_matrix.py",
+                    )
+                    self.assertIn(
+                        (
+                            "--build-arg",
+                            f"PYTORCH_ROCM_ARCH={matrix.ROCM_PREVIEW_DEVICES}",
+                        ),
+                        build_args,
+                    )
 
         stable, docker_args = self.run_builder(
             REPO_ROOT / ".ci/docker/manywheel/build.sh",
@@ -151,9 +163,12 @@ class TestRocmPreviewWheels(unittest.TestCase):
             self.assertEqual(config["desired_cuda"], "rocmpreview")
             self.assertEqual(config["upload_subfolder"], "rocm-preview")
             self.assertEqual(config["container_image_tag_prefix"], "rocm-preview")
+            devices = ",".join(
+                f"device-{gfx}" for gfx in matrix.ROCM_PREVIEW_DEVICES.split(";")
+            )
             self.assertEqual(
                 config["pytorch_extra_install_requirements"],
-                f"rocm[libraries,device-all]=={PREVIEW_PIN}",
+                f"rocm[libraries,{devices}]=={PREVIEW_PIN}",
             )
         self.assertFalse(
             [

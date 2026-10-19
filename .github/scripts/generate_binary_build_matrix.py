@@ -68,6 +68,9 @@ ROCM_PREVIEW = RocmPreviewLane(
     .strip(),
 )
 ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW.arch]
+# Matches PYTORCH_ROCM_ARCH in .ci/docker/manywheel/build.sh. Preview's
+# device-all also pulls targets torch is not built for, e.g. gfx900.
+ROCM_PREVIEW_DEVICES = "gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
 
 XPU_ARCHES = ["xpu"]
 
@@ -130,7 +133,11 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
-    ROCM_PREVIEW.arch: f"rocm[libraries,device-all]=={ROCM_PREVIEW.version}",
+    ROCM_PREVIEW.arch: (
+        "rocm[libraries,"
+        + ",".join(f"device-{gfx}" for gfx in ROCM_PREVIEW_DEVICES.split(";"))
+        + f"]=={ROCM_PREVIEW.version}"
+    ),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "

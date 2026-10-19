@@ -867,7 +867,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_11-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
           - desired_python: "3.12"
             desired_cuda: "rocmpreview"
             gpu_arch_version: "preview"
@@ -876,7 +876,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_12-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
           - desired_python: "3.13"
             desired_cuda: "rocmpreview"
             gpu_arch_version: "preview"
@@ -885,7 +885,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_13-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
           - desired_python: "3.14"
             desired_cuda: "rocmpreview"
             gpu_arch_version: "preview"
@@ -894,7 +894,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_14-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
           - desired_python: "3.14t"
             desired_cuda: "rocmpreview"
             gpu_arch_version: "preview"
@@ -903,7 +903,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_14t-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
           - desired_python: "3.15"
             desired_cuda: "rocmpreview"
             gpu_arch_version: "preview"
@@ -912,7 +912,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_15-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
           - desired_python: "3.15t"
             desired_cuda: "rocmpreview"
             gpu_arch_version: "preview"
@@ -921,7 +921,7 @@ jobs:
             docker_image_tag_prefix: "rocm-preview"
             build_name: "manywheel-py3_15t-rocmpreview"
             timeout_minutes: 420
-            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+            pytorch_extra_install_requirements: "rocm[libraries,device-gfx908,device-gfx90a,device-gfx942,device-gfx950,device-gfx1030,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1200,device-gfx1201,device-gfx1150,device-gfx1151,device-gfx1250]==10.2.0a20260916"
     with:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
