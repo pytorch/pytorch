@@ -1743,14 +1743,6 @@ def forward(self, x_1, w_1):
             self.assertEqual(out, expected)
 
     def _fp8_block_quantize(self, w, block_n, block_k):
-        """Per-block absmax fp8_e4m3fn quantization of w: [N, K].
-
-        Returns (mat_b, scale_b, w_dq) consumable directly by woq_scaled_mm:
-        mat_b is [K, N] (fp8), scale_b is [N // block_n, K // block_k], and
-        w_dq is the fp32 dequantized [N, K] weight (mat_b * scale_b), used to
-        build an "emulated" reference matmul the same way
-        test_scaled_matmul_cuda.py's mm_float8_emulated does.
-        """
         N, K = w.shape
         w_blocked = w.float().reshape(N // block_n, block_n, K // block_k, block_k)
         amax = w_blocked.abs().amax(dim=(1, 3), keepdim=True)
@@ -1761,9 +1753,6 @@ def forward(self, x_1, w_1):
         return q.t(), scale.reshape(N // block_n, K // block_k), w_dq
 
     def _unpack_fp4x2_to_u8(self, x):
-        """Unpack a packed float4_e2m1fn_x2 tensor into a uint8 tensor twice
-        as wide along the last dim (one fp4 nibble per element, in the low
-        bits), mirroring test_scaled_matmul_cuda.py's unpack_uint4()."""
         raw = x.view(torch.uint8)
         shape = list(raw.shape)
         shape[-1] *= 2
@@ -1774,8 +1763,6 @@ def forward(self, x_1, w_1):
         return out.view(shape)
 
     def _mxfp_dequantize(self, scale_e8m0, data_lp, block_size, format):
-        """Dequantize an MX-format (scale, data) pair as returned by
-        to_mxfp() back to fp32, shaped like the original [N, K] weight."""
         if format == "mxfp8":
             data_f32 = data_lp.float()
         else:
@@ -1808,8 +1795,6 @@ def forward(self, x_1, w_1):
             mat_b, scale_b, weight_dq = self._fp8_block_quantize(weight_nk, 128, 128)
             scale_recipe = ScalingType.BlockWise128x128
         else:
-            # to_mxfp only supports bfloat16/float32 inputs; float16 weights
-            # are up-cast to float32 purely to satisfy that API constraint.
             weight_hp = weight_nk.float() if mat_a_dtype == torch.half else weight_nk
             scale_b, mat_b_nk = to_mxfp(weight_hp, block_size=32, format=recipe)
             mat_b = mat_b_nk.t()
@@ -1828,10 +1813,6 @@ def forward(self, x_1, w_1):
         )
         self.assertEqual(out.dtype, mat_a.dtype)
 
-        # Emulated reference: dequantize the actual low-precision mat_b (not
-        # the pre-quantization weight) so the comparison isolates the
-        # matmul/accumulation behavior from the quantization error, matching
-        # mm_float8_emulated() in test_scaled_matmul_cuda.py.
         out_emulated = mat_a.float() @ weight_dq.t()
         if bias is not None:
             out_emulated = out_emulated + bias.float()
