@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 import unittest
+from functools import partial
+from unittest.mock import patch
 
 
 # Native reductions register during import, so enable the rollout first.
@@ -130,6 +132,26 @@ def _effective_numerics():
 @instantiate_parametrized_tests
 class StrictNumericsConfigTest(TestCase):
     @parametrize("numerics", NUMERICS_MODES)
+    @parametrize("backend", ("triton", "halide"))
+    @parametrize("hip", (None, "test-rocm"))
+    def test_strict_cuda_triton_scope(self, numerics, backend, hip):
+        from torch._inductor.utils import is_strict_cuda_triton
+
+        with (
+            config.patch(_numerics_options(numerics, False)),
+            config.patch(cuda_backend=backend),
+            patch.object(torch.version, "hip", hip),
+        ):
+            enabled = (
+                numerics in ("strict_pointwise", "strict")
+                and backend == "triton"
+                and hip is None
+            )
+            self.assertEqual(is_strict_cuda_triton(torch.device("cuda")), enabled)
+            self.assertFalse(is_strict_cuda_triton(torch.device("cpu")))
+            self.assertFalse(is_strict_cuda_triton(None))
+
+    @parametrize("numerics", NUMERICS_MODES)
     def test_config_patch_enables_eager_numerics(self, numerics):
         enabled = numerics in ("strict_pointwise", "strict")
         reduction_enabled = numerics in ("strict_reduction", "strict")
@@ -199,6 +221,19 @@ class StrictNumericsConfigTest(TestCase):
     "requires NVIDIA CUDA and Triton",
 )
 class StrictNumericsCompileTest(TestCase):
+    def _check_pointwise(self, fn, inputs, numerics, upcast):
+        result, codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+            ),
+            *inputs,
+        )
+        bits = _BIT_VIEW[result.dtype]
+        self.assertEqual(result.view(bits), fn(*inputs).view(bits))
+        return "\n".join(codes)
+
     @ops(
         [op for op in op_db if op.name in ("byte", "char", "short")],
         allowed_dtypes=(
@@ -333,6 +368,77 @@ class StrictNumericsCompileTest(TestCase):
         self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
         self.assertEqual(negative, expected_negative)
         self.assertIn("tl.where", "\n".join(codes))
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    @parametrize("decimals", (-3, 0, 3))
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_round_decimals_strict(self, device, dtype, decimals, numerics, upcast):
+        x = (
+            _exhaustive_16bit(dtype, device)
+            if dtype in (torch.float16, torch.bfloat16)
+            else _sampled_fp32(NUM_BITPATTERN_SAMPLES, device).to(dtype)
+        )
+        if dtype == torch.float64:
+            bits = torch.tensor(
+                [1, 0x3FE0000000000001, 0x7FF8123456789ABC],
+                device=device,
+                dtype=torch.int64,
+            )
+            x = torch.cat((x, bits.view(dtype)))
+        boundaries = torch.tensor(
+            [0.0, -0.0, 0.0005, -0.0005, 0.0015, -0.0015, 2.5, -2.5, 1234.5, -1234.5],
+            device=device,
+            dtype=dtype,
+        )
+        x = torch.cat((x, boundaries))
+
+        code = self._check_pointwise(
+            partial(torch.round, decimals=decimals), (x,), numerics, upcast
+        )
+        self.assertIn("libdevice.nearbyint", code)
+        if dtype != torch.float64 and decimals != 0:
+            self.assertIn("div_rn", code)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    @parametrize("scalar_sign", (False, True))
+    def test_copysign_strict(self, device, dtype, numerics, upcast, scalar_sign):
+        x = _exhaustive_16bit(dtype, device)
+        y = -0.0 if scalar_sign else x.flip(0)
+        code = self._check_pointwise(torch.copysign, (x, y), numerics, upcast)
+        self.assertIn("tl.int16", code)
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_remainder_strict(self, device, dtype, numerics, upcast):
+        x = (
+            _exhaustive_16bit(dtype, device)
+            if dtype in (torch.float16, torch.bfloat16)
+            else _sampled_fp32(NUM_BITPATTERN_SAMPLES, device).to(dtype)
+        )
+        y = x.flip(0)
+        special = _SPECIALS.to(device=device, dtype=dtype)
+        x = torch.cat((x, special.repeat_interleave(special.numel())))
+        y = torch.cat((y, special.repeat(special.numel())))
+
+        code = self._check_pointwise(torch.remainder, (x, y), numerics, upcast)
+        self.assertIn("libdevice.fmod", code)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("numerics", ("default", "strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_negative_zero_constant(self, device, dtype, numerics, upcast):
+        x = torch.ones(16, device=device, dtype=dtype)
+        compiled = torch.compile(
+            lambda x: torch.full_like(x, -0.0),
+            fullgraph=True,
+            options={"numerics": numerics, "triton.codegen_upcast_to_fp32": upcast},
+        )
+        expected = torch.full_like(x, -0.0 if numerics != "default" or upcast else 0.0)
+        self.assertEqual(compiled(x).view(torch.int16), expected.view(torch.int16))
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
@@ -905,8 +1011,6 @@ POINTWISE_XFAIL = frozenset(
         ("clamp_min", "bfloat16"),
         ("clamp_min", "float16"),
         ("clamp_min", "float32"),
-        ("copysign", "bfloat16"),
-        ("copysign", "float16"),
         ("div_floor_rounding", "bfloat16"),
         ("div_floor_rounding", "float16"),
         ("div_floor_rounding", "float32"),
@@ -971,18 +1075,6 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_softshrink", "bfloat16"),
         ("nn_functional_softshrink", "float16"),
         ("nn_functional_softshrink", "float32"),
-        ("remainder", "bfloat16"),
-        ("remainder", "float16"),
-        ("remainder", "float32"),
-        ("__rmod__", "bfloat16"),
-        ("__rmod__", "float16"),
-        ("__rmod__", "float32"),
-        ("round_decimals_3", "bfloat16"),
-        ("round_decimals_3", "float16"),
-        ("round_decimals_3", "float32"),
-        ("round_decimals_neg_3", "bfloat16"),
-        ("round_decimals_neg_3", "float16"),
-        ("round_decimals_neg_3", "float32"),
         ("rsub", "bfloat16"),
         ("rsub", "float16"),
         ("rsub", "float32"),
@@ -1122,9 +1214,10 @@ NONFLOAT_XFAIL = frozenset(
 
 
 class _strict_ops(ops):
-    def __init__(self, op_list, xfails):
+    def __init__(self, op_list, xfails, full_dtype_ops: tuple[str, ...] = ()):
         super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
         self.xfails = xfails
+        self.full_dtype_ops = frozenset(full_dtype_ops)
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for case in super()._parametrize_test(test, generic_cls, device_cls):
@@ -1135,6 +1228,7 @@ class _strict_ops(ops):
             if (
                 ALL_SAMPLES
                 or dtype == preferred
+                or _op_id(op) in self.full_dtype_ops
                 or (_op_id(op), _dtype_label(dtype)) in self.xfails
             ):
                 yield case
@@ -1409,7 +1503,17 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
-    @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
+    @_strict_ops(
+        POINTWISE_OPS,
+        POINTWISE_XFAIL,
+        full_dtype_ops=(
+            "copysign",
+            "remainder",
+            "__rmod__",
+            "round_decimals_3",
+            "round_decimals_neg_3",
+        ),
+    )
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(

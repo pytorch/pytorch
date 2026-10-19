@@ -48,6 +48,7 @@ from . import config, inductor_prims
 from .utils import (
     is_bf16x9_matmul,
     is_gpu,
+    is_strict_cuda_triton,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
 )
@@ -456,6 +457,13 @@ def convolution_backward(
 
 @register_decomposition([aten.round.decimals])
 def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
+    if is_strict_cuda_triton(x.device) and x.dtype in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ):
+        return NotImplemented
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
