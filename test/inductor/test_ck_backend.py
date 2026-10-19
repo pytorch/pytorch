@@ -529,10 +529,6 @@ class TestCKBackend(TestCase):
         {**_test_env, "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
     )
     def test_max_autotune_conv_transpose2d_skips_forward_ck(self):
-        # C == K, k=3, stride=1, pad=1: forward and transposed outputs share a
-        # shape, so a forward CK kernel used to win autotune with a wrong result.
-        # CK is the only backend, so that kernel is selected if it is still offered.
-        # With the guard, choices stay empty and convolution() falls back to ATen.
         tensor_options = {"device": "cuda", "dtype": torch.float32}
         x = torch.randn(1, 64, 32, 32, **tensor_options).to(
             memory_format=torch.channels_last
