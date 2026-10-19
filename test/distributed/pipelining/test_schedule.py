@@ -19,6 +19,7 @@ from torch.distributed.pipelining import (
     ScheduleDualPipeV,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
+    ScheduleInterleaved1F1BCombined,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
@@ -1733,6 +1734,90 @@ instantiate_parametrized_tests(ScheduleTest)
 
 class TestSchedulePlan(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("num_microbatches", [1, 4])
+    def test_interleaved_combined_real_stages(self, num_microbatches):
+        """Compare actual CPU stages and their ordered gradient accumulation."""
+        store = torch.distributed.TCPStore(
+            "localhost", 0, 1, True, timeout=timedelta(seconds=30)
+        )
+        torch.distributed.init_process_group(
+            backend="gloo",
+            rank=0,
+            world_size=1,
+            store=store,
+            timeout=timedelta(seconds=30),
+        )
+        try:
+            torch.manual_seed(42)
+            modules = [torch.nn.Linear(4, 4).double() for _ in range(2)]
+            inputs = torch.randn(8, 4, dtype=torch.float64)
+            targets = torch.randn_like(inputs)
+            results = []
+            for ScheduleClass in (
+                ScheduleInterleaved1F1B,
+                ScheduleInterleaved1F1BCombined,
+            ):
+                local_modules = copy.deepcopy(modules)
+                stages = [
+                    PipelineStage(
+                        module,
+                        stage_index,
+                        2,
+                        torch.device("cpu"),
+                        input_args=inputs[: 8 // num_microbatches],
+                    )
+                    for stage_index, module in enumerate(local_modules)
+                ]
+                schedule = ScheduleClass(
+                    stages,
+                    num_microbatches,
+                    loss_fn=torch.nn.MSELoss(),
+                    scale_grads=False,
+                )
+                pairs = [
+                    action
+                    for action in schedule.pipeline_order[0]
+                    if action is not None and action.computation_type == OVERLAP_F_B
+                ]
+                if ScheduleClass is ScheduleInterleaved1F1B:
+                    compute_order = [
+                        action
+                        for action in schedule.pipeline_order[0]
+                        if action is not None
+                    ]
+                    initial_forwards = next(
+                        index
+                        for index, action in enumerate(compute_order)
+                        if action.computation_type == B
+                    )
+                if ScheduleClass is ScheduleInterleaved1F1BCombined:
+                    self.assertEqual(
+                        get_schedule_class("Interleaved1F1BCombined"), ScheduleClass
+                    )
+                    self.assertEqual(
+                        len(pairs), 2 * num_microbatches - initial_forwards
+                    )
+                    for action in pairs:
+                        forward, backward = action.sub_actions
+                        self.assertEqual(forward.computation_type, F)
+                        self.assertEqual(backward.computation_type, B)
+                        self.assertNotEqual(
+                            forward.microbatch_index, backward.microbatch_index
+                        )
+                losses = []
+                output = schedule.step(inputs, target=targets, losses=losses)
+                self.assertEqual(len(losses), num_microbatches)
+                gradients = [
+                    parameter.grad
+                    for module in local_modules
+                    for parameter in module.parameters()
+                ]
+                self.assertTrue(all(gradient is not None for gradient in gradients))
+                results.append((output, losses, gradients))
+            self.assertEqual(results[0], results[1], rtol=0, atol=0)
+        finally:
+            torch.distributed.destroy_process_group()
 
     def setUp(self):
         super().setUp()
