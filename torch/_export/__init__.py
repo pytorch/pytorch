@@ -160,15 +160,15 @@ _AOTI_RUNNER_REGISTER: dict[str, tuple[type, bool]] = {
 
 # The runner classes for the optional devices are only compiled into builds
 # with the corresponding device support, so look them up by name.
-for _device, _runner_cls_name in (
-    ("cuda", "AOTIModelContainerRunnerCuda"),
-    ("xpu", "AOTIModelContainerRunnerXpu"),
-    ("mps", "AOTIModelContainerRunnerMps"),
+for _device, _runner_cls_name, _takes_device in (
+    ("cuda", "AOTIModelContainerRunnerCuda", True),
+    ("xpu", "AOTIModelContainerRunnerXpu", True),
+    ("mps", "AOTIModelContainerRunnerMps", False),
 ):
     _runner_cls = getattr(torch._C._aoti, _runner_cls_name, None)
     if _runner_cls is not None:
-        _AOTI_RUNNER_REGISTER[_device] = (_runner_cls, True)
-del _device, _runner_cls_name, _runner_cls
+        _AOTI_RUNNER_REGISTER[_device] = (_runner_cls, _takes_device)
+del _device, _runner_cls_name, _runner_cls, _takes_device
 
 def register_aoti_runner(
     device_type: str,
