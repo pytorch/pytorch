@@ -170,12 +170,14 @@ class BroadcastOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllreduceOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
     sparseIndices: Tensor | None
+    config: object | None
 
 class AllreduceCoalescedOptions(AllreduceOptions): ...
 
@@ -185,15 +187,18 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class GatherOptions:
     rootRank: int
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ScatterOptions:
     rootRank: int
@@ -204,6 +209,7 @@ class ReduceScatterOptions:
     reduceOp: ReduceOp | ReduceOp.RedOpType
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class BarrierOptions:
     device_ids: list[int]
@@ -214,6 +220,7 @@ class BarrierOptions:
 class AllToAllOptions:
     timeout: timedelta
     asyncOp: bool
+    config: object | None
 
 class ReconfigureOptions:
     uuid: int
@@ -916,6 +923,7 @@ class ProcessGroupNCCL(Backend):
         min_ctas: int
         max_ctas: int
         host_cft_mode: int
+        nvls_host_mode: int
         def unsafe_get_ptr(self) -> int: ...
 
     class Options(Backend.Options):
@@ -923,6 +931,7 @@ class ProcessGroupNCCL(Backend):
         is_high_priority_stream: bool
         split_from: ProcessGroupNCCL
         split_color: int
+        lazy_init: bool
 
         def __init__(self, is_high_priority_stream: bool = False): ...
 
@@ -1006,6 +1015,7 @@ def _set_allow_inflight_collective_as_graph_input(
 def _allow_inflight_collective_as_graph_input() -> bool: ...
 def _unregister_all_process_groups() -> None: ...
 def _unregister_process_group(group_name: GroupName) -> None: ...
+def _release_nvshmem_team_pool(group_name: GroupName) -> None: ...
 
 # Initializes the device state in CUmodule so that it's able to perform NVSHMEM
 # operations.  CUmodule is a pointer to a CUDA module, carried by an int64 in
@@ -1091,6 +1101,8 @@ class _SymmetricMemory:
     def rank(self) -> int: ...
     @property
     def world_size(self) -> int: ...
+    @property
+    def group_name(self) -> GroupName: ...
     @staticmethod
     def rendezvous(
         tensor: torch.Tensor, group_name: str | None = None
