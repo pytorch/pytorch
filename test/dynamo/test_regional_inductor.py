@@ -1610,11 +1610,11 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
 
     @parametrize("serialize", [False])
     def test_joint_graph_passes_run_on_hop_subgraph(self, serialize):
-        # Inductor's joint-graph passes (e.g. scatter_upon_const_tensor, which
-        # rewrites full+scatter into eq+where to avoid materializing a sparse
-        # buffer) must run on the HOP subgraph's joint graph, not just the
-        # outer one. nll_loss_backward decomposes to full+scatter; without the
-        # rewrite the bw subgraph keeps a (B, V) scatter destination buffer.
+        # Inductor's joint-graph passes must run on the HOP subgraph's joint
+        # graph, not just the outer one. nll_loss_backward decomposes to a
+        # one-hot where, and log_softmax_backward sums it over the classes;
+        # one_hot_sum folds that sum into the selected term, which only
+        # happens if the joint-graph passes ran on the subgraph.
         from torch._inductor.decomposition import select_decomp_table
 
         nested_config = get_invoke_subgraph_compile_options(
@@ -1644,8 +1644,8 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             opt_fn(logits, targets).backward()
 
         # captured_gms[0] is the fw subgraph and captured_gms[1] is the bw
-        # subgraph. The bw should NOT contain aten.scatter — the joint pass
-        # rewrote full+scatter into eq+where.
+        # subgraph. The bw should have no class-dim sum: one_hot_sum replaced
+        # it with the selected term.
         self.assertExpectedInline(
             captured_gms[0].code.strip(),
             """\
