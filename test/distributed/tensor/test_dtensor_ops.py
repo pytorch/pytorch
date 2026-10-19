@@ -22,6 +22,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
+    dtypes,
     instantiate_device_type_tests,
     ops,
     skip,
@@ -33,6 +34,7 @@ from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbac
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     np,
+    parametrize,
     run_tests,
     SEED,
     suppress_warnings,
@@ -693,6 +695,37 @@ class TestDTensorOps(TestCase):
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
+
+    @dtypes(torch.int32, torch.int64)
+    @parametrize("op_name", ["__lshift__", "__rshift__"])
+    @parametrize("tensor_rhs", [False, True])
+    def test_shift_dunder(self, device, dtype, op_name, tensor_rhs):
+        mesh = self.build_device_mesh()
+        value = torch.arange(-8, 9, device=device, dtype=dtype)
+        shifts = torch.arange(17, device=device, dtype=dtype) % 4 if tensor_rhs else 2
+        expected = getattr(value, op_name)(shifts)
+        for placement in [Replicate(), Shard(0)]:
+            dt = distribute_tensor(value.clone(), mesh, [placement])
+            rhs = distribute_tensor(shifts, mesh, [placement]) if tensor_rhs else shifts
+            for _ in range(2):
+                result = getattr(dt, op_name)(rhs)
+                self.assertIsNot(result, dt)
+                self.assertEqual(result.full_tensor(), expected)
+                self.assertEqual(dt.full_tensor(), value)
+
+            inplace_dt = distribute_tensor(value.clone(), mesh, [placement])
+            result = getattr(inplace_dt, "__i" + op_name[2:])(rhs)
+            self.assertIs(result, inplace_dt)
+            self.assertEqual(result.full_tensor(), expected)
+
+            output = distribute_tensor(torch.empty_like(value), mesh, [placement])
+            overload = "Tensor_out" if tensor_rhs else "Scalar_out"
+            op = getattr(getattr(torch.ops.aten, op_name), overload)
+            for _ in range(2):
+                result = op(dt, rhs, out=output)
+                self.assertIs(result, output)
+                self.assertEqual(output.full_tensor(), expected)
+                self.assertEqual(dt.full_tensor(), value)
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
