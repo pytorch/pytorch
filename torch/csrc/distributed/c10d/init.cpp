@@ -1535,9 +1535,10 @@ Returns:
 )");
 
   py::enum_<::c10d::HookOpName>(module, "HookOpName", R"(
-The operation a pre/post hook is firing for. There is one value per dispatcher
-op, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is distinct from
-``ALLGATHER`` (``all_gather``).)")
+The operation a pre/post hook is firing for. Values mostly follow the
+dispatcher ops, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is
+distinct from ``ALLGATHER`` (``all_gather``), but some ops share a value, e.g.
+``recv`` from any source reports ``RECV``.)")
       .value("SEND", ::c10d::HookOpName::SEND)
       .value("RECV", ::c10d::HookOpName::RECV)
       .value("BROADCAST", ::c10d::HookOpName::BROADCAST)
@@ -1580,11 +1581,11 @@ op, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is distinct from
       .def_readwrite(
           "input_tensors",
           &::c10d::PreHookArgs::input_tensors,
-          "Tensors the operation reads; nested lists are flattened.")
+          "Tensors the operation reads; nested lists are flattened. For in-place operations such as ``allreduce`` and ``broadcast`` these are also the tensors written.")
       .def_readwrite(
           "output_tensors",
           &::c10d::PreHookArgs::output_tensors,
-          "Tensors the operation writes; nested lists are flattened.")
+          "Tensors the operation writes into, separate from ``input_tensors``; nested lists are flattened. Empty for in-place operations.")
       .def_readwrite(
           "root",
           &::c10d::PreHookArgs::root,
@@ -1610,7 +1611,7 @@ op, so e.g. ``ALLGATHER_BASE`` (``all_gather_into_tensor``) is distinct from
       .def_readwrite(
           "work",
           &::c10d::PostHookArgs::work,
-          "``Work`` handle of the issued operation; may be ``None`` for synchronous operations.")
+          "``Work`` handle of the issued operation; may be ``None``.")
       .def_readwrite(
           "op_id",
           &::c10d::PostHookArgs::op_id,
@@ -3324,11 +3325,13 @@ support abort hooks (see ``supports_abort_hooks``); others raise.
 A single failure may run the hook more than once, possibly concurrently from
 different threads, so it must be idempotent. A hook that should only run once
 must block on later calls until the first one finishes rather than return
-early, since the process may be terminated once it returns.
+early, since the process may be terminated once it returns. Hooks run in no
+particular order, typically on a background thread; exceptions they raise are
+logged and ignored.
 
 Args:
     hook_id (int): Identifier for ``unregister_abort_hook``. Registering an
-        existing id replaces its hook.
+        existing id keeps the existing hook; unregister it first to replace it.
     hook (Callable[[], None]): The hook.
 )")
           .def(
@@ -3339,7 +3342,7 @@ Args:
           .def_property_readonly(
               "supports_completion_hooks",
               &::c10d::ProcessGroup::supportsCompletionHooks,
-              "Whether the default backend reports operation completion to C++ completion hooks.")
+              "Whether the default backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
@@ -3348,8 +3351,9 @@ Args:
               R"(
 Register ``hook`` to be called with a ``PreHookArgs`` before each operation
 issued through this process group, on the issuing thread, for every backend.
-Hooks run in ``hook_id`` order. Register hooks during setup, not concurrently
-with operations.
+Hooks run in ``hook_id`` order. If a hook raises, the exception propagates to
+the caller, the remaining hooks are skipped and the operation is not issued.
+Register hooks during setup, not concurrently with operations.
 
 Args:
     hook_id (int): Identifier for ``unregister_pre_hook``. Registering an
@@ -3369,8 +3373,9 @@ Args:
               R"(
 Register ``hook`` to be called with a ``PostHookArgs`` after each operation
 issued through this process group is issued, not when it completes; wait on
-``PostHookArgs.work`` to observe completion. Otherwise behaves like
-``register_pre_hook``.
+``PostHookArgs.work`` to observe completion. If a hook raises, the operation
+has already been issued but its ``Work`` is not returned to the caller.
+Otherwise behaves like ``register_pre_hook``.
 
 Args:
     hook_id (int): Identifier for ``unregister_post_hook``. Registering an
@@ -3556,11 +3561,13 @@ support abort hooks (see ``supports_abort_hooks``); others raise.
 A single failure may run the hook more than once, possibly concurrently from
 different threads, so it must be idempotent. A hook that should only run once
 must block on later calls until the first one finishes rather than return
-early, since the process may be terminated once it returns.
+early, since the process may be terminated once it returns. Hooks run in no
+particular order, typically on a background thread; exceptions they raise are
+logged and ignored.
 
 Args:
     hook_id (int): Identifier for ``unregister_abort_hook``. Registering an
-        existing id replaces its hook.
+        existing id keeps the existing hook; unregister it first to replace it.
     hook (Callable[[], None]): The hook.
 )")
           .def(
@@ -3571,7 +3578,7 @@ Args:
           .def_property_readonly(
               "supports_completion_hooks",
               &::c10d::Backend::supportsCompletionHooks,
-              "Whether the backend reports operation completion to C++ completion hooks.")
+              "Whether the backend reports operation completion to completion hooks, which can only be registered from C++.")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,

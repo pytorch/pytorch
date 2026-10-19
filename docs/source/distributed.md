@@ -962,7 +962,10 @@ monitoring and debugging.
 and {meth}`ProcessGroup.register_post_hook <torch.distributed.ProcessGroup.register_post_hook>`
 register hooks that run before and after each operation is issued, for every
 backend. A post-hook runs once the operation is issued, not when it completes.
-`op_id` pairs a pre-hook call with its post-hook call.
+`op_id` pairs a pre-hook call with its post-hook call. Hooks run for the
+standard collective and point-to-point operations.
+
+The example below assumes the default process group is initialized.
 
 ```python
 import torch
@@ -981,7 +984,8 @@ pg.unregister_pre_hook(0)
 ```
 
 {meth}`ProcessGroup.register_abort_hook <torch.distributed.ProcessGroup.register_abort_hook>`
-registers a hook that runs before the backend aborts on a timeout or error. Check
+registers a hook that runs when the backend detects a timeout or error, before it
+aborts; it does not run on a user-requested abort or shutdown. Check
 {attr}`~torch.distributed.ProcessGroup.supports_abort_hooks` first.
 
 PyTorch attaches these built-in hooks to new process groups:
