@@ -551,7 +551,9 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     torch._check(lambd <= limit, message)
     if a.dtype in (torch.bfloat16, torch.float16):
         lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
-    # Match the ATen kernels: NaN propagates and the dead zone is +0.
+    # Match the CUDA kernel and the CPU vectorized path: NaN propagates and the
+    # dead zone is +0. (The CPU scalar path and MPS compute a * 0, which is -0.0
+    # for negative inputs.)
     # This decomposition is not registered for Autograd, so the backward is
     # softshrink_backward rather than the derivative of these wheres, whose
     # accumulation would turn a -0.0 gradient into +0.0.

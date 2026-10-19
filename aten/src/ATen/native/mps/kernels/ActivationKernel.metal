@@ -15,15 +15,13 @@ struct hardshrink_functor {
 struct softshrink_functor {
   template <typename T>
   inline T operator()(const T x, const T lambda) {
-    // Like the CUDA kernel: NaN propagates and the dead zone is +0
-    if (::metal::isnan(static_cast<float>(x))) {
-      return x;
-    } else if (x > lambda) {
+    if (x > lambda) {
       return x - lambda;
     } else if (x < -lambda) {
       return x + lambda;
     } else {
-      return T(0);
+      // multiplication to propagate Nan, Nan * 0 = Nan.
+      return x * T(0);
     }
   }
 };
