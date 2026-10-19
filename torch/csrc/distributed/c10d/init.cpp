@@ -1332,8 +1332,8 @@ Example:
 Options for :meth:`Window.put`.
 
 Attributes:
-    timeout (datetime.timedelta): Operation timeout. If unset, the backend
-        default is used.
+    timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
+        sentinel, meaning the process group's timeout.
     hints (dict[str, str]): Backend-specific hints.
 )")
       .def(py::init<>())
@@ -1344,8 +1344,8 @@ Attributes:
 Options for :meth:`Window.signal`.
 
 Attributes:
-    timeout (datetime.timedelta): Operation timeout. If unset, the backend
-        default is used.
+    timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
+        sentinel, meaning the process group's timeout.
     hints (dict[str, str]): Backend-specific hints.
 )")
       .def(py::init<>())
@@ -1356,8 +1356,8 @@ Attributes:
 Options for :meth:`Window.wait_signal`.
 
 Attributes:
-    timeout (datetime.timedelta): Operation timeout. If unset, the backend
-        default is used.
+    timeout (datetime.timedelta): Operation timeout. Defaults to a -1 ms
+        sentinel, meaning the process group's timeout.
     hints (dict[str, str]): Backend-specific hints.
 )")
       .def(py::init<>())
