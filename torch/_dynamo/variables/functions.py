@@ -817,12 +817,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def should_allow_nested_graph_breaks(self) -> bool:
         from torch._dynamo.trace_rules import (
+            _is_builtin_inline_when_called,
             BUILTIN_INLINE_WHEN_CALLED,
             is_ngb_suppressed_inline,
         )
 
         filename = self.get_filename()
-        if any(filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED):
+        if _is_builtin_inline_when_called(filename, tuple(BUILTIN_INLINE_WHEN_CALLED)):
             return False
         if is_ngb_suppressed_inline(filename):
             return False
@@ -2751,6 +2752,19 @@ class SkipFunctionVariable(VariableTracker):
                     "frame.\n"
                     "Next steps: drop the call, or turn off compile_on_one_rank "
                     "for this region."
+                )
+
+        if self.value is torch.autograd.backward:
+            inputs = args[5] if len(args) > 5 else kwargs.get("inputs")
+            inputs = inputs.realize() if inputs is not None else None
+            if isinstance(inputs, variables.MappingProxyVariable) and inputs.source:
+                unimplemented(
+                    gb_type="autograd inputs from an external mapping proxy",
+                    context="",
+                    explanation="Dynamo cannot identify the underlying mapping or its items/values overrides.",
+                    hints=["Construct the mapping proxy inside the compiled region."],
+                    skip_frame=True,
+                    preserve_skip_frame_after_inline=True,
                 )
 
         # importlib functions are frozen builtins that Dynamo cannot trace

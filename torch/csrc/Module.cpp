@@ -25,6 +25,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
+#include <c10/core/Contiguity.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/impl/COW.h>
@@ -35,6 +36,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
+#include <pybind11/options.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/utils/pybind.h>
@@ -1691,32 +1693,10 @@ static PyObject* THPModule_getAllDtypes(PyObject* _unused, PyObject* noargs) {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 #undef DEFINE_SCALAR_TYPE
 
-  auto is_subbyte_dummy = [](at::ScalarType t) {
-    switch (t) {
-      case at::ScalarType::UInt1:
-      case at::ScalarType::UInt2:
-      case at::ScalarType::UInt3:
-      case at::ScalarType::UInt4:
-      case at::ScalarType::UInt5:
-      case at::ScalarType::UInt6:
-      case at::ScalarType::UInt7:
-      case at::ScalarType::Int1:
-      case at::ScalarType::Int2:
-      case at::ScalarType::Int3:
-      case at::ScalarType::Int4:
-      case at::ScalarType::Int5:
-      case at::ScalarType::Int6:
-      case at::ScalarType::Int7:
-        return true;
-      default:
-        return false;
-    }
-  };
-
   THPObjectPtr result(PyList_New(0));
   TORCH_CHECK_PYTHON(result);
   for (auto scalar_type : all_scalar_types) {
-    if (c10::isQIntType(scalar_type) || is_subbyte_dummy(scalar_type)) {
+    if (c10::isQIntType(scalar_type) || c10::isSubByteIntType(scalar_type)) {
       continue;
     }
     auto* dtype = reinterpret_cast<PyObject*>(torch::getTHPDtype(scalar_type));
@@ -3007,6 +2987,59 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
   });
 
+  py_module.def(
+      "_is_contiguous_or_false",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_is_contiguous_or_false(sizes, strides);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_2d_or_false",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_is_channels_last_contiguous_2d_or_false(sizes, strides);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_3d_or_false",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_is_channels_last_contiguous_3d_or_false(sizes, strides);
+      });
+  py_module.def(
+      "_is_contiguous",
+      [](c10::SymIntArrayRef sizes,
+         c10::SymIntArrayRef strides,
+         const c10::SymInt& numel) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_compute_contiguous<c10::SymInt>(sizes, strides, numel);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_2d",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_compute_channels_last_contiguous_2d<c10::SymInt>(
+            sizes, strides);
+      });
+  py_module.def(
+      "_is_channels_last_contiguous_3d",
+      [](c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides) {
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "sizes and strides must have the same length");
+        return c10::_compute_channels_last_contiguous_3d<c10::SymInt>(
+            sizes, strides);
+      });
+
   py::class_<WeakTensorRef>(py_module, "_WeakTensorRef")
       .def(py::init([](const py::object& tensor) {
         return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
@@ -3143,18 +3176,37 @@ Call this whenever a new thread is created in order to propagate values from
       .def_readonly("is_causal", &sdp::sdp_params::is_causal)
       .def_readonly("enable_gqa", &sdp::sdp_params::enable_gqa);
 
-  py::enum_<sdp::SDPBackend>(
-      py_module,
-      "_SDPBackend",
-      "An enum-like class that contains the different backends for scaled dot product attention.\n\n... warning:: This class is in beta and subject to change.\n\n"
-      "This backend class is designed to be used with the sdpa_kernel context manager."
-      "See :func: torch.nn.attention.sdpa_kernel for more details.")
-      .value("ERROR", sdp::SDPBackend::error)
-      .value("MATH", sdp::SDPBackend::math)
-      .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
-      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
-      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
+  {
+    py::options options;
+    options.disable_enum_members_docstring();
+
+    py::enum_<sdp::SDPBackend>(
+        py_module,
+        "_SDPBackend",
+        "An enum-like class that contains the different backends for scaled dot product attention.\n\n"
+        ".. warning:: This class is in beta and subject to change.\n\n"
+        "This backend class is designed to be used with the sdpa_kernel context manager. "
+        "See :func:`torch.nn.attention.sdpa_kernel` for more details.\n\n"
+        "The following members are available:\n\n"
+        "- ``ERROR``: Represents an error while determining the backend.\n"
+        "- ``MATH``: Selects the PyTorch implementation defined in C++ that "
+        "matches the formulation in "
+        ":func:`torch.nn.functional.scaled_dot_product_attention`.\n"
+        "- ``FLASH_ATTENTION``: Selects the FlashAttention backend. The default "
+        "CUDA implementation uses `FlashAttention-2`_: Faster Attention with "
+        "Better Parallelism and Work Partitioning.\n"
+        "- ``EFFICIENT_ATTENTION``: Selects `Memory-Efficient Attention`_.\n"
+        "- ``CUDNN_ATTENTION``: Selects the cuDNN scaled dot product attention implementation.\n"
+        "- ``OVERRIDEABLE``: Selects an overrideable backend provided by an extension.\n\n"
+        ".. _FlashAttention-2: https://arxiv.org/abs/2307.08691\n"
+        ".. _Memory-Efficient Attention: https://github.com/facebookresearch/xformers")
+        .value("ERROR", sdp::SDPBackend::error)
+        .value("MATH", sdp::SDPBackend::math)
+        .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
+        .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
+        .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
+        .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
+  }
 
   py_module.def("_is_flash_attention_available", []() {
 #if defined(USE_CUDA) || defined(USE_XPU)
@@ -3455,6 +3507,12 @@ Call this whenever a new thread is created in order to propagate values from
       static_cast<void (*)(
           const at::Tensor&, std::unordered_map<std::string, bool>)>(
           torch::jit::setTensorMetadata));
+  py_module.def(
+      "_copy_backend_meta",
+      &torch::jit::copyBackendMeta,
+      py::arg("src"),
+      py::arg("dst"),
+      py::arg("for_fake") = false);
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });

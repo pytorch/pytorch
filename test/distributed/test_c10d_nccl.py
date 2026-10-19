@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import gzip
 import json
 import logging
 import os
@@ -51,12 +52,24 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
+from torch.profiler import (
+    CuspyConfig,
+    profile,
+    ProfilerActivity,
+    ProfilerActivityConfig,
+)
+from torch.testing._internal.common_cuda import (
+    _get_torch_rocm_version,
+    TEST_CUDA_GRAPH_TOOLS_ID,
+    TEST_CUPTI_V13_3,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_distributed import (
     core_dumps_disabled,
     get_required_world_size,
     get_timeout,
     init_multigpu_helper,
+    MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
@@ -83,7 +96,9 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     skipIfRocmArch,
+    TemporaryFileName,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
@@ -761,13 +776,19 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     def _helper_test_extra_cuda_context_by_nvml(self):
         """
-        A helper for `test_extra_cuda_context`, if pynvml is available.
-        pynvml provides python bindings for NVIDIA NVML functionalities.
-        Here we are interested in: nvmlDeviceGetComputeRunningProcesses
+        A helper for `test_extra_cuda_context`, if pynvml (CUDA) or amdsmi (ROCm)
+        is available. They provide python bindings for NVML / AMD SMI.
+        Here we are interested in: nvmlDeviceGetComputeRunningProcesses /
+        amdsmi_get_gpu_process_list
         """
-        import pynvml
+        if torch.version.hip:
+            # Raises ModuleNotFoundError if amdsmi is not available.
+            handle = torch.cuda._get_amdsmi_handler(self.rank)
+            import amdsmi
+        else:
+            import pynvml
 
-        pynvml.nvmlInit()
+            pynvml.nvmlInit()
 
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
@@ -777,8 +798,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Wait for every rank to delete Work without touching another CUDA context.
         store = c10d.distributed_c10d._get_default_store()
         store.barrier("work_deleted", self.world_size)
-        handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
-        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        if torch.version.hip:
+            processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+        else:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
+            processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
 
         # A barrier for non-0 ranks
@@ -796,6 +820,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         A helper for `test_extra_cuda_context`, if pynvml is NOT available.
         If extra context is created, it would manifest into device 0's memory usage.
         """
+        if torch.version.hip:
+            raise SkipTest(
+                "Requires amdsmi on ROCm: an extra HIP context uses almost no device "
+                "memory, while the first RCCL kernel launch allocates ~1 GB of scratch "
+                "on the rank's own device, so memory growth cannot detect it."
+            )
         device = torch.device(f"cuda:{self.rank:d}")
         x = torch.empty((1,), device=device)
         # Rank 0 takes a snapshot before collective -- this snapshot should have
@@ -1113,6 +1143,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if self.rank == 0:
             # Ideally we want to sleep for a very long time, but this is not
             # feasible in unit test. So this is only a very tiny case.
+            # Hold the first allreduce until rank 1 has issued both allreduces:
+            # w1 completing earlier releases its extension before w2 exists.
+            store.wait(["extend_timeout_issued"])
             time.sleep(5)
             pg.allreduce(torch.rand(10).cuda(self.rank))
             time.sleep(5)
@@ -1126,6 +1159,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             )
             w1 = pg.allreduce(torch.rand(10).cuda(self.rank))
             w2 = pg.allreduce(torch.rand(5).cuda(self.rank))
+            store.set("extend_timeout_issued", "1")
             self.assertEqual(w1.timeout, timedelta(seconds=13))
             self.assertEqual(w2.timeout, timedelta(seconds=13))
             w1.wait()
@@ -7816,6 +7850,74 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         torch.cuda.synchronize()
         # This must not hang.
         dist.destroy_process_group()
+
+
+@unittest.skipIf(torch.cuda.device_count() < 2, "2 CUDA GPUs required")
+class CollectiveAnnotationTest(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    @skipIfRocm
+    def test_captured_collective_is_annotated(self):
+        if not TEST_CUDA_GRAPH_TOOLS_ID:
+            self.skipTest("CUDA graph annotations are unavailable")
+        from torch.cuda.graph_annotations import get_kernel_annotations
+
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, enable_annotations=True):
+            dist.all_reduce(x)
+        annotations = [
+            a
+            for kernel_annotations in get_kernel_annotations().values()
+            for a in kernel_annotations
+            if "Collective name" in a
+        ]
+        self.assertTrue(annotations, "no kernel carries collective metadata")
+        for annotation in annotations:
+            self.assertEqual(annotation["Collective name"], "all_reduce")
+            self.assertEqual(annotation["In msg nelems"], 1024)
+
+    @skipIfRocm
+    def test_cuspy_collective_is_annotated(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        torch.cuda.synchronize()
+        cuda_config = ProfilerActivityConfig(profiler_configs=[CuspyConfig()])
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, {ProfilerActivity.CUDA: cuda_config}]
+            ) as prof:
+                dist.all_reduce(x)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            if os.path.exists(trace_path + ".gz"):
+                with gzip.open(trace_path + ".gz", "rt") as f:
+                    events = json.load(f)["traceEvents"]
+            else:
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+        kernels = [
+            e
+            for e in events
+            if e.get("cat") == "kernel" and "nccl" in e.get("name", "").lower()
+        ]
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
+            self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
 
 if __name__ == "__main__":

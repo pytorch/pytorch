@@ -594,6 +594,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
+        "torch._C._copy_backend_meta",
         "torch._C._cpu._init_amx",
         "torch._C._cpu._get_cpu_capability",
         "torch._C._crash_if_aten_asan",
@@ -4107,6 +4108,11 @@ def is_torch_inline_allowed(filename: str) -> bool:
 
 
 @functools.cache
+def _is_builtin_inline_when_called(filename: str, prefixes: tuple[str, ...]) -> bool:
+    return filename.startswith(prefixes)
+
+
+@functools.cache
 def get_ngb_suppress_inlinelist() -> set[str]:
     torch_dir = _module_dir(torch)
     if torch_dir is None:
@@ -4313,5 +4319,6 @@ def clear_lru_cache() -> None:
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
+    torch._dynamo.trace_rules._is_builtin_inline_when_called.cache_clear()
     torch._dynamo.trace_rules.get_ngb_suppress_inlinelist.cache_clear()
     torch._dynamo.trace_rules.dynamo_dir.cache_clear()
