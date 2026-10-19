@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -27,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -109,6 +110,32 @@ class SerializedCode:
         return types.CodeType(
             *kwargs.values(),
         )
+
+
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
+# The one persistent id a guards state may carry: a guards-state pickler emits it
+# for a pruned value that the C pickler saves by type (an exact builtin
+# container) without ever consulting reducer_override, and _GuardsStateUnpickler
+# turns it back into _Missing. Any other persistent id in a guards state is a
+# bug. An artifact is only ever read by the torch that wrote it (SystemInfo's
+# check_compatibility runs before load_guards_state), so no reader from before
+# this id existed sees one.
+_PRUNED_VALUE_PID = "pruned"
 
 
 class FunctionPicklerBase(pickle.Pickler):
@@ -288,9 +315,9 @@ class FunctionPicklerBase(pickle.Pickler):
         )
 
     @staticmethod
-    def _fqn_resolves(fn: types.FunctionType) -> bool:
-        """Whether pickling fn by reference (import __module__, walk __qualname__)
-        lands back on fn. False for a <locals> function, a functools.wraps
+    def _fqn_resolves(fn: types.FunctionType | type) -> bool:
+        """Whether pickling fn (a function or a class) by reference (import
+        __module__, walk __qualname__) lands back on fn. False for a <locals> one, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
         a module absent from sys.modules; pickling those by reference fails at
         dump with PicklingError (a bare AttributeError from the C pickler for a
@@ -472,6 +499,22 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    def __init__(self, file: IO[bytes]) -> None:
+        super().__init__(file)
+        # One sentinel per load for every pruned container, aliases and distinct
+        # ones alike (reducer_override's memo would keep distinct ones distinct;
+        # a _Missing carries nothing but its reason, so collapsing them loses
+        # nothing). Per load rather than per process: loaded values are keyed
+        # by id elsewhere, and one artifact's sentinel has no business in another.
+        self._pruned = _Missing(_PRUNED_VALUE_PID)
+
+    def persistent_load(self, pid: str) -> _Missing:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return self._pruned
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -480,7 +523,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
@@ -586,6 +629,10 @@ class _DynamoCodeCacheEntry:
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
+      11. Whether install() skips the frame and everything it calls, until
+         uninstall(). Set on a frame a precompile capture serves as plain
+         Python: its variants inlined its Python callees, which hold no entries
+         of their own.
     """
 
     python_code: SerializedCode
@@ -598,6 +645,17 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    skip_recursive: bool = False
+
+
+def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
+    name = namespace.get("__name__")
+    if not isinstance(name, str):
+        return None
+    module = sys.modules.get(name)
+    if isinstance(module, types.ModuleType) and vars(module) is namespace:
+        return module
+    return None
 
 
 def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
@@ -637,13 +695,39 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
     return fn
 
 
+def _descriptor_functions(obj: Any) -> list[tuple[str, Any]]:
+    """The functions a descriptor wraps, as (attribute name, function) pairs.
+
+    ``getattr`` on the CLASS returns the descriptor itself, not the function
+    inside it, so a code object defined under ``@property`` resolves to a
+    ``property`` object that nothing downstream can descend into. The attribute
+    name is what makes the path round-trip: the loader replays it with plain
+    ``getattr``, and ``property.fget`` is an ordinary attribute.
+    """
+    if isinstance(obj, property):
+        return [
+            (name, fn)
+            for name, fn in (
+                ("fget", obj.fget),
+                ("fset", obj.fset),
+                ("fdel", obj.fdel),
+            )
+            if fn is not None
+        ]
+    if isinstance(obj, functools.cached_property):
+        return [("func", obj.func)]
+    return []
+
+
 def _raise_resolution_error(code: types.CodeType, scope: Any) -> Never:
     raise PackageError(
         f"Cannot resolve a fully qualified name for {code}. Lookup scope: {scope}"
     )
 
 
-def _get_code_source(code: types.CodeType) -> tuple[str, str]:
+def _get_code_source(
+    code: types.CodeType, module_hint: types.ModuleType | None = None
+) -> tuple[str, str]:
     """
     Given a code object, return a fully qualified name which will be used as
     a serialized handle to access the code object from the new process.
@@ -655,19 +739,28 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     This function handles all of the corner cases above.
     """
 
-    module = inspect.getmodule(code)
+    code_module = inspect.getmodule(code)
+    module = code_module or module_hint
     if module is None:
         raise PackageError(f"Cannot find module for code {code}")
 
     toplevel: Any = module
-    if sys.version_info >= (3, 11):
+    search_module_tree = code_module is None
+    if sys.version_info >= (3, 11) and not search_module_tree:
         parts = code.co_qualname.split(".")
 
         for part in parts:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
+            if (
+                inspect.isfunction(toplevel)
+                or inspect.ismethod(toplevel)
+                or _descriptor_functions(toplevel)
+            ):
+                # Stop at a descriptor too, and let _find_code_source unwrap it.
+                # The remaining parts of a qualname like "C.prop.<locals>.inner"
+                # are not attributes of the property object.
                 break
     seen = set()
 
@@ -683,9 +776,20 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if obj is code:
                 return ""
 
+            # Only a code constant can hold `code`. Adding the others to `seen`
+            # compares b"" with 0 (equal hashes), an error under python -bb.
             for i, const in enumerate(obj.co_consts):
+                if not inspect.iscode(const):
+                    continue
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
+
+        for attr, wrapped in _descriptor_functions(obj):
+            if (res := _find_code_source(wrapped)) is not None:
+                # No `toplevel = obj` here: the recursive call sets it to the
+                # wrapped function, whose __qualname__ is the descriptor's own
+                # dotted name, which is what the loader walks to.
+                return f".{attr}{res}"
 
         if inspect.ismethod(obj):
             if (res := _find_code_source(obj.__func__)) is not None:
@@ -712,7 +816,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         toplevel = obj
                         return f".__closure__[{i}].cell_contents{res}"
 
-        if sys.version_info < (3, 11):
+        if sys.version_info < (3, 11) or search_module_tree:
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
                     if not (
@@ -724,22 +828,32 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                     if (res := _find_code_source(value)) is not None:
                         return res
 
-            if inspect.isclass(obj):
-                for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
-                    try:
-                        value = getattr(obj, name)
-                    except AttributeError:
-                        continue
-                    if not (
-                        inspect.isfunction(value)
-                        or inspect.isclass(value)
-                        or inspect.ismethod(value)
-                    ):
-                        continue
-                    if (res := _find_code_source(value)) is not None:
-                        if value.__name__ != name:
-                            _raise_resolution_error(code, toplevel)
-                        return res
+        if inspect.isclass(obj):
+            for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
+                try:
+                    value = getattr(obj, name)
+                except Exception:
+                    # Class-level descriptors and metaclass __getattr__ may
+                    # raise anything, and the module search visits every class.
+                    continue
+                # A descriptor is what getattr on the CLASS returns for
+                # anything defined under @property or @cached_property, so
+                # excluding it here hides every code object inside one.
+                wrapped = _descriptor_functions(value)
+                if not (
+                    inspect.isfunction(value)
+                    or inspect.isclass(value)
+                    or inspect.ismethod(value)
+                    or wrapped
+                ):
+                    continue
+                if (res := _find_code_source(value)) is not None:
+                    # A descriptor has no __name__; the functions it wraps
+                    # carry the attribute's name instead.
+                    actual = wrapped[0][1].__name__ if wrapped else value.__name__
+                    if actual != name:
+                        _raise_resolution_error(code, toplevel)
+                    return res
         return None
 
     code_source = _find_code_source(toplevel)
@@ -988,6 +1102,33 @@ def _compile_frame_context(
     return _ctx()
 
 
+# The skips installed packages hold on each code object, one per package, True
+# for a skip of everything the code calls. A strategy is process-global, so a
+# code keeps the widest skip still held and goes back to the default only when
+# the last holder uninstalls. A strategy set before install() (e.g. by
+# torch._dynamo.skip) is not restored: there is no getter for it.
+_SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+
+def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None:
+    from torch._C._dynamo.eval_frame import set_code_exec_strategy
+
+    from .types import FrameAction, FrameExecStrategy
+
+    holds = _SKIP_HOLDS.setdefault(code, [])
+    if hold:
+        holds.append(recursive)
+    else:
+        holds.remove(recursive)
+    if not holds:
+        del _SKIP_HOLDS[code]
+        strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+    else:
+        callees = FrameAction.SKIP if any(holds) else FrameAction.DEFAULT
+        strategy = FrameExecStrategy(FrameAction.SKIP, callees)
+    set_code_exec_strategy(code, strategy)
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1016,6 +1157,9 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # The skips install() holds in _SKIP_HOLDS, which uninstall() releases:
+        # (code, whether its callees are skipped too).
+        self._skipped_codes: list[tuple[types.CodeType, bool]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1142,27 +1286,63 @@ class CompilePackage:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(self._innermost_fn)
 
-    def _add_user_function(self, code: types.CodeType) -> None:
-        function_name, code_source = _get_code_source(code)
-        module = inspect.getmodule(code)
+    def _add_user_function(
+        self,
+        code: types.CodeType,
+        global_scope: dict[str, object] | None = None,
+    ) -> None:
+        code_module = inspect.getmodule(code)
+        module = code_module or (
+            _globals_module(global_scope) if global_scope is not None else None
+        )
         if module is None:
             raise PackageError(f"Cannot find module for code {code}")
+        function_name, code_source = _get_code_source(code, module)
         self._add_function(
             code,
             module.__name__,
             function_name=_FunctionId(function_name),
             code_source=code_source,
         )
+        if code_module is None:
+            # The module search records the found function's __qualname__,
+            # which the loader replays with plain getattr. dataclasses rename
+            # what they exec() to its attribute path; a helper that does not
+            # would otherwise only fail at load.
+            cause: Exception | None = None
+            try:
+                resolves = _lookup_code(self._codes[code]) is code
+            except Exception as e:
+                # A replay can fail in many ways (a missing attribute, a None
+                # __closure__, an index out of range); each means unreplayable.
+                resolves, cause = False, e
+            if not resolves:
+                del self._codes[code]
+                outcome = f"fails with {cause!r}" if cause else "finds other code"
+                raise PackageError(
+                    f"Cannot resolve a fully qualified name for {code}: replaying "
+                    f"the recorded path {module.__name__}:{function_name} "
+                    f"({code_source}) {outcome}"
+                ) from cause
+
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        """The entry of the code object being compiled inside ``code_context``."""
+        return self._current_entry
 
     @contextlib.contextmanager
-    def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
+    def code_context(
+        self,
+        code: types.CodeType,
+        global_scope: dict[str, object] | None = None,
+    ) -> Generator[None, None, None]:
         if self._current_entry is not None:
             raise AssertionError("_current_entry is already set in code_context")
 
         # Sometimes user code cannot be inlined in dynamo resulting in extra user code
         # being compiled. We should record these as when they are actually invoked.
         if code not in self._codes:
-            self._add_user_function(code)
+            self._add_user_function(code, global_scope)
 
         entry = self._codes[code]
         self._current_entry = entry
@@ -1203,6 +1383,9 @@ class CompilePackage:
         # break adds a resume code), so accumulate: a cpu-only resume frame
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
+
+    def note_compute(self) -> None:
+        """Called when the current compile traced a graph, even one bypass_package then drops."""
 
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
@@ -1284,8 +1467,8 @@ class CompilePackage:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
-        CleanupHook.disown(module.__dict__, name)
-        record = not (record_only_if_new and name in module.__dict__)
+        owned = CleanupHook.disown(module.__dict__, name)
+        record = owned or not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
         if record:
             self._installed_globals.setdefault(module, []).append(name)
@@ -1300,6 +1483,9 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
+        for code, recursive in self._skipped_codes:
+            _update_skip_hold(code, recursive, hold=False)
+        self._skipped_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1310,6 +1496,7 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
+        import torch._inductor.config as inductor_config
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
@@ -1329,8 +1516,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases are the only names install() records that are ever
-                # seeded that way.
+                # aliases and the ___unnamed_scope keys below are the only names
+                # install() records that are ever seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1378,8 +1565,19 @@ class CompilePackage:
                         raise RuntimeError(
                             f"Backend {backend_id} is not found in the given backends"
                         )
-                    with dynamo_timed(
-                        "after_deserialization", phase_name="backend_compile"
+                    # AutotuneCacheBundler keeps one bundle per compile
+                    # context, left open on a remote-cache miss until the
+                    # first compiled call. A backend with a backward
+                    # post-compiles both in one after_deserialization(), and a
+                    # frame can have several backends, so a second bundle
+                    # would fail to open. With the flag off these kernels'
+                    # first-call autotune results are not uploaded as a
+                    # bundle; the per-kernel autotune caches still apply.
+                    with (
+                        dynamo_timed(
+                            "after_deserialization", phase_name="backend_compile"
+                        ),
+                        inductor_config.patch(bundled_autotune_remote_cache=False),
                     ):
                         backend = backends[backend_id].after_deserialization()
                         self._install_global(
@@ -1388,10 +1586,11 @@ class CompilePackage:
                             torch._dynamo.disable(backend),
                         )
 
-                if len(entry.guarded_codes) == 0:
-                    # Dynamo generates empty graph for trivial functions, should just skip them
-                    # in these cases.
-                    torch._dynamo.eval_frame.skip_code(target_code)
+                # Dynamo generates empty graph for trivial functions, should just skip them
+                # in these cases.
+                if entry.skip_recursive or len(entry.guarded_codes) == 0:
+                    _update_skip_hold(target_code, entry.skip_recursive, hold=True)
+                    self._skipped_codes.append((target_code, entry.skip_recursive))
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):
@@ -1419,6 +1618,42 @@ class CompilePackage:
                                 )
                         else:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
+                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
+                    # in the tracing process, so a fresh process has no binding
+                    # for it. Bind it (after the builtins dict above, which a
+                    # recorded source can be rooted at) to the live namespace,
+                    # found again through the inlined function's source, so
+                    # the guards and the bytecode see what they saw while
+                    # tracing; the artifact's copy of the dict is frozen and
+                    # has its tensors faked. A
+                    # key whose source does not resolve here (one rooted at a
+                    # frame local, or a chain through user objects that raises
+                    # against this process's state) stays unbound and misses as
+                    # before. A binding already here is kept; a live compile's
+                    # is taken over from its CleanupHook, so uninstall() drops
+                    # it, and anyone else's is left alone.
+                    sources = guards_state.output_graph.unnamed_scope_sources
+                    closure_vars = torch._dynamo.guards._get_closure_vars()
+                    for name, source in sources.items():
+                        try:
+                            namespace = source.get_value(
+                                {"G": runtime_global_scope}, closure_vars, {}
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                "leaving %s unbound, %s raised: %r",
+                                name,
+                                source.name,
+                                e,
+                            )
+                            continue
+                        if isinstance(namespace, dict):
+                            self._install_global(
+                                module,
+                                name,
+                                runtime_global_scope.get(name, namespace),
+                                record_only_if_new=True,
+                            )
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"
@@ -1707,7 +1942,9 @@ class DiskDynamoCache(DiskDynamoStore):
                 return result
             except Exception:
                 counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning("Failed to load package from path %s", exc_info=True)
+                logger.warning(
+                    "Failed to load package from path %s", path, exc_info=True
+                )
                 return None
         logger.info("No package found for %s", key)
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1

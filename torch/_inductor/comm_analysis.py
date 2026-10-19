@@ -3,7 +3,7 @@ import logging
 import math
 import operator
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntEnum
 from typing import Any
 
@@ -90,6 +90,7 @@ class InterconnectType(IntEnum):
     IB_HDR = 4  # 200 Gbps InfiniBand
     IB_NDR = 5  # 400 Gbps InfiniBand / RoCE
     PCIE = 6  # PCIe (no NVLink)
+    UNKNOWN = 7
 
 
 @dataclass(frozen=True)
@@ -176,15 +177,27 @@ def _has_nvlink() -> bool:
         return True
 
 
+# RDNA GPUs have no xGMI, so the NVIDIA generation their GFX major version maps
+# to says nothing about their interconnect.
+_ROCM_NO_XGMI_ARCH_PREFIXES = ("gfx10", "gfx11", "gfx120")
+
+
 @functools.lru_cache
-def get_gpu_type() -> NVIDIA_GPU_TYPE:
+def get_gpu_type() -> NVIDIA_GPU_TYPE | None:
     # Prefer compute capability (works for all NVIDIA GPUs, including H200, L40, etc.)
     if (
         _get_device_type_str() == "cuda"
         and torch.cuda.is_available()
         and torch.cuda.device_count() > 0
     ):
-        major = torch.cuda.get_device_properties(0).major
+        props = torch.cuda.get_device_properties(0)
+        # On ROCm, major is the GFX major version: CDNA parts keep the model it
+        # selects, PCIe-only RDNA parts get none.
+        if torch.version.hip is not None and props.gcnArchName.startswith(
+            _ROCM_NO_XGMI_ARCH_PREFIXES
+        ):
+            return None
+        major = props.major
         if major >= 10:
             return NVIDIA_GPU_TYPE.BLACKWELL
         if major >= 9:
@@ -212,6 +225,8 @@ def detect_interconnect(group_size: int) -> InterconnectType:
     device_module = _get_device_module()
     gpus_per_node = device_module.device_count() if device_module.is_available() else 8
     gpu_gen = get_gpu_type()
+    if gpu_gen is None:
+        return InterconnectType.UNKNOWN
     if math.ceil(group_size / gpus_per_node) == 1:
         if not _has_nvlink():
             return InterconnectType.PCIE
@@ -267,11 +282,22 @@ def get_collective_input_size_bytes(node: ir.IRNode) -> int:
     return sz_bytes
 
 
+def _get_collective_group_name(node: ir._CollectiveKernel) -> Any:
+    # group_name isn't the last constant arg when a collective config is passed.
+    names = [arg.name for arg in node.op_overload._schema.arguments]  # type: ignore[union-attr]
+    if "group_name" not in names:
+        return node.constant_args[-1]
+    args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    if "group_name" in kwargs:
+        return kwargs["group_name"]
+    return args[names.index("group_name")]
+
+
 def get_collective_group_size(node: ir.IRNode) -> int:
     if isinstance(node, ir._CollectiveKernel) and not isinstance(node, ir._WaitKernel):
         from torch.distributed.distributed_c10d import _get_group_size_by_name
 
-        return _get_group_size_by_name(node.constant_args[-1])
+        return _get_group_size_by_name(_get_collective_group_name(node))
     else:
         raise TypeError(f"Unsupported collective type: {node}")
 
@@ -487,21 +513,27 @@ _GPU_INTER_NODE_BW: dict[NVIDIA_GPU_TYPE, float] = {
 
 
 def get_intra_node_bw() -> float:
-    """Return intra-node bandwidth in GB/s. Config overrides auto-detection."""
+    """Return modeled intra-node bandwidth in GB/s, or 0 if unavailable."""
     override = torch._inductor.config.intra_node_bw
     if override is not None:
         return float(override)
+    gpu_type = get_gpu_type()
+    if gpu_type is None:
+        return 0.0
     if not _has_nvlink():
         return _PCIE_INTRA_NODE_BW
-    return _GPU_NVLINK_BW.get(get_gpu_type(), 240.0)
+    return _GPU_NVLINK_BW.get(gpu_type, 240.0)
 
 
 def get_inter_node_bw() -> float:
-    """Return inter-node (IB/RoCE) bandwidth in GB/s. Config overrides auto-detection."""
+    """Return modeled inter-node bandwidth in GB/s, or 0 if unavailable."""
     override = torch._inductor.config.inter_node_bw
     if override is not None:
         return float(override)
-    return _GPU_INTER_NODE_BW.get(get_gpu_type(), 25.0)
+    gpu_type = get_gpu_type()
+    if gpu_type is None:
+        return 0.0
+    return _GPU_INTER_NODE_BW.get(gpu_type, 25.0)
 
 
 def _log2i(n: int) -> int:
@@ -520,7 +552,7 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
     if kernel is None:
         raise AssertionError("snode.node must not be None")
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
-    pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
+    pg_name = _get_collective_group_name(kernel)  # type: ignore[arg-type]
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     pg = _resolve_process_group(pg_name)
@@ -584,7 +616,7 @@ def _nccl_algo_time(
     # per-channel BW cap table lookups.
     bwIntra = get_intra_node_bw()
     bwInter = get_inter_node_bw()
-    nChannels = _GPU_NCHANNELS.get(compCapIndex, 8)
+    nChannels = 8 if compCapIndex is None else _GPU_NCHANNELS.get(compCapIndex, 8)
 
     # Detect interconnect for IB-specific corrections
     interconnect = detect_interconnect(group_size)
@@ -624,27 +656,29 @@ def _nccl_algo_time(
 
     busBw = bw
 
-    index1 = compCapIndex if nNodes == 1 else 0
-    llMaxBw = llMaxBws[index1][index2]
+    if compCapIndex is None:
+        # The per-generation caps are NVIDIA tuning constants; without a GPU
+        # generation only the configured bandwidth limits the estimate.
+        llMaxBw = ringLL128MaxBw = treeLL128MaxBw = treeMaxBw = math.inf
+    else:
+        index1 = compCapIndex if nNodes == 1 else 0
+        llMaxBw = llMaxBws[index1][index2]
+        ringLL128MaxBw = nChannels * perChMaxRingLL128Bws[compCapIndex][index2]
+        treeLL128MaxBw = nChannels * perChMaxTreeLL128Bws[compCapIndex][index2]
+        treeMaxBw = nChannels * perChMaxTreeBws[compCapIndex][index2]
 
     if algo == NCCL_ALGO.RING and proto == NCCL_PROTO.LL:
         busBw = min(llMaxBw, busBw * 0.5)
     elif algo == NCCL_ALGO.RING and proto == NCCL_PROTO.LL128:
-        busBw = min(
-            busBw * (120.0 / 128.0),
-            nChannels * perChMaxRingLL128Bws[compCapIndex][index2],
-        )
+        busBw = min(busBw * (120.0 / 128.0), ringLL128MaxBw)
     elif algo == NCCL_ALGO.TREE and proto == NCCL_PROTO.LL:
         busBw = min(busBw * (1.0 / 3.8), llMaxBw)
     elif algo == NCCL_ALGO.TREE and proto == NCCL_PROTO.LL128:
         factor = 7.0 / 9.0 if nNodes == 1 else 120.0 / 128.0
-        busBw = min(
-            busBw * factor,
-            nChannels * perChMaxTreeLL128Bws[compCapIndex][index2],
-        )
+        busBw = min(busBw * factor, treeLL128MaxBw)
     elif algo == NCCL_ALGO.TREE and proto == NCCL_PROTO.SIMPLE:
         if coll == NCCL_COLL.ALL_REDUCE:
-            busBw = min(busBw * 0.92, nChannels * perChMaxTreeBws[compCapIndex][index2])
+            busBw = min(busBw * 0.92, treeMaxBw)
     # Ring+SIMPLE: no extra cap beyond busBw
 
     if busBw <= 0:
@@ -675,7 +709,11 @@ def _nccl_algo_time(
         return -1.0
 
     # --- Latency computation (mirrors ncclTopoTuneModel) ---
-    intraHw = NCCL_HW.PCI if interconnect == InterconnectType.PCIE else NCCL_HW.NVLINK
+    intraHw = (
+        NCCL_HW.PCI
+        if interconnect in (InterconnectType.PCIE, InterconnectType.UNKNOWN)
+        else NCCL_HW.NVLINK
+    )
     lat = baseLat[algo][proto]
     intraLat = hwLat[intraHw][algo][proto]
     interLat = hwLat[NCCL_HW.NET][algo][proto]
@@ -801,6 +839,23 @@ def estimate_nccl_collective_runtime_impl(
     return time_us / 1000.0
 
 
+def _configured_profile(group_size: int) -> InterconnectProfile | None:
+    """Return the PCIe (one node) or IB HDR (multi-node) profile scaled to the
+    configured bandwidth, or None if that bandwidth is not set."""
+    gpus_per_node = torch.cuda.device_count() if torch.cuda.is_available() else 8
+    if math.ceil(group_size / gpus_per_node) == 1:
+        configured = torch._inductor.config.intra_node_bw
+        base, base_bw = InterconnectType.PCIE, _PCIE_INTRA_NODE_BW
+    else:
+        configured = torch._inductor.config.inter_node_bw
+        base = InterconnectType.IB_HDR
+        base_bw = _GPU_INTER_NODE_BW[NVIDIA_GPU_TYPE.AMPERE]
+    if configured is None:
+        return None
+    profile = INTERCONNECT_PROFILES[base]
+    return replace(profile, bus_bw_GBps=profile.bus_bw_GBps * configured / base_bw)
+
+
 def compute_min_saturation_bytes(
     group_size: int,
     coll: NCCL_COLL,
@@ -820,7 +875,14 @@ def compute_min_saturation_bytes(
     if group_size <= 1:
         return 0
 
-    profile = INTERCONNECT_PROFILES[detect_interconnect(group_size)]
+    interconnect = detect_interconnect(group_size)
+    if interconnect == InterconnectType.UNKNOWN:
+        configured = _configured_profile(group_size)
+        if configured is None:
+            return 0
+        profile = configured
+    else:
+        profile = INTERCONNECT_PROFILES[interconnect]
 
     if coll in (NCCL_COLL.ALL_GATHER, NCCL_COLL.REDUCE_SCATTER):
         nsteps = group_size - 1

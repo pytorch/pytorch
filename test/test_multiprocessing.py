@@ -3,6 +3,7 @@ import contextlib
 import copy
 import gc
 import os
+import struct
 import sys
 import time
 import unittest
@@ -22,13 +23,15 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     load_tests,
+    parametrize,
     run_tests,
-    skipIfRocm,
     slowTest,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -118,10 +121,13 @@ def limbo_cleanup_worker(q, e):
     del t
 
 
-def send_tensor_with_untyped_storage(queue, event):
-    tensors = torch.ones(2, device="cuda").chunk(2, dim=0)
+def send_tensor_with_untyped_storage(queue, event, expandable, peer):
+    os.environ["TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC"] = "1"
+    torch.cuda.memory._set_allocator_settings(f"expandable_segments:{expandable}")
+    torch.cuda.empty_cache()
+    tensors = (*torch.ones(2, device="cuda").chunk(2), torch.ones(1, device="cuda"))
     specs = []
-    for tensor in tensors:
+    for tensor in tensors * (2 if peer else 1):
         storage = tensor.untyped_storage()
         (
             storage_device,
@@ -152,7 +158,7 @@ def send_tensor_with_untyped_storage(queue, event):
                 "event_sync_required": event_sync_required,
             }
         )
-    queue.put(specs)
+    queue.put((specs, tensors[2].data_ptr() - tensors[0].data_ptr()))
     event.wait()
 
 
@@ -266,8 +272,8 @@ def _event_multiprocess_child(event, p2c, c2p):
     c2p.put(1)  # notify parent synchronization is done
 
 
-def _event_handle_importer_consumer(handle, p2c, c2p):
-    e1 = torch.cuda.Event.from_ipc_handle(0, handle)
+def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+    e1 = event_cls.from_ipc_handle(0, handle)
     c2p.put(0)  # notify parent child is ready
     p2c.get()  # wait for record in parent
     e1.synchronize()
@@ -275,10 +281,10 @@ def _event_handle_importer_consumer(handle, p2c, c2p):
     p2c.get()  # wait for parent to finish before destructing child event
 
 
-def _event_handle_exporter_consumer(handle, p2c, c2p):
+def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
     stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        e1 = torch.cuda.Event.from_ipc_handle(torch.cuda.current_device(), handle)
+    with stream:
+        e1 = event_cls.from_ipc_handle(torch.cuda.current_device(), handle)
         torch.cuda._sleep(50000000)  # spin for about 50 ms
         e1.record()
         c2p.put(0)
@@ -527,7 +533,6 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     def test_empty_tensor_sharing(self, device, dtype):
         self._test_empty_tensor_sharing(dtype, torch.device(device))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/92131")
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4000")
     @unittest.skipIf(
         TEST_WITH_ASAN,
@@ -818,6 +823,7 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
 @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+@instantiate_parametrized_tests
 class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -947,25 +953,67 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         # memory 'file' for performance reason
         torch.cuda.ipc_collect()
 
-    def test_rebuild_cuda_tensor(self):
+    @parametrize("expandable", [False, True])
+    @parametrize("peer", [False, True])
+    def test_rebuild_cuda_tensor(self, expandable, peer):
+        if peer and (not TEST_MULTIGPU or not torch.cuda.can_device_access_peer(1, 0)):
+            self.skipTest("requires peer access from cuda:1 to cuda:0")
         ctx = mp.get_context("spawn")
         queue = ctx.Queue()
         event = ctx.Event()
 
         proc = ctx.Process(
             target=send_tensor_with_untyped_storage,
-            args=(queue, event),
+            args=(queue, event, expandable, peer),
         )
         proc.start()
 
-        specs = queue.get()
         tensors = []
-        for spec in specs:
-            tensors.append(mp.reductions.rebuild_cuda_tensor(**spec))
-        self.assertEqual(tensors, [1, 1])
-
-        del tensors, spec
-        event.set()
+        try:
+            specs, ptr_delta = queue.get(timeout=30)
+            handles = [s["storage_handle"] for s in specs]
+            handle = handles[0]
+            self.assertEqual(handles, [handle] * len(specs))
+            if expandable:
+                self.assertEqual(handle[1:2], b"e")
+                self.assertEqual(handle[6:10] + handle[30:34], bytes(8))
+                wrong_handle = bytearray(handle)
+                handle_type = struct.unpack_from("=i", handle, 26)[0]
+                if os.environ.get("TEST_CONFIG") == "h100-fabric":
+                    self.assertEqual(handle_type, 2)  # FABRIC_HANDLE
+                struct.pack_into("=i", wrong_handle, 26, 0)  # UNSPECIFIED
+                with self.assertRaisesRegex(RuntimeError, "Unsupported.*IPC"):
+                    mp.reductions.rebuild_cuda_tensor(
+                        **dict(specs[0], storage_handle=bytes(wrong_handle))
+                    )
+            for dev in range(2 if peer else 1):
+                start = 3 * dev
+                tensors.extend(
+                    mp.reductions.rebuild_cuda_tensor(**dict(s, storage_device=dev))
+                    for s in specs[start : start + 3]
+                )
+                self.assertEqual([t.device.index for t in tensors[start:]], [dev] * 3)
+                self.assertEqual(tensors[start:], [1, 1, 1])
+                self.assertEqual(
+                    tensors[start + 2].data_ptr() - tensors[start].data_ptr(), ptr_delta
+                )
+                self.assertEqual(
+                    tensors[start].untyped_storage()._cdata,
+                    tensors[start + 1].untyped_storage()._cdata,
+                )
+            with self.assertRaisesRegex(RuntimeError, "received from another process"):
+                mp.reductions.reduce_tensor(tensors[0])
+            if peer:
+                del tensors[:3]
+                self.assertEqual(tensors, [1, 1, 1])
+        finally:
+            tensors.clear()
+            event.set()
+            proc.join(30)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+        self.assertEqual(proc.exitcode, 0)
 
     def test_event(self):
         ctx = mp.get_context("spawn")
@@ -990,8 +1038,15 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
-    def test_event_multiprocess(self):
-        event = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_multiprocess(self, event_cls):
+        event = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
         ctx = mp.get_context("spawn")
@@ -1034,8 +1089,15 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
             # create handle on different device from recorded event
             e1.ipc_handle()
 
-    def test_event_handle_importer(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_importer(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
         ctx = mp.get_context("spawn")
@@ -1043,7 +1105,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
 
@@ -1058,15 +1120,22 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         p2c.put(1)  # notify child that parent is done
         p.join()
 
-    def test_event_handle_exporter(self):
-        e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
+    @parametrize(
+        "event_cls",
+        [
+            subtest(torch.cuda.Event, name="cuda_event"),
+            subtest(torch.Event, name="generic_event"),
+        ],
+    )
+    def test_event_handle_exporter(self, event_cls):
+        e0 = event_cls(enable_timing=False, interprocess=True)
 
         ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=_event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
+            args=(event_cls, e0.ipc_handle(), p2c, c2p),
         )
         p.start()
         # wait for event in child process is recorded

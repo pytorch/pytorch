@@ -144,7 +144,6 @@ class TestCppExtensionAOTDevice(common.TestCase):
 class TestCppExtensionAOTCUDA(common.TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cublas_extension(self):
@@ -154,7 +153,6 @@ class TestCppExtensionAOTCUDA(common.TestCase):
         z = cublas_extension.noop_cublas_function(x)
         self.assertEqual(z, x)
 
-    @common.skipIfRocm
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cusolver_extension(self):
@@ -164,7 +162,7 @@ class TestCppExtensionAOTCUDA(common.TestCase):
         z = cusolver_extension.noop_cusolver_function(x)
         self.assertEqual(z, x)
 
-    @common.skipIfRocm
+    @common.skipIfRocm(msg="dlink build path has no ROCm arch handling")
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(

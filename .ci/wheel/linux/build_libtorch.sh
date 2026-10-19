@@ -107,7 +107,7 @@ echo "Calling -m pip install . -v --no-build-isolation at $(date)"
 
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
-        CFLAGS='-Wno-deprecated-declarations' \
+        CFLAGS="$CFLAGS -Wno-deprecated-declarations" \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \
         python -m pip install --no-build-isolation -v .
 
