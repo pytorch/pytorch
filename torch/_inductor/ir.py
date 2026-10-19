@@ -7,6 +7,7 @@ import functools
 import itertools
 import logging
 import operator
+import sys
 import textwrap
 import traceback
 from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
@@ -65,6 +66,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
+from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -4409,14 +4411,19 @@ class SliceView(View):
         sizevars = V.graph.sizevars
         dim_size = x.get_size()[dim]
 
-        if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-            min_func = Min
-            max_func = Max
-        elif any(
-            # Only needed when backed_size_oblivious is on.
-            x.has(sympy.Min, sympy.Max, Min, Max)
-            for x in (start, end, dim_size)
-            if isinstance(x, Expr)
+        if end is not None and sizevars.statically_known_equals(end, sys.maxsize):
+            end = dim_size
+
+        # Existing symbolic clamps must not acquire hint-dependent guards,
+        # even when size-oblivious mode is off.
+        if (
+            fx_config.backed_size_oblivious
+            or any(free_unbacked_symbols(x) for x in (start, end, dim_size))
+            or any(
+                x.has(sympy.Min, sympy.Max, Min, Max)
+                for x in (start, end, dim_size)
+                if isinstance(x, Expr)
+            )
         ):
             min_func = Min
             max_func = Max
