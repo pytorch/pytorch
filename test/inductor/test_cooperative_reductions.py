@@ -406,7 +406,7 @@ class TestFixedConfigs(TestCase):
         def fn(x):
             return torch.var_mean(x, dim=-1)
 
-        cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
+        cfg = {"XBLOCK": 16, "RSPLIT": rsplit, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 64
         args = [torch.randn(x, r, device=GPU_TYPE)]
@@ -465,7 +465,7 @@ class TestFixedConfigs(TestCase):
                 torch.mean(x + y),
             ]
 
-        cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
+        cfg = {"XBLOCK": 16, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
         args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
