@@ -823,13 +823,11 @@ class ConstDictVariable(VariableTracker):
         if result is not None:
             # A data descriptor on the type wins over a deleted instance-dict
             # entry (e.g. '__class__'/'__dict__' written via the __dict__ view).
-            from .user_defined import is_data_descriptor
+            from .user_defined import type_attr_takes_precedence
 
-            type_attr = mro_lookup(self.python_type(), name)
-            data_descriptor = self.lookup_tp_getset_member(name) is not None or (
-                type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr)
-            )
-            if result.is_constant_match(True) or not data_descriptor:
+            if result.is_constant_match(True) or not type_attr_takes_precedence(
+                self, name
+            ):
                 return result
         cls = self.python_type()
         if any(
@@ -988,10 +986,9 @@ class OrderedDictVariable(ConstDictVariable):
                 gb_type="setattr() on a pre-existing OrderedDict",
                 context=f"setattr({self.debug_repr()}, {name_var}, {value})",
                 explanation=(
-                    "Dynamo models instance attributes only on OrderedDicts built "
-                    "inside the traced region. Supporting writes to a pre-existing "
-                    "OrderedDict (guarded value + mutation replay) is out of scope "
-                    "for this fix, so the frame is graph-broken instead."
+                    "Dynamo models instance attributes of an OrderedDict only when "
+                    "the object is built inside the traced region; writing an "
+                    "attribute of a pre-existing OrderedDict is not modeled."
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
@@ -1008,13 +1005,15 @@ class OrderedDictVariable(ConstDictVariable):
                 tx,
                 f"attribute name must be string, not '{name_var.python_type_name()}'",
             )
-        if name in ("__dict__", "__class__"):
+        from .user_defined import type_attr_takes_precedence
+
+        if type_attr_takes_precedence(self, name):
             unimplemented(
                 gb_type="setattr() of a descriptor attribute on OrderedDict",
                 context=f"setattr({self.debug_repr()}, {name!r}, {value})",
                 explanation=(
-                    "Dynamo does not model writes to the __dict__/__class__ "
-                    "descriptors of an OrderedDict."
+                    "Dynamo does not model writes to attributes that are data "
+                    "descriptors on the OrderedDict type (e.g. __class__/__dict__)."
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
@@ -1047,23 +1046,28 @@ class OrderedDictVariable(ConstDictVariable):
                 # side-effects compartment as setattr.
                 se.track_attribute_mutation_new(self)
             return self.get_dict_vt(tx)
+        from .misc import DeletedVariable
+        from .user_defined import type_attr_takes_precedence
+
+        # PyObject_GenericGetAttr order: a data descriptor on the type wins over
+        # the instance __dict__, which in turn wins over non-data descriptors
+        # and other class attributes.
+        if not type_attr_takes_precedence(self, name):
+            se = tx.output.side_effects
+            if se.has_pending_mutation_of_attr(
+                self, name, AttrMutationKind.INSTANCE_DICT
+            ):
+                value = se.load_attr(self, name, deleted_ok=True)
+                if not isinstance(value, DeletedVariable):
+                    return value
         type_attr = mro_lookup(self.python_type(), name)
         if type_attr is not NO_SUCH_SUBOBJ:
             return super().tp_getattro_impl(tx, name)
-        # Not found on the type: CPython next looks in the instance __dict__.
         if self.source is not None:
-            unimplemented(
-                gb_type="getattr() on a pre-existing OrderedDict instance attribute",
-                context=f"getattr({self.debug_repr()}, {name})",
-                explanation=(
-                    "Dynamo models instance attributes only on OrderedDicts built "
-                    "inside the traced region. Reading an instance attribute off a "
-                    "pre-existing OrderedDict requires guarded attribute sources "
-                    "and a handle on the live object, which is out of scope for "
-                    "this fix, so the frame is graph-broken instead."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            # Deferred resolution: the attribute is loaded from the live object
+            # at runtime, preserving the pre-#191365 behavior for reads off a
+            # pre-existing OrderedDict.
+            return super().tp_getattro_impl(tx, name)
         raise_observed_exception(
             AttributeError,
             tx,

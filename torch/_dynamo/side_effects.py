@@ -797,7 +797,14 @@ class SideEffects:
         Keyed by the VT's id since there is no backing Python object."""
         if id(variable) in self.id_to_variable:
             return
-        variable.mutation_type = AttributeMutationNew()
+        previous = variable.mutation_type
+        mutation = AttributeMutationNew()
+        if previous is not None:
+            # Keep the object's creation scope: the mutation may be observed
+            # inside a HigherOrderOp even though the object predates it, and
+            # is_side_effect_safe() relies on the creation scope.
+            mutation.scope = previous.scope
+        variable.mutation_type = mutation
         self.id_to_variable[id(variable)] = variable
         self.keepalive.append(variable)
 
@@ -1043,11 +1050,14 @@ class SideEffects:
                 return
             visited.add(var)
             # A DunderDictVariable views its owner's instance __dict__ through
-            # this table, so the owner has to stay alive for its attribute
-            # mutations to be codegen'd. Exact type check: isinstance() on a
-            # LazyVariableTracker would realize it during pruning.
+            # this table, so the owner (and, transitively, its contents) has to
+            # stay alive for its attribute mutations to be codegen'd. Exact type
+            # check: isinstance() on a LazyVariableTracker would realize it
+            # during pruning.
             if istype(var, variables.DunderDictVariable):
-                visit(var.items.item)  # noqa: F821
+                # The proxy storage is not walked by VariableTracker.visit, so
+                # walk the owner explicitly to keep its contents reconstructable.
+                VariableTracker.visit(visit, var.items.item)  # noqa: F821
             # Object may have been mutated, store this mutation.
             if isinstance(var.mutation_type, AttributeMutationNew):
                 live_new_objects.add(var)

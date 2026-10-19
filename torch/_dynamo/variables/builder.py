@@ -5814,9 +5814,6 @@ class SourcelessBuilder:
         handlers[set] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
-        handlers[frozenset] = lambda tx, value: FrozensetVariable(
-            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
-        )
         handlers[OrderedSet] = lambda tx, value: OrderedSetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )

@@ -4156,22 +4156,23 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         check(opt(x), f(x))
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_sourced_ordereddict_instance_attr_declines(self):
+    def test_sourced_ordereddict_attribute_contract(self):
         od = OrderedDict(a=1)
         od.foo = 7
         x = torch.zeros(1)
 
+        # Reads of a pre-existing OrderedDict attribute keep compiling (deferred
+        # attribute load on the live object) and match eager.
         def read_attr(x, d):
-            return x + d.foo
+            return x + 1, d.foo
 
-        with self.assertRaisesRegex(
-            Unsupported,
-            "getattr\\(\\) on a pre-existing OrderedDict instance attribute",
-        ):
-            torch.compile(read_attr, backend="eager", fullgraph=True)(x, od)
-        # Without fullgraph the frame falls back to eager and matches.
-        self.assertEqual(torch.compile(read_attr, backend="eager")(x, od), x + 7)
+        self.assertEqual(
+            torch.compile(read_attr, backend="eager", fullgraph=True)(x, od),
+            read_attr(x, od),
+        )
 
+        # Writes are not modeled on a pre-existing OrderedDict: graph break under
+        # fullgraph, eager fallback otherwise.
         def write_attr(x, d):
             d.foo = 1
             return x + len(d)

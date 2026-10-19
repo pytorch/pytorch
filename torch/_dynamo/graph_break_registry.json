@@ -72,16 +72,6 @@
       ]
     }
   ],
-  "GB6896": [
-    {
-      "Gb_type": "unmaterializable instance __dict__ key",
-      "Context": "key type: {type(name)}",
-      "Explanation": "Dynamo cannot replay a write through object.__dict__ whose key is neither a literal nor a tuple/frozenset of literals.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB2085": [
     {
       "Gb_type": "unreplayable key type in instance __dict__",
@@ -2477,15 +2467,7 @@
     {
       "Gb_type": "setattr() on a pre-existing OrderedDict",
       "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
-      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. Supporting writes to a pre-existing OrderedDict (guarded value + mutation replay) is out of scope for this fix, so the frame is graph-broken instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    },
-    {
-      "Gb_type": "setattr() on a pre-existing OrderedDict",
-      "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
-      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. A pre-existing OrderedDict is dict-backed, so the write could not be guarded/replayed soundly.",
+      "Explanation": "Dynamo models instance attributes of an OrderedDict only when the object is built inside the traced region; writing an attribute of a pre-existing OrderedDict is not modeled.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -2505,25 +2487,7 @@
     {
       "Gb_type": "setattr() of a descriptor attribute on OrderedDict",
       "Context": "setattr({self.debug_repr()}, {name}, {value})",
-      "Explanation": "Dynamo does not model writes to the __dict__/__class__ descriptors of an OrderedDict.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
-  "GB5031": [
-    {
-      "Gb_type": "getattr() on a pre-existing OrderedDict instance attribute",
-      "Context": "getattr({self.debug_repr()}, {name})",
-      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. Reading an instance attribute off a pre-existing OrderedDict requires guarded attribute sources and a handle on the live object, which is out of scope for this fix, so the frame is graph-broken instead.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    },
-    {
-      "Gb_type": "getattr() on a pre-existing OrderedDict instance attribute",
-      "Context": "getattr({self.debug_repr()}, {name})",
-      "Explanation": "Dynamo models instance attributes only on OrderedDicts built inside the traced region. Reading one off a pre-existing OrderedDict would need a guard through a dict-backed source, which Dynamo cannot represent.",
+      "Explanation": "Dynamo does not model writes to attributes that are data descriptors on the OrderedDict type (e.g. __class__/__dict__).",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
