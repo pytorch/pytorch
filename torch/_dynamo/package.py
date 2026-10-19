@@ -629,6 +629,10 @@ class _DynamoCodeCacheEntry:
          of that code object included, since install() would have used none.
          TODO(#196773): prune only the guarded codes whose bytecode names the
          missing backend at write time, so the other variants stay installable.
+      11. Whether install() skips the frame and everything it calls, until
+         uninstall(). Set on a frame a precompile capture serves as plain
+         Python: its variants inlined its Python callees, which hold no entries
+         of their own.
     """
 
     python_code: SerializedCode
@@ -641,6 +645,7 @@ class _DynamoCodeCacheEntry:
     install_to_global: bool
     has_compile_id: bool = False
     bypassed: bool = False
+    skip_recursive: bool = False
 
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
@@ -1097,6 +1102,33 @@ def _compile_frame_context(
     return _ctx()
 
 
+# The skips installed packages hold on each code object, one per package, True
+# for a skip of everything the code calls. A strategy is process-global, so a
+# code keeps the widest skip still held and goes back to the default only when
+# the last holder uninstalls. A strategy set before install() (e.g. by
+# torch._dynamo.skip) is not restored: there is no getter for it.
+_SKIP_HOLDS: WeakIdKeyDictionary = WeakIdKeyDictionary()
+
+
+def _update_skip_hold(code: types.CodeType, recursive: bool, hold: bool) -> None:
+    from torch._C._dynamo.eval_frame import set_code_exec_strategy
+
+    from .types import FrameAction, FrameExecStrategy
+
+    holds = _SKIP_HOLDS.setdefault(code, [])
+    if hold:
+        holds.append(recursive)
+    else:
+        holds.remove(recursive)
+    if not holds:
+        del _SKIP_HOLDS[code]
+        strategy = FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT)
+    else:
+        callees = FrameAction.SKIP if any(holds) else FrameAction.DEFAULT
+        strategy = FrameExecStrategy(FrameAction.SKIP, callees)
+    set_code_exec_strategy(code, strategy)
+
+
 class CompilePackage:
     """
     CompilePackage is considered a low level component and should not be directly exposed to
@@ -1125,6 +1157,9 @@ class CompilePackage:
         # earlier, installed variant of the same code object still needs.
         self._current_backend_ids: list[_BackendId] = []
         self._installed_globals: dict[types.ModuleType, list[str]] = {}
+        # The skips install() holds in _SKIP_HOLDS, which uninstall() releases:
+        # (code, whether its callees are skipped too).
+        self._skipped_codes: list[tuple[types.CodeType, bool]] = []
         # Every device type the graphs compiled into this package named.
         self._device_types: frozenset[str] = frozenset()
 
@@ -1349,6 +1384,9 @@ class CompilePackage:
         # must not erase the accelerator an earlier frame named.
         self._device_types |= _graph_device_types(graph)
 
+    def note_compute(self) -> None:
+        """Called when the current compile traced a graph, even one bypass_package then drops."""
+
     def bypass_current_compile(self) -> None:
         """Drop the backend ids the current compile registered on its entry.
 
@@ -1429,8 +1467,8 @@ class CompilePackage:
         # A pre-reset compile in this process may still own `name` via a
         # CleanupHook that hasn't fired yet. We're taking over the binding now,
         # so that hook must not delete it once its code object is collected.
-        CleanupHook.disown(module.__dict__, name)
-        record = not (record_only_if_new and name in module.__dict__)
+        owned = CleanupHook.disown(module.__dict__, name)
+        record = owned or not (record_only_if_new and name in module.__dict__)
         module.__dict__[name] = value
         if record:
             self._installed_globals.setdefault(module, []).append(name)
@@ -1445,6 +1483,9 @@ class CompilePackage:
                 module.__dict__.pop(name, None)
 
         self._installed_globals = {}
+        for code, recursive in self._skipped_codes:
+            _update_skip_hold(code, recursive, hold=False)
+        self._skipped_codes = []
 
         _reset_precompile_entries(self._innermost_fn.__code__)
 
@@ -1455,6 +1496,7 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
+        import torch._inductor.config as inductor_config
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
         from .convert_frame import input_codes
@@ -1474,8 +1516,8 @@ class CompilePackage:
                 # AOTCompiledFunction._seed_guard_scope seeds those aliases into
                 # a live module scope and nothing re-seeds them -- so uninstall()
                 # must leave a binding this package did not create alone. The
-                # aliases are the only names install() records that are ever
-                # seeded that way.
+                # aliases and the ___unnamed_scope keys below are the only names
+                # install() records that are ever seeded that way.
                 for alias, module_name in entry.import_sources.items():
                     self._install_global(
                         module,
@@ -1523,8 +1565,19 @@ class CompilePackage:
                         raise RuntimeError(
                             f"Backend {backend_id} is not found in the given backends"
                         )
-                    with dynamo_timed(
-                        "after_deserialization", phase_name="backend_compile"
+                    # AutotuneCacheBundler keeps one bundle per compile
+                    # context, left open on a remote-cache miss until the
+                    # first compiled call. A backend with a backward
+                    # post-compiles both in one after_deserialization(), and a
+                    # frame can have several backends, so a second bundle
+                    # would fail to open. With the flag off these kernels'
+                    # first-call autotune results are not uploaded as a
+                    # bundle; the per-kernel autotune caches still apply.
+                    with (
+                        dynamo_timed(
+                            "after_deserialization", phase_name="backend_compile"
+                        ),
+                        inductor_config.patch(bundled_autotune_remote_cache=False),
                     ):
                         backend = backends[backend_id].after_deserialization()
                         self._install_global(
@@ -1533,10 +1586,11 @@ class CompilePackage:
                             torch._dynamo.disable(backend),
                         )
 
-                if len(entry.guarded_codes) == 0:
-                    # Dynamo generates empty graph for trivial functions, should just skip them
-                    # in these cases.
-                    torch._dynamo.eval_frame.skip_code(target_code)
+                # Dynamo generates empty graph for trivial functions, should just skip them
+                # in these cases.
+                if entry.skip_recursive or len(entry.guarded_codes) == 0:
+                    _update_skip_hold(target_code, entry.skip_recursive, hold=True)
+                    self._skipped_codes.append((target_code, entry.skip_recursive))
 
                 for guarded_code in entry.guarded_codes:
                     with dynamo_timed("precompile_load_guards"):
@@ -1564,6 +1618,42 @@ class CompilePackage:
                                 )
                         else:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
+                    # The ___unnamed_scope_<id>_c<n> key embeds id() of a dict
+                    # in the tracing process, so a fresh process has no binding
+                    # for it. Bind it (after the builtins dict above, which a
+                    # recorded source can be rooted at) to the live namespace,
+                    # found again through the inlined function's source, so
+                    # the guards and the bytecode see what they saw while
+                    # tracing; the artifact's copy of the dict is frozen and
+                    # has its tensors faked. A
+                    # key whose source does not resolve here (one rooted at a
+                    # frame local, or a chain through user objects that raises
+                    # against this process's state) stays unbound and misses as
+                    # before. A binding already here is kept; a live compile's
+                    # is taken over from its CleanupHook, so uninstall() drops
+                    # it, and anyone else's is left alone.
+                    sources = guards_state.output_graph.unnamed_scope_sources
+                    closure_vars = torch._dynamo.guards._get_closure_vars()
+                    for name, source in sources.items():
+                        try:
+                            namespace = source.get_value(
+                                {"G": runtime_global_scope}, closure_vars, {}
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                "leaving %s unbound, %s raised: %r",
+                                name,
+                                source.name,
+                                e,
+                            )
+                            continue
+                        if isinstance(namespace, dict):
+                            self._install_global(
+                                module,
+                                name,
+                                runtime_global_scope.get(name, namespace),
+                                record_only_if_new=True,
+                            )
                     if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
                         raise AssertionError(
                             f"Expected GuardsState, got {type(guards_state)}"

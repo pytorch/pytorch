@@ -338,10 +338,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     query = lowerings[aten.as_strided](query, gqa_query_shape, gqa_query_stride)
 
-    kernel_options.setdefault(
-        "SAFE_M_BOUNDARY",
-        Mod(seq_len_q * gqa_shared_heads, kernel_options["BLOCK_M"]) == 0,
-    )
     # TODO: This feels sketchy
     kernel_options.setdefault("SAFE_N_BOUNDARY", True)
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
@@ -371,6 +367,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("num_warps", conf.num_warps)
         cur_kernel_options.setdefault("num_stages", conf.num_stages)
+        # After the fwd_ overrides: a pinned fwd_BLOCK_M changes which rows are
+        # out of bounds, and the kernel skips its Q_LEN masks when this is True.
+        cur_kernel_options.setdefault(
+            "SAFE_M_BOUNDARY",
+            Mod(seq_len_q * gqa_shared_heads, cur_kernel_options["BLOCK_M"]) == 0,
+        )
 
         if (
             cur_kernel_options["SPARSE_Q_BLOCK_SIZE"] % cur_kernel_options["BLOCK_M"]
