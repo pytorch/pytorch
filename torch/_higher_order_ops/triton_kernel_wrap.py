@@ -3046,3 +3046,62 @@ class TraceableTritonKernelWrapper:
         if isinstance(arg, (torch.SymInt, torch.SymBool, torch.SymFloat)):
             return guard_scalar(arg)
         return arg
+
+
+###############################################################################
+# Registration with the DSL-agnostic user-kernel machinery
+# (torch/_higher_order_ops/user_kernel_registry.py).
+
+
+def _triton_kernel_name(node: Any) -> str:
+    """Name of the user Triton kernel behind a triton_kernel_wrapper_* node."""
+    from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    import torch
+    from torch._inductor import config as inductor_config
+
+    kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+    if isinstance(kernel, JITFunction):
+        return kernel.fn.__name__
+    if isinstance(kernel, Autotuner):
+        if inductor_config.is_fbcode():
+            # Autotuner has different implementations for AMD and NV
+            if torch.version.hip is None:
+                return kernel.base_fn.__name__
+            return kernel.fn.__name__
+        return kernel.base_fn.__name__
+    raise AssertionError("Unknown triton kernel type")
+
+
+def _triton_mutated_arg_names(
+    hop_kwargs: dict[str, Any], fake_kwargs: dict[str, Any]
+) -> list[str]:
+    """Kernel kwargs a triton_kernel_wrapper_mutation node writes (TTIR analysis)."""
+    return get_mutated_tensors(
+        hop_kwargs["kernel_idx"],
+        hop_kwargs["constant_args_idx"],
+        fake_kwargs,
+        hop_kwargs["tma_descriptor_metadata"],
+    )
+
+
+def _register_triton_user_kernel_hops() -> None:
+    from torch._higher_order_ops.user_kernel_registry import (
+        register_user_kernel_hops,
+        UserKernelHOPs,
+    )
+
+    register_user_kernel_hops(
+        UserKernelHOPs(
+            dsl="triton",
+            mutation=triton_kernel_wrapper_mutation,
+            functional=triton_kernel_wrapper_functional,
+            functional_dense=triton_kernel_wrapper_functional_dense,
+            kernel_name=_triton_kernel_name,
+            mutated_arg_names=_triton_mutated_arg_names,
+        )
+    )
+
+
+_register_triton_user_kernel_hops()
