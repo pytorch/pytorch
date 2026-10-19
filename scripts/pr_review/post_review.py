@@ -10,10 +10,14 @@ fails is dropped, never repaired.
 Invariants:
 - A `changes_requested` verdict is REQUEST_CHANGES; anything else is COMMENT,
   never APPROVE.
-- A new review is posted before earlier ones are hidden. Hiding resolves the
-  review's inline threads where it can and minimizes it as outdated. Nothing
-  is edited or deleted. A change request is hidden only once it no longer
-  stands.
+- A new review is posted before earlier ones are hidden. Hiding folds the
+  review's body into a collapsed section, deletes its inline comments that
+  nobody replied to, resolves the replied threads where it can, and minimizes
+  it as outdated. Minimizing alone leaves the inline comments listed on the
+  Files tab and in GitHub Mobile, hence the deleting. A change request is
+  hidden only once it no longer stands.
+- A blocking finding next to an earlier inline comment someone replied to
+  goes in the body with a link to that discussion, not on the line again.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissal is a run retracting its own review because the
@@ -115,6 +119,12 @@ class GitHub:
     def __init__(self, token: str, repo: str):
         self.token = token
         self.repo = repo
+        # Every comment any listed reply in this run answers. It is the only
+        # deletion gate: such a comment is never deleted, even if a later
+        # listing misses the reply.
+        self.replies_seen: set[int] = set()
+        # When set (time.monotonic()), no call starts or waits past it.
+        self.deadline: float | None = None
 
     def request(
         self, method: str, path: str, body: dict | None = None, idempotent=None
@@ -124,6 +134,8 @@ class GitHub:
         if idempotent is None:
             idempotent = method in ("GET", "PUT", "DELETE")
         for attempt in range(RETRIES if idempotent else 1):
+            if self.deadline is not None and time.monotonic() > self.deadline:
+                raise GitHubError(0, "out of time for this step")
             try:
                 return self._once(method, path, body)
             except GitHubError as exc:
@@ -132,8 +144,15 @@ class GitHub:
                 transient = exc.status in (0, 429) or exc.status >= 500 or throttled
                 if not transient or attempt == RETRIES - 1 or not idempotent:
                     raise
-                wait = min(exc.retry_after, MAX_WAIT) if throttled else 0
-                _sleep(max(2**attempt, wait))
+                wait = max(
+                    2**attempt, min(exc.retry_after, MAX_WAIT) if throttled else 0
+                )
+                if (
+                    self.deadline is not None
+                    and time.monotonic() + wait > self.deadline
+                ):
+                    raise
+                _sleep(wait)
 
     def _once(self, method: str, path: str, body: dict | None):
         url = path if path.startswith("https://") else f"{API}{path}"
@@ -253,7 +272,8 @@ def permalink(repo: str, sha: str, finding: dict) -> str:
 def finding_blocks(
     repo: str, sha: str, findings: list[dict], mark: str = ""
 ) -> list[str]:
-    """Each finding as its code link, a blank line, then the message."""
+    """Each finding as its code link, a blank line, then the message, and the
+    earlier discussion of it if there is one."""
     lines: list[str] = []
     for i, f in enumerate(findings):
         if i:
@@ -262,6 +282,8 @@ def finding_blocks(
         if mark:
             message = marked(mark, message)
         lines += [permalink(repo, sha, f), "", *message, ""]
+        if f.get("discussion"):
+            lines += [f"Discussed earlier: {f['discussion']}", ""]
     return lines
 
 
@@ -275,7 +297,7 @@ def review_body(
     """Verdict, summary, and the findings not posted inline (non-blocking ones
     folded). Over MAX_BODY, findings are dropped from the end and counted."""
     blocking = blocking_findings(verdict, findings)
-    in_body = [] if inline else blocking
+    in_body = [f for f in blocking if f.get("discussion")] if inline else blocking
     folded = [f for f in findings if f not in blocking]
     keep_body, keep_folded = len(in_body), len(folded)
     while True:
@@ -284,8 +306,7 @@ def review_body(
             summary,
             sha,
             repo,
-            blocking,
-            inline,
+            len(blocking) - len(in_body) if inline else 0,
             in_body[:keep_body],
             folded[:keep_folded],
             len(in_body) - keep_body + len(folded) - keep_folded,
@@ -298,9 +319,7 @@ def review_body(
             keep_body -= 1
 
 
-def _compose(
-    verdict, summary, sha, repo, blocking, inline, in_body, folded, omitted
-) -> str:
+def _compose(verdict, summary, sha, repo, n_inline, in_body, folded, omitted) -> str:
     lines = [
         MARKER,
         f"**Automated review** of {sha[:12]}: {_VERDICT_LINE[verdict]}.",
@@ -308,10 +327,10 @@ def _compose(
         *contained(summary),
         "",
     ]
-    if blocking and inline:
+    if n_inline:
         lines += [
-            f"{BLOCKING_MARK} {count(len(blocking), 'blocking finding')} "
-            f"{'is' if len(blocking) == 1 else 'are'} attached to the code below.",
+            f"{BLOCKING_MARK} {count(n_inline, 'blocking finding')} "
+            f"{'is' if n_inline == 1 else 'are'} attached to the code below.",
             "",
         ]
     lines += finding_blocks(repo, sha, in_body, BLOCKING_MARK)
@@ -357,6 +376,7 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
             "body": comment_body(f),
         }
         for f in blocking_findings(verdict, findings)
+        if not f.get("discussion")
     ]
     if comments:
         body = review_body(verdict, summary, findings, sha, gh.repo, inline=True)
@@ -383,27 +403,118 @@ def post(gh: GitHub, pr: int, sha: str, verdict, summary, findings) -> dict:
 _MINIMIZED = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on PullRequestReview { id isMinimized } } }"
 
 
-def earlier_reviews(gh: GitHub, pr: int, author: str, new_id: int) -> list[dict]:
-    """This workflow's visible reviews older than `new_id`.
+def earlier_reviews(
+    gh: GitHub, pr: int, author: str, new_id: int, listing=None
+) -> tuple[list[dict], list[dict]]:
+    """This workflow's reviews older than `new_id`: (visible, minimized).
 
     Older, not just other, so overlapping runs never hide the newer review.
-    Minimized reviews are skipped, so a thread someone reopened stays open.
+    A review whose state did not come back is in neither list.
     """
+    if listing is None:
+        listing = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
     mine = [
         r
-        for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
+        for r in listing
         if isinstance(r.get("id"), int)
         and r["id"] < new_id
         and (r.get("user") or {}).get("login") == author
         and (r.get("body") or "").startswith(MARKER)
     ]
-    # A review whose state did not come back is left alone.
-    visible: set[str] = set()
+    state: dict[str, bool] = {}
     for i in range(0, len(mine), 100):
         ids = [r["node_id"] for r in mine[i : i + 100]]
         nodes = gh.graphql(_MINIMIZED, {"ids": ids}).get("nodes") or []
-        visible |= {n["id"] for n in nodes if n and n.get("isMinimized") is False}
-    return [r for r in mine if r["node_id"] in visible]
+        state |= {
+            n["id"]: n["isMinimized"]
+            for n in nodes
+            if n and isinstance(n.get("isMinimized"), bool)
+        }
+    visible = [r for r in mine if state.get(r["node_id"]) is False]
+    hidden = [r for r in mine if state.get(r["node_id"]) is True]
+    return visible, hidden
+
+
+def pr_comments(gh: GitHub, pr: int) -> list[dict] | None:
+    """Every inline comment on the PR, or None if they could not be listed.
+
+    The comment each reply answers is recorded in `gh.replies_seen` as its
+    page arrives, so a reply seen before a later page fails still protects it.
+    """
+    comments: list[dict] = []
+    page = 1
+    try:
+        while True:
+            batch = (
+                gh.request(
+                    "GET",
+                    f"/repos/{gh.repo}/pulls/{pr}/comments?per_page=100&page={page}",
+                )
+                or []
+            )
+            gh.replies_seen |= {
+                c["in_reply_to_id"] for c in batch if c.get("in_reply_to_id")
+            }
+            comments.extend(batch)
+            if len(batch) < 100:
+                return comments
+            page += 1
+    except GitHubError as exc:
+        warn(f"could not list the PR's inline comments: {exc}")
+        return None
+
+
+# How far a new finding may sit from an earlier discussed one and still be the
+# same place.
+NEARBY = 3
+
+
+def ours(gh: GitHub, pr: int, author: str) -> set[int]:
+    """The ids of every review this workflow posted on the PR."""
+    return {
+        r["id"]
+        for r in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
+        if (r.get("user") or {}).get("login") == author
+        and (r.get("body") or "").startswith(MARKER)
+    }
+
+
+def with_discussions(gh: GitHub, pr: int, author: str, findings: list[dict]):
+    """`findings`, each linked to an earlier finding of ours next to it that
+    someone replied to, so the reply is not answered by a fresh comment on the
+    line. Unchanged if the PR could not be read."""
+    comments = pr_comments(gh, pr)
+    if not comments:
+        return findings
+    try:
+        reviews = ours(gh, pr, author)
+    except GitHubError as exc:
+        warn(f"could not list earlier reviews: {exc}")
+        return findings
+    return note_discussions(findings, comments, reviews, gh.replies_seen)
+
+
+def note_discussions(findings: list[dict], comments, reviews: set[int], replied):
+    discussed = [
+        c
+        for c in comments
+        if c.get("id") in replied
+        and c.get("pull_request_review_id") in reviews
+        and isinstance(c.get("line"), int)  # None once its line has changed
+    ]
+    out = []
+    for f in findings:
+        near = [
+            c
+            for c in discussed
+            if c.get("path") == unescape_path(f["path"])
+            and abs(c["line"] - f["line"]) <= NEARBY
+        ]
+        url = (near[0].get("html_url") or "") if near else ""
+        if url.startswith("https://github.com/"):
+            f = {**f, "discussion": url}
+        out.append(f)
+    return out
 
 
 _MINIMIZE = "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { clientMutationId } }"
@@ -431,24 +542,29 @@ def retract(gh: GitHub, pr: int, review: dict) -> None:
                 f"it still requests changes on an old commit: {exc}"
             )
             return
-    take_down(gh, pr, review)
+    take_down(gh, pr, review, reason="withdrawn: the PR changed while it was posted")
 
 
-def take_down(gh: GitHub, pr: int, review: dict) -> None:
-    """Resolve the review's threads, then minimize it as outdated.
+SUPERSEDED = "a newer one replaces it"
 
-    Its text and state are unchanged. It is minimized even if a thread cannot
-    be resolved (GITHUB_TOKEN is refused resolveReviewThread on pytorch/pytorch);
-    such a thread stays open, and once the review is minimized no later run
-    retries it.
+
+def take_down(
+    gh: GitHub, pr: int, review: dict, comments=None, reason=SUPERSEDED
+) -> None:
+    """Fold the review, delete its unreplied comments, resolve its replied
+    threads, then minimize it as outdated. Its state is unchanged.
+
+    Each step is attempted even if an earlier one fails. GITHUB_TOKEN is
+    refused resolveReviewThread on pytorch/pytorch, so replied threads stay
+    open, and once the review is minimized no later run retries them.
     """
     rid = review["id"]
+    fold(gh, pr, review, reason)
+    if comments is None:
+        comments = pr_comments(gh, pr)
+    kept = delete_unreplied(gh, pr, rid, comments)
     try:
-        ids = {
-            c["id"]
-            for c in gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews/{rid}/comments")
-        }
-        resolved = resolve_threads(gh, pr, ids)
+        resolved = kept is not None and resolve_threads(gh, pr, kept)
     except GitHubError as exc:
         warn(f"could not resolve the threads of review {rid}: {exc}")
         resolved = False
@@ -459,6 +575,164 @@ def take_down(gh: GitHub, pr: int, review: dict) -> None:
         print(f"hid earlier automated review {rid} as outdated")
     except GitHubError as exc:
         warn(f"could not minimize review {rid}: {exc}")
+
+
+FOLDED_REVIEW = "<details><summary>Outdated automated review"
+
+
+def folded(review: dict, reason: str = SUPERSEDED) -> str:
+    """The review's body inside a collapsed section, marker still first."""
+    rest = (review.get("body") or "")[len(MARKER) :].lstrip("\n")
+    sha = str(review.get("commit_id") or "")[:12]
+    return "\n".join(
+        [
+            MARKER,
+            f"{FOLDED_REVIEW} of {sha}; {reason}</summary>",
+            "",
+            rest,
+            "",
+            "</details>",
+        ]
+    )
+
+
+def fold(
+    gh: GitHub, pr: int, review: dict, reason: str = SUPERSEDED, budget=None
+) -> None:
+    """Fold the review's body unless it is folded already."""
+    body = review.get("body") or ""
+    if not body.startswith(MARKER) or body.startswith(f"{MARKER}\n{FOLDED_REVIEW}"):
+        return
+    if budget is not None and not budget.take():
+        return
+    try:
+        gh.request(
+            "PUT",
+            f"/repos/{gh.repo}/pulls/{pr}/reviews/{review['id']}",
+            {"body": folded(review, reason)},
+        )
+    except GitHubError as exc:
+        warn(f"could not fold review {review['id']}: {exc}")
+
+
+class Budget:
+    """API writes a step may still start; None is unlimited."""
+
+    def __init__(self, left: int | None = None):
+        self.left = left
+
+    def take(self) -> bool:
+        if self.left is None:
+            return True
+        if self.left <= 0:
+            return False
+        self.left -= 1
+        return True
+
+    def spent(self) -> bool:
+        return self.left is not None and self.left <= 0
+
+
+def delete_unreplied(
+    gh: GitHub, pr: int, rid: int, comments, budget: Budget | None = None, refresh=True
+) -> set[int] | None:
+    """Delete review `rid`'s inline comments nobody replied to.
+
+    Returns the ids of the comments kept, or None if the PR's comments could
+    not be listed. Replies stay, and so does the comment they answer; a reply
+    any listing in this run saw protects its comment. With `refresh` the
+    comments are listed again just before deleting, which narrows the window
+    for a reply landing first but cannot close it. Each delete spends `budget`.
+    """
+    budget = budget or Budget()
+
+    def roots_of(listing):
+        return [
+            c
+            for c in listing
+            if c.get("pull_request_review_id") == rid and not c.get("in_reply_to_id")
+        ]
+
+    if comments is None:
+        return None
+    roots = roots_of(comments)
+    if all(c["id"] in gh.replies_seen for c in roots):
+        return {c["id"] for c in roots}
+    fresh = pr_comments(gh, pr) if refresh else comments
+    if fresh is None:
+        return None
+    kept: set[int] = set()
+    for c in roots_of(fresh):
+        if c["id"] in gh.replies_seen or not budget.take():
+            kept.add(c["id"])
+            continue
+        try:
+            gh.request("DELETE", f"/repos/{gh.repo}/pulls/comments/{c['id']}")
+        except GitHubError as exc:
+            if exc.status != 404:  # an overlapping run deleted it first
+                warn(f"could not delete comment {c['id']} of review {rid}: {exc}")
+                kept.add(c["id"])
+    return kept
+
+
+# Writes the backfill may start in one run, and for how long; the rest waits
+# for the next run. Retries of a throttled call can outlast the count, hence
+# the clock, which every call (and its retry waits) honours.
+MAX_BACKFILL = 50
+BACKFILL_SECONDS = 90
+
+
+def backfill(gh: GitHub, pr: int, author: str, new_id: int) -> None:
+    """Fold and empty this workflow's reviews hidden before folding and
+    deleting existed, or by a run whose deletes failed.
+
+    Runs last, after any change request has been dealt with, and spends at
+    most MAX_BACKFILL writes and BACKFILL_SECONDS. The comments are listed
+    once, just before the first delete. Threads are not touched: one reopened
+    stays open. A change request that may still stand is skipped.
+    """
+    gh.deadline = time.monotonic() + BACKFILL_SECONDS
+    try:
+        _backfill(gh, pr, author, new_id)
+    except GitHubError as exc:
+        warn(f"stopped tidying earlier reviews: {exc}")
+    finally:
+        gh.deadline = None
+
+
+def _backfill(gh: GitHub, pr: int, author: str, new_id: int) -> None:
+    listing = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
+    _, hidden = earlier_reviews(gh, pr, author, new_id, listing)
+    replaced = latest_is_request(listing, author)
+    budget = Budget(MAX_BACKFILL)
+    comments = None
+    for old in sorted(hidden, key=lambda r: r["id"], reverse=True):
+        if old.get("state") == "CHANGES_REQUESTED" and not replaced:
+            continue
+        if budget.spent():
+            print("more earlier reviews to tidy; the next run continues")
+            return
+        fold(gh, pr, old, budget=budget)
+        if comments is None:
+            comments = pr_comments(gh, pr)
+            if comments is None:
+                return
+        delete_unreplied(gh, pr, old["id"], comments, budget, refresh=False)
+
+
+def latest_is_request(listing: list[dict], author: str) -> bool:
+    """Whether this workflow's newest review requests changes, so that it, not
+    any earlier one, is what stands."""
+    mine = [
+        r
+        for r in listing
+        if (r.get("user") or {}).get("login") == author
+        and (r.get("body") or "").startswith(MARKER)
+        and isinstance(r.get("id"), int)
+    ]
+    return bool(mine) and max(mine, key=lambda r: r["id"]).get("state") == (
+        "CHANGES_REQUESTED"
+    )
 
 
 _THREADS = """query($o: String!, $r: String!, $n: Int!, $c: String) {
@@ -582,16 +856,19 @@ def run(gh: GitHub, row: dict, pr: int, sha: str, opt_out: str, author: str) -> 
         warn(f"automated review not posted: {exc}")
         # Without our review id, spare this commit's requests (overlapping run).
         return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
-    if new_id is RETRACTED or not clean:
+    if new_id is RETRACTED:
         return 0
     if new_id is None:
-        return clear_after_clean(gh, pr, sha, author, keep_commit=sha)
-    rc = clear_after_clean(gh, pr, sha, author, older_than=new_id)
-    # Hide the requests just dismissed; any still standing stay visible.
-    try:
-        hide_earlier(gh, pr, author, {"id": new_id, "state": "COMMENTED"})
-    except GitHubError as exc:
-        warn(f"could not hide the withdrawn reviews: {exc}")
+        return clear_after_clean(gh, pr, sha, author, keep_commit=sha) if clean else 0
+    rc = 0
+    if clean:
+        rc = clear_after_clean(gh, pr, sha, author, older_than=new_id)
+        # Hide the requests just dismissed; any still standing stay visible.
+        try:
+            hide_earlier(gh, pr, author, {"id": new_id, "state": "COMMENTED"})
+        except GitHubError as exc:
+            warn(f"could not hide the withdrawn reviews: {exc}")
+    backfill(gh, pr, author, new_id)
     return rc
 
 
@@ -645,7 +922,8 @@ RETRACTED = object()
 def publish(gh, pr, sha, author, verdict, summary, findings):
     """Post the review and hide earlier ones. Returns the new id, None if GitHub
     gave none, or RETRACTED if the head moved while posting."""
-    new = post(gh, pr, sha, verdict, summary, findings[:MAX_FINDINGS])
+    findings = with_discussions(gh, pr, author, findings[:MAX_FINDINGS])
+    new = post(gh, pr, sha, verdict, summary, findings)
     print(f"posted automated review {new.get('id')}: {new.get('html_url')}")
     if not isinstance(new.get("id"), int):
         warn("GitHub returned no review id; leaving earlier reviews in place")
@@ -677,14 +955,18 @@ def hide_earlier(gh, pr, author, new):
     An earlier change request is hidden only if `new` requests changes too;
     otherwise it waits until `clear_after_clean` has dismissed it.
     """
-    replaced = new.get("state") == "CHANGES_REQUESTED"
+    listing = gh.paged(f"/repos/{gh.repo}/pulls/{pr}/reviews")
+    # Its state now, not when posted: an overlapping run may have dismissed it.
+    now = next((r for r in listing if r.get("id") == new["id"]), new)
+    replaced = now.get("state") == "CHANGES_REQUESTED"
+    visible, _ = earlier_reviews(gh, pr, author, new["id"], listing)
+    comments = pr_comments(gh, pr)
     # Newest first; one failure does not stop the rest.
-    olds = earlier_reviews(gh, pr, author, new["id"])
-    for old in sorted(olds, key=lambda r: r["id"], reverse=True):
+    for old in sorted(visible, key=lambda r: r["id"], reverse=True):
         if old.get("state") == "CHANGES_REQUESTED" and not replaced:
             continue
         try:
-            take_down(gh, pr, old)
+            take_down(gh, pr, old, comments)
         except GitHubError as exc:
             warn(f"could not hide review {old['id']}: {exc}")
 
