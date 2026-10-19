@@ -115,7 +115,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
-from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
+from .graph_bytecode_inputs import UserObjectRegistry
 from .graph_deduplication import apply_graph_deduplication
 from .graph_id_filter import (
     get_backend_override_for_compile_id,
@@ -482,6 +482,8 @@ class OutputGraphGuardsState:
     compile_on_one_rank: bool = False
     # torch.fx.traceback annotation active when the frame started tracing
     fx_annotation: dict[str, Any] | None = None
+    # ___unnamed_scope_* key -> source of the namespace it was minted for
+    unnamed_scope_sources: dict[str, Source] = dc_field(default_factory=dict)
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -508,6 +510,7 @@ class OutputGraphGuardsState:
             current_device=self.current_device,
             global_state_guard=self.global_state_guard,
             fx_annotation=self.fx_annotation,
+            unnamed_scope_sources=self.unnamed_scope_sources,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -663,6 +666,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
             output_graph_guards_state.compile_on_one_rank,
             fx_annotation=output_graph_guards_state.fx_annotation,
+            unnamed_scope_sources=output_graph_guards_state.unnamed_scope_sources,
         )
 
         self.import_sources = import_sources or {}
@@ -859,6 +863,7 @@ class OutputGraph(OutputGraphCommon):
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: dict[str, Source] | None = {}
         self.side_effects = SideEffects(self)
+        self.user_objects = UserObjectRegistry()
         # Generators created while tracing this frame. Tracked here (not on
         # SideEffects) because SideEffects is cloned/swapped during HOP
         # speculation and graph-break restore; the OutputGraph is the single
@@ -2974,6 +2979,8 @@ class OutputGraph(OutputGraphCommon):
             if next(gm.parameters(), None) is not None:
                 # If dynamo produces a graph with parameters, skip package stuff
                 # Bypass output graph
+                if self.package is not None:
+                    self.package.note_compute()
                 self.bypass_package(
                     "Graph contains named parameters due to static addresses.",
                     gm=gm.print_readable(
@@ -3193,7 +3200,7 @@ class OutputGraph(OutputGraphCommon):
                 raise AssertionError("root_tx must not be None")
             cg = PyCodegen(self.root_tx)
 
-            if has_user_objects():
+            if self.user_objects.needs_pre_graph_store():
                 # NB: This is where we store possible user objects before running the graph
                 # index_to_user_object_weakref is the function used in the graph to translate
                 # the dynamo-generated index into the actual object passed to the compiled function.
@@ -3207,7 +3214,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
                 tmp_vars = []
-                for constructor in index_to_bytecode_constructor:
+                for constructor in self.user_objects.bytecode_constructors:
                     constructor(cg)
                     var_name = (
                         self.new_var()
@@ -3219,7 +3226,7 @@ class OutputGraph(OutputGraphCommon):
                 for var_name in tmp_vars:
                     cg.append_output(cg.create_load(var_name))
 
-                cg.call_function(len(index_to_bytecode_constructor), False)
+                cg.call_function(len(tmp_vars), False)
                 cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):

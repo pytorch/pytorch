@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
+import collections
 import contextlib
+import dataclasses
 import functools
 import gc
 import importlib
@@ -21,7 +24,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -29,9 +32,11 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.precompile_package import default_guard_filter_fn
+from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -55,6 +60,28 @@ def import_from_path(module_name, file_path):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def hooked_forward(x, w):
+    y = x.sin() * w
+    torch._dynamo.graph_break()
+    return y.cos().sum()
+
+
+# Inlineable (GraphModule) saved tensors hooks whose pack is lossy, so packing a
+# saved tensor twice changes the gradients.
+def doubling_pack(x):
+    return x * 2
+
+
+def identity_unpack(x):
+    return x
+
+
+INLINEABLE_HOOKS = (
+    torch.fx.symbolic_trace(doubling_pack),
+    torch.fx.symbolic_trace(identity_unpack),
+)
 
 
 def compute_loss_helper(x):
@@ -147,10 +174,123 @@ class _DescriptorCodeOwner:
         return 2
 
 
+class _RaisingClassAttribute:
+    def __get__(self, obj, owner=None):
+        raise RuntimeError("not available on the class")
+
+
+class _ClassWithRaisingAttribute:
+    # Visited by the module search before _ExecGeneratedCodeOwner.
+    value = _RaisingClassAttribute()
+
+
+@dataclasses.dataclass
+class _ExecGeneratedCodeOwner:
+    x: int = 0
+
+    @property
+    def doubled(self):
+        return self.x * 2
+
+
+def _exec_without_renaming():
+    namespace = {}
+    exec(
+        "def __create_fn__():\n    def f(self):\n        return 1\n    return f\n",
+        globals(),
+        namespace,
+    )
+    return namespace["__create_fn__"]()
+
+
+class _UnrenamedExecOwner:
+    # exec()'d like a dataclass __init__, but its __qualname__ is left as
+    # "__create_fn__.<locals>.f", which is not a path from this module.
+    f = _exec_without_renaming()
+
+
+def _exec_function():
+    namespace = {}
+    exec("def g(self):\n    return 1\n", globals(), namespace)
+    return namespace["g"]
+
+
+def _closureless():
+    return None
+
+
+def _hold(fn):
+    def holder():
+        return fn
+
+    # Found through holder's closure, but the recorded qualname leads to a
+    # function with no closure, so replaying the path raises PackageError.
+    holder.__qualname__ = "_closureless"
+    return holder
+
+
+_mislabeled_holder = _hold(_exec_function())
+
+
+def _package_op(x):
+    return x + 1
+
+
+@dataclasses.dataclass
+class _GraphBreakingDataclass:
+    x: torch.Tensor
+
+    def __post_init__(self):
+        torch._dynamo.graph_break()
+
+
 # A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
 # global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
+
+# namedtuple builds __new__ with exec into a namespace no module owns.
+PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
+
+PKG_LOG_SCOPE = {"log": []}
+exec("def scale(self, x):\n    log.append(1)\n    return x * 3\n", PKG_LOG_SCOPE)
+
+
+class PkgLogger:
+    scale = PKG_LOG_SCOPE["scale"]
+
+
+PKG_LOGGER = PkgLogger()
+
+PKG_FACTOR_SCOPE = {"factor": 3}
+exec("def scale(self, x):\n    return x * factor\n", PKG_FACTOR_SCOPE)
+
+
+class PkgScaler:
+    scale = PKG_FACTOR_SCOPE["scale"]
+
+
+PKG_SCALER = PkgScaler()
+
+# scale reaches helper through the namespace itself, so helper's source is rooted
+# at the unnamed scope key that stands for it.
+PKG_CHAIN_SCOPE = {"factor": 3}
+exec(
+    "def helper(x):\n    return x * factor\n"
+    "helpers = [helper]\n"
+    "def scale(self, x):\n    return helpers[0](x)\n",
+    PKG_CHAIN_SCOPE,
+)
+
+
+class PkgChainScaler:
+    scale = PKG_CHAIN_SCOPE["scale"]
+
+
+PKG_HANDLER_SCOPE = {"factor": 3}
+exec("def scale(x):\n    return x * factor\n", PKG_HANDLER_SCOPE)
+PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
+PKG_HANDLER_SET = {PKG_HANDLER_SCOPE["scale"]}
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -252,6 +392,117 @@ print(eval(f"bbmod.{name}.{path}") is code)
             with package.code_context(code):
                 pass
             self.assertIs(_lookup_code(package._codes[code]), code)
+
+    def test_code_source_resolves_exec_generated_code_from_globals(self):
+        # dataclasses exec() __init__, so its code names no source file and its
+        # co_qualname is synthetic; only the frame's globals name its module.
+        init = _ExecGeneratedCodeOwner.__init__
+        code = init.__code__
+        self.assertIsNone(inspect.getmodule(code))
+        package = CompilePackage(None)
+        with package.code_context(code, init.__globals__):
+            pass
+        entry = package._codes[code]
+        self.assertIs(sys.modules[entry.python_module], inspect.getmodule(init))
+        self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_refuses_exec_generated_code_it_cannot_replay(self):
+        fn = _UnrenamedExecOwner.f
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(PackageError, "Cannot resolve"):
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_refuses_a_path_whose_replay_raises(self):
+        fn = _mislabeled_holder()
+        self.assertIsNone(inspect.getmodule(fn.__code__))
+        package = CompilePackage(None)
+        with self.assertRaisesRegex(
+            PackageError, r"_closureless.*fails with PackageError"
+        ) as cm:
+            with package.code_context(fn.__code__, fn.__globals__):
+                pass
+        self.assertIsInstance(cm.exception.__cause__, PackageError)
+        self.assertNotIn(fn.__code__, package._codes)
+
+    def test_code_source_keeps_the_codes_own_module_over_its_globals(self):
+        code = _closureless.__code__
+        package = CompilePackage(None)
+        with package.code_context(code, vars(functools)):
+            pass
+        entry = package._codes[code]
+        self.assertEqual(entry.python_module, __name__)
+        self.assertIs(_lookup_code(entry), code)
+
+    def test_code_source_search_skips_class_attributes_that_raise(self):
+        with self.assertRaises(RuntimeError):
+            _ClassWithRaisingAttribute.value
+        init = _ExecGeneratedCodeOwner.__init__
+        package = CompilePackage(None)
+        with package.code_context(init.__code__, init.__globals__):
+            pass
+        self.assertIs(_lookup_code(package._codes[init.__code__]), init.__code__)
+
+    def test_dataclass_init_frame_saves_and_loads(self):
+        # The graph break under the constructor makes the exec()'d __init__ a
+        # frame of its own, which convert_frame records with its globals.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return _GraphBreakingDataclass(x + 1).x * 2
+
+        def guard_filter_fn(guards):
+            # Identity guards on the globals are beside the point here.
+            unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+            return [guard.guard_type not in unsupported for guard in guards]
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(
+            "eager", package=package, guard_filter_fn=guard_filter_fn
+        )(fn)
+        expected = compiled_fn(x)
+        self.assertIn(_GraphBreakingDataclass.__init__.__code__, package._codes)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(
+                package=package, guard_filter_fn=guard_filter_fn
+            )(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(x))
+
+    def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
+        # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
+        # as a FUNCTION_CODE_MATCH, and a rebinding names it in the refusal.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return _package_op(x) * 2
+
+        x = torch.randn(3)
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        expected = compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            self.assertEqual(expected, compiled_fn(x))
+            with patch.dict(globals(), {"_package_op": lambda x: x - 1}):
+                with self.assertRaisesRegex(RuntimeError, "___check_function_code"):
+                    compiled_fn(x)
 
     def test_package_records_the_devices_a_graph_names(self):
         # The recording side of the scan, which is what the artifact carries. A
@@ -475,6 +726,55 @@ print(eval(f"bbmod.{name}.{path}") is code)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), mod(x))
 
+    def _hooked_grads(self, fn, under_hooks):
+        x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
+        w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
+        if under_hooks:
+            with torch.autograd.graph.saved_tensors_hooks(*INLINEABLE_HOOKS):
+                fn(x, w).backward()
+        else:
+            fn(x, w).backward()
+        return x.grad, w.grad
+
+    def _save_and_load_hooked_forward(self, guard_filter_fn=None):
+        ctx = DiskDynamoStore()
+        package = CompilePackage(hooked_forward)
+        compiled_fn = torch._dynamo.optimize(
+            "inductor", package=package, guard_filter_fn=guard_filter_fn
+        )(hooked_forward)
+        expected = self._hooked_grads(compiled_fn, under_hooks=True)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        # Load outside any hooks context, the way setup code does.
+        package, backends = ctx.load_package(hooked_forward, self.path())
+        compiled_fn = torch._dynamo.optimize(
+            package=package, guard_filter_fn=guard_filter_fn
+        )(hooked_forward)
+        package.install(backends)
+        return compiled_fn, expected
+
+    def test_loaded_graphs_do_not_rerun_inlined_saved_tensors_hooks(self):
+        compiled_fn, expected = self._save_and_load_hooked_forward()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
+        self.assertEqual(grads, expected)
+
+    @staticmethod
+    def _drop_hooks_guard(guards):
+        # Without its hooks guard, one loaded graph serves calls with and
+        # without the hooks.
+        return [g.guard_type != "AUTOGRAD_SAVED_TENSORS_HOOKS" for g in guards]
+
+    def test_a_first_call_outside_the_hooks_still_disables_them_later(self):
+        compiled_fn, expected = self._save_and_load_hooked_forward(
+            self._drop_hooks_guard
+        )
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self._hooked_grads(compiled_fn, under_hooks=False)
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
+        self.assertEqual(grads, expected)
+
     def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
         # install() roots the guards at sys.modules[...].__dict__, and a package
         # keeps every guard, so the serialized scope holds the global as a
@@ -591,6 +891,266 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(installed - set(scope), set())
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
+
+    def _save_record_package(self, ctx):
+        # Inlining PkgRecord.__new__ roots guards at the ___unnamed_scope_<id>_c<n>
+        # key Dynamo mints for its globals. The key embeds an id() from the
+        # compiling process, so a loading process has no binding for it and every
+        # call misses on a KeyError unless install() seeds it.
+        def fn(x):
+            record = PkgRecord(x.sin(), 2)
+            return record.value * record.weight
+
+        return self._save_unnamed_scope_package(ctx, fn)
+
+    def _save_unnamed_scope_package(self, ctx, fn, *args):
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(fn)(*(args or (torch.randn(4),)))
+        names = {
+            name
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name in load_guards_state(
+                guarded.guards_state
+            ).output_graph.global_scope
+            if name.startswith(UNNAMED_SCOPE_PREFIX)
+        }
+        self.assertTrue(names)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        return fn, names
+
+    def _recorded_unnamed_scope_sources(self, package):
+        return {
+            name: source
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name, source in load_guards_state(
+                guarded.guards_state
+            ).output_graph.unnamed_scope_sources.items()
+        }
+
+    def _install_unnamed_scope_package(self, ctx, fn, names):
+        # Drop the keys the save bound, as a fresh process would not have them.
+        torch._dynamo.reset()
+        scope = fn.__globals__
+        for name in names:
+            scope.pop(name, None)
+        self.addCleanup(lambda: [scope.pop(name, None) for name in names])
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.addCleanup(package.uninstall)
+        return package, backends, compiled_fn
+
+    def test_install_seeds_unnamed_scope_globals(self):
+        ctx = DiskDynamoStore()
+        fn, names = self._save_record_package(ctx)
+        package, backends, compiled_fn = self._install_unnamed_scope_package(
+            ctx, fn, names
+        )
+        scope = fn.__globals__
+        for name in names:
+            self.assertIs(scope[name], PkgRecord.__new__.__globals__)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        package.uninstall()
+        self.assertFalse(names & scope.keys())
+
+        # A binding someone else wrote is neither replaced nor removed.
+        foreign = {name: {} for name in names}
+        scope.update(foreign)
+        package.install(backends)
+        package.uninstall()
+        for name in names:
+            self.assertIs(scope.pop(name), foreign[name])
+
+    def test_install_keeps_unnamed_scope_globals_of_a_live_compile(self):
+        # The live compile bound the key behind a CleanupHook keyed on its
+        # generated code. install() keeps that binding, and the hook firing
+        # afterwards must not delete it from under the installed guards.
+        ctx = DiskDynamoStore()
+        # Hold the code objects already registered, so none is collected and its
+        # id reused by a code object of the compile below.
+        held = [ref() for ref in list(CleanupManager.instance.refs.values())]
+        before = set(CleanupManager.instance.refs)
+        fn, names = self._save_record_package(ctx)
+        self.addCleanup(lambda: [fn.__globals__.pop(name, None) for name in names])
+        # Pin the live compile's code objects so its hooks fire after install().
+        pinned = [
+            ref()
+            for idx, ref in list(CleanupManager.instance.refs.items())
+            if idx not in before
+        ]
+        pinned_ids = {id(p) for p in pinned if p is not None}
+        self.assertTrue(pinned_ids)
+
+        torch._dynamo.reset()
+        live = {name: fn.__globals__[name] for name in names}
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.addCleanup(package.uninstall)
+        del pinned
+        gc.collect()
+
+        self.assertFalse(pinned_ids & set(CleanupManager.instance.refs))
+        for name in names:
+            self.assertIs(fn.__globals__[name], live[name])
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        # Taken over from the hook, so nothing would drop it if uninstall() didn't.
+        package.uninstall()
+        self.assertFalse(names & fn.__globals__.keys())
+        del held
+
+    def test_install_binds_unnamed_scope_globals_to_the_live_namespace(self):
+        # The bytecode replays log.append through the key, so binding the
+        # artifact's copy of the namespace would append to the copy.
+        def fn(x):
+            return PKG_LOGGER.scale(x.sin())
+
+        # Trace against an empty list, and leave it empty for a rerun.
+        log = PKG_LOG_SCOPE["log"]
+        log.clear()
+        self.addCleanup(log.clear)
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_LOG_SCOPE)
+        # The guards want the list as it was while tracing; the save appended.
+        log.clear()
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+        self.assertEqual(log, [1])
+
+    def test_installed_unnamed_scope_guards_check_the_live_namespace(self):
+        # EQUALS_MATCH on factor must fail once the namespace changes; checking
+        # the artifact's frozen copy would keep serving x * 3.
+        def fn(x):
+            return PKG_SCALER.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+        PKG_FACTOR_SCOPE["factor"] = 5
+        self.addCleanup(PKG_FACTOR_SCOPE.__setitem__, "factor", 3)
+        self.assertEqual(compiled_fn(x), x.sin() * 5)
+
+    @parametrize("handlers", ["emptied", "rebound"])
+    def test_install_leaves_unbound_an_unnamed_scope_whose_source_raises(
+        self, handlers
+    ):
+        # The namespace's source is G['PKG_HANDLERS'][0].__globals__. Against an
+        # emptied or rebound list it raises IndexError or TypeError, and
+        # install() must skip the key rather than fail partway through, leaving
+        # a call that misses.
+        def fn(x):
+            return PKG_HANDLERS[0](x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        stale = [] if handlers == "emptied" else None
+        with patch.object(sys.modules[fn.__module__], "PKG_HANDLERS", stale):
+            package, _, compiled_fn = self._install_unnamed_scope_package(
+                ctx, fn, names
+            )
+        self.assertEqual(self._recorded_unnamed_scope_sources(package).keys(), names)
+        self.assertFalse(names & fn.__globals__.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(torch.randn(4))
+
+    def test_install_binds_an_unnamed_scope_reached_through_a_set(self):
+        # The namespace's source goes through Dynamo's ___set_getitem helper,
+        # which a bare eval of the source's name does not have.
+        def fn(x):
+            for handler in PKG_HANDLER_SET:
+                return handler(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        sources = self._recorded_unnamed_scope_sources(package)
+        self.assertIn("___set_getitem", "".join(s.name for s in sources.values()))
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+
+    def test_install_binds_an_unnamed_scope_reached_through_builtins(self):
+        # The namespace's source is rooted at the builtins dict key, which a
+        # fresh process does not have either, so install() binds that first.
+        builtins.pkg_builtin_scale = PKG_HANDLER_SCOPE["scale"]
+        self.addCleanup(delattr, builtins, "pkg_builtin_scale")
+
+        def fn(x):
+            return pkg_builtin_scale(x.sin())  # noqa: F821
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict__")
+        }
+        self.assertTrue(builtins_keys)
+        package, _, compiled_fn = self._install_unnamed_scope_package(
+            ctx, fn, names | builtins_keys
+        )
+        sources = self._recorded_unnamed_scope_sources(package)
+        self.assertIn("__builtins_dict__", "".join(s.name for s in sources.values()))
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+
+    def test_install_leaves_unbound_an_unnamed_scope_reached_through_a_local(self):
+        # The namespace is found through the frame's argument, which install()
+        # does not have, so the key stays unbound and the call misses.
+        def fn(scaler, x):
+            return scaler.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(
+            ctx, fn, PKG_SCALER, torch.randn(4)
+        )
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(self._recorded_unnamed_scope_sources(package))
+        self.assertFalse(names & fn.__globals__.keys())
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(PKG_SCALER, x)
+        self.assertEqual(compiled_fn(PKG_SCALER, x), x.sin() * 3)
+
+    def test_install_records_no_source_rooted_at_an_unnamed_scope_key(self):
+        # scale is reached through the frame's argument and helper through
+        # G[<key>]['helpers'][0]. Recording the latter would bind the key through
+        # itself, so neither is recorded and the key stays unbound.
+        def fn(scaler, x):
+            return scaler.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(
+            ctx, fn, PkgChainScaler(), torch.randn(4)
+        )
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(self._recorded_unnamed_scope_sources(package))
+        self.assertFalse(names & fn.__globals__.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(PkgChainScaler(), torch.randn(4))
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
@@ -1146,6 +1706,52 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
+
+    def test_install_survives_a_cold_bundled_autotune_cache(self, device):
+        # AutotuneCacheBundler keeps one bundle per compile context, left open
+        # on a remote-cache miss, and install() post-compiles both of the
+        # frame's variants in one.
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
+        from torch._inductor.runtime.autotune_cache import (
+            _AutotuneCacheBundlerImpl as Bundler,
+        )
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        args = [
+            torch.randn(4, device=device, dtype=dtype)
+            for dtype in (torch.float32, torch.float64)
+        ]
+        cold = unittest.mock.Mock()
+        cold.get.return_value = None
+        ctx = DiskDynamoStore()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+            patch(
+                "torch._inductor.runtime.autotune_cache.create_cache",
+                return_value=cold,
+            ),
+            # Without Triton the bundler has no backend hash and fails before
+            # it reaches the one-bundle check.
+            patch.object(Bundler, "_get_backend_hash", return_value="backend"),
+        ):
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
+            for x in args:
+                compiled_fn(x)
+            self.assertEqual(len(package.cached_backends), 2)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            with torch.compiler.set_stance("fail_on_recompile"):
+                for x in args:
+                    self.assertEqual(compiled_fn(x), fn(x))
 
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
