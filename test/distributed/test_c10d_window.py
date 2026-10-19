@@ -18,7 +18,11 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.distributed.distributed_c10d import SignalOptions, WaitSignalOptions
+from torch.distributed.distributed_c10d import (
+    PutOptions,
+    SignalOptions,
+    WaitSignalOptions,
+)
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
@@ -138,18 +142,24 @@ class AbstractWindowTest:
         win = dist._new_window(win_buf)
         next_rank = (self.rank + 1) % self.world_size
         prev_rank = (self.rank - 1) % self.world_size
-        win.signal(next_rank, False, opts=SignalOptions())
-        win.wait_signal(prev_rank, False, opts=WaitSignalOptions())
+        opts = SignalOptions()
+        opts.timeout = timedelta(seconds=60)
+        opts.hints = {"unused": "1"}
+        win.signal(next_rank, False, opts=opts)
+        wait_opts = WaitSignalOptions()
+        wait_opts.timeout = timedelta(seconds=60)
+        win.wait_signal(prev_rank, False, opts=wait_opts)
         torch.cuda.synchronize()
         win.tensor_deregister()
 
     def test_symmetric_mem_pool_teardown(self):
-        # register_mem_pool(symm=True) before allocating upgrades each new
-        # segment to a symmetric window; deregister_mem_pool tears them down.
+        # register_mem_pool(symm=True) gives the pool's existing and new
+        # segments symmetric windows; deregister_mem_pool tears them down.
         self._init_backend()
         # Probe before register_mem_pool: allocating from a symm=True pool
         # raises, rather than skips, without a symmetric-memory transport.
-        # Probing this pool keeps its window segment under deregister_mem_pool.
+        # The probe's segment belongs to pool, so deregister_mem_pool(pool)
+        # also tears it down.
         pool = self._make_pool()
         self._probe_window_support(pool)
         # A window outside the symm pool, to check put's source validation
@@ -161,20 +171,27 @@ class AbstractWindowTest:
         other_win = dist._new_window(other_buf)
         next_rank = (self.rank + 1) % self.world_size
         prev_rank = (self.rank - 1) % self.world_size
+        # Large allocations get their own segments. This one exists before
+        # symm=True, so registration upgrades it.
+        with torch.cuda.use_mem_pool(pool):
+            old_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
         self.backend.register_mem_pool(pool, symm=True)
-        # Reuses the probe's segment, registered before symm=True.
+        # Reuses the probe's segment.
         with torch.cuda.use_mem_pool(pool):
-            win_buf = torch.zeros(self.world_size, device=self.device)
+            win_buf = torch.zeros(2 * self.world_size, device=self.device)
         win = dist._new_window(win_buf)
-        # A large allocation lands in a new segment, which symm=True
-        # registers, so it is a valid put source outside the window.
+        # A new segment, which symm=True registers as it is allocated.
         with torch.cuda.use_mem_pool(pool):
-            src_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
-        src = src_seg[:1]
-        win.put(src, next_rank, self.rank, False)
+            new_seg = torch.full((1 << 20,), float(self.rank), device=self.device)
+        opts = PutOptions()
+        opts.timeout = timedelta(seconds=60)
+        win.put(old_seg[:1], next_rank, self.rank, False, opts=opts)
+        win.put(new_seg[:1], next_rank, self.world_size + self.rank, False)
+        win.wait_signal(prev_rank, False)
         win.wait_signal(prev_rank, False)
         torch.cuda.synchronize()
         self.assertEqual(win_buf[prev_rank].item(), prev_rank)
+        self.assertEqual(win_buf[self.world_size + prev_rank].item(), prev_rank)
         win.tensor_deregister()
         del win, win_buf
         self.backend.deregister_mem_pool(pool)
@@ -182,10 +199,10 @@ class AbstractWindowTest:
         # without communicating.
         unregistered = "not in a registered symmetric window"
         with self.assertRaisesRegex(RuntimeError, unregistered):
-            other_win.put(src, next_rank, 0, False)
+            other_win.put(new_seg[:1], next_rank, 0, False)
         other_win.tensor_deregister()
         self.backend.deregister_mem_pool(other_pool)
-        del src, src_seg, pool, other_win, other_buf, other_pool
+        del old_seg, new_seg, pool, other_win, other_buf, other_pool
         torch.cuda.synchronize()
 
     def test_put_dtypes_and_sizes(self):

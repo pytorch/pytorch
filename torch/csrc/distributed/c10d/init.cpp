@@ -1502,7 +1502,9 @@ Wait for one signal from ``peer_rank``, sent by :meth:`signal` or, on
 backends where :meth:`put` signals, by :meth:`put`. Signals are counted:
 call this once per signal or put from that peer. Signals and puts from the
 same peer are not distinguished, so after a :meth:`signal` followed by a
-:meth:`put` the first wait can return before the put's data arrives.
+:meth:`put` the first wait can return before the put's data arrives. With
+NCCL, counts are shared by all windows of the process group, so a put to one
+window can satisfy a wait on another.
 
 Args:
     peer_rank (int): Rank to wait on.
@@ -4574,10 +4576,13 @@ Returns:
               "register_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
-              py::arg("symm") = false)
+              py::arg("symm") = false,
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows.)")
           .def(
               "deregister_mem_pool",
-              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool)
+              &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
+              py::arg("pool"),
+              R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
