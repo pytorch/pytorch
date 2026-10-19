@@ -4201,7 +4201,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
               py::arg("symm") = false,
-              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, unregistered segments are registered as NCCL symmetric windows instead; already registered segments are left as is. ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
+              R"(Register ``pool``'s segments with this communicator. With ``symm=True``, unregistered segments are registered as NCCL symmetric windows instead; already registered segments are left as is. This is collective, as are later allocations from the pool. ``symm`` is ignored when PyTorch is built against NCCL older than 2.27.)")
           .def(
               "deregister_mem_pool",
               &::c10d::ProcessGroupNCCL::deregisterMemPool,
