@@ -5,6 +5,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
+#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -609,7 +610,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         return FAIL;
       }
 
-      void* workspace_buffer = at::cuda::getCUDABlasLtWorkspace();
+      at::cuda::blas::detail::CublasLtWorkspace ltworkspace;
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),
@@ -624,8 +625,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             params->c,
             mat_c,
             &algo_,
-            workspace_buffer,
-            workspace_size,
+            ltworkspace.ptr,
+            ltworkspace.size,
             at::cuda::getCurrentCUDAStream()));
 
       //TORCH_HIPBLASLT_CHECK(hipblasLtMatmulDescDestroy(matmul));

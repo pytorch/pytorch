@@ -35,11 +35,25 @@ on:
         default: "7.5"
         description: |
           List of CUDA architectures CI build should target.
+      rocm-arch-list:
+        required: false
+        type: string
+        default: ""
+        description: |
+          List of ROCm architectures CI build should target.
       runner_prefix:
         required: false
         default: ""
         type: string
         description: Prefix for runner label
+      lf_runners:
+        required: false
+        default: ""
+        type: string
+        description: |
+          Comma-separated LF allowlist (ci-infra#1081). Empty means
+          unrestricted. Forwarded verbatim to filter_test_configs.py's
+          --lf-runners for the test matrix.
       runner:
         required: false
         type: string
@@ -202,6 +216,7 @@ jobs:
           selected-test-configs: ${{ inputs.selected-test-configs }}
           ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
+          lf-runners: ${{ inputs.lf_runners }}
 
       - name: Configure AWS credentials
         id: aws-creds
@@ -227,6 +242,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          PYTORCH_ROCM_ARCH: ${{ inputs.rocm-arch-list }}
           FLASH_ATTENTION_LARGE_MEMORY_BUILD: ${{ inputs.flash-attention-large-memory-build }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}

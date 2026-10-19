@@ -196,8 +196,7 @@
 
 - name: MPS
   patterns:
-  - test/test_mps.py
-  - test/inductor/test_mps_basic.py
+  - test/**
   - torch/testing/_internal/common_mps.py
   - torch/testing/_internal/common_methods_invocations.py
   - torch/testing/_internal/opinfo/**
@@ -233,11 +232,9 @@
   patterns:
   - docs/source/pipeline.rst
   - docs/source/distributed*
-  - docs/source/rpc.rst
-  - docs/source/rpc/**
+  - docs/source/distributed/**
   - docs/source/_static/img/rpc*
   - docs/source/_static/img/*distributed*
-  - docs/source/elastic/**
   - benchmarks/distributed/**
   - torch/distributed/**
   - torch/nn/parallel/distributed*
@@ -280,7 +277,7 @@
 
 - name: DCP
   patterns:
-  - docs/source/distributed.checkpoint.rst
+  - docs/source/distributed/checkpoint.md
   - torch/distributed/checkpoint/**
   approved_by:
   - LucasLLC
@@ -520,6 +517,7 @@
   - rtimpe
   - trichmo
   - hameerabbasi
+  - riccardofelluga
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -590,6 +588,23 @@
   - Lint
   - pull
 
+- name: Complex Compilation
+  patterns:
+  - torch/_subclasses/complex_tensor/**
+  - test/complex_tensor/**
+  - torch/_functorch/_aot_autograd/complex_decomposition.py
+  - test/dynamo/test_complex.py
+  approved_by:
+  - hameerabbasi
+  - amjames
+  - eellison
+  - ezyang
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - inductor
+
 - name: Testing (Temporarily used for test refactoring)
   patterns:
   - torch/testing/**
@@ -606,15 +621,14 @@
   - '*'
   approved_by:
   - aditvenk
-  - AmesingFlank
   - angelayi
   - anshul-si
   - aorenste
   - atalman
   - blaine-rister
   - bobrenjc93
+  - BoyuanFeng
   - d4l3k
-  - dcci
   - desertfire
   - digantdesai
   - dolpm
@@ -637,7 +651,9 @@
   - karthickai
   - laithsakka
   - liangel-02
+  - MengjiaoZhou
   - Microve
+  - Mingming-Ding
   - mlazos
   - nandesuka
   - NicolasHug
@@ -653,14 +669,15 @@
   - SherlockNoMad
   - slayton58
   - soulitzer
+  - tianyu-l
   - tushar00jain
-  - vkuzo
   - warrendeng
   - wconstab
   - weifengpy
   - williamwen42
   - ydwu4
   - yushangdi
+  - zoranzhao
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -14,8 +14,19 @@ MPSEvent::~MPSEvent() {
   }
 }
 
-void MPSEvent::recordLocked(bool syncEvent) {
+void MPSEvent::recordLocked(bool syncEvent, MPSStream* stream) {
   TORCH_INTERNAL_ASSERT(!m_enable_timing || syncEvent, "Timing-enabled MPS events must commit when recorded");
+  if (stream) {
+    m_stream = stream;
+  }
+  // If the stream has been changed since the last `record` and there are still
+  // pending signals on the previous stream, create a new Metal event so that
+  // pending waits stay bound to the old Metal event.
+  if (m_signal_stream && m_signal_stream != m_stream && m_event.signaledValue < m_signalCounter.load()) {
+    [m_event release];
+    m_event = [m_stream->device() newSharedEvent];
+  }
+  m_signal_stream = m_stream;
   // active encoders must end before encoding or waiting
   m_stream->endKernelCoalescing();
   const uint64_t signalCounter = ++m_signalCounter;
@@ -51,19 +62,20 @@ bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
   id<MTLCommandBuffer> commandBuffer = wait_stream->commandBuffer();
   [commandBuffer encodeWaitForEvent:m_event value:signalCounter];
   if (syncEvent) {
-    m_stream->synchronize(SyncType::COMMIT);
+    wait_stream->synchronize(SyncType::COMMIT);
   }
   return true;
 }
 
-void MPSEvent::record(bool needsLock, bool syncEvent) {
+void MPSEvent::record(bool needsLock, bool syncEvent, MPSStream* stream) {
   if (!needsLock) {
-    recordLocked(syncEvent);
+    recordLocked(syncEvent, stream);
     return;
   }
-  dispatch_sync(m_stream->queue(), ^() {
+  MPSStream* dispatch_stream = stream ? stream : m_stream;
+  dispatch_sync(dispatch_stream->queue(), ^() {
     @autoreleasepool {
-      recordLocked(syncEvent);
+      recordLocked(syncEvent, stream);
     }
   });
 }
@@ -199,9 +211,9 @@ void MPSEventPool::resetEvent(id_t event_id, MPSStream* stream, bool enable_timi
   event->reset(stream, enable_timing);
 }
 
-void MPSEventPool::recordEvent(id_t event_id, bool syncEvent) {
+void MPSEventPool::recordEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
   MPSEvent* event = getInUseEvent(event_id);
-  event->record(/*needsLock*/ true, syncEvent);
+  event->record(/*needsLock*/ true, syncEvent, stream);
 }
 
 void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream) {

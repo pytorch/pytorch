@@ -30,9 +30,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
-#include <ATen/ops/sgn_native.h>
-#include <ATen/ops/sign_mps_dispatch.h>
-#include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh_native.h>
@@ -57,16 +54,7 @@ static bool is_empty_tensor(const Tensor& self) {
   return self.numel() == 0;
 }
 
-static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::string op_name, UnaryOpBlock unaryBlock) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-
-  auto output = output_;
-  bool needsCopyToOutput = false;
-  if (needsGather(output)) {
-    output = at::empty(output.sizes(), output.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-    needsCopyToOutput = true;
-  }
-
+static void unary_op_noresize(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock) {
   @autoreleasepool {
     std::string key = op_name + getTensorsStringKey({self, output});
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSUnaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -79,31 +67,11 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
       newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
     });
 
-    // If self is non-densely mapped in storage, create a dense output-like representation
-    at::Tensor self_;
-    if (!is_dense_in_storage(self) && !is_macOS_15_0_or_newer) {
-      self_ = at::empty_like(output, self.scalar_type());
-      mps::mps_copy_(self_, self, false);
-    } else {
-      self_ = self;
-    }
-
-    bool gatherTensorData = true;
-    // NS: This check is wrong and needs to be fixed, as it would produce wrong results for transposed outputs
     // See https://github.com/pytorch/pytorch/issues/100764
-
-    if (!output.is_contiguous() || output.is_view()) {
-      gatherTensorData = false;
-    }
-
-    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self_, /*mpsShape=*/nullptr, gatherTensorData);
-    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, /*mpsShape=*/nullptr, false);
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-
-    if (needsCopyToOutput) {
-      output_.copy_(output);
-    }
   }
 }
 
@@ -122,12 +90,6 @@ static void unary_op(const Tensor& self,
   unary_op_noresize(self, output_, op_name, unaryBlock);
 }
 
-static MPSGraphTensor* lengthOfComplexAsReal(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-  auto squares = [mpsGraph squareWithTensor:inputTensor name:nil];
-  auto sumSquares = [mpsGraph reductionSumWithTensor:squares axis:-1 name:nil];
-  return [mpsGraph squareRootWithTensor:sumSquares name:nil];
-}
-
 } // namespace mps
 
 TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
@@ -144,32 +106,6 @@ TORCH_IMPL_FUNC(signbit_out_mps)(const Tensor& self, const Tensor& output) {
     return mps::castMPSTensor(mpsGraph, output, ScalarType::Bool);
   });
 }
-
-TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "sign_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    // Sign op is not implemented in MPS as of MacOS13.0 beta, so simulate it using clamp
-    if ([inputTensor dataType] == MPSDataTypeInt64) {
-      return [mpsGraph clampWithTensor:inputTensor
-                        minValueTensor:[mpsGraph constantWithScalar:-1 dataType:MPSDataTypeInt64]
-                        maxValueTensor:[mpsGraph constantWithScalar:1 dataType:MPSDataTypeInt64]
-                                  name:nil];
-    }
-    return [mpsGraph signWithTensor:inputTensor name:nil];
-  });
-}
-
-#define REGISTER_MPS_UNARY_STUB(func, mps_func)                                                                        \
-  static void mps_##func##_kernel(TensorIteratorBase& iter) {                                                          \
-    mps::unary_op(                                                                                                     \
-        iter.input(0), iter.output(0), __func__, ^MPSGraphTensor*(MPSGraph * mpsGraph, MPSGraphTensor * inputTensor) { \
-          return [mpsGraph mps_func##WithTensor:inputTensor name:nil];                                                 \
-        });                                                                                                            \
-  }                                                                                                                    \
-  REGISTER_DISPATCH(func##_stub, mps_##func##_kernel)
-
-REGISTER_MPS_UNARY_STUB(acosh, acosh);
-REGISTER_MPS_UNARY_STUB(asinh, asinh);
-REGISTER_MPS_UNARY_STUB(atanh, atanh);
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
   TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
@@ -307,30 +243,6 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
 TORCH_IMPL_FUNC(cumprod_out_mps)
 (const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, const Tensor& result) {
   return cumulative_op_impl(self, dim, dtype, result, MPSCumulativeOpType::CUMPROD);
-}
-
-TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
-  if (!self.is_complex()) {
-    at::mps::sign_outf(self, const_cast<Tensor&>(output));
-    return;
-  }
-
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
-  }
-
-  Tensor realInput = at::view_as_real(self);
-  Tensor realOutput = at::view_as_real(output);
-
-  auto complex_sgn_op = [&](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) -> MPSGraphTensor* {
-    MPSGraphTensor* norm = mps::lengthOfComplexAsReal(mpsGraph, inputTensor);
-    MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:norm.dataType];
-    MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:norm secondaryTensor:zero name:nil];
-    MPSGraphTensor* sgnTensor = [mpsGraph divisionWithPrimaryTensor:inputTensor secondaryTensor:norm name:nil];
-    return [mpsGraph selectWithPredicateTensor:isZero truePredicateTensor:zero falsePredicateTensor:sgnTensor name:nil];
-  };
-
-  mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
 }
 
 } // namespace at::native

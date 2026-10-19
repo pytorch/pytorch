@@ -33,7 +33,9 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..exc import (
+    handle_observed_exception,
     ObservedException,
+    ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -44,6 +46,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     get_fake_value,
     guard_if_dyn,
+    istype,
     iter_contains,
     no_keywords,
     no_positional,
@@ -61,17 +64,19 @@ from .base import (
     GetSet,
     Member,
     Method,
+    MutationType,
     readonly_setter,
     ValueMutationNew,
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_getiter,
     generic_richcompare_bool,
     maybe_get_python_type,
     pyindex_check,
+    pyiter_next,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
@@ -83,6 +88,8 @@ from .object_protocol import (
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+    from .functions import UserFunctionVariable
 
 
 def pytuple_checkexact(obj: VariableTracker) -> bool:
@@ -125,6 +132,9 @@ class BaseListVariable(VariableTracker):
     # CPython's ValueError text for a failed .index(); tuple (and so namedtuple
     # and torch.Size) ignores the value while list/deque repr it.
     _index_not_found_msg = "tuple.index(x): x not in tuple"
+    # CPython's ValueError text for a failed .remove(); list never reprs the
+    # value, deque does before 3.14 (see DequeVariable).
+    _remove_not_found_msg = "list.remove(x): x not in list"
 
     @staticmethod
     def cls_for_instance(obj: object) -> type["BaseListVariable"]:
@@ -160,14 +170,12 @@ class BaseListVariable(VariableTracker):
     def _as_proxy(self) -> list[Any]:
         return [x.as_proxy() for x in self.items]
 
-    def modified(
-        self, items: list[VariableTracker], **kwargs: Any
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
     ) -> "BaseListVariable":
-        return type(self)(items, **kwargs)
-
-    @property
-    def value(self) -> Any:
-        return self.as_python_constant()
+        return type(self)(items, mutation_type=mutation_type)
 
     def debug_repr_helper(self, prefix: str, suffix: str) -> str:
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
@@ -202,12 +210,9 @@ class BaseListVariable(VariableTracker):
                 raise_observed_exception(
                     ValueError, tx, args=["slice step cannot be zero"]
                 )
-            # Set source to None because slicing a list gives a new local
-            return self.clone(
-                items=self.items[index],
-                source=None,
-                mutation_type=ValueMutationNew() if self.mutation_type else None,
-            )
+            # Slicing a list/tuple gives a new local, not sourced from self.
+            mutation_type = ValueMutationNew() if self.mutation_type else None
+            return self._new_list(self.items[index], mutation_type=mutation_type)
         else:
             raise_type_error(
                 tx,
@@ -238,7 +243,7 @@ class BaseListVariable(VariableTracker):
     def call_tree_map_branch(
         self,
         tx: "InstructionTranslatorBase",
-        tree_map_fn: UserFunctionVariable,
+        tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -282,7 +287,7 @@ class BaseListVariable(VariableTracker):
     def call_tree_map_with_path_branch(
         self,
         tx: "InstructionTranslatorBase",
-        tree_map_fn: UserFunctionVariable,
+        tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: list[VariableTracker],
         tree_map_kwargs: dict[str, VariableTracker],
@@ -366,10 +371,10 @@ class BaseListVariable(VariableTracker):
         except (MemoryError, OverflowError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         # self.items is a list, so we can't go through VariableTracker.build (which would wrap in a list variable)
-        kwargs: dict[str, Any] = {}
-        if issubclass(self.python_type(), list):
-            kwargs["mutation_type"] = ValueMutationNew()
-        return type(self)(new_items, **kwargs)
+        mutation_type = (
+            ValueMutationNew() if issubclass(self.python_type(), list) else None
+        )
+        return self._new_list(new_items, mutation_type=mutation_type)
 
     def _seq_richcompare(
         self,
@@ -397,10 +402,7 @@ class BaseListVariable(VariableTracker):
 
         left = self.items
         # CPython uses ob_item (the C array) directly, bypassing __iter__.
-        # For user-defined subclasses (UserDefinedListVariable etc.),
-        # the items live on the _base_vt.
-        other_vt = getattr(other, "_base_vt", None) or other
-        right = other_vt.items  # pyrefly: ignore[missing-attribute]
+        right = other.items  # pyrefly: ignore[missing-attribute]
 
         cmp_op = cmp_name_to_op_mapping[op]
 
@@ -460,13 +462,13 @@ class BaseListVariable(VariableTracker):
 
         return ConstantVariable.create(cmp_op(len(left), len(right)))
 
-    def list_index(
+    def _index_or_raise(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        not_found_msg: str,
     ) -> VariableTracker:
-        check_positional(tx, "index", len(args), 1, 3)
         try:
             # Speedup trace times for constant data structures
             items = [item.as_python_constant() for item in self.items]
@@ -478,17 +480,23 @@ class BaseListVariable(VariableTracker):
                 )
             except ValueError:
                 raise_observed_exception(
-                    ValueError,
-                    tx,
-                    args=[self._index_not_found_msg.format(const_args[0])],
+                    ValueError, tx, args=[not_found_msg.format(const_args[0])]
                 )
         except AsPythonConstantNotImplementedError:
-            not_found_msg = ConstantVariable.create(self._index_not_found_msg)
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
-                {**kwargs, "not_found_msg": not_found_msg},
+                {**kwargs, "not_found_msg": ConstantVariable.create(not_found_msg)},
             )
+
+    def list_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "index", len(args), 1, 3)
+        return self._index_or_raise(tx, args, kwargs, self._index_not_found_msg)
 
     def list_count(
         self,
@@ -536,7 +544,7 @@ class BaseListVariable(VariableTracker):
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
-        if isinstance(args[0], (ListVariable, TupleVariable)):
+        if istype(args[0], (ListVariable, TupleVariable)):
             self.items.extend(args[0].items)
         elif isinstance(args[0], UserDefinedObjectVariable):
             self.items.extend(unpack_iterable(tx, args[0]))
@@ -556,8 +564,10 @@ class BaseListVariable(VariableTracker):
             items = unpack_iterable(tx, args[0])
             self.items.extend(items)
         else:
+            # Use the native append, matching CPython's internal list_extend
+            # which bypasses a subclass's overridden append (e.g. immutable_list).
             unpack_and_apply_fn(
-                tx, args[0], lambda item: self.call_method(tx, "append", [item], {})
+                tx, args[0], lambda item: self.list_append(tx, [item], {})
             )
 
         if len(self.items) > sz:
@@ -633,7 +643,7 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker:
         # List copy() doesn't have args and kwargs
         items_lst: list[VariableTracker] = list(self.items)
-        return self.modified(items_lst, mutation_type=ValueMutationNew())
+        return self._new_list(items_lst, mutation_type=ValueMutationNew())
 
     def list_reverse(
         self,
@@ -655,8 +665,11 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        idx = self.call_method(tx, "index", args, kwargs)
-        self.call_method(tx, "pop", [idx], {})
+        # list_remove deletes in place (list_ass_slice) rather than calling the
+        # public pop, whose arity differs per type (deque.pop takes no index).
+        idx = self._index_or_raise(tx, args, kwargs, self._remove_not_found_msg)
+        tx.output.side_effects.mutation(self)
+        del self.items[idx.as_python_constant()]
         return ConstantVariable.create(None)
 
     def list_sort(
@@ -1178,7 +1191,12 @@ class ListVariable(BaseListVariable):
         return VariableTracker.build(tx, f"[{items}]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self._contains_self_reference():
+        # Only a sourceless object needs the empty-then-fill placeholder. Once
+        # it has a source -- including the TempLocalSource that
+        # codegen_save_tempvars assigns after materializing it -- the
+        # self-reference loads from that source, and caching a throwaway here
+        # would rebind every later codegen of this VT to the throwaway.
+        if self._contains_self_reference() and self.source is None:
             # Self-referential list: create empty, cache, then extend
             codegen.extend_output(
                 [
@@ -1238,7 +1256,9 @@ class ListVariable(BaseListVariable):
         tx.output.side_effects.mutation(self)
         self.items.clear()
         if len(args) == 1:
-            self.call_method(tx, "extend", args, {})
+            # list.__init__ uses the internal C-level extend, which bypasses a
+            # subclass's overridden extend/append (e.g. fx immutable_list).
+            ListVariable.list_extend(self, tx, args, {})
         return ConstantVariable.create(None)
 
     def call_obj_hasattr(
@@ -1287,7 +1307,10 @@ class ListVariable(BaseListVariable):
             i = key.nb_index_impl(tx).as_python_constant()
             if i < 0:
                 i += len(self.items)
-            return self.sq_ass_item_impl(tx, ConstantVariable(i), value)
+            # Explicit unbound dispatch
+            return ListVariable.sq_ass_item_impl(
+                self, tx, ConstantVariable.create(i), value
+            )
         elif pyslice_check(key):
             # CPython runs PySlice_Unpack first, which raises ValueError on
             # step==0 before the iterable check.
@@ -1359,7 +1382,8 @@ class ListVariable(BaseListVariable):
     ) -> VariableTracker:
         # Implements PySequence_InPlaceConcat for sequences
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L1464-L1472
-        self.call_method(tx, "extend", [other], {})
+        # Uses the native extend, which bypasses a subclass's overridden extend.
+        ListVariable.list_extend(self, tx, [other], {})
         return self
 
     def is_hashable(self) -> bool:
@@ -1403,6 +1427,11 @@ class DequeVariable(BaseListVariable):
     _cpython_type = collections.deque
     _index_not_found_msg = (
         "deque.index(x): x not in deque"
+        if sys.version_info >= (3, 14)
+        else "{!r} is not in deque"
+    )
+    _remove_not_found_msg = (
+        "deque.remove(x): x not in deque"
         if sys.version_info >= (3, 14)
         else "{!r} is not in deque"
     )
@@ -1506,6 +1535,22 @@ class DequeVariable(BaseListVariable):
     def python_type(self) -> type:
         return collections.deque
 
+    def _new_list(
+        self,
+        items: list[VariableTracker],
+        mutation_type: MutationType | None = None,
+    ) -> "DequeVariable":
+        # deque repeat (sq_repeat) is the only caller; deque has no slicing.
+        # CPython returns a fresh mutable deque that copies maxlen from the
+        # left operand (__init__ truncates to the last maxlen items). Return a
+        # base deque, matching sq_concat_impl, rather than type(self)(items),
+        # which would misfire on a subclass VT's (value, items) constructor.
+        return DequeVariable(
+            items,
+            maxlen=self.maxlen,
+            mutation_type=ValueMutationNew(),
+        )
+
     def sq_item_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1576,7 +1621,8 @@ class DequeVariable(BaseListVariable):
     ) -> VariableTracker:
         # Implements PySequence_InPlaceConcat for deque
         # ref: https://github.com/python/cpython/blob/v3.13.0/Modules/_collectionsmodule.c#L572-L584
-        self.call_method(tx, "extend", [other], {})
+        # Uses the native extend, which bypasses a subclass's overridden extend.
+        DequeVariable.extend(self, tx, [other], {})
         return self
 
     def _repeat_items(
@@ -1660,13 +1706,12 @@ class DequeVariable(BaseListVariable):
         )
         codegen.append_output(create_instruction("BUILD_LIST", arg=0))
         codegen(self.maxlen)
-        codegen.extend_output(
-            [
-                *codegen.create_call_function_kw(2, ("maxlen",), False),
-                create_dup_top(),
-            ]
-        )
-        codegen.add_cache(self)
+        codegen.extend_output([*codegen.create_call_function_kw(2, ("maxlen",), False)])
+        # See ConstDictVariable.reconstruct: only cache a sourceless object, so
+        # the store cannot rebind a later codegen of this VT to this throwaway.
+        if self.source is None:
+            codegen.append_output(create_dup_top())
+            codegen.add_cache(self)
 
         codegen.append_output(create_dup_top())
         codegen.load_method("extend")
@@ -1754,8 +1799,9 @@ class DequeVariable(BaseListVariable):
             return None
         # NOTE this is inefficient, but the alternative is to represent
         # self.items as a deque, which is a more intrusive change.
+        # Use the native appendleft, bypassing a subclass's overridden appendleft.
         unpack_and_apply_fn(
-            tx, args[0], lambda item: self.call_method(tx, "appendleft", [item], {})
+            tx, args[0], lambda item: DequeVariable.appendleft(self, tx, [item], {})
         )
         self._clamp_maxlen("left")
         return ConstantVariable.create(None)
@@ -1840,6 +1886,19 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return result
 
+    def remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # deque_remove deletes through deque_del_item, which bumps state.
+        result = BaseListVariable.list_remove(self, tx, args, kwargs)
+        if result is None:
+            return None
+        self.state += 1
+        return result
+
     def deque_reversed(
         self,
         tx: "InstructionTranslatorBase",
@@ -1912,7 +1971,9 @@ class DequeVariable(BaseListVariable):
         self.maxlen = new_maxlen
         self.items.clear()
         if iterable is not None:
-            self.call_method(tx, "extend", [iterable], {})
+            # deque_init extends via the native path, bypassing a subclass's
+            # overridden extend.
+            DequeVariable.extend(self, tx, [iterable], {})
         return ConstantVariable.create(None)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1938,7 +1999,7 @@ class DequeVariable(BaseListVariable):
         "clear": Method(clear),
         "rotate": Method(_rotate),
         "reverse": Method(BaseListVariable.list_reverse),
-        "remove": Method(BaseListVariable.list_remove),
+        "remove": Method(remove),
         "copy": Method(copy),
         "__copy__": Method(copy),
         "__reversed__": Method(deque_reversed),
@@ -2307,9 +2368,129 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def bytearray_hex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.hex(*const_args, **const_kwargs)
+        except (OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_decode(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.decode(*const_args, **const_kwargs)
+        except (LookupError, TypeError, UnicodeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_append(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_append_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        item = pynumber_index(tx, args[0])
+        if not item.is_python_constant():
+            return None
+        new_data = bytearray(self.data)
+        try:
+            new_data.append(item.as_python_constant())
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer: do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    def bytearray_extend(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_extend: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        iterable = args[0]
+        # Only literal constants take the fast path: iterator variables are also
+        # python constants, but reading one returns a copy and would leave the
+        # traced iterator unconsumed.
+        if isinstance(iterable, ConstantVariable):
+            values = iterable.as_python_constant()
+        elif not isinstance(iterable, ByteArrayVariable) and issubclass(
+            maybe_get_python_type(iterable), (bytes, bytearray)
+        ):
+            # CPython reads a buffer before it considers __iter__, so a bytes
+            # or bytearray subclass that overrides __iter__ is still extended
+            # from its buffer. Raw-buffer access is not modeled here: decline.
+            return None
+        elif vt_is_iterable(iterable):
+            values = []
+            iterator = generic_getiter(tx, iterable)
+            # CPython asks the argument for a length hint (default 32) once it
+            # has the iterator and before it reads any item.
+            variables.BuiltinVariable(operator.length_hint).call_function(
+                tx, [iterable, ConstantVariable.create(32)], {}
+            )
+            # One item at a time, like CPython: a bad byte must leave the rest
+            # of the iterator unread, and __index__ may grow the iterable.
+            while True:
+                try:
+                    item = pyiter_next(tx, iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    break
+                item = pynumber_index(tx, item)
+                if not item.is_python_constant():
+                    return None
+                value = item.as_python_constant()
+                if not 0 <= value < 256:
+                    raise_observed_exception(
+                        ValueError, tx, args=["byte must be in range(0, 256)"]
+                    )
+                values.append(value)
+        else:
+            raise_type_error(
+                tx, f"can't extend bytearray with {iterable.python_type_name()}"
+            )
+        new_data = bytearray(self.data)
+        try:
+            new_data.extend(values)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+        return ConstantVariable.create(None)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
+        "hex": Method(bytearray_hex),
+        "decode": Method(bytearray_decode),
+        "append": Method(bytearray_append),
+        "extend": Method(bytearray_extend),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
