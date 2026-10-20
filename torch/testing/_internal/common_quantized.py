@@ -523,11 +523,17 @@ def from_blocked(input, input_scales, blocksize) -> torch.Tensor:
 
 def from_blocked_format(x_mxfp8, scales_unswizzled, blocksize=32):
     # expand scales
-    scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=1)
+    scales = torch.repeat_interleave(scales_unswizzled, blocksize, dim=-1)
 
     # de-scale and convert
     x_f32 = x_mxfp8.to(torch.float) * scales.to(torch.float)
     return x_f32.to(torch.bfloat16)
+
+def from_blocked_3d(input, input_scales, blocksize) -> torch.Tensor:
+    output = []
+    for matrix, scales in zip(input, input_scales, strict=True):
+        output.append(from_blocked(matrix, scales.flatten(), blocksize))
+    return torch.stack(output)
 
 def to_blocked(input_matrix, swizzle_32_8: bool = False) -> torch.Tensor:
     """
