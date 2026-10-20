@@ -162,7 +162,6 @@ class TestTritonWrapper(TestCase):
 instantiate_device_type_tests(
     TestTritonWrapper,
     globals(),
-    except_for=("hpu",),
     allow_xpu=True,
 )
 
