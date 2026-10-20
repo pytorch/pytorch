@@ -43,6 +43,7 @@ from torch.distributed.pipelining._utils import (
 from torch.distributed.tensor import DTensor
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils._pytree import tree_map
 from torch.utils.hooks import RemovableHandle
 
 from ._backward import (
@@ -443,7 +444,7 @@ class _PipelineStageBase(ABC):
         self,
         num_microbatches: int,
         loss_fn: Callable[..., torch.Tensor] | None = None,
-        target: torch.Tensor | None = None,
+        target: Any = None,
         received_grad_meta: _StageBackwardMeta | None = None,
         loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
@@ -733,7 +734,11 @@ class _PipelineStageBase(ABC):
                 if self.has_backward and can_release and out.requires_grad
                 else None
             )
-            if not can_release and self._retained_output_reason is None:
+            if (
+                self.has_backward
+                and not can_release
+                and self._retained_output_reason is None
+            ):
                 self._retained_output_reason = reason
                 logger.debug(
                     "%s keeping output tensors alive until backward: %s",
@@ -743,8 +748,13 @@ class _PipelineStageBase(ABC):
 
         return _ForwardChunkState(
             output_grad_edges=tuple(output_grad_edges),
-            input_values=input_values,
-            live_outputs=list(output_tuple),
+            input_values=input_values if self.has_backward else [],
+            # Forward-only final outputs belong to the loss/user, not this cache.
+            live_outputs=(
+                [None] * len(output_tuple)
+                if self.is_last and not self.has_backward
+                else list(output_tuple)
+            ),
             releasable=tuple(releasable),
             send_pending=[False] * len(output_tuple),
         )
@@ -813,6 +823,21 @@ class _PipelineStageBase(ABC):
             state.send_pending[idx] = False
             if state.releasable[idx]:
                 state.live_outputs[idx] = None
+        if not self.has_backward:
+            self._release_forward_state(fwd_chunk_id)
+
+    def _release_forward_state(self, fwd_chunk_id: int) -> None:
+        """Release a forward-only microbatch after all sends have completed."""
+        state = self._forward_chunk_states.get(fwd_chunk_id)
+        if state is None:
+            raise RuntimeError(
+                f"{self.log_prefix} has no forward state for chunk {fwd_chunk_id}"
+            )
+        if any(state.send_pending):
+            raise RuntimeError(
+                f"{self.log_prefix} chunk {fwd_chunk_id} still has pending consumers"
+            )
+        del self._forward_chunk_states[fwd_chunk_id]
 
     def _get_grad_send_meta(self, input_idx: int) -> TensorMeta | None:
         """Return gradient metadata for ``input_idx`` if a recv was allocated."""
@@ -1577,7 +1602,7 @@ class _PipelineStage(_PipelineStageBase):
         self,
         num_microbatches: int,
         loss_fn: Callable[..., torch.Tensor] | None = None,
-        target: torch.Tensor | None = None,
+        target: Any = None,
         received_grad_meta: _StageBackwardMeta | None = None,
         loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
@@ -2040,6 +2065,15 @@ class PipelineStage(_PipelineStageBase):
                 f"Unsupported type {type(arg)} for _to_tensor: {arg}"
             )
 
+    def _to_inference_tensors(self, value: Any) -> Any:
+        """Materialize tensor leaves while preserving the input's container structure."""
+        return tree_map(
+            lambda arg: self._to_tensor(arg)
+            if isinstance(arg, (torch.Tensor, TensorMeta))
+            else arg,
+            value,
+        )
+
     def _ones_from_metadata(self, meta: TensorMeta) -> torch.Tensor:
         """Create a ones tensor from metadata for backward inference grad_outputs."""
         local_ones = torch.ones(
@@ -2131,10 +2165,7 @@ class PipelineStage(_PipelineStageBase):
             self._stage_meta.inputs = recv_meta.forward_metas
             inference_args = tuple(self._to_tensor(m) for m in recv_meta.forward_metas)
 
-        inference_kwargs = {
-            k: self._to_tensor(v) if isinstance(v, torch.Tensor) else v
-            for k, v in kwargs.items()
-        }
+        inference_kwargs = self._to_inference_tensors(kwargs)
 
         # Isolate metadata inference from user's grad context.
         # has_backward → enable_grad() so backward tracing sees grad_fn;
@@ -2189,7 +2220,7 @@ class PipelineStage(_PipelineStageBase):
     def _backward_metadata_inference(
         self,
         loss_fn: Callable[..., torch.Tensor] | None = None,
-        target: torch.Tensor | None = None,
+        target: Any = None,
         received_grad_meta: _StageBackwardMeta | None = None,
         loss_kwargs: dict[str, Any] | None = None,
     ) -> _StageBackwardMeta | None:
@@ -2224,11 +2255,11 @@ class PipelineStage(_PipelineStageBase):
                 raise PipeliningMetadataError(
                     f"Stage {self.stage_index}: loss_fn and target required for last stage"
                 )
-            inference_target = self._to_tensor(target)
+            inference_target = self._to_inference_tensors(target)
             loss = loss_fn(
                 fwd_outputs[0] if len(fwd_outputs) == 1 else fwd_outputs,
                 inference_target,
-                **(loss_kwargs or {}),
+                **self._to_inference_tensors(loss_kwargs or {}),
             )
             self._stage_meta.output_grads = None
             all_input_grads = self._compute_input_grads(
@@ -2328,6 +2359,8 @@ class PipelineStage(_PipelineStageBase):
         backward metadata inference. Restoring immediately after forward can
         bump autograd version counters for buffers saved by the forward graph.
         """
+        if self._inference_mode != InferenceMode.DYNAMIC:
+            return
         buffer_backup = self._metadata_inference_buffer_backup
         if buffer_backup is not None:
             with torch.no_grad():
@@ -2352,7 +2385,7 @@ class PipelineStage(_PipelineStageBase):
         self,
         num_microbatches: int,
         loss_fn: Callable[..., torch.Tensor] | None = None,
-        target: torch.Tensor | None = None,
+        target: Any = None,
         received_grad_meta: "_StageBackwardMeta | None" = None,
         loss_kwargs: dict[str, Any] | None = None,
     ) -> "_StageBackwardMeta | None":

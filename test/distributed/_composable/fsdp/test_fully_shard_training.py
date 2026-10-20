@@ -1097,6 +1097,24 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
         self.assertIsNone(comm_ctx.all_gather_state)
 
+    @skip_if_lt_x_gpu(2)
+    def test_finalize_forward_clears_deferred_all_gather_state(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        model = ChunkedHeadModel(32, 128, tie=False).to(device)
+        fully_shard([model.norm, model.head])
+        fully_shard(model)
+        tokens = torch.randint(0, 128, (2, 16), device=device)
+        with torch.no_grad():
+            hidden = model(tokens, skip_head=True)
+            model.head(hidden)
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertIsNotNone(comm_ctx.all_gather_state)
+
+        model.finalize_forward()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
     def _test_partial_group_forward_then_standalone(
         self,
         reshard_after_forward: bool | int,

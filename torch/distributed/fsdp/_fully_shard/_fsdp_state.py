@@ -363,9 +363,7 @@ class FSDPState(_State):
             self._training_state = TrainingState.IDLE
             if self._state_ctx.iter_forward_root is self:
                 output = self._force_complete_incomplete_states(output)
-                # Free the last result retained for forward copy-in overlap; see
-                # [Note: Overlapping all-gather copy-in and all-gather].
-                self._comm_ctx.release_all_gather_state_for_comm_reuse()
+                self._finalize_forward()
                 self._state_ctx.iter_forward_root = None
             return self._cast_output_dtype(output)
 
@@ -402,6 +400,10 @@ class FSDPState(_State):
             output = state._cast_output_dtype(output)
             state._modules_to_run_forward.clear()
         return output
+
+    def _finalize_forward(self) -> None:
+        """Release the final all-gather result retained for forward overlap."""
+        self._comm_ctx.release_all_gather_state_for_comm_reuse()
 
     @_dynamo_disable
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:

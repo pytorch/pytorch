@@ -167,6 +167,13 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
 
 The frontend API is `fully_shard` that can be called on a `module`:
 
+Execution engines that explicitly schedule unshards across several modules can
+call `FSDPModule.finalize_forward()` after a successful forward-only iteration
+and its pending sends complete. This releases the final all-gather result
+retained for forward communication overlap. Ordinary module execution performs
+the same cleanup in its root post-forward hook. Forward finalization does not
+discard gradient state or replace exception recovery through `reset_iter_state()`.
+
 ```{eval-rst}
 .. autofunction:: fully_shard
 ```
