@@ -1271,16 +1271,6 @@ def skip_if_cpu(fn):
 # CPU hosts can also run tests on an accelerator, so distinguish the host
 # device from the execution device.
 # Keep historical MPS paths that do not require Triton via allow_mps.
-def skip_if_not_cpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if torch.device(self.device).type != "cpu":
-            raise unittest.SkipTest("requires CPU")
-        return fn(self, *args, **kwargs)
-
-    return wrapper
-
-
 def skip_if_not_cuda(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1322,9 +1312,9 @@ def skip_if_no_accelerator(fn):
     return wrapper
 
 
-def _require_device_triton(device):
+def _require_triton():
     if not has_triton():
-        raise unittest.SkipTest(f"triton is required for {device}")
+        raise unittest.SkipTest("triton is required")
 
 
 def skip_if_no_accelerator_triton(fn=None, *, allow_mps=False):
@@ -1335,7 +1325,7 @@ def skip_if_no_accelerator_triton(fn=None, *, allow_mps=False):
     def wrapper(self, *args, **kwargs):
         device = accelerator_device(self.device)
         if not (allow_mps and torch.device(device).type == "mps"):
-            _require_device_triton(device)
+            _require_triton()
         return fn(self, *args, **kwargs)
 
     return wrapper
@@ -1346,7 +1336,7 @@ def _require_multiple_accelerators(device):
     if torch.get_device_module(device_type).device_count() < 2:
         raise unittest.SkipTest(f"requires multiple {device_type} devices")
     if device_type != "mps":
-        _require_device_triton(device)
+        _require_triton()
 
 
 def skip_if_halide(fn):
@@ -4138,7 +4128,7 @@ class CommonTemplate:
 
     @skipCPUIf(True, "requires accelerator Triton")
     def test_builtins_round_float_ndigits_neg_uses_value_expr(self):
-        _require_device_triton(self.device)
+        _require_triton()
 
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
@@ -5235,8 +5225,6 @@ for dtype in (torch.int32, torch.int64):
                     self.assertNotIn(bmm_fallback_call, code_str)
 
     @skip_if_not_cuda
-    @skip_if_cpu
-    @skipIfXpu(msg="CUDA codegen check")
     @skip_if_not_triton
     def test_bmm_dot_shape_decompose_threshold(self):
         def fn(a, b):
@@ -5269,8 +5257,6 @@ for dtype in (torch.int32, torch.int64):
                     self.assertNotIn(bmm_fallback_call, code_str)
 
     @skip_if_not_cuda
-    @skip_if_cpu
-    @skipIfXpu(msg="CUDA codegen check")
     @skip_if_not_triton
     def test_bmm_dot_shape_dynamic_k_range_spans_decompose_threshold(self):
         def fn(a, b):
@@ -5298,8 +5284,6 @@ for dtype in (torch.int32, torch.int64):
         self.assertNotIn(bmm_fallback_call, code_str)
 
     @skip_if_not_cuda
-    @skip_if_cpu
-    @skipIfXpu(msg="CUDA integer bmm error preservation")
     @skip_if_cpp_wrapper("cpp wrapper reports AOTI API call failures")
     @skip_if_not_triton
     def test_bmm_dot_shape_int_preserves_eager_error(self):
@@ -19322,7 +19306,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor", dynamic=True)(a, b)
         self.assertEqual(eager, compiled)
 
-    @skip_if_not_cpu
     def test_cpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
             return a + b[0]
@@ -19361,7 +19344,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with self.assertRaises(RuntimeError):
             compiled = torch.compile(fn, backend="inductor")(a, b)
 
-    @skip_if_not_cpu
     def test_cpu_tensor_with_cpu_tensor(self):
         def fn(a, b):
             return a + b
@@ -19373,7 +19355,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor")(a, b)
         self.assertEqual(eager, compiled)
 
-    @skip_if_not_cpu
     def test_cpu_scalar_with_cpu_scalar(self):
         def fn(a, b):
             return a[0] + b[0]
@@ -20672,7 +20653,7 @@ class _AcceleratorTestCase(TestCase):
     def setUp(self):
         # Preserve the historical MPS path, which does not require Triton.
         if torch.device(self.device).type != "mps":
-            _require_device_triton(self.device)
+            _require_triton()
         super().setUp()
 
 
@@ -23052,7 +23033,7 @@ class _TritonDeviceTestCase(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        _require_device_triton(cls.get_primary_device())
+        _require_triton()
 
 
 if HAS_TRITON:
