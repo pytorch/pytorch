@@ -29,10 +29,6 @@ if has_triton():
     import triton.language as tl
 
 
-def compile_with_ac(f, memory_budget):
-    return torch.compile(f, backend="aot_eager_decomp_partition")
-
-
 def get_act_mem(f, device):
     out = f()
     out.backward()
