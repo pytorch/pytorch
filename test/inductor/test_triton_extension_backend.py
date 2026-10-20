@@ -39,7 +39,6 @@ except ImportError:
 import torch._inductor.lowering as inductor_lowering
 from torch._C import FileCheck
 from torch._dynamo import device_interface
-from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor import codegen, ir, metrics
 from torch._inductor.codegen import common
 from torch._inductor.codegen.common import (
@@ -314,18 +313,6 @@ class TritonExtensionBackendAcceleratorTests(TritonHeuristicsTestBase):
         device = self.get_primary_device()
         if not HAS_TRITON:
             raise unittest.SkipTest(f"triton is required for {device}")
-        try:
-            interface = device_interface.get_interface_for_device(
-                torch.device(device).type
-            )
-        except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-        if not interface.is_triton_capable(device):
-            raise unittest.SkipTest(f"requires Triton support for {device}")
-        try:
-            interface.raise_if_triton_unavailable(device)
-        except TritonUnavailableError as exc:
-            raise unittest.SkipTest(str(exc)) from exc
         super().setUp()
 
     @onlyAccelerator
