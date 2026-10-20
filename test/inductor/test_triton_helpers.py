@@ -11,11 +11,7 @@ Covers:
   integer type before the final bitcast, preventing size mismatch errors.
 """
 
-import unittest
-
 import torch
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
     max2,
@@ -165,17 +161,6 @@ class _TritonDeviceTestCase(TestCase):
     def setUp(self):
         if not HAS_TRITON:
             self.skipTest("triton is required")
-        device = self.get_primary_device()
-        try:
-            device_interface = get_interface_for_device(torch.device(device).type)
-        except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-        if not device_interface.is_triton_capable(device):
-            raise unittest.SkipTest(f"requires Triton support for {device}")
-        try:
-            device_interface.raise_if_triton_unavailable(device)
-        except TritonUnavailableError as exc:
-            raise unittest.SkipTest(str(exc)) from exc
         super().setUp()
 
 
