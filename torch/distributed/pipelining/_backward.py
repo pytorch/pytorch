@@ -2,8 +2,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from collections.abc import Iterator
-from typing import Any, Optional, Union
+from collections.abc import Iterator, Sequence
+from typing import Any, cast
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -15,13 +15,17 @@ from ._debug import map_debug_info
 logger = logging.getLogger(__name__)
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
+def _get_grad_fn_or_grad_acc(t: torch.Tensor | GradientEdge) -> Node | None:
     """
     Get the grad function or grad accumulator for a tensor.
 
-    Accumulate grad nodes are lazily created, so we need to a
+    Accumulate grad nodes are lazily created, so we need to create a
     dummy view in order to trigger its creation.
+
+    A ``GradientEdge`` directly supplies the backward root.
     """
+    if isinstance(t, GradientEdge):
+        return t.node
     if t.requires_grad and t.grad_fn is None:
         # if no grad function (leaf tensors) we use view
         viewed_t = t.view_as(t)
@@ -114,7 +118,7 @@ def get_param_groups(
             "intermediates": intersected,
         }
         for input_node in intersected:
-            existing = param_groups.get(input_node, None)
+            existing = param_groups.get(input_node)
             if existing is not None:
                 existing["params"] = existing["params"].union(param_group["params"])
                 existing["intermediates"] = existing["intermediates"].union(
@@ -140,15 +144,52 @@ def get_param_groups(
     return unique_param_groups
 
 
+def _autograd_grad_for_inputs(
+    outputs: Sequence[torch.Tensor | GradientEdge],
+    inputs: Sequence[Any],
+    grad_outputs: Sequence[torch.Tensor | None] | None = None,
+    retain_graph: bool = False,
+    allow_unused: bool = False,
+) -> tuple[torch.Tensor | None, ...]:
+    """Compute input gradients, returning ``None`` for non-grad inputs."""
+    # Some inputs may not be used or may not require gradients, so we filter them out
+    # before calling autograd.grad and place None for those positions in the result.
+    grad_indices: list[int] = []
+    inputs_requiring_grad: list[torch.Tensor] = []
+    for i, inp in enumerate(inputs):
+        if isinstance(inp, torch.Tensor) and inp.requires_grad:
+            grad_indices.append(i)
+            inputs_requiring_grad.append(inp)
+
+    if not inputs_requiring_grad:
+        return tuple(None for _ in inputs)
+
+    grads = torch.autograd.grad(
+        # The stub does not model Autograd's GradientEdge support.
+        outputs=cast(Sequence[torch.Tensor], outputs),
+        inputs=inputs_requiring_grad,
+        grad_outputs=grad_outputs,
+        retain_graph=retain_graph,
+        allow_unused=allow_unused,
+    )
+
+    result: list[torch.Tensor | None] = [None] * len(inputs)
+    for idx, g in zip(grad_indices, grads, strict=True):
+        result[idx] = g
+    return tuple(result)
+
+
 def stage_backward_input(
-    stage_outputs_or_loss: list[torch.Tensor],
-    output_grads: Optional[list[torch.Tensor]],
-    input_values: list[torch.Tensor],
+    stage_outputs_or_loss: Sequence[torch.Tensor | GradientEdge | None],
+    output_grads: list[torch.Tensor] | None,
+    input_values: list[Any],
     weights: Iterator[Parameter],
-) -> tuple[tuple[Optional[torch.Tensor], ...], list[dict[str, Any]]]:
+) -> tuple[tuple[torch.Tensor | None, ...], list[dict[str, Any]]]:
     """
     Compute the gradients for only the stage inputs with
     respect to the stage outputs (if non-last stage) or loss (if last stage)
+
+    Entries may be tensors, edges for released outputs, or ``None``.
 
     After computing input gradients, we save the intermediate nodes in `param_groups`
     for later use in stage_backward_weight. We don't need to save any other intermediate nodes
@@ -156,11 +197,39 @@ def stage_backward_input(
     Detaching the stage_outputs_or_loss at the end of this function is important as
     it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
     """
+    valid_outputs: list[torch.Tensor | GradientEdge] = []
+    valid_output_grads: list[torch.Tensor | None] = []
+    for i, stage_output in enumerate(stage_outputs_or_loss):
+        if isinstance(stage_output, GradientEdge):
+            # Released activations receive gradients from the next stage.
+            if output_grads is None:
+                raise AssertionError(
+                    "A GradientEdge root requires output gradients from the next stage"
+                )
+            valid_outputs.append(stage_output)
+            valid_output_grads.append(output_grads[i])
+        elif isinstance(stage_output, torch.Tensor) and (
+            stage_output.requires_grad or stage_output.grad_fn is not None
+        ):
+            valid_outputs.append(stage_output)
+            valid_output_grads.append(
+                torch.ones_like(stage_output)
+                if output_grads is None
+                else output_grads[i]
+            )
+
     stage_output_grad_fns: list[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs_or_loss))
+        filter(None, map(_get_grad_fn_or_grad_acc, valid_outputs))
     )
     stage_input_grad_fns: list[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, input_values))
+        filter(
+            None,
+            (
+                _get_grad_fn_or_grad_acc(inp)
+                for inp in input_values
+                if isinstance(inp, torch.Tensor)
+            ),
+        )
     )
     weight_grad_fns: list[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, weights))
@@ -172,101 +241,128 @@ def stage_backward_input(
     )
 
     handles = []
-    for param_group in param_groups:
-        for i, intermediate in enumerate(param_group["intermediates"]):
+    try:
+        for param_group in param_groups:
+            intermediates = list(param_group["intermediates"])
+            param_group["intermediates"] = intermediates
+            for i, intermediate in enumerate(intermediates):
 
-            def get_hook(param_group, i):
-                def hook(grad_inputs):
-                    if param_group.get("grads", None) is None:
-                        param_group["grads"] = [None] * len(
-                            param_group["intermediates"]
-                        )
-                    param_group["grads"][i] = grad_inputs
+                def get_hook(param_group, i):
+                    def hook(grad_inputs):
+                        if param_group.get("grads", None) is None:
+                            param_group["grads"] = [None] * len(
+                                param_group["intermediates"]
+                            )
+                        param_group["grads"][i] = grad_inputs
 
-                return hook
+                    return hook
 
-            # These are always "split" nodes that we need to recompute, so
-            # save their inputs.
-            handle = intermediate.register_prehook(get_hook(param_group, i))
-            handles.append(handle)
+                handle = intermediate.register_prehook(get_hook(param_group, i))
+                handles.append(handle)
 
-    if output_grads is None:
-        # In case this is the loss and there are no output_grads, then we just use 1s
-        output_grads = [
-            torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
-        ]
-
-    dinputs = torch.autograd.grad(
-        stage_outputs_or_loss,
-        inputs=input_values,
-        grad_outputs=output_grads,
-        retain_graph=True,
-    )
-
-    # update the gradients for inputs
-    for i, inp in enumerate(input_values):
-        if inp.grad is None:
-            inp.grad = dinputs[i]
+        if valid_outputs:
+            dinputs = _autograd_grad_for_inputs(
+                valid_outputs,
+                input_values,
+                valid_output_grads,
+                retain_graph=True,
+                allow_unused=True,
+            )
         else:
-            inp.grad += dinputs[i]
+            dinputs = tuple(None for _ in input_values)
 
-    # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
-    # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
-    for t in stage_outputs_or_loss:
-        t.detach_()
+        for inp, dinput in zip(input_values, dinputs):
+            if isinstance(inp, torch.Tensor) and dinput is not None:
+                if inp.grad is None:
+                    inp.grad = dinput
+                else:
+                    inp.grad += dinput
 
-    # hooks are no longer necessary, clean up for consistency
-    for handle in handles:
-        handle.remove()
+        # Drop output-side graph state we no longer need. A view cannot be
+        # detached in place (e.g. the output of an identity autograd.Function,
+        # such as an activation-checkpoint boundary); its graph is freed when
+        # the last reference to the output goes away, which for outputs the
+        # stage retains is after the weight backward.
+        for stage_output in stage_outputs_or_loss:
+            if isinstance(stage_output, torch.Tensor) and not stage_output._is_view():
+                stage_output.detach_()
 
-    return dinputs, param_groups
+        return dinputs, param_groups
+    except Exception as e:
+        exc_msg = f"""
+        Failed to run stage backward input:
+        Stage output: {map_debug_info(stage_outputs_or_loss)}
+        Output gradient: {map_debug_info(output_grads)}
+        Input: {map_debug_info(input_values)}
+        """
+        raise RuntimeError(exc_msg) from e
+    finally:
+        for handle in handles:
+            handle.remove()
 
 
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: list[dict[str, Any]], retain_graph=False
-) -> tuple[Optional[torch.Tensor], ...]:
+) -> tuple[torch.Tensor | None, ...]:
     # map weights to param_group_weights
     grad_acc_to_weight = {}
-    weight_grads: list[Optional[torch.Tensor]] = []
+    weight_grads: list[torch.Tensor | None] = []
     for index, weight in enumerate(weights):
         grad_acc = _get_grad_fn_or_grad_acc(weight)
         grad_acc_to_weight[grad_acc] = weight, index
         weight_grads.append(weight.grad)
 
     for param_group in param_groups:
-        # TODO: Handle case where intermediate can have multiple outputs
-        intermediate_edges = tuple(
-            GradientEdge(i, 0) for i in param_group["intermediates"]
-        )
-        weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
+        valid_edges = []
+        valid_grad_outputs: list[torch.Tensor] = []
 
-        # Break a reference cycle caused inside stage_backward_input->get_hook->hook
-        # The summarized cycle is:
-        # `hook` -> cell -> param_group -> intermediates -> `hook`
-        # becuase we install the hook function onto each of the intermediate autograd nodes.
-        # We need to keep intermediates alive up until backward_weight, but we can free it now.
-        del param_group["intermediates"]
+        for grads_tuple, intermediate in zip(
+            param_group["grads"], param_group["intermediates"]
+        ):
+            for i, grad in enumerate(grads_tuple):
+                if grad is not None:
+                    valid_edges.append(GradientEdge(intermediate, i))
+                    # pyrefly: ignore [bad-argument-type]
+                    valid_grad_outputs.append(grad)
 
-        assert all(len(g) == 1 for g in param_group["grads"])
-        # [NEW!] Able to pass a GradientEdge to autograd.grad as output
-        # We do not need to retain_graph because... guarantee no overlap?
-        # print("trying to execute: ", intermediate_edges, weights_edges)
-        dweights = torch.autograd.grad(
-            intermediate_edges,
-            weights_edges,
-            grad_outputs=sum(param_group["grads"], tuple()),
-            retain_graph=retain_graph,
-        )
-        # release grad memory early after use
-        del param_group["grads"]
+        # clamp saved grads to avoid double counting through descendant intermediates.
+        handles = []
+        try:
+            if len(param_group["intermediates"]) > 1:
+                for grads_tuple, intermediate in zip(
+                    param_group["grads"],
+                    param_group["intermediates"],
+                    strict=True,
+                ):
+                    handles.append(
+                        intermediate.register_prehook(
+                            lambda grad_outputs, sg=grads_tuple: sg
+                        )
+                    )
 
-        for grad_acc, dw in zip(param_group["params"], dweights):
-            weight, index = grad_acc_to_weight[grad_acc]
-            if weight.grad is None:
-                weight.grad = dw
-            else:
-                weight.grad += dw
-    # return grads in the original order weights were provided in
+            # break the hook -> param_group -> intermediates cycle
+            del param_group["intermediates"]
+
+            if valid_edges:
+                weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
+                dweights = torch.autograd.grad(
+                    valid_edges,
+                    weights_edges,
+                    grad_outputs=valid_grad_outputs,
+                    retain_graph=retain_graph,
+                )
+
+                del param_group["grads"]
+
+                for grad_acc, dw in zip(param_group["params"], dweights):
+                    weight, index = grad_acc_to_weight[grad_acc]
+                    if weight.grad is None:
+                        weight.grad = dw
+                    else:
+                        weight.grad += dw
+        finally:
+            for handle in handles:
+                handle.remove()
     return tuple(weight_grads)
 
 
@@ -274,8 +370,8 @@ def stage_backward(
     stage_output,
     output_grads,
     input_values,
-    outputs_with_grads_idxs: Optional[list[int]] = None,  # deprecated, not used
-) -> tuple[Optional[torch.Tensor], ...]:
+    outputs_with_grads_idxs: list[int] | None = None,  # deprecated, not used
+) -> tuple[torch.Tensor | None, ...]:
     """
     This is a helper function to:
     1. compute the gradients for the stage inputs, and
@@ -285,6 +381,10 @@ def stage_backward(
     value(s), compute and accumulate gradients for all parameter values (leaves
     in the autograd trace) as well as return a list of the gradients for the
     input values
+
+    An output value may be a ``GradientEdge`` instead of a tensor when the stage
+    released the output after its send completed. Autograd starts from the edge's
+    node, so the released activation is not needed.
     """
     if outputs_with_grads_idxs is not None:
         # Deprecated, not used in runtime calls, only exists in compiler
@@ -294,8 +394,8 @@ def stage_backward(
     try:
         # stage_output may be a composite datatype like dict. Extract all individual
         # tensor values here
-        stage_output_tensors: list[torch.Tensor] = []
-        output_grad_tensors: list[Optional[torch.Tensor]] = []
+        stage_output_tensors: list[torch.Tensor | GradientEdge] = []
+        output_grad_tensors: list[torch.Tensor | None] = []
 
         def extract_tensors_with_grads(
             output_val,
@@ -303,21 +403,33 @@ def stage_backward(
             # Don't delete me- see [Note: ref cycle]
             extract_tensors_with_grads,
         ):
-            if isinstance(output_val, torch.Tensor):
+            if isinstance(output_val, GradientEdge):
+                if not isinstance(grad_val, torch.Tensor):
+                    raise AssertionError(
+                        f"A GradientEdge root requires a gradient but got {type(grad_val)}"
+                    )
+                stage_output_tensors.append(output_val)
+                output_grad_tensors.append(grad_val)
+            elif isinstance(output_val, torch.Tensor):
                 if not output_val.requires_grad and output_val.grad_fn is None:
                     return
-                assert isinstance(grad_val, (torch.Tensor, type(None))), (
-                    f"Expected Tensor or None gradient but got {type(grad_val)}"
-                )
+                if not isinstance(grad_val, (torch.Tensor, type(None))):
+                    raise AssertionError(
+                        f"Expected Tensor or None gradient but got {type(grad_val)}"
+                    )
                 stage_output_tensors.append(output_val)
                 output_grad_tensors.append(grad_val)
             elif isinstance(output_val, (tuple, list)):
                 if grad_val is None:
                     return
-                assert isinstance(grad_val, (tuple, list)), (
-                    f"grad_value expected to have type {type(output_val)} but got {type(grad_val)}"
-                )
-                assert len(output_val) == len(grad_val)
+                if not isinstance(grad_val, (tuple, list)):
+                    raise AssertionError(
+                        f"grad_value expected to have type {type(output_val)} but got {type(grad_val)}"
+                    )
+                if not len(output_val) == len(grad_val):
+                    raise AssertionError(
+                        f"Expected len(output_val) == len(grad_val), got {len(output_val)} != {len(grad_val)}"
+                    )
                 for ov, gv in zip(output_val, grad_val):
                     extract_tensors_with_grads(
                         ov,
@@ -327,9 +439,13 @@ def stage_backward(
             elif isinstance(output_val, dict):
                 if grad_val is None:
                     return
-                assert isinstance(grad_val, dict)
-                assert set(output_val.keys()) == set(grad_val.keys())
-                for k in output_val.keys():
+                if not isinstance(grad_val, dict):
+                    raise AssertionError(f"Expected dict, got {type(grad_val)}")
+                if not set(output_val.keys()) == set(grad_val.keys()):
+                    raise AssertionError(
+                        f"Expected keys {set(output_val.keys())}, got {set(grad_val.keys())}"
+                    )
+                for k in output_val:
                     extract_tensors_with_grads(
                         output_val[k], grad_val[k], extract_tensors_with_grads
                     )
@@ -350,15 +466,22 @@ def stage_backward(
         )
 
         torch.autograd.backward(
-            stage_output_tensors,
+            cast(Sequence[torch.Tensor], stage_output_tensors),
             grad_tensors=output_grad_tensors,  # type: ignore[arg-type]
         )
 
         # Extract gradients wrt the input values
-        grad_inputs: list[Optional[torch.Tensor]] = []
+        grad_inputs: list[torch.Tensor | None] = []
         for val in input_values:
             if isinstance(val, torch.Tensor):
                 grad_inputs.append(val.grad)
+                # Since gradients that will pass back to previous stages do not require gradient accumulation,
+                # by decrementing the gradients' reference count at this point, the memory of gradients will be
+                # returned to the allocator as soon as the next micro batch's get_bwd_send_ops comes and current
+                # asynchronous send completes.
+                # This prevents the gradients from persisting in GPU memory for the entire duration of step_microbatches
+                # until clear_runtime_states() is called.
+                val.grad = None
             else:
                 grad_inputs.append(None)
 

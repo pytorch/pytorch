@@ -165,6 +165,9 @@ TEST_F(ParallelTest, ParallelApplyRethrowsException_MultiCUDA) {
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
+      // ParallelApplyRethrowsException is about a user exception propagating
+      // out of forward(), so this should stay a plain std:: exception.
+      // @allow-raw-throw: intentionally a plain std:: exception
       throw std::runtime_error("Badness!");
     }
   };
@@ -264,7 +267,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
     input += i;
     input_dp += i;
 
-    // non-prallel training
+    // non-parallel training
     torch::optim::SGD optim(model->parameters(), torch::optim::SGDOptions(0.1));
     auto output = model->forward(input);
     auto loss = torch::mse_loss(output, torch::zeros_like(output));

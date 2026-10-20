@@ -3,8 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
-import copy
-
 # Owner(s): ["oncall: export"]
 import math
 import operator
@@ -14,6 +12,7 @@ from re import escape
 import torch
 from functorch.experimental.control_flow import cond
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import config
 from torch._export.non_strict_utils import (
     _fakify_script_objects,
     _gather_constant_attrs,
@@ -47,15 +46,17 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
-from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils import _pytree as pytree
 
 
@@ -69,12 +70,12 @@ def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> 
 
 class _AddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target == operator.add
 
 
 class _AtenAddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
+        return node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
 
 
 def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
@@ -179,7 +180,8 @@ def _set_grad_enabled_tests():
 
     def _get_predispatch_module(mod, args, ambient_grad_enabled=True):
         with torch.set_grad_enabled(ambient_grad_enabled):
-            return _export(mod, args, pre_dispatch=True).module()
+            with config.patch(use_new_tracer_experimental=True):
+                return _export(mod, args, pre_dispatch=True).module()
 
     return {
         "ctx_manager": (
@@ -307,7 +309,9 @@ def _with_mixed_autocast_set_grad_tests():
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
-        return _export(mod, args, pre_dispatch=True).module()
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            ep = _export(mod, args, pre_dispatch=True).module()
+            return ep
 
     return {
         "multi_ctx_manager": (
@@ -354,9 +358,7 @@ def _sequential_split_inline_tests():
 
         for i, node in enumerate(insert_locs):
             with gm.graph.inserting_before(node):
-                gm.graph.call_function(
-                    torch._C._set_grad_enabled, (True if i % 2 == 0 else False,), {}
-                )
+                gm.graph.call_function(torch._C._set_grad_enabled, (i % 2 == 0,), {})
         return gm
 
     x = torch.randn(2, 2)
@@ -375,6 +377,8 @@ def _sequential_split_inline_tests():
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.MIXED_AUTOCAST_SET_GRAD_TESTS = _with_mixed_autocast_set_grad_tests()
@@ -411,9 +415,10 @@ class TestPasses(TestCase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(2, 7, 3))
 
         self.assertEqual(
@@ -442,15 +447,17 @@ class TestPasses(TestCase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be >= 3, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] >= 3"),
         ):
+            # expected >= 3, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -475,16 +482,18 @@ class TestPasses(TestCase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[1] to be <= 6, but got 7"),
+            AssertionError,
+            escape("Guard failed: x.size()[1] <= 6"),
         ):
+            # expected <= 6, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] == 5"),
         ):
+            # expected 5, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -509,14 +518,19 @@ class TestPasses(TestCase):
             M(), (x, y), dynamic_shapes={"x": None, "y": {1: dim1_y}}, strict=True
         )
 
-        with self.assertRaisesRegex(RuntimeError, escape("shape[1] to be equal to 2")):
+        with self.assertRaisesRegex(
+            AssertionError,
+            escape("Guard failed: x.size()[1] == 2"),
+        ):
+            # expected 2, but got 7
             ep.module()(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[1].shape[0] to be equal to 5, but got 2"),
+            AssertionError,
+            escape("Guard failed: y.size()[0] == 5"),
         ):
+            # expected 5, but got 2
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -567,7 +581,8 @@ class TestPasses(TestCase):
 
         for aten_schema in aten_schemas:
             val = aten_schema.split(".")
-            assert len(val) <= 2
+            if len(val) > 2:
+                raise AssertionError(f"Expected at most 2 parts, got {len(val)}: {val}")
             name = ""
             overload = ""
             if len(val) == 1:
@@ -628,16 +643,13 @@ class TestPasses(TestCase):
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
             """\
-def forward(self, token, obj_attr, x):
-    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
-    getitem = with_effects[0]
-    getitem_1 = with_effects[1]
-    getitem_2 = with_effects[2];  with_effects = None
+def forward(self, obj_attr, x):
+    takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(foo = obj_attr, x = x);  x = None
+    getitem_1 = takes_foo_tuple_return_default[0]
+    getitem_2 = takes_foo_tuple_return_default[1];  takes_foo_tuple_return_default = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
-    getitem_3 = with_effects_1[0]
-    getitem_4 = with_effects_1[1];  with_effects_1 = None
-    return (getitem_3, getitem_4)""",  # noqa: B950
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(foo = obj_attr, x = add);  obj_attr = add = None
+    return (takes_foo_default,)""",
         )
 
     def test_fakify_script_objects(self):
@@ -803,6 +815,7 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -822,14 +835,16 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
-    sin = torch.ops.aten.sin.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
-    submod_4 = self.submod_2
-    add_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
-    getitem = add_1[0];  add_1 = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1)
-    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    submod_4 = self.submod_1
+    sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_4, add);  submod_4 = add = None
+    getitem = sum_1[0];  sum_1 = None
+    add_1 = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
+    submod_5 = self.submod_3
+    sub = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add_1);  submod_5 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((add_1, getitem_1), self._out_spec)
     """,
         )
 
@@ -841,6 +856,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -860,6 +876,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -880,6 +897,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
@@ -892,7 +910,7 @@ def forward(self, x):
     sub = torch.ops.aten.sub.Tensor(add_1, 1)
     sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS[
@@ -905,6 +923,7 @@ def forward(self, x):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
@@ -917,7 +936,7 @@ def forward(self, x):
     sub = wrap_with_set_grad_enabled_1[0]
     sub_1 = wrap_with_set_grad_enabled_1[1];  wrap_with_set_grad_enabled_1 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
     def test_sequential_split(self):
@@ -940,6 +959,7 @@ def forward(self, x):
             """\
 def forward(self, x1, x2):
     x1, x2, = fx_pytree.tree_flatten_spec(([x1, x2], {}), self._in_spec)
+    submod_0 = self.submod_0(x1, x2);  submod_0 = None
     submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
@@ -995,28 +1015,30 @@ def forward(self, sin, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
-    submod_3 = self.submod_3
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
-    sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
-    getitem_2 = sin[0];  sin = None
-    cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
-    submod_4 = self.submod_1
-    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    submod_3 = self.submod_2
+    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_3, sin);  submod_3 = sin = None
+    add_1 = wrap_with_set_grad_enabled[0]
+    sub = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_2.code.strip("\n"),
+            """\
+def forward(self, sin):
+    cos = torch.ops.aten.cos.default(sin);  sin = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_3, cos);  submod_3 = cos = None
     getitem = add_1[0];  add_1 = None
     sub = torch.ops.aten.sub.Tensor(getitem, 1)
-    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    return (getitem, sub)
     """,
         )
         self.assertExpectedInline(
-            mod.submod_3.code.strip("\n"),
-            """\
-def forward(self, add):
-    sin = torch.ops.aten.sin.default(add);  add = None
-    return (sin,)
-    """,
-        )
-        self.assertExpectedInline(
-            mod.submod_1.code.strip("\n"),
+            mod.submod_2.submod_1.code.strip("\n"),
             """\
 def forward(self, cos):
     add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
@@ -1033,6 +1055,7 @@ def forward(self, cos):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_3 = self.submod_1
     add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
@@ -1065,6 +1088,7 @@ def forward(self, add):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1115,6 +1139,7 @@ def forward(self, add_1):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     wrap_with_autocast = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1129,7 +1154,7 @@ def forward(self, x):
     sub = wrap_with_autocast_2[0]
     sub_1 = wrap_with_autocast_2[1];  wrap_with_autocast_2 = None
     return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
-    """,  # noqa: B950
+    """,
         )
 
         self.assertExpectedInline(
@@ -1172,6 +1197,7 @@ def forward(self, add_1, add_2):
             """\
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_4 = self.submod_1
     sum_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, add);  submod_4 = add = None
@@ -1213,6 +1239,7 @@ def forward(self, add_1):
             )
             after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
+            new_gm._guards_fn = gm._guards_fn
             self.assertEqual(gm(*args), new_gm(*args))
 
     def test_remove_auto_functionalized_pass(self) -> None:
@@ -1302,8 +1329,56 @@ default](args = (%x, %b_state), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass(self):
+
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+class TestMoveToDevicePassDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_move_device_to(self, device):
+        device_type = torch.device(device).type
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = torch.ops.aten.to.device(x, device=device, dtype=torch.float32)
+                return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, device_type)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip("\n"),
+            f"""\
+def forward(self, x):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(x, dtype = torch.float32, device = '{device_type}', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.device(x, '{device_type}', torch.float32);  x = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,
+        )
+
+    def test_move_device_submod(self, device):
+        device_type = torch.device(device).type
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                    x = x.to(device=device)
+                    return x + x
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+        ep = move_to_device_pass(ep, device_type)
+        self.assertExpectedInline(
+            ep.graph_module.submod_1.code.strip("\n"),
+            f"""\
+def forward(self, arg0_1):
+    _assert_tensor_metadata_default = torch.ops.aten._assert_tensor_metadata.default(arg0_1, dtype = torch.float32, device = '{device_type}', layout = torch.strided);  _assert_tensor_metadata_default = None
+    to = torch.ops.aten.to.dtype_layout(arg0_1, dtype = torch.float32, layout = torch.strided, device = '{device_type}');  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(to, to);  to = None
+    return (add,)
+    """,
+        )
+
+    def test_move_to_device_pass(self, device):
         class Model(torch.nn.Module):
             def __init__(self, size=4, h_dim=10):
                 super().__init__()
@@ -1313,121 +1388,228 @@ default](args = (%x, %b_state), kwargs = {})
                 _, states = self.rnn(x)
                 return states
 
-        # move the exported program from cpu to cuda:0
+        # move the exported program from cpu to the accelerator
         mod = Model()
         example_inputs = (torch.rand(1, 10, 4),)
         ep = export(mod, example_inputs, strict=True)
-        location = torch.device("cuda:0")
-        ep = move_to_device_pass(ep, location=location)
+        ep = move_to_device_pass(ep, location=device)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        test_inputs = (torch.rand(1, 10, 4).to(device),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        self.assertEqual(outputs.device, torch.device(device))
+
         # move it back to cpu
-        location = "cpu"
-        ep = move_to_device_pass(ep, location=location)
+        ep = move_to_device_pass(ep, location="cpu")
         gm = ep.module()
         test_inputs = (torch.rand(1, 10, 4).to("cpu"),)
         outputs = gm(*test_inputs)
         self.assertEqual(outputs.device, torch.device("cpu"))
-        # move it to cuda:0 again
-        location = {"cpu": "cuda:0"}
+
+        # move it to the accelerator again
+        location = {"cpu": device}
         ep = move_to_device_pass(ep, location=location)
         gm = ep.module()
-        test_inputs = (torch.rand(1, 10, 4).to("cuda:0"),)
+        test_inputs = (torch.rand(1, 10, 4).to(device),)
         outputs = gm(*test_inputs)
-        self.assertEqual(outputs.device, torch.device("cuda:0"))
+        self.assertEqual(outputs.device, torch.device(device))
 
-    def test_constant_folding_pass(self):
-        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
-        from torch.ao.quantization.pt2e._affine_quantization import (
-            AffineQuantizedMinMaxObserver,
-        )
-        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-        from torch.ao.quantization.quantizer import (
-            QuantizationAnnotation,
-            QuantizationSpec,
-            Quantizer,
-        )
+    def test_move_device_example_inputs(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
 
-        class BackendAQuantizer(Quantizer):
-            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                for node in model.graph.nodes:
-                    if (
-                        node.op == "call_function"
-                        and node.target == torch.ops.aten.linear.default
-                    ):
-                        input_act = node.args[0]
-                        assert isinstance(input_act, torch.fx.Node)
-                        weight = node.args[1]
-                        assert isinstance(weight, torch.fx.Node)
+            def forward(self, x, y, z):
+                return self.linear(x) + y + z
 
-                        act_qspec = QuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=None,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
-                                # TODO: maybe align the arg name here
-                                target_dtype=torch.uint8,
-                                mapping_type=MappingType.SYMMETRIC,
-                                granularity=PerToken(),
-                            ),
-                        )
+        # Create model with example inputs on CPU
+        mod = Model()
+        example_args = (torch.rand(4, 4), torch.rand(4, 4))
+        example_kwargs = {"z": torch.tensor([1.0, 2.0, 3.0, 4.0])}
 
-                        weight_qspec = QuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=None,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
-                                target_dtype=torch.uint8,
-                                mapping_type=MappingType.SYMMETRIC,
-                                granularity=PerGroup(group_size=128),
-                            ),
-                        )
-                        node.meta["quantization_annotation"] = QuantizationAnnotation(
-                            input_qspec_map={
-                                input_act: act_qspec,
-                                weight: weight_qspec,
-                            },
-                            _annotated=True,
-                        )
+        # Export with example inputs
+        ep = export(mod, example_args, example_kwargs)
 
-            def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
+        # Verify initial state - all tensors should be on CPU
+        self.assertEqual(ep.example_inputs[0][0].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[0][1].device, torch.device("cpu"))
+        self.assertEqual(ep.example_inputs[1]["z"].device, torch.device("cpu"))
 
+        # Move to the accelerator
+        moved_ep = move_to_device_pass(ep, location=device)
+
+        # Verify example_inputs moved to the accelerator
+        self.assertEqual(moved_ep.example_inputs[0][0].device, torch.device(device))
+        self.assertEqual(moved_ep.example_inputs[0][1].device, torch.device(device))
+        self.assertEqual(moved_ep.example_inputs[1]["z"].device, torch.device(device))
+
+
+@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+class TestMoveToDevicePassCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_recompiles_graph_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.long().sum()
+
+        ep = torch.export.export(M(), (torch.zeros(4, dtype=torch.float32),))
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIn("cuda:0", ep.graph_module.code)
+        (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device="cuda:0"))
+        self.assertEqual(out.device, torch.device("cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_recompiles_nested_graph_modules(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + torch.ones(4)
+
+                def false_fn(x):
+                    return x - torch.ones(4)
+
+                return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+        ep = torch.export.export(M(), (torch.zeros(4),))
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        submodules = [
+            m
+            for m in ep.graph_module.modules()
+            if isinstance(m, torch.fx.GraphModule) and m is not ep.graph_module
+        ]
+        self.assertEqual(len(submodules), 2)
+        for submodule in submodules:
+            self.assertIn("cuda:0", submodule.code)
+        (out,) = ep.graph_module(torch.ones(4, device="cuda:0"))
+        self.assertEqual(out, torch.full((4,), 2.0, device="cuda:0"))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_does_not_mutate_source_module(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear = torch.nn.Linear(128, 20)
+                self.weight = torch.nn.Parameter(torch.ones(3))
+                self.register_buffer("bias", torch.ones(3))
 
             def forward(self, x):
-                return self.linear(x)
+                return x * self.weight + self.bias
 
-        example_inputs = (torch.randn(5, 128),)
-        model = M()
-        quantizer = BackendAQuantizer()
-        m = torch.export.export(model.eval(), example_inputs, strict=True).module()
-        m = prepare_pt2e(m, quantizer)
-        # Calibration
-        m(*example_inputs)
-        # Get the quantized model
-        m_fold = copy.deepcopy(m)
-        m_fold = convert_pt2e(m_fold, fold_quantize=True)
+        m = M()
+        ep = torch.export.export(m, (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+        buffer = ep.state_dict["bias"]
 
-        # If fold, check the graph only contains frozed params and no linear_weight
-        FileCheck().check("_frozen_param0").check_not("linear_weight").run(m_fold.code)
+        ep = move_to_device_pass(ep, "cuda:0")
 
-        m_not_fold = copy.deepcopy(m)
-        m_not_fold = convert_pt2e(m_not_fold, fold_quantize=False)
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertIsNot(ep.state_dict["bias"], buffer)
+        self.assertIs(m.weight, param)
+        self.assertIs(m.bias, buffer)
+        self.assertEqual(m.weight.device, torch.device("cpu"))
+        self.assertEqual(m.bias.device, torch.device("cpu"))
+        self.assertEqual(ep.state_dict["weight"].device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
 
-        # If not fold, check the graph doesn't contain frozed params and contain linear_weight
-        FileCheck().check_not("_frozen_param0").check("linear_weight").run(
-            m_not_fold.code
+        self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
+        self.assertEqual(
+            ep.module()(torch.ones(3, device="cuda:0")).device,
+            torch.device("cuda:0"),
         )
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_move_to_device_pass_wrapper_subclass_parameter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    TwoTensor(torch.ones(3), torch.ones(3))
+                )
+                self.register_buffer("bias", torch.ones(3))
+
+            def forward(self, x):
+                return x + self.weight + self.bias
+
+        m = M()
+        ep = torch.export.export(m, (torch.zeros(3),))
+        param = ep.state_dict["weight"]
+
+        ep = move_to_device_pass(ep, "cuda:0")
+
+        self.assertIsNot(ep.state_dict["weight"], param)
+        self.assertIs(m.weight, param)
+        self.assertEqual(param.device, torch.device("cpu"))
+        self.assertEqual(param.a.device, torch.device("cpu"))
+        self.assertEqual(param.b.device, torch.device("cpu"))
+        self.assertEqual(m.bias.device, torch.device("cpu"))
+
+        moved_param = ep.state_dict["weight"]
+        self.assertEqual(moved_param.device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.a.device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.b.device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
+
+        inp = torch.ones(3, device="cuda:0")
+        self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
+        self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
+
+    def test_move_to_device_pass_interpreter_only_graph(self):
+        init_torchbind_implementations()
+        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
+            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
+
+            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
+            def identity_with_obj(obj, x):
+                return x
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ones(3, device=x.device) + x
+
+            ep = torch.export.export(M(), (torch.zeros(3),))
+            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+            add = next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.add.Tensor
+            )
+            inp = add.args[0]
+            with ep.graph.inserting_before(add):
+                with_obj = ep.graph.call_function(
+                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
+                    (custom_obj, inp),
+                )
+                with_obj.meta = add.meta.copy()
+            add.replace_input_with(inp, with_obj)
+
+            with self.assertWarnsRegex(
+                UserWarning, "graph module will no longer be directly callable"
+            ):
+                ep = ep._update(ep.graph_module, ep.graph_signature)
+
+            self.assertEqual(
+                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
+                (torch.full((3,), 2.0),),
+            )
+            ep = move_to_device_pass(ep, "meta")
+            (out,) = torch.fx.Interpreter(ep.graph_module).run(
+                torch.ones(3, device="meta")
+            )
+            self.assertEqual(out.device, torch.device("meta"))
+
+
+# except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
+instantiate_device_type_tests(
+    TestMoveToDevicePassDevice,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

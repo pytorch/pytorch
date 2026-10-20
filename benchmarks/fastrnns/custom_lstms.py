@@ -43,8 +43,10 @@ def script_lstm(
     """Returns a ScriptModule that mimics a PyTorch native LSTM."""
 
     # The following are not implemented.
-    assert bias
-    assert not batch_first
+    if not bias:
+        raise AssertionError("bias=False is not implemented")
+    if batch_first:
+        raise AssertionError("batch_first=True is not implemented")
 
     if bidirectional:
         stack_type = StackedLSTM2
@@ -80,9 +82,12 @@ def script_lnlstm(
     """Returns a ScriptModule that mimics a PyTorch native LSTM."""
 
     # The following are not implemented.
-    assert bias
-    assert not batch_first
-    assert not dropout
+    if not bias:
+        raise AssertionError("bias=False is not implemented")
+    if batch_first:
+        raise AssertionError("batch_first=True is not implemented")
+    if dropout:
+        raise AssertionError("dropout=True is not implemented")
 
     if bidirectional:
         stack_type = StackedLSTM2
@@ -160,7 +165,10 @@ class LayerNorm(jit.ScriptModule):
         normalized_shape = torch.Size(normalized_shape)
 
         # XXX: This is true for our LSTM / NLP use case and helps simplify code
-        assert len(normalized_shape) == 1
+        if len(normalized_shape) != 1:
+            raise AssertionError(
+                f"Expected normalized_shape to have length 1, but got {len(normalized_shape)}"
+            )
 
         self.weight = Parameter(torch.ones(normalized_shape))
         self.bias = Parameter(torch.zeros(normalized_shape))
@@ -389,7 +397,8 @@ class StackedLSTMWithDropout(jit.ScriptModule):
 
 def flatten_states(states):
     states = list(zip(*states))
-    assert len(states) == 2
+    if len(states) != 2:
+        raise AssertionError(f"Expected states to have length 2, but got {len(states)}")
     return [torch.stack(state) for state in states]
 
 
@@ -409,14 +418,26 @@ def test_script_rnn_layer(seq_len, batch, input_size, hidden_size):
     lstm = nn.LSTM(input_size, hidden_size, 1)
     lstm_state = LSTMState(state.hx.unsqueeze(0), state.cx.unsqueeze(0))
     for lstm_param, custom_param in zip(lstm.all_weights[0], rnn.parameters()):
-        assert lstm_param.shape == custom_param.shape
+        if lstm_param.shape != custom_param.shape:
+            raise AssertionError(
+                f"Shape mismatch: lstm_param.shape={lstm_param.shape}, custom_param.shape={custom_param.shape}"
+            )
         with torch.no_grad():
             lstm_param.copy_(custom_param)
     lstm_out, lstm_out_state = lstm(inp, lstm_state)
 
-    assert (out - lstm_out).abs().max() < 1e-5
-    assert (out_state[0] - lstm_out_state[0]).abs().max() < 1e-5
-    assert (out_state[1] - lstm_out_state[1]).abs().max() < 1e-5
+    if (out - lstm_out).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Output mismatch: max diff={(out - lstm_out).abs().max()}"
+        )
+    if (out_state[0] - lstm_out_state[0]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Hidden state mismatch: max diff={(out_state[0] - lstm_out_state[0]).abs().max()}"
+        )
+    if (out_state[1] - lstm_out_state[1]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Cell state mismatch: max diff={(out_state[1] - lstm_out_state[1]).abs().max()}"
+        )
 
 
 def test_script_stacked_rnn(seq_len, batch, input_size, hidden_size, num_layers):
@@ -435,14 +456,26 @@ def test_script_stacked_rnn(seq_len, batch, input_size, hidden_size, num_layers)
     for layer in range(num_layers):
         custom_params = list(rnn.parameters())[4 * layer : 4 * (layer + 1)]
         for lstm_param, custom_param in zip(lstm.all_weights[layer], custom_params):
-            assert lstm_param.shape == custom_param.shape
+            if lstm_param.shape != custom_param.shape:
+                raise AssertionError(
+                    f"Shape mismatch at layer {layer}: lstm_param.shape={lstm_param.shape}, custom_param.shape={custom_param.shape}"
+                )
             with torch.no_grad():
                 lstm_param.copy_(custom_param)
     lstm_out, lstm_out_state = lstm(inp, lstm_state)
 
-    assert (out - lstm_out).abs().max() < 1e-5
-    assert (custom_state[0] - lstm_out_state[0]).abs().max() < 1e-5
-    assert (custom_state[1] - lstm_out_state[1]).abs().max() < 1e-5
+    if (out - lstm_out).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Output mismatch: max diff={(out - lstm_out).abs().max()}"
+        )
+    if (custom_state[0] - lstm_out_state[0]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Hidden state mismatch: max diff={(custom_state[0] - lstm_out_state[0]).abs().max()}"
+        )
+    if (custom_state[1] - lstm_out_state[1]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Cell state mismatch: max diff={(custom_state[1] - lstm_out_state[1]).abs().max()}"
+        )
 
 
 def test_script_stacked_bidir_rnn(seq_len, batch, input_size, hidden_size, num_layers):
@@ -466,14 +499,27 @@ def test_script_stacked_bidir_rnn(seq_len, batch, input_size, hidden_size, num_l
             index = 2 * layer + direct
             custom_params = list(rnn.parameters())[4 * index : 4 * index + 4]
             for lstm_param, custom_param in zip(lstm.all_weights[index], custom_params):
-                assert lstm_param.shape == custom_param.shape
+                if lstm_param.shape != custom_param.shape:
+                    raise AssertionError(
+                        f"Shape mismatch at layer {layer}, direction {direct}: "
+                        f"lstm_param.shape={lstm_param.shape}, custom_param.shape={custom_param.shape}"
+                    )
                 with torch.no_grad():
                     lstm_param.copy_(custom_param)
     lstm_out, lstm_out_state = lstm(inp, lstm_state)
 
-    assert (out - lstm_out).abs().max() < 1e-5
-    assert (custom_state[0] - lstm_out_state[0]).abs().max() < 1e-5
-    assert (custom_state[1] - lstm_out_state[1]).abs().max() < 1e-5
+    if (out - lstm_out).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Output mismatch: max diff={(out - lstm_out).abs().max()}"
+        )
+    if (custom_state[0] - lstm_out_state[0]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Hidden state mismatch: max diff={(custom_state[0] - lstm_out_state[0]).abs().max()}"
+        )
+    if (custom_state[1] - lstm_out_state[1]).abs().max() >= 1e-5:
+        raise AssertionError(
+            f"Cell state mismatch: max diff={(custom_state[1] - lstm_out_state[1]).abs().max()}"
+        )
 
 
 def test_script_stacked_lstm_dropout(

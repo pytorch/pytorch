@@ -2,45 +2,43 @@
 
 import unittest
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, xfailIfS390X
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    xfailIfS390X,
+)
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
 
 
-requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
+# prepacked linear requires XNNPACK support.
+requires_prepacked_linear = unittest.skipIf(
+    not hasattr(torch.ops.prepacked, "linear_clamp_prepack"),
+    "requires XNNPACK (prepacked linear ops)",
+)
 
 
-class TestConverter(TestCase):
-    def setUp(self):
-        init_torchbind_implementations()
-
-        self.torch_bind_ops = [
-            torch.ops._TorchScriptTesting.queue_pop,
-            torch.ops._TorchScriptTesting.queue_push,
-            torch.ops._TorchScriptTesting.queue_size,
-        ]
-
-    def tearDown(self):
-        return
-
+class _ConverterTestMixin:
     def _check_equal_ts_ep_converter(
         self,
         M,
         tracing_inputs,
-        option: Optional[list[str]] = None,
+        option: list[str] | None = None,
         check_persistent=False,
         lifted_tensor_constants=None,
-        runtime_inputs: Optional[list[Any]] = None,
+        runtime_inputs: list[Any] | None = None,
     ) -> list[ExportedProgram]:
         # By default, it tests both jit.trace and jit.script.
         if option is None:
@@ -111,6 +109,20 @@ class TestConverter(TestCase):
             else:
                 self.assertEqual(type(x), type(y))
                 self.assertEqual(x, y)
+
+
+class TestConverter(_ConverterTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
+
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -365,25 +377,6 @@ class TestConverter(TestCase):
                 return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
 
         inp = (torch.rand((3, 2)),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-    def test_prim_device(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand(3, 4),)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-    @requires_cuda
-    def test_prim_device_cuda(self):
-        class Module(torch.nn.Module):
-            def forward(self, x):
-                device = x.device
-                return torch.ones(2, 3, device=device)
-
-        inp = (torch.rand((3, 4), device="cuda:0"),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_prim_dtype(self):
@@ -700,7 +693,7 @@ class TestConverter(TestCase):
                 else:
                     return self.w + self.m2(x)
 
-        # Super nested, parameters neeed to lifted
+        # Super nested, parameters need to be lifted
         # multiple times.
         class SuperNestedM(torch.nn.Module):
             def __init__(self) -> None:
@@ -755,7 +748,7 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        # Super nested, parameters neeed to lifted
+        # Super nested, parameters need to be lifted
         # multiple times.
         class SuperNestedM1(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -771,7 +764,7 @@ class TestConverter(TestCase):
                     return self.linear(self.m2(x))
 
         # Super nested, even the input needs to be
-        # lifted recursively due to value propogation optimiztaion.
+        # lifted recursively due to value propagation optimization.
         class SuperNestedM2(torch.nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
@@ -873,7 +866,7 @@ class TestConverter(TestCase):
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.int8]
+                return x.dtype == torch.int8
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):
@@ -911,7 +904,7 @@ class TestConverter(TestCase):
                 return x + x
 
             # Meta function of the custom op.
-            @torch.library.impl_abstract(
+            @torch.library.register_fake(
                 "mylib::foo",
                 lib=lib,
             )
@@ -1366,12 +1359,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):  # noqa: F841
+        def func2(x):
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):  # noqa: F841
+        def func3(x):
             while x.sum() < 10:
                 x += x.sin()
             return x
@@ -1405,7 +1398,7 @@ class TestConverter(TestCase):
     )
     # qnnpack not supported on s390x
     @xfailIfS390X
-    def test_ts2ep_convert_quantized_model(self):
+    def test_ts2ep_convert_quantized_model1(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1448,8 +1441,13 @@ class TestConverter(TestCase):
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
             self._check_tensor_list_equal(orig_out, ep_out)
 
-    # qnnpack not supported on s390x
+    # qnnpack/xnnpack not supported on s390x.
+    # it is required by
+    # torch.ops.prepacked.linear_clamp_prepack
+    # and
+    # torch.ops.prepacked.linear_clamp_run
     @xfailIfS390X
+    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):
@@ -1467,6 +1465,13 @@ class TestConverter(TestCase):
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
 
+    # qnnpack/xnnpack not supported on s390x.
+    # it is required by
+    # torch.ops.prepacked.linear_clamp_prepack
+    # and
+    # torch.ops.prepacked.linear_clamp_run
+    @xfailIfS390X
+    @requires_prepacked_linear
     def test_ts2ep_convert_quantized_model_with_opcontext_and_constant(self):
         class M(torch.nn.Module):
             def __init__(self, linear_op):
@@ -1486,6 +1491,26 @@ class TestConverter(TestCase):
         m = M(linear_op)
         inp = (torch.randn(1, 10),)
         self._check_equal_ts_ep_converter(m, inp, ["script"])
+
+
+class TestConverterDevice(_ConverterTestMixin, TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_prim_device(self, device):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                device = x.device
+                return torch.ones(2, 3, device=device)
+
+        inp = (torch.rand((3, 4), device=device),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+
+instantiate_device_type_tests(
+    TestConverterDevice,
+    globals(),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

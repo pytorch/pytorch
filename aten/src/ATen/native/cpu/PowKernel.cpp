@@ -80,7 +80,26 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
           return std::pow(base, static_cast<cast_scalar_t>(exp));
         },
         [=](Vec base) -> Vec {
-          return base.pow(static_cast<cast_scalar_t>(exp));
+          if constexpr (std::is_same_v<scalar_t, float> &&
+            std::is_same_v<cast_scalar_t, double>) {
+            // Reached only for an exponent that does not survive a round trip
+            // through float (pow_tensor_scalar_kernel routes the rest to
+            // cast_scalar_t == float). Vectorized<float>::pow would round it,
+            // turning an odd integer exponent such as INT_MAX even and flipping
+            // the sign for negative bases, so widen instead.
+            using Vd = Vectorized<double>;
+            constexpr int kN = Vec::size() / Vd::size();
+            static_assert(kN == 2);
+            const Vd exp_vec(static_cast<double>(exp));
+            auto wide = convert<double, kN, float, 1>(VectorizedN<float, 1>(base));
+            VectorizedN<double, kN> result;
+            // Compile-time indices; a runtime index spills the VectorizedN.
+            result[0] = wide[0].pow(exp_vec);
+            result[1] = wide[1].pow(exp_vec);
+            return convert<float, 1, double, kN>(result);
+          } else {
+            return base.pow(static_cast<cast_scalar_t>(exp));
+          }
         }
     );
   }
@@ -96,18 +115,32 @@ static void pow_tensor_scalar_kernel(
       dtype == kBFloat16 || isComplexType(dtype)) {
     // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
     if (exp_scalar.equal(.5)) {
-      return sqrt_kernel(iter);
+      sqrt_kernel(iter);
+      return;
     } else if (exp_scalar.equal(-0.5)) {
-      return rsqrt_kernel(iter);
+      rsqrt_kernel(iter);
+      return;
     } else if (exp_scalar.equal(-1.0)) {
-      return reciprocal_kernel(iter);
+      reciprocal_kernel(iter);
+      return;
     }
   }
 
   if (dtype == ScalarType::Float || dtype == ScalarType::Double) {
+    const auto exp = exp_scalar.to<double>();
+    // A Scalar holds every floating point value as a double, so a float
+    // exponent is only recognisable by round-tripping it. Where it survives,
+    // narrowing is lossless and the kernel can run entirely in float; where it
+    // does not, cast_scalar_t stays double so the vectorized path widens rather
+    // than rounding the exponent, which would change its parity.
+    if (dtype == ScalarType::Float &&
+        static_cast<double>(static_cast<float>(exp)) == exp) {
+      pow_tensor_scalar_optimized_kernel<float, float>(
+          iter, static_cast<float>(exp));
+      return;
+    }
     AT_DISPATCH_FLOATING_TYPES(dtype, "pow", [&]() {
-      pow_tensor_scalar_optimized_kernel<scalar_t, double>(
-          iter, exp_scalar.to<double>());
+      pow_tensor_scalar_optimized_kernel<scalar_t, double>(iter, exp);
     });
   } else if (isComplexType(dtype)) {
     AT_DISPATCH_COMPLEX_TYPES(dtype, "pow", [&]() {
@@ -117,7 +150,7 @@ static void pow_tensor_scalar_kernel(
   } else if (dtype == ScalarType::Half) {
     [&]() {
       using scalar_t =
-          decltype(c10::impl::ScalarTypeToCPPType<ScalarType::Half>::t);
+          c10::impl::ScalarTypeToCPPTypeT<ScalarType::Half>;
       const auto exp = exp_scalar.to<scalar_t>();
       using Vec = Vectorized<scalar_t>;
       cpu_kernel_vec(iter,

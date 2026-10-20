@@ -36,7 +36,7 @@ Sometimes, there is no existing OpInfo that fits our need to test an operator. Y
 
 Follow the steps below to create new OpInfo tests:
 
-1. Use the implementation for `ops.aten.slice_scatter` as a reference (https://github.com/microsoft/onnxscript/blob/e67335101e4a06b8cc98cb4129935a9af5062c77/tests/function_libs/torch_lib/extra_opinfo.py#L2412-L2418) to declare an OpInfo in [`extra_opinfo.py`](./extra_opinfo.py)
+1. Use the implementation for `ops.aten.slice_scatter` as a reference (https://github.com/microsoft/onnxscript/blob/e67335101e4a06b8cc98cb4129935a9af5062c77/tests/function_libs/torch_lib/extra_opinfo.py#L2412-L2418) to declare an `OpInfo` in `extra_opinfo.py`.
 
    ```py
     opinfo_core.OpInfo(

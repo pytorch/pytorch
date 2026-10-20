@@ -9,7 +9,7 @@
 namespace torch::lazy {
 
 // Tensor implementation class used to be fed to the at::Tensor.
-// Its scope is just to handle an LazyTensor.
+// Its scope is just to handle a LazyTensor.
 class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
  public:
   explicit LTCTensorImpl(const LazyTensorPtr& tensor);
@@ -41,10 +41,11 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   int64_t numel_custom() const override;
   int64_t storage_offset_custom() const override;
   int64_t dim_custom() const override;
-  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   bool is_strides_like_custom(at::MemoryFormat memory_format) const override;
-  bool is_non_overlapping_and_dense_custom() const override;
+  c10::SymBool sym_is_non_overlapping_and_dense_custom() const override;
 
+  c10::SymBool sym_is_contiguous_custom(
+      at::MemoryFormat memory_format) const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
   c10::SymInt sym_numel_custom() const override;

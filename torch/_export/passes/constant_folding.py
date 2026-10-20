@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import collections
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -64,7 +65,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def is_impure(self, node: torch.fx.Node) -> bool:
         if (
-            node.target == torch.ops.prims.convert_element_type.default
+            node.target is torch.ops.prims.convert_element_type.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
             and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
             and node.args[1] == torch.bfloat16
@@ -126,7 +127,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # contains a ScriptObject, equality checking results in a type error if
         # the types are different.
         if any(
-            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            type(self.unknown_value) is type(input_) and self.unknown_value == input_
             for input_ in flattened_inputs
         ):
             return self.unknown_value
@@ -134,7 +135,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 
@@ -205,7 +206,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
 def constant_fold(
     gm: torch.fx.GraphModule,
-    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    constraint_fn: Callable[[torch.fx.Node], bool] | None = None,
 ):
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
@@ -218,7 +219,7 @@ def constant_fold(
 
         erased_params = []
         # Get all attr users by looking up the graph instead from node.users, because in this case
-        # _tensor_constant0 and _tensor_constant0_1 are actually refereing to the same tensor.
+        # _tensor_constant0 and _tensor_constant0_1 are actually referring to the same tensor.
 
         #     opcode         name                 target            args                         kwargs
         # -------------  -------------------  ----------------  ---------------------------  --------

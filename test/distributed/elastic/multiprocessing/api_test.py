@@ -15,8 +15,9 @@ import signal
 import sys
 import tempfile
 import time
+import unittest
+from collections.abc import Callable
 from itertools import product
-from typing import Callable, Union
 from unittest import mock
 
 import torch
@@ -34,20 +35,24 @@ from torch.distributed.elastic.multiprocessing.api import (
 )
 from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     skip_if_pytest,
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
 
 
 class RunProcResultsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -91,6 +96,8 @@ class RunProcResultsTest(TestCase):
 
 
 class StdTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_from_value(self):
         self.assertEqual(Std.NONE, Std.from_str("0"))
         self.assertEqual(Std.OUT, Std.from_str("1"))
@@ -126,8 +133,9 @@ def echo1(msg: str, exitcode: int = 0) -> str:
         print(f"exit {exitcode} from {rank}", file=sys.stderr)
         sys.exit(exitcode)
     else:
-        print(f"{msg} stdout from {rank}")
-        print(f"{msg} stderr from {rank}", file=sys.stderr)
+        for m in msg.split(","):
+            print(f"{m} stdout from {rank}")
+            print(f"{m} stderr from {rank}", file=sys.stderr)
         return f"{msg}_{rank}"
 
 
@@ -145,7 +153,7 @@ def echo_large(size: int) -> dict[int, str]:
     returns a large output ({0: test0", 1: "test1", ..., (size-1):f"test{size-1}"})
     """
     out = {}
-    for idx in range(0, size):
+    for idx in range(size):
         out[idx] = f"test{idx}"
     return out
 
@@ -193,7 +201,7 @@ def wait_fn(wait_time: int = 300) -> None:
 
 def start_processes_zombie_test(
     idx: int,
-    entrypoint: Union[str, Callable],
+    entrypoint: str | Callable,
     mp_queue: mp.Queue,
     log_dir: str,
     nproc: int = 2,
@@ -227,6 +235,8 @@ def start_processes_zombie_test(
 
 
 class _StartProcessesTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -246,6 +256,13 @@ class _StartProcessesTest(TestCase):
             for line in expected:
                 self.assertIn(line, actual)
 
+    def assert_not_in_file(self, lines: list[str], filename: str) -> None:
+        lines = [f"{line.rstrip()}\n" for line in lines]
+        with open(filename) as fp:
+            actual = fp.readlines()
+            for line in lines:
+                self.assertNotIn(line, actual)
+
     def assert_pids_noexist(self, pids: dict[int, int]):
         for local_rank, pid in pids.items():
             with self.assertRaises(
@@ -254,11 +271,11 @@ class _StartProcessesTest(TestCase):
                 os.kill(pid, 0)
 
     def _test_zombie_workflow(
-        self, entrypoint: Union[str, Callable], signal_to_send: signal.Signals
+        self, entrypoint: str | Callable, signal_to_send: signal.Signals
     ) -> None:
         mp_queue = mp.get_context("spawn").Queue()
         child_nproc = 2
-        mp.spawn(
+        process_context = mp.spawn(
             start_processes_zombie_test,
             nprocs=1,
             args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
@@ -272,8 +289,8 @@ class _StartProcessesTest(TestCase):
         child_pids = pids[1:]
 
         os.kill(parent_pid, signal.SIGTERM)
-        # Wait to give time for signal handlers to finish work
-        time.sleep(5)
+        # Wait for the parent to finish closing its children.
+        process_context.processes[0].join(timeout=5)
         for child_pid in child_pids:
             # Killing parent should kill all children, we expect that each call to
             # os.kill would raise OSError
@@ -359,8 +376,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
             self.assertIsNone(pc.wait(timeout=0.1, period=0.01))
             self.assertIsNotNone(pc.wait(period=0.1))
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
 
         def test_pcontext_wait_on_a_child_thread(self):
             asyncio.run(asyncio.to_thread(self.test_pcontext_wait))
@@ -378,8 +395,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             pids = pc.pids()
             pc.close()
             self.assert_pids_noexist(pids)
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
 
         def test_function_with_tensor(self):
             for start_method in self._start_methods:
@@ -413,9 +430,6 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @skip_but_pass_in_sandcastle_if(
-            TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan"
-        )
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -439,6 +453,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     for i in range(pc.nprocs):
                         self.assertEqual(size, len(results.return_values[i]))
 
+        @unittest.skipIf(
+            TEST_WITH_ROCM,
+            "Skipped on ROCm due to hang in MultiprocessContext.wait after Kineto bump (PR #177101, 1fd9c49); investigating",
+        )
         def test_function_raise(self):
             """
             run 2x copies of echo2, raise an exception on the first
@@ -481,8 +499,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         int(error_file_data["message"]["extraInfo"]["timestamp"]),
                         int(failure.timestamp),
                     )
-                    self.assertTrue(pc._stderr_tail.stopped())
-                    self.assertTrue(pc._stdout_tail.stopped())
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
 
         def test_wait_for_all_child_procs_to_exit(self):
             """
@@ -500,11 +518,13 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
             )
 
-            with mock.patch.object(
-                mpc, "_is_done", return_value=True
-            ), mock.patch.object(mpc, "_pc"), mock.patch.object(
-                mpc._pc, "join", side_effect=[True, False, False, True]
-            ) as mock_join:
+            with (
+                mock.patch.object(mpc, "_is_done", return_value=True),
+                mock.patch.object(mpc, "_pc"),
+                mock.patch.object(
+                    mpc._pc, "join", side_effect=[True, False, False, True]
+                ) as mock_join,
+            ):
                 mpc._poll()
                 self.assertEqual(4, mock_join.call_count)
 
@@ -556,7 +576,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             FAIL = 138
             pc = start_processes(
                 name="echo",
-                entrypoint=bin("echo1.py"),
+                entrypoint=bin("echo4.py"),
                 args={0: ("--exitcode", FAIL, "foo"), 1: ("--exitcode", 0, "bar")},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 logs_specs=DefaultLogsSpecs(
@@ -566,9 +586,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             )
 
             results = pc.wait(period=0.1)
-
             self.assertTrue(results.is_failed())
-            self.assertEqual(1, len(results.failures))
+            self.assertEqual(2, len(results.failures))
 
             failure = results.failures[0]
             self.assertEqual(138, failure.exitcode)
@@ -578,8 +597,15 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assert_in_file([], results.stdouts[0])
             self.assertFalse(results.stderrs[1])
             self.assertFalse(results.stdouts[1])
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
+
+            failure = results.failures[1]
+            self.assertEqual(-15, failure.exitcode)
+            self.assertEqual("SIGTERM", failure.signal_name())
+            self.assertEqual("<NONE>", failure.error_file_data["message"])
+            # Assert that the failure message contains expected substrings
+            self.assertIn("Signal 15 (SIGTERM) received by PID", failure.message)
 
         def test_binary_raises(self):
             pc = start_processes(
@@ -663,6 +689,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
         ########################################
         # start_processes as binary tests
         ########################################
+
         def test_binary(self):
             for redirs in redirects_oss_test():
                 with self.subTest(redirs=redirs):
@@ -700,6 +727,10 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                                 [f"hello stderr from {i}"], results.stderrs[i]
                             )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/163230",
+        )
         def test_binary_redirect_and_tee(self):
             pc = start_processes(
                 name="trainer",
@@ -722,8 +753,46 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
             self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
             self.assertFalse(pc.stdouts[1])
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
+
+        def test_binary_duplicate_log_filters(self):
+            envs = {0: {"RANK": "0"}, 1: {"RANK": "1"}}
+            logs_specs = DefaultLogsSpecs(
+                log_dir=self.log_dir(),
+                redirects={0: Std.ERR, 1: Std.NONE},
+                tee={0: Std.OUT, 1: Std.ERR},
+            )
+            logs_dest = logs_specs.reify(envs)
+            pc = start_processes(
+                name="trainer",
+                entrypoint=bin("echo1.py"),
+                args={0: ("helloA,helloB",), 1: ("worldA,worldB",)},
+                envs=envs,
+                logs_specs=logs_specs,
+                log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
+                duplicate_stdout_filters=["helloA"],
+                duplicate_stderr_filters=["worldA", "B"],
+                start_method="spawn",
+            )
+
+            result = pc.wait()
+
+            self.assertFalse(result.is_failed())
+            self.assert_in_file(
+                ["[rank0]:helloA stdout from 0"], logs_dest.filtered_stdout
+            )
+            self.assert_not_in_file(
+                ["[rank0]:helloB stdout from 0"], logs_dest.filtered_stdout
+            )
+            self.assert_in_file(
+                ["[rank1]:worldA stderr from 1"], logs_dest.filtered_stderr
+            )
+            self.assert_in_file(
+                ["[rank1]:worldB stderr from 1"], logs_dest.filtered_stderr
+            )
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
@@ -754,6 +823,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     stderr_redirects={0: stderr_redir},
                     ret_vals={0: queue},
                     queue_finished_reading_event=worker_finished_event_mock,
+                    numa_options=None,
                 )
                 self.assertEqual("hello_0", queue.get())
                 if stdout_redir:
@@ -785,8 +855,47 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
                     self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
                     self.assertFalse(pc.stdouts[1])
-                    self.assertTrue(pc._stderr_tail.stopped())
-                    self.assertTrue(pc._stdout_tail.stopped())
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
+
+        def test_function_duplicate_log_filters(self):
+            for start_method in self._start_methods:
+                with self.subTest(start_method=start_method):
+                    envs = {0: {"RANK": "0"}, 1: {"RANK": "1"}}
+                    logs_specs = DefaultLogsSpecs(
+                        log_dir=self.log_dir(),
+                        redirects={0: Std.ERR, 1: Std.NONE},
+                        tee={0: Std.OUT, 1: Std.ERR},
+                    )
+                    logs_dest = logs_specs.reify(envs)
+                    pc = start_processes(
+                        name="trainer",
+                        entrypoint=echo1,
+                        args={0: ("helloA,helloB",), 1: ("worldA,worldB",)},
+                        envs=envs,
+                        logs_specs=logs_specs,
+                        duplicate_stdout_filters=["helloA"],
+                        duplicate_stderr_filters=["worldA", "B"],
+                        start_method="spawn",
+                    )
+
+                    result = pc.wait()
+
+                    self.assertFalse(result.is_failed())
+                    self.assert_in_file(
+                        ["[trainer0]:helloA stdout from 0"], logs_dest.filtered_stdout
+                    )
+                    self.assert_not_in_file(
+                        ["[trainer0]:helloB stdout from 0"], logs_dest.filtered_stdout
+                    )
+                    self.assert_in_file(
+                        ["[trainer1]:worldA stderr from 1"], logs_dest.filtered_stderr
+                    )
+                    self.assert_in_file(
+                        ["[trainer1]:worldB stderr from 1"], logs_dest.filtered_stderr
+                    )
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
 
         def test_function(self):
             for start_method, redirs in product(self._start_methods, redirects_all()):
@@ -871,8 +980,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     self.assertFalse(results.stdouts[0])
                     self.assertFalse(results.stderrs[1])
                     self.assertFalse(results.stdouts[1])
-                    self.assertTrue(pc._stderr_tail.stopped())
-                    self.assertTrue(pc._stdout_tail.stopped())
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
 
         def test_no_zombie_process_function(self):
             signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]
@@ -928,6 +1037,96 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                 del os.environ[mp.ENV_VAR_PARALLEL_START]
             else:
                 os.environ[mp.ENV_VAR_PARALLEL_START] = self.orig_paralell_env_val
+
+
+class BoundedCloseTest(TestCase):
+    """Verify that _close in MultiprocessContext / SubprocessContext returns
+    within a bounded time when child processes refuse to die (simulating a
+    Linux D-state worker, which SIGKILL cannot reap).
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _make_multiprocess_context(self) -> MultiprocessContext:
+        log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        return MultiprocessContext(
+            name="test",
+            entrypoint=time.sleep,
+            args={0: (0,)},
+            envs={0: {}},
+            start_method="spawn",
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+
+    def test_multiprocess_context_close_bounded_when_unkillable(self):
+        ctx = self._make_multiprocess_context()
+        unkillable = mock.Mock()
+        unkillable.pid = 99999
+        unkillable.is_alive.return_value = True
+        # Simulate a process that never exits: every bounded join honors
+        # the timeout the caller passes. We assert below that _close still
+        # returns promptly because it now passes a bounded timeout.
+        join_calls: list[float | None] = []
+
+        def _join(t: float | None = None) -> None:
+            join_calls.append(t)
+
+        unkillable.join.side_effect = _join
+        ctx._pc = mock.Mock()
+        ctx._pc.processes = [unkillable]
+        with mock.patch("os.kill"):
+            ctx._close(death_sig=signal.SIGTERM, timeout=1)
+        # _close must pass a bounded timeout to every join() call;
+        # without the fix the final join would be unbounded (timeout=None).
+        self.assertTrue(join_calls, "expected proc.join() to be called")
+        for t in join_calls:
+            self.assertIsNotNone(t, "proc.join() must be called with a bounded timeout")
+            if t is None:  # for type narrowing
+                raise AssertionError("expected t to be not None")
+            self.assertGreater(t, 0)
+
+    def test_subprocess_context_close_bounded_when_unkillable(self):
+        log_dir = tempfile.mkdtemp(prefix="BoundedCloseTest")
+        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
+        from torch.distributed.elastic.multiprocessing.api import SubprocessContext
+
+        ctx = SubprocessContext(
+            name="test",
+            entrypoint="/bin/true",
+            args={0: ()},
+            envs={0: {}},
+            logs_specs=DefaultLogsSpecs(log_dir=log_dir),
+        )
+        handler = mock.Mock()
+        handler.proc = mock.Mock()
+        handler.proc.pid = 99999
+        handler.proc.poll.return_value = None  # always "alive"
+
+        import subprocess as _subprocess
+
+        # Every bounded wait() raises TimeoutExpired immediately; the
+        # unbounded form (timeout=None) is what we want to make sure
+        # _close never invokes.
+        wait_calls: list[float | None] = []
+
+        def _wait(t: float | None = None) -> None:
+            wait_calls.append(t)
+            if t is None:
+                return None
+            raise _subprocess.TimeoutExpired(cmd="test", timeout=t)
+
+        handler.proc.wait.side_effect = _wait
+        ctx.subprocess_handlers = {0: handler}
+        ctx._close(death_sig=signal.SIGTERM, timeout=1)
+        # _close must pass a bounded timeout to every wait() call;
+        # without the fix the final wait would be unbounded (timeout=None).
+        self.assertTrue(wait_calls, "expected proc.wait() to be called")
+        for t in wait_calls:
+            self.assertIsNotNone(t, "proc.wait() must be called with a bounded timeout")
+            if t is None:  # for type narrowing
+                raise AssertionError("expected t to be not None")
+            self.assertGreater(t, 0)
 
 
 if __name__ == "__main__":

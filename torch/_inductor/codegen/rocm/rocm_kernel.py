@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING
 
+import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.utils import do_bench_using_profiling
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
@@ -11,6 +13,7 @@ from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
+from .rocm_utils import DTYPE_TO_ROCM_TYPE
 
 
 if TYPE_CHECKING:
@@ -68,7 +71,7 @@ class ROCmTemplateKernel(ROCmKernel):
         outputs: list[IRNode],
         size_args: list[str],
         names_str: str = "",
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -93,7 +96,11 @@ class ROCmTemplateKernel(ROCmKernel):
             input_reorder = [4, 0, 1, 2, 3]
 
         if input_reorder is not None:
-            assert len(inputs) == len(input_reorder)
+            if len(inputs) != len(input_reorder):
+                raise AssertionError(
+                    f"expected len(inputs) == len(input_reorder), "
+                    f"got {len(inputs)} and {len(input_reorder)}"
+                )
         else:
             input_reorder = list(range(len(inputs)))
 
@@ -109,7 +116,7 @@ class ROCmTemplateKernel(ROCmKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
 
         runtime_arg_defs = [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
 
@@ -136,12 +143,15 @@ class ROCmTemplateKernel(ROCmKernel):
         if V.graph.cpp_wrapper:
             # Make sure we initialize these kernels since they're exported as
             # C-style symbol names.
-            assert isinstance(wrapper, CppWrapperCpu)
+            if not isinstance(wrapper, CppWrapperCpu):
+                raise AssertionError(
+                    f"expected wrapper to be CppWrapperCpu, got {type(wrapper)}"
+                )
             wrapper.initialized_kernels[name] = self
             # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
             # So, we replace with the real kernel name passed as an arg to this function.
             self.signature = self.signature.replace("KERNEL_NAME", name)
-            _, call_args, arg_types = self.args.cpp_argdefs()
+            _, call_args, arg_types = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
 
@@ -225,13 +235,11 @@ class ROCmTemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
+            [ROCmTemplateBuffer, Sequence[IRNode] | None], str
         ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
-        ],  # type: ignore[type-arg]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -241,12 +249,17 @@ class ROCmTemplateCaller(ChoiceCaller):
         self.info_kwargs = info_kwargs
 
     def precompile(self) -> None:
-        assert self.bmreq is not None
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to be set")
         self.bmreq.precompile()
 
     def benchmark(self, *args, out) -> float:
-        assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        if self.bmreq is None:
+            raise AssertionError("expected self.bmreq to be set")
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
@@ -262,7 +275,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",
@@ -272,12 +285,14 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        return TensorBox.create(
-            ROCmTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                workspace_size=self.bmreq.workspace_size,
-                template=self.template,
-            )
+        buffer = ROCmTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            workspace_size=self.bmreq.workspace_size,
+            template=self.template,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)

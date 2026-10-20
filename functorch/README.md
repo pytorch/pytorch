@@ -7,7 +7,7 @@
 | [**Future Plans**](#future-plans)
 
 **This library is currently under heavy development - if you have suggestions
-on the API or use-cases you'd like to be covered, please open an github issue
+on the API or use-cases you'd like to be covered, please open a GitHub issue
 or reach out. We'd love to hear about how you're using the library.**
 
 `functorch` is [JAX-like](https://github.com/google/jax) composable function
@@ -161,7 +161,7 @@ result = vmap(model)(examples)
 
 ### grad
 
-`grad(func)(*inputs)` assumes `func` returns a single-element Tensor. It compute
+`grad(func)(*inputs)` assumes `func` returns a single-element Tensor. It computes
 the gradients of the output of func w.r.t. to `inputs[0]`.
 
 ```py
@@ -192,7 +192,7 @@ def compute_loss(weights, example, target):
 weights = torch.randn(feature_size, requires_grad=True)
 examples = torch.randn(batch_size, feature_size)
 targets = torch.randn(batch_size)
-inputs = (weights,examples, targets)
+inputs = (weights, examples, targets)
 grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
 ```
 

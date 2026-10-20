@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -34,9 +33,8 @@ class ScopedVarName {
   ScopedVarName(VarNameMap* mapping, const VarPtr& var, const std::string& name)
       : mapping_(mapping), var_(var) {
     auto iter = mapping->find(var);
-    if (iter != mapping->end()) {
-      throw std::runtime_error("Duplicate var entry: " + var->name_hint());
-    }
+    TORCH_CHECK(
+        iter == mapping->end(), "Duplicate var entry: " + var->name_hint());
     mapping->insert(std::make_pair(var, name));
   }
 
@@ -89,10 +87,10 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
 }
 
 void CudaAnalysis::visit(const FreePtr& v) {
-  if (thread_local_bufs_.count(v->buffer_var()) == 0 &&
-      cross_block_bufs_.count(v->buffer_var()) == 0) {
-    throw std::runtime_error("Global free not supported yet");
-  }
+  TORCH_CHECK(
+      thread_local_bufs_.contains(v->buffer_var()) ||
+          cross_block_bufs_.contains(v->buffer_var()),
+      "Global free not supported yet");
 }
 
 void CudaAnalysis::visit(const AllocatePtr& v) {
@@ -112,11 +110,11 @@ void CudaAnalysis::visit(const AllocatePtr& v) {
     }
     p = p->get_parent();
   }
-  throw std::runtime_error("Global alloc not supported yet");
+  TORCH_CHECK(false, "Global alloc not supported yet");
 }
 
 void CudaAnalysis::visit(const PlacementAllocatePtr& v) {
-  throw std::runtime_error("Memory reuse not supported yet");
+  TORCH_CHECK(false, "Memory reuse not supported yet");
 }
 
 void CudaAnalysis::visit(const ForPtr& v) {
@@ -126,20 +124,17 @@ void CudaAnalysis::visit(const ForPtr& v) {
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
-    if (gpu_block_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_block_index");
-    }
+    TORCH_CHECK(gpu_block_index < 3, "support only 3D gpu_block_index");
     ExprPtr prev = nullptr;
     if (gpu_block_extents_.size() <= static_cast<size_t>(gpu_block_index)) {
       gpu_block_extents_.resize(gpu_block_index + 1);
     } else {
       prev = gpu_block_extents_[gpu_block_index];
     }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
-    }
+    TORCH_CHECK(
+        is_zero(v->start()),
+        "start must be zero for gpu_block_index: " +
+            std::to_string(v->start()));
 
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (prev == nullptr) {
@@ -154,20 +149,17 @@ void CudaAnalysis::visit(const ForPtr& v) {
     }
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
-    if (gpu_thread_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_thread_index");
-    }
+    TORCH_CHECK(gpu_thread_index < 3, "support only 3D gpu_thread_index");
     ExprPtr prev = nullptr;
     if (gpu_thread_extents_.size() <= static_cast<size_t>(gpu_thread_index)) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
     } else {
       prev = gpu_thread_extents_[gpu_thread_index];
     }
-    if (!is_zero(v->start())) {
-      throw std::runtime_error(
-          "start must be zero for gpu_thread_index: " +
-          std::to_string(v->start()));
-    }
+    TORCH_CHECK(
+        is_zero(v->start()),
+        "start must be zero for gpu_thread_index: " +
+            std::to_string(v->start()));
 
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (prev == nullptr) {
@@ -192,29 +184,29 @@ void CudaPrinter::print_flat_alloc(const AllocatePtr& alloc) {
     if (dim_i) {
       flat_size *= *dim_i;
     } else {
-      throw std::runtime_error("Only integer dimensions are supported for now");
+      TORCH_CHECK(false, "Only integer dimensions are supported for now");
     }
   }
-  os() << dtypeToCppString(alloc->dtype()) << " " << (*alloc->buffer_var())
-       << "[" << flat_size << "];" << '\n';
+  os() << dtypeToCppString(alloc->dtype()) << ' ' << (*alloc->buffer_var())
+       << '[' << flat_size << "];" << '\n';
 }
 
 void CudaPrinter::visit(const AllocatePtr& v) {
   // TODO: handle dynamic shapes here.
-  if (cuda_analysis_->cross_block_bufs().count(v->buffer_var()) != 0) {
+  if (cuda_analysis_->cross_block_bufs().contains(v->buffer_var())) {
     emitIndent();
     os() << "__shared__ ";
     print_flat_alloc(v);
     return;
   }
 
-  if (cuda_analysis_->thread_local_bufs().count(v->buffer_var()) != 0) {
+  if (cuda_analysis_->thread_local_bufs().contains(v->buffer_var())) {
     emitIndent();
     print_flat_alloc(v);
     return;
   }
 
-  throw std::runtime_error("Encountered Alloc not local to block or thread");
+  TORCH_CHECK(false, "Encountered Alloc not local to block or thread");
 }
 
 void CudaPrinter::visit(const FreePtr& v) {
@@ -234,9 +226,9 @@ void CudaPrinter::visit(const CastPtr& v) {
       : v->src_value()->dtype().scalar_type() == ScalarType::BFloat16
       ? "__bfloat162float"
       : ("(" + dtypeToCppString(v->dtype()) + ")");
-  os() << castFn << "(";
+  os() << castFn << '(';
   v->src_value()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const IntrinsicsPtr& v) {
@@ -265,18 +257,18 @@ void CudaPrinter::visit(const IntrinsicsPtr& v) {
     func_name = "isnan";
   }
 
-  os() << func_name << "(";
+  os() << func_name << '(';
   for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
     os() << *v->param(i);
   }
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const ExternalCallPtr& v) {
-  throw unimplemented_lowering(v);
+  TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
 }
 
 void CudaPrinter::visit(const LoadPtr& v) {
@@ -293,15 +285,15 @@ void CudaPrinter::visit(const LoadPtr& v) {
       v->dtype().scalar_type() == ScalarType::Half ||
       v->dtype().scalar_type() == ScalarType::BFloat16) {
     // There's no __ldg overload for bool or half.
-    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    os() << *v->base_handle() << '[' << *v->flat_index() << ']';
     return;
   }
   if (cuda_analysis_->is_buf_store_target(v->buf())) {
     // Cuda __ldg can only be applied on read-only buffers.
-    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    os() << *v->base_handle() << '[' << *v->flat_index() << ']';
     return;
   }
-  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ')';
 }
 
 // TODO: maybe this should be a more shared location?
@@ -352,7 +344,7 @@ class AtomicAddFuser : public IRMutator {
     BufPtr buf = v->buf();
 
     // Thread locals never need to be atomic.
-    if (thread_local_bufs_.count(buf->base_handle()) != 0) {
+    if (thread_local_bufs_.contains(buf->base_handle())) {
       return v;
     }
 
@@ -412,20 +404,20 @@ void CudaPrinter::visit(const StorePtr& v) {
   if (v->indices().empty()) {
     os() << *v->base_handle() << " = ";
   } else {
-    os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+    os() << *v->base_handle() << '[' << *v->flat_index() << "] = ";
   }
-  os() << *v->value() << ";";
+  os() << *v->value() << ';';
   os() << '\n';
 }
 
 void CudaPrinter::visit(const AtomicAddPtr& v) {
   emitIndent();
-  if (cuda_analysis_->thread_local_bufs().count(v->base_handle()) > 0) {
+  if (cuda_analysis_->thread_local_bufs().contains(v->base_handle())) {
     // atomicAdd only works on global and shared memory
-    os() << *v->base_handle() << "[" << *v->flat_index()
-         << "] += " << *v->value() << ";";
+    os() << *v->base_handle() << '[' << *v->flat_index()
+         << "] += " << *v->value() << ';';
   } else {
-    os() << "atomicAdd(&" << *v->base_handle() << "[" << *v->flat_index() << "]"
+    os() << "atomicAdd(&" << *v->base_handle() << '[' << *v->flat_index() << ']'
          << ", " << *v->value() << ");";
   }
   os() << '\n';
@@ -438,9 +430,9 @@ void CudaPrinter::visit(const MaxPtr& v) {
     os() << "maximum(";
   }
   v->lhs()->accept(this);
-  os() << ",";
+  os() << ',';
   v->rhs()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const MinPtr& v) {
@@ -450,9 +442,9 @@ void CudaPrinter::visit(const MinPtr& v) {
     os() << "minimum(";
   }
   v->lhs()->accept(this);
-  os() << ",";
+  os() << ',';
   v->rhs()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const IfThenElsePtr& v) {
@@ -462,11 +454,11 @@ void CudaPrinter::visit(const IfThenElsePtr& v) {
   v->true_value()->accept(this);
   os() << " : ";
   v->false_value()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void CudaPrinter::visit(const BlockPtr& v) {
-  os() << "{" << '\n';
+  os() << '{' << '\n';
   indent_++;
 
   for (const StmtPtr& s : v->stmts()) {
@@ -475,15 +467,15 @@ void CudaPrinter::visit(const BlockPtr& v) {
 
   indent_--;
   emitIndent();
-  os() << "}";
+  os() << '}';
 }
 
 void CudaPrinter::visit(const LetPtr& v) {
   emitIndent();
   os() << dtypeToCppString(v->var()->dtype());
-  os() << " " << *v->var() << " = ";
+  os() << ' ' << *v->var() << " = ";
   v->value()->accept(this);
-  os() << ";" << '\n';
+  os() << ';' << '\n';
 }
 
 class PrioritizeLoad : public IRMutator {
@@ -496,7 +488,7 @@ class PrioritizeLoad : public IRMutator {
     if (nested_let_) {
       return IRMutator::mutate(v);
     }
-    if (thread_local_bufs_.count(v->base_handle()) > 0) {
+    if (thread_local_bufs_.contains(v->base_handle())) {
       return IRMutator::mutate(v);
     }
     if (v->indices().empty()) {
@@ -635,7 +627,7 @@ class PrioritizeLoad : public IRMutator {
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
   int64_t counter = 0;
   std::string name = func_prefix;
-  while (taken_func_names.count(name)) {
+  while (taken_func_names.contains(name)) {
     name = func_prefix + "_" + std::to_string(counter++);
   }
 
@@ -671,9 +663,7 @@ StmtPtr GPUMetaVarRewriter::mutate(const ForPtr& v) {
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
-    if (gpu_block_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_block_index");
-    }
+    TORCH_CHECK(gpu_block_index < 3, "support only 3D gpu_block_index");
     old_reach = current_block_reach_[gpu_block_index];
 
     // Extents must be positive, assume >= 1.
@@ -688,9 +678,7 @@ StmtPtr GPUMetaVarRewriter::mutate(const ForPtr& v) {
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
-    if (gpu_thread_index >= 3) {
-      throw std::runtime_error("support only 3D gpu_thread_index");
-    }
+    TORCH_CHECK(gpu_thread_index < 3, "support only 3D gpu_thread_index");
     old_reach = current_thread_reach_[gpu_thread_index];
 
     // Extents must be positive, assume >= 1.
@@ -843,14 +831,14 @@ static std::ostream& operator<<(
   return out;
 }
 
-static const char* device_resource_string = R"(
+static constexpr const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
 
 )";
 
-static const char* shared_resource_string = R"(
+static constexpr const char* shared_resource_string = R"(
 template<typename T>
 __device__ T maximum(T a, T b) {
   return isnan(a) ? a : (a > b ? a : b);
@@ -911,7 +899,7 @@ void CudaCodeGen::Initialize() {
   // https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   os() << "__attribute__((amdgpu_flat_work_group_size(1, 1024)))" << std::endl;
 #endif
-  os() << "void " << func_name << "(";
+  os() << "void " << func_name << '(';
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
@@ -932,7 +920,7 @@ void CudaCodeGen::Initialize() {
     rand_seed = alloc<Var>("rand_seed", kInt);
     rand_offset = alloc<Var>("rand_offset", kInt);
     std::string uint64_str = "unsigned long long";
-    os() << ", " << uint64_str << " " << *rand_seed << ", " << uint64_str << " "
+    os() << ", " << uint64_str << ' ' << *rand_seed << ", " << uint64_str << ' '
          << *rand_offset;
   }
   os() << ") {";
@@ -942,7 +930,7 @@ void CudaCodeGen::Initialize() {
     VarPtr idx = alloc<Var>("idx", kInt);
     os() << "int " << *idx << " = blockIdx.x*blockDim.x + threadIdx.x;" << '\n';
     VarPtr rand_func = printer_->rand_func();
-    os() << "Philox " << *rand_func << "(" << *rand_seed << ", " << *idx << ", "
+    os() << "Philox " << *rand_func << '(' << *rand_seed << ", " << *idx << ", "
          << *rand_offset << ");" << '\n';
     os() << '\n';
   }
@@ -969,15 +957,14 @@ void CudaCodeGen::Initialize() {
 
   stmt_v->accept(printer_.get());
   os() << '\n';
-  os() << "}";
+  os() << '}';
 
   // Check that all block extents had been set.
   const std::vector<ExprPtr>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
-    if (!gpu_block_extents[i]) {
-      throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
-    }
+    TORCH_CHECK(
+        gpu_block_extents[i], "Missing gpu_block_index: " + std::to_string(i));
   }
 
   // Precompute block and thread extents for call_with_numel().  If
@@ -1021,7 +1008,7 @@ void CudaCodeGen::Initialize() {
     vars_in_extents.insert(v.begin(), v.end());
   }
   for (const size_t i : c10::irange(buffer_args.size())) {
-    if (vars_in_extents.count(buffer_args[i].var())) {
+    if (vars_in_extents.contains(buffer_args[i].var())) {
       extents_buffer_args.push_back(buffer_args[i]);
       arg_pos_in_extents_.push_back(true);
     } else {
@@ -1082,8 +1069,7 @@ void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
   // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
   std::vector<void*> ptr_to_args(buffer_args.size());
   for (size_t i = 0; i < buffer_args.size(); i++) {
-    ptr_to_args[i] =
-        buffer_args[i].isVar() ? args[i] : const_cast<void**>(&args[i]);
+    ptr_to_args[i] = buffer_args[i].isVar() ? args[i] : (&args[i]);
   }
 
   const auto device = this->device().index();
@@ -1120,10 +1106,9 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
       metavar_rewriter_->gpu_block_extents();
   const std::vector<ExprPtr>& gpu_thread_extents =
       metavar_rewriter_->gpu_thread_extents();
-  if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
-    throw malformed_input(
-        "cuda_codegen: block or thread extent greater than 3D");
-  }
+  TORCH_CHECK(
+      gpu_block_extents.size() <= 3 && gpu_thread_extents.size() <= 3,
+      "MALFORMED INPUT: cuda_codegen: block or thread extent greater than 3D");
 
   std::vector<int64_t> gpu_block_extents_v(3, 1);
   std::vector<int64_t> gpu_thread_extents_v(3, 1);
@@ -1233,9 +1218,9 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
 }
 
 void CudaCodeGen::call(const std::vector<CallArg>& args) {
-  if (args.size() != buffer_args().size()) {
-    throw malformed_input("cuda_codegen: wrong number of args in call");
-  }
+  TORCH_CHECK(
+      args.size() == buffer_args().size(),
+      "MALFORMED INPUT: cuda_codegen: wrong number of args in call");
 
   auto const& buffer_args = this->buffer_args();
   std::vector<void*> raw_args(buffer_args.size());
@@ -1282,11 +1267,11 @@ void CudaCodeGen::CompileToNVRTC(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
 #if defined(USE_ROCM)
-  std::vector<const char*> args = {"--std=c++17"};
+  std::vector<const char*> args = {"--std=c++20"};
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if !defined(USE_ROCM)
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessarily recognize PTX emitted by new
@@ -1300,7 +1285,7 @@ void CudaCodeGen::CompileToNVRTC(
 #endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
-      "--std=c++17", compute.c_str(), "-default-device"};
+      "--std=c++20", compute.c_str(), "-default-device"};
 #endif
 
   auto result = nvrtc().nvrtcCompileProgram(
@@ -1314,14 +1299,14 @@ void CudaCodeGen::CompileToNVRTC(
     cu << log.data() << '\n';
     cu << "nvrtc compilation failed: " << '\n';
     cu << code << '\n';
-    throw std::runtime_error(cu.str());
+    TORCH_CHECK(false, std::move(cu).str());
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size = 0;
   std::vector<char> ptx;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if !defined(USE_ROCM)
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   auto getSize = compile_to_sass

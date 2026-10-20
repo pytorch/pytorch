@@ -3,7 +3,7 @@ import os
 import sys
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 from typing_extensions import Self
 
 import torch
@@ -50,7 +50,7 @@ def _display_stats_tabular(headers: list[str], table_data: list[list[Any]]) -> N
 
 
 # Based on:
-# https://github.com/fairinternal/xformers/blob/0ded5697a2ea15711ce45131002d04e72053cc6d/xformers/checkpoint.py#L62
+# https://github.com/facebookresearch/xformers/blob/main/xformers/checkpoint.py#L71
 @dataclass
 class _SACMetadata:
     """
@@ -125,7 +125,7 @@ class MSPS(NamedTuple):
 
     Attributes:
         func_names (set[str]): Set of operator/operator group names.
-        op_idx (int): Operator index (group head index incase of operator groups).
+        op_idx (int): Operator index (group head index in case of operator groups).
         memory (int): Memory usage in bytes.
         runtime (float): Runtime in milliseconds.
         msps (float): Memory per second calculated as memory/runtime.
@@ -194,7 +194,7 @@ class SACEstimator(TorchDispatchMode):
     estimation modes, `operator-level-benchmark` and (`operator-level-cost-model` (roofline model).
 
     Attributes:
-        sac_mod_stats (Dict[str, SACStats]): Dictionary from module FQN (fuly qualified name) to ``SACStats``.
+        sac_mod_stats (Dict[str, SACStats]): Dictionary from module FQN (fully qualified name) to ``SACStats``.
         sac_mod_tradeoff_stats (Dict[str, SACTradeOffStats]): Dictionary from module FQN to ``SACTradeOffStats``.
         sac_mod_greedy_order_meta (Dict[str, SACGreedyOrderMeta]): Dictionary from module FQN to ``SACGreedyOrderMeta``.
 
@@ -215,7 +215,13 @@ class SACEstimator(TorchDispatchMode):
                 sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, gpu_type: str | None = None) -> None:
+        """
+        Args:
+            gpu_type (str | None): Optional datasheet device name (e.g.
+                ``"NVIDIA H100"``) to pin the roofline estimates to instead of
+                querying the current device. See ``RuntimeEstimator``.
+        """
         self.sac_mod_stats: dict[str, SACStats] = {}
         self.sac_mod_tradeoff_stats: dict[str, SACTradeOffStats] = {}
         self.sac_mod_greedy_order_meta: dict[str, SACGreedyOrderMeta] = {}
@@ -227,6 +233,7 @@ class SACEstimator(TorchDispatchMode):
             self._pack_hook, lambda x: x
         )
         self._saved_tensor_ids: set[int] = set()
+        self._gpu_type = gpu_type
         self._estimate_runtime = RuntimeEstimator._roofline_estimate
 
     def _pack_hook(self, x: torch.Tensor) -> torch.Tensor:
@@ -243,7 +250,8 @@ class SACEstimator(TorchDispatchMode):
         # Tracks module FQN, force store random flag, and ``SACModMetadata``
         # Initializes metadata for non-leaf modules, marks leaf modules
         mod_fqn = self._mod_tracker.get_known_fqn(mod)
-        assert mod_fqn is not None
+        if mod_fqn is None:
+            raise AssertionError
         num_children = sum(1 for _ in mod.children())
         if num_children > 0:
             force_store_random = self._get_force_store_random(inputs)
@@ -261,7 +269,8 @@ class SACEstimator(TorchDispatchMode):
         #    - ``SACStats`` using the module's metadata and force store random flag
         #    - ``SACGreedyOrderMeta`` using the computed SAC statistics
         mod_fqn = self._mod_tracker.get_known_fqn(mod)
-        assert mod_fqn is not None
+        if mod_fqn is None:
+            raise AssertionError
         if mod_fqn in self._leaf_modules:
             return
         else:
@@ -358,15 +367,13 @@ class SACEstimator(TorchDispatchMode):
         output_ids = tuple(hash(st) for st in out_storages)
         # 4. If the function is not inplace, return
         if not is_inplace(func):
-            return curr_idx, output_ids, {mod_fqn: () for mod_fqn in active_mod_fqns}
+            return curr_idx, output_ids, dict.fromkeys(active_mod_fqns, ())
 
         op_idx = curr_idx
         # 5. Initialize the parent op ids of the inplace op for each of the active modules
-        mod_op_parent_idxs: dict[str, int] = {
-            mod_fqn: -1 for mod_fqn in active_mod_fqns
-        }
+        mod_op_parent_idxs: dict[str, int] = dict.fromkeys(active_mod_fqns, -1)
         for i, d in enumerate(self._sac_metadata):
-            # 6. Find the first occurence of a tensor corresponding to each module that
+            # 6. Find the first occurrence of a tensor corresponding to each module that
             # shares the same storage as the current tensor
             past_output_ids = d.output_ids
             if set(output_ids).issubset(set(past_output_ids)):
@@ -376,7 +383,8 @@ class SACEstimator(TorchDispatchMode):
                             if i >= acm_stats.start_idx:
                                 mod_op_parent_idxs[mod_fqn] = i
                         else:
-                            assert mod_fqn == "Global"
+                            if mod_fqn != "Global":
+                                raise AssertionError
                             mod_op_parent_idxs[mod_fqn] = i
         # 7. If no parent tensor is found, then it's probably an inplace op on the arguments
         # so one can just store the current-op idx as parent idx
@@ -407,9 +415,10 @@ class SACEstimator(TorchDispatchMode):
                     out_storages_cpu.update(get_untyped_storages(o))
 
         # Check if there's more than 1 CUDA device
-        assert len(cuda_devices) <= 1, (
-            f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
-        )
+        if len(cuda_devices) > 1:
+            raise AssertionError(
+                f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+            )
 
         # 2. Get the memory consumed by output
         nbytes_cuda = sum(
@@ -431,6 +440,7 @@ class SACEstimator(TorchDispatchMode):
         # sdpa has non-deterministic seed, but might be deterministic
         # if no dropout is applied
         if func.overloadpacket.__name__ == "_scaled_dot_product_flash_attention":
+            # pyrefly: ignore [missing-attribute]
             is_rand_op = kwargs.get("dropout_p", 0) != 0
         # 5. Create metadata information per active non-leaf module
         for mod_fqn in self._mod_tracker.parents:
@@ -449,9 +459,8 @@ class SACEstimator(TorchDispatchMode):
             if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
                 acm_stats.sac_metadata.append(acm)
             else:
-                assert mod_fqn == "Global", (
-                    f"Module {mod_fqn} not found in AC Mod Stats"
-                )
+                if mod_fqn != "Global":
+                    raise AssertionError(f"Module {mod_fqn} not found in AC Mod Stats")
                 self._sac_metadata.append(acm)
 
         return out
@@ -470,8 +479,8 @@ class SACEstimator(TorchDispatchMode):
             op_group.add(op_idx)
 
         # Like inplace ops, all of the random ops in the function/module should all be either recomputed or saved
-        # as a group. This is because, they affect the ranom seed generator. If force_store_random is set True,
-        # all of the random ops will be stored by default. For easy of manageability, we store the top-most random op
+        # as a group. This is because, they affect the random seed generator. If force_store_random is set True,
+        # all of the random ops will be stored by default. For ease of manageability, we store the top-most random op
         # as the leader of the random_ops_group.
         random_ops_group: dict[int, set[int]] = {}
         random_group_head_idx = min(sac_stats.rand_ops, default=-1)
@@ -485,7 +494,7 @@ class SACEstimator(TorchDispatchMode):
         #   a) If the head of this group is an inplace op, then we have to store the entire group.
         #   b) If any op in the group is random and force_store_random is set, then entire group will be stored.
         #   c) If none of ops in the group are random and the head of the group is not an in-place op, then
-        #       this group can be considered for recomputation in its entireity
+        #       this group can be considered for recomputation in its entirety
         stored_ops: set[int] = set()
         recomputed_ops: set[int] = set()
         # Case 1:
@@ -535,7 +544,7 @@ class SACEstimator(TorchDispatchMode):
             func_names = {sac_stats.func_names[op_idx] for op_idx in op_indices}
             msps = (mem / runtime) if runtime > 0 else sys.float_info.max
             msps_meta.append(MSPS(func_names, cand_idx, mem, runtime, msps))
-        # We choose canidates to be recomputed based on increasing msps
+        # We choose candidates to be recomputed based on increasing msps
         msps_meta.sort(key=lambda x: x.msps, reverse=True)
         return SACGreedyOrderMeta(
             recomputed_ops, stored_ops, inplace_op_groups, random_ops_group, msps_meta
@@ -562,7 +571,7 @@ class SACEstimator(TorchDispatchMode):
             greedy_order_meta.random_ops_group,
             greedy_order_meta.msps_meta,
         )
-        # 1. Intitialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
+        # 1. Initialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
         recomp_indices: set[int] = set()
         for r_idx in recomputed_ops:
             recomp_indices.add(r_idx)
@@ -576,11 +585,11 @@ class SACEstimator(TorchDispatchMode):
         # 2. Initialize the max recomputation time and total recomputation memory
         sac_runtime = sum(sac_stats.runtimes)
         sac_memory = sum(sac_stats.memory)
-        # 3. Tradeoff curve stores the KV pair of the dicarded memory to total memory and,
+        # 3. Tradeoff curve stores the KV pair of the discarded memory to total memory and,
         # recomputation time to total runtime incurred.
         delta = 1e-2
         tradeoff_curve = OrderedDict()
-        # 4. Initialize the trade-off curve with the stats of of already chosen recomputed_ops
+        # 4. Initialize the trade-off curve with the stats of already chosen recomputed_ops
         tradeoff_curve[(discarded_mem / sac_memory) + delta] = (
             recomp_runtime / sac_runtime
         )
@@ -654,9 +663,11 @@ class SACEstimator(TorchDispatchMode):
             save_prediction_graph(tradeoff_pwlf, x, y, filename)
         # 9. Obtain the slopes, intercepts and breakpoints of the fitted piecewise linear functions
         slopes = tradeoff_pwlf.calc_slopes().tolist()
-        assert isinstance(tradeoff_pwlf.intercepts, np.ndarray) and isinstance(
-            tradeoff_pwlf.fit_breaks, np.ndarray
-        )
+        if not (
+            isinstance(tradeoff_pwlf.intercepts, np.ndarray)
+            and isinstance(tradeoff_pwlf.fit_breaks, np.ndarray)
+        ):
+            raise AssertionError
         intercepts = tradeoff_pwlf.intercepts.tolist()
         fit_breaks = tradeoff_pwlf.fit_breaks.tolist()
         return SACTradeOffStats(
@@ -712,7 +723,7 @@ class SACEstimator(TorchDispatchMode):
                 str(i in sac_stats.view_like_ops),
                 str(i in sac_stats.rand_ops),
                 str(i in sac_stats.saved_autograd_ops),
-                str(op_parent.get(i, None)),
+                str(op_parent.get(i)),
             ]
             table_data.append(row)
         # Define headers
@@ -778,9 +789,9 @@ class SACEstimator(TorchDispatchMode):
         def append_row(
             op_indices: set[int],
             func_names: set[str],
-            msps: Optional[float] = None,
-            stored: Optional[bool] = False,
-            recomputed: Optional[bool] = False,
+            msps: float | None = None,
+            stored: bool | None = False,
+            recomputed: bool | None = False,
         ) -> None:
             row = [
                 str(op_indices),
@@ -944,10 +955,10 @@ class SACEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
-        assert isinstance(fake_mode, FakeTensorMode), (
-            "SAC Estimator should be called in FakeTensorMode"
-        )
+        if not isinstance(fake_mode, FakeTensorMode):
+            raise AssertionError("SAC Estimator should be called in FakeTensorMode")
         RuntimeEstimator.fake_mode = fake_mode
+        RuntimeEstimator.gpu_type = self._gpu_type
         self._mod_tracker.register_user_hooks(
             pre_fw_hook=self._pre_fw_hook,
             post_fw_hook=self._post_fw_hook,

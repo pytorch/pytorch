@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 
 import torch
-from torch.library import _scoped_library, Library
+from torch.library import _scoped_library
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -28,20 +28,24 @@ def autograd_fallback_mode(mode):
 class TestAutogradFallback(TestCase):
     test_ns = "_test_autograd_fallback"
 
+    def setUp(self):
+        super().setUp()
+        self.libraries = []
+
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
-        if hasattr(self, "lib"):
-            del self.lib.m
-            del self.lib
+        for lib in self.libraries:
+            lib._destroy()
+        del self.libraries
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
-        self.lib = lib
-        return lib
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        self.libraries.append(result)
+        return result
 
     @parametrize("mode", ("nothing", "warn"))
     def test_no_grad(self, mode):
@@ -92,7 +96,8 @@ class TestAutogradFallback(TestCase):
             return self.assertWarnsRegex(
                 UserWarning, "an autograd kernel was not registered"
             )
-        assert mode == "nothing"
+        if mode != "nothing":
+            raise AssertionError(f"mode should be 'nothing', got {mode!r}")
         if mode_nothing_raises:
             return self.assertRaisesRegex(RuntimeError, "does not require grad")
         return contextlib.nullcontext()

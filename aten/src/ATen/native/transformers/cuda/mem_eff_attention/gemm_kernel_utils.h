@@ -9,6 +9,8 @@
 
 #include <cutlass/arch/mma.h>
 
+#include <cstdint>
+
 ////////////////////////////////////////////////////////////////////////////////
 // Some helper functions
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,9 +72,10 @@
   TORCH_CHECK(                                                         \
       TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
 
-#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
-  TORCH_CHECK(                         \
-      uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
+#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT)                              \
+  TORCH_CHECK(                                                         \
+      uint64_t(PTR) % ((ALIGNMENT) * sizeof(*(PTR))) == 0,             \
+      #PTR " is not correctly aligned")
 
 #define ASSIGN_CHECK_OVERFLOW(A, B)                                    \
   {                                                                    \
@@ -91,6 +94,21 @@ constexpr CUTLASS_HOST_DEVICE integer ceil_div(integer n, integer m) {
 template <typename integer>
 constexpr CUTLASS_HOST_DEVICE integer align_up(integer n, integer m) {
   return ((n + m - 1) / m) * m;
+}
+
+// NOTE [Mem-efficient attention dropout RNG offset]
+// The forward kernel, the backward kernel and the rand_uniform_kernel helper
+// that reconstructs the mask for tests must partition the Philox sequence
+// identically, otherwise the passes disagree about which elements were
+// dropped. Taking every extent as int64_t also keeps num_queries * num_keys
+// from wrapping at 2^32.
+constexpr CUTLASS_HOST_DEVICE int64_t dropout_rng_offset(
+    int64_t batch_id,
+    int64_t head_id,
+    int64_t num_heads,
+    int64_t num_queries,
+    int64_t num_keys) {
+  return (batch_id * num_heads + head_id) * num_queries * num_keys;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

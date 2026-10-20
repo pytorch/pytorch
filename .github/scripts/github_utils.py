@@ -1,13 +1,19 @@
 """GitHub Utilities"""
 
+from __future__ import annotations
+
 import json
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, TYPE_CHECKING
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 GITHUB_API_URL = "https://api.github.com"
@@ -18,8 +24,9 @@ class GitHubComment:
     body_text: str
     created_at: str
     author_login: str
+    author_url: str | None
     author_association: str
-    editor_login: Optional[str]
+    editor_login: str | None
     database_id: int
     url: str
 
@@ -27,9 +34,9 @@ class GitHubComment:
 def gh_fetch_url_and_headers(
     url: str,
     *,
-    headers: Optional[dict[str, str]] = None,
-    data: Union[Optional[dict[str, Any]], str] = None,
-    method: Optional[str] = None,
+    headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None | str = None,
+    method: str | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> tuple[Any, Any]:
     if headers is None:
@@ -70,9 +77,9 @@ def gh_fetch_url_and_headers(
 def gh_fetch_url(
     url: str,
     *,
-    headers: Optional[dict[str, str]] = None,
-    data: Union[Optional[dict[str, Any]], str] = None,
-    method: Optional[str] = None,
+    headers: dict[str, str] | None = None,
+    data: dict[str, Any] | None | str = None,
+    method: str | None = None,
     reader: Callable[[Any], Any] = json.load,
 ) -> Any:
     return gh_fetch_url_and_headers(
@@ -82,9 +89,9 @@ def gh_fetch_url(
 
 def gh_fetch_json(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
-    method: Optional[str] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    method: str | None = None,
 ) -> list[dict[str, Any]]:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -99,8 +106,8 @@ def gh_fetch_json(
 
 def _gh_fetch_json_any(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> Any:
     headers = {"Accept": "application/vnd.github.v3+json"}
     if params is not None and len(params) > 0:
@@ -112,30 +119,90 @@ def _gh_fetch_json_any(
 
 def gh_fetch_json_list(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], _gh_fetch_json_any(url, params, data))
 
 
 def gh_fetch_json_dict(
     url: str,
-    params: Optional[dict[str, Any]] = None,
-    data: Optional[dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return cast(dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"... ({len(text) - limit} more chars truncated)"
+
+
+class GHGraphQLError(RuntimeError):
+    """GraphQL response contained errors; the raw response is kept so callers
+    can tolerate partial failures (GraphQL still returns data for the paths
+    that resolved)."""
+
+    def __init__(
+        self,
+        message: str,
+        response: dict[str, Any],
+        query: str | None = None,
+        variables: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.response = response
+        self.query = query
+        self.variables = variables
+        if query is not None and hasattr(self, "add_note"):  # Python 3.11+
+            # Shown in tracebacks but not in str(e), which stays short for comments
+            self.add_note(self.details_markdown())
+
+    def details_markdown(self) -> str:
+        """The query, variables and raw errors, for a collapsed comment section.
+
+        Each part is capped so the whole comment stays well under GitHub's
+        65536-char limit.
+        """
+        parts: list[str] = []
+        if self.variables is not None:
+            variables = _truncate(json.dumps(self.variables, indent=2), 2000)
+            parts.append(f"GraphQL variables:\n```json\n{variables}\n```")
+        errors = _truncate(json.dumps(self.response.get("errors"), indent=2), 20000)
+        parts.append(f"GraphQL errors:\n```json\n{errors}\n```")
+        if self.query is not None:
+            query = _truncate(self.query.strip(), 10000)
+            parts.append(f"GraphQL query:\n```graphql\n{query}\n```")
+        return "\n\n".join(parts)
+
+
 def gh_graphql(query: str, **kwargs: Any) -> dict[str, Any]:
     rc = gh_fetch_url(
-        "https://api.github.com/graphql",
+        "https://api.github.com/graphql",  # @lint-ignore
         data={"query": query, "variables": kwargs},
         reader=json.load,
     )
     if "errors" in rc:
-        raise RuntimeError(
-            f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}"
+        errors = rc["errors"]
+        if not isinstance(errors, list):
+            errors = [] if errors is None else [errors]
+        messages = "; ".join(
+            str(err.get("message", err)) if isinstance(err, dict) else str(err)
+            for err in errors
         )
+        # One line, so a newline in the message can't open a markdown block
+        messages = _truncate(" ".join(messages.split()), 2000)
+        err = GHGraphQLError(
+            f"GitHub GraphQL query failed: {messages or '(no error message)'}",
+            rc,
+            query=query,
+            variables=kwargs,
+        )
+        # Keep the full context in the job log; mergebot runs on Python 3.10,
+        # where tracebacks don't show add_note()
+        print(f"{err}\n{err.details_markdown()}")
+        raise err
     return cast(dict[str, Any], rc)
 
 
@@ -174,6 +241,34 @@ def gh_close_pr(org: str, repo: str, pr_num: int, dry_run: bool = False) -> None
         print(f"Dry run closing PR {pr_num}")
     else:
         gh_fetch_url(url, method="PATCH", data={"state": "closed"})
+
+
+def gh_merge_pr(
+    org: str,
+    repo: str,
+    pr_num: int,
+    *,
+    merge_method: str = "squash",
+    commit_title: str | None = None,
+    commit_message: str | None = None,
+    sha: str | None = None,
+    dry_run: bool = False,
+) -> str:
+    """Merge a PR via GitHub's merge API and return the resulting merge commit sha."""
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}/merge"
+    data: dict[str, Any] = {"merge_method": merge_method}
+    if commit_title is not None:
+        data["commit_title"] = commit_title
+    if commit_message is not None:
+        data["commit_message"] = commit_message
+    if sha is not None:
+        data["sha"] = sha
+    if dry_run:
+        print(f"[dry_run] Merging PR {pr_num} via GitHub API with {data}")
+        return ""
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    resp = gh_fetch_url(url, headers=headers, data=data, method="PUT", reader=json.load)
+    return cast(str, resp["sha"])
 
 
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:

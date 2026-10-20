@@ -25,7 +25,7 @@ TORCH_API void set_autocast_cache_enabled(bool enabled);
 // deprecated CUDA-specific autocast APIs
 C10_DEPRECATED_MESSAGE(
     "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
-TORCH_API inline bool is_enabled() {
+inline bool is_enabled() {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -34,7 +34,7 @@ TORCH_API inline bool is_enabled() {
 }
 C10_DEPRECATED_MESSAGE(
     "at::autocast::set_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")
-TORCH_API inline void set_enabled(bool enabled) {
+inline void set_enabled(bool enabled) {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -43,7 +43,7 @@ TORCH_API inline void set_enabled(bool enabled) {
 }
 C10_DEPRECATED_MESSAGE(
     "at::autocast::get_autocast_gpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")
-TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
+inline at::ScalarType get_autocast_gpu_dtype() {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -52,7 +52,7 @@ TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
 }
 C10_DEPRECATED_MESSAGE(
     "at::autocast::set_autocast_gpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCUDA, dtype) instead.")
-TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
+inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -65,7 +65,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::is_" #name                                                                      \
       "_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type         \
       ") instead.")                                                                                  \
-  TORCH_API inline bool is_##name##_enabled() {                                                      \
+  inline bool is_##name##_enabled() {                                                                \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -78,7 +78,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::set_" #name                                                                     \
       "_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type \
       ", enabled) instead.")                                                                         \
-  TORCH_API inline void set_##name##_enabled(bool enabled) {                                         \
+  inline void set_##name##_enabled(bool enabled) {                                                   \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -91,7 +91,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::get_autocast_" #name                                                            \
       "_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(" #device_type            \
       ") instead.")                                                                                  \
-  TORCH_API inline at::ScalarType get_autocast_##name##_dtype() {                                    \
+  inline at::ScalarType get_autocast_##name##_dtype() {                                              \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -104,7 +104,7 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
       "at::autocast::set_autocast_" #name                                                            \
       "_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type       \
       ", dtype) instead.")                                                                           \
-  TORCH_API inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                          \
+  inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                                    \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -195,7 +195,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
     case c10::DeviceType::MPS:
       return DispatchKey::AutocastMPS;
     default:
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "unknown device type for autocast in get_autocast_dispatch_key_from_device_type");
   }
 }
@@ -216,7 +217,8 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
   if (is_autocast_available(device_type)) {
     return get_autocast_dtype(device_type);
   } else {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "unknown device type for autocast in get_lower_precision_fp_from_device_type");
   }
 }
@@ -375,7 +377,7 @@ Keep it simple for now by assuming only one such flag is
 present in the argument list.  If I ever need a function
 with more than flag I'll figure out something else.
 The policy is:
-If the user has explicity specified a dtype, respect it.
+If the user has explicitly specified a dtype, respect it.
 Otherwise, set it to the autocast type.
 ********************************************************/
 
@@ -870,6 +872,7 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(softplus)                         \
   _(layer_norm)                       \
   _(native_layer_norm)                \
+  _(rms_norm)                         \
   _(group_norm)                       \
   _(frobenius_norm, dim)              \
   _(nuclear_norm)                     \
@@ -912,21 +915,15 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 #define AT_FORALL_FP32_SET_OPT_DTYPE(_) \
   _(prod)                               \
   _(prod, dim_int)                      \
-  _(prod, dim_Dimname)                  \
   _(softmax, int)                       \
-  _(softmax, Dimname)                   \
   _(log_softmax, int)                   \
-  _(log_softmax, Dimname)               \
   _(cumprod)                            \
-  _(cumprod, dimname)                   \
   _(cumsum)                             \
-  _(cumsum, dimname)                    \
   _(linalg_vector_norm)                 \
   _(linalg_matrix_norm)                 \
   _(linalg_matrix_norm, str_ord)        \
   _(sum)                                \
-  _(sum, dim_IntList)                   \
-  _(sum, dim_DimnameList)
+  _(sum, dim_IntList)
 
 #define AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(_)                         \
   _(ADD_NS(norm),                                                           \
@@ -941,16 +938,6 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
         const Tensor&,                                                      \
         const std::optional<Scalar>&,                                       \
         IntArrayRef,                                                        \
-        bool,                                                               \
-        ScalarType),                                                        \
-    fp32_append_dtype)                                                      \
-  _(ADD_NS(norm),                                                           \
-    "norm.names_ScalarOpt_dim",                                             \
-    Tensor(const Tensor&, const std::optional<Scalar>&, DimnameList, bool), \
-    Tensor(                                                                 \
-        const Tensor&,                                                      \
-        const std::optional<Scalar>&,                                       \
-        DimnameList,                                                        \
         bool,                                                               \
         ScalarType),                                                        \
     fp32_append_dtype)

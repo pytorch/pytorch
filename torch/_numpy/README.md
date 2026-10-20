@@ -3,7 +3,7 @@
 This folder contains an implementation of (most of) the NumPy public API using PyTorch tensors.
 Note that this folder does not depend on NumPy in any way. This is a standalone implementation.
 
-This implementation is used by Dynamo to through NumPy code and lower it into PyTorch code.
+This implementation is used by Dynamo to trace through NumPy code and lower it into PyTorch code.
 
 To see design decisions that went into this implementation, please see the [rfc](https://github.com/pytorch/rfcs/pull/54).
 
@@ -24,7 +24,7 @@ a decorator called `normalizer` that will inspect these types and preprocess the
 preprocessing is the one in charge of mapping array-like objects into `Tensor`s, dtype-like objects into PyTorch dtypes, implement
 the `out=` behaviour and so on.
 
-In the files `_funcs.py` and `_ufuncs.py` we use register the `normalizer` decorator to all the `*_impl.py` functions.
+In the files `_funcs.py` and `_ufuncs.py` we register the `normalizer` decorator to all the `*_impl.py` functions.
 
 In the file `_ndarray.py` we define the `ndarray` class, which is just a thin wrapper around a PyTorch tensor. We use the free functions
 and a bit of metaprogramming to implement many of the methods.

@@ -20,7 +20,7 @@ TEST(XPUStreamTest, CopyAndMoveTest) {
     return;
   }
 
-  int32_t device = -1;
+  c10::DeviceIndex device = -1;
   sycl::queue queue;
   c10::xpu::XPUStream copyStream = c10::xpu::getStreamFromPool();
   {
@@ -98,6 +98,22 @@ TEST(XPUStreamTest, StreamBehavior) {
   EXPECT_NE(stream.device_index(), c10::xpu::current_device());
 }
 
+TEST(XPUStreamTest, GenericStream) {
+  if (!has_xpu()) {
+    return;
+  }
+  c10::xpu::XPUStream xpu_stream = c10::xpu::getStreamFromPool();
+  c10::Stream generic_stream = xpu_stream.unwrap();
+  c10::xpu::XPUStream wrapped_stream = c10::xpu::XPUStream(generic_stream);
+  EXPECT_EQ(xpu_stream, wrapped_stream);
+  EXPECT_EQ(
+      (sycl::queue*)xpu_stream,
+      reinterpret_cast<sycl::queue*>(generic_stream.native_handle()));
+  EXPECT_EQ(
+      &(xpu_stream.queue()),
+      reinterpret_cast<sycl::queue*>(generic_stream.native_handle()));
+}
+
 static void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
   auto new_stream = c10::xpu::getStreamFromPool();
   c10::xpu::setCurrentXPUStream(new_stream);
@@ -119,8 +135,10 @@ TEST(XPUStreamTest, MultithreadStreamBehavior) {
 
   c10::xpu::XPUStream cur_stream = c10::xpu::getCurrentXPUStream();
 
-  EXPECT_NE(cur_stream, *s0);
-  EXPECT_NE(cur_stream, *s1);
+  EXPECT_TRUE(s0);
+  EXPECT_TRUE(s1);
+  EXPECT_NE(cur_stream, s0);
+  EXPECT_NE(cur_stream, s1);
   EXPECT_NE(s0, s1);
 }
 
@@ -137,8 +155,8 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
 
   std::unordered_set<sycl::queue> queue_set{};
   bool hasDuplicates = false;
-  for (const auto i : c10::irange(streams.size())) {
-    auto& queue = streams[i].queue();
+  for (auto& stream : streams) {
+    auto& queue = stream.queue();
     auto result_pair = queue_set.insert(queue);
     if (!result_pair.second) { // already existed
       hasDuplicates = true;
@@ -167,6 +185,7 @@ TEST(XPUStreamTest, StreamFunction) {
   }
 
   constexpr int numel = 1024;
+  // NOLINTNEXTLINE(*-c-arrays)
   int hostData[numel];
   initHostData(hostData, numel);
 

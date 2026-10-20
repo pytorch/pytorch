@@ -14,8 +14,9 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Callable, cast, Optional
+from typing import cast
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 
@@ -34,6 +35,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     _Action,
     _BackendRendezvousStateHolder,
     _DistributedRendezvousOpExecutor,
+    _natural_sort_key,
     _NodeDesc,
     _NodeDescGenerator,
     _RendezvousCloseOp,
@@ -118,6 +120,64 @@ class NodeDescTest(TestCase):
         self.assertIn(desc2, descs)
 
 
+class NodeDescNaturalSortKeyTest(TestCase):
+    def test_ranks_follow_numeric_host_order(self) -> None:
+        addrs = ["node66", "node7", "node70", "node8"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            [node.addr for node in ordered], ["node7", "node8", "node66", "node70"]
+        )
+
+    def test_zero_padded_hostnames_keep_lexicographic_order(self) -> None:
+        addrs = ["node070", "node007", "node066", "node008"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        self.assertEqual(sorted(nodes, key=_natural_sort_key), sorted(nodes))
+
+    def test_heterogeneous_addresses_do_not_raise(self) -> None:
+        addrs = ["10.0.0.7", "10.0.0.66", "gpu-a", "gpu-10", "gpu-2", "ip-10-0-1-5"]
+        nodes = [_NodeDesc(addr, 1, 1) for addr in addrs]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(
+            ordered,
+            ["10.0.0.7", "10.0.0.66", "gpu-2", "gpu-10", "gpu-a", "ip-10-0-1-5"],
+        )
+
+    def test_non_decimal_digit_characters_do_not_raise(self) -> None:
+        # str.isdigit() is True for characters such as superscripts that int()
+        # rejects, hence the key checks str.isdecimal().
+        nodes = [_NodeDesc("node1²2", 1, 1), _NodeDesc("node3", 1, 1)]
+
+        ordered = [node.addr for node in sorted(nodes, key=_natural_sort_key)]
+
+        self.assertEqual(ordered, ["node1²2", "node3"])
+
+    def test_processes_on_same_host_stay_grouped_and_ordered(self) -> None:
+        nodes = [
+            _NodeDesc("node9", 7, 1),
+            _NodeDesc("node10", 3, 1),
+            _NodeDesc("node9", 3, 2),
+            _NodeDesc("node9", 3, 1),
+        ]
+
+        ordered = sorted(nodes, key=_natural_sort_key)
+
+        self.assertEqual(
+            ordered,
+            [
+                _NodeDesc("node9", 3, 1),
+                _NodeDesc("node9", 3, 2),
+                _NodeDesc("node9", 7, 1),
+                _NodeDesc("node10", 3, 1),
+            ],
+        )
+
+
 class NodeDescGeneratorTest(TestCase):
     def test_generate(self) -> None:
         desc_generator = _NodeDescGenerator()
@@ -175,7 +235,7 @@ class RendezvousStateTest(TestCase):
 
 
 class FakeRendezvousBackend(RendezvousBackend):
-    _state: Optional[bytes]
+    _state: bytes | None
     _token: int
 
     def __init__(self) -> None:
@@ -186,15 +246,15 @@ class FakeRendezvousBackend(RendezvousBackend):
     def name(self) -> str:
         return "fake_backend"
 
-    def get_state(self) -> Optional[tuple[bytes, Token]]:
+    def get_state(self) -> tuple[bytes, Token] | None:
         if self._token == 0:
             return None
 
         return self._state, self._token  # type: ignore[return-value]
 
     def set_state(
-        self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[tuple[bytes, Token, bool]]:
+        self, state: bytes, token: Token | None = None
+    ) -> tuple[bytes, Token, bool] | None:
         if token is None:
             token = 0
 
@@ -222,6 +282,7 @@ class FakeRendezvousBackend(RendezvousBackend):
 
 class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
+        super().setUp()
         self._backend = FakeRendezvousBackend()
 
         mock_get_state = MagicMock(wraps=self._backend.get_state)
@@ -252,7 +313,7 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
         )
 
         mock_datetime = self._datetime_patch.start()
-        mock_datetime.utcnow.return_value = self._now
+        mock_datetime.now.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
@@ -512,7 +573,7 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
 class FakeRendezvousStateHolder(_RendezvousStateHolder):
     _state: _RendezvousState
-    _dirty: Optional[bool]
+    _dirty: bool | None
 
     def __init__(self) -> None:
         self._state = _RendezvousState()
@@ -526,7 +587,7 @@ class FakeRendezvousStateHolder(_RendezvousStateHolder):
     def state(self, value) -> None:
         self._state = value
 
-    def sync(self) -> Optional[bool]:
+    def sync(self) -> bool | None:
         self._dirty, dirty = None, self._dirty
 
         return dirty
@@ -537,6 +598,7 @@ class FakeRendezvousStateHolder(_RendezvousStateHolder):
 
 class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
     def setUp(self) -> None:
+        super().setUp()
         self._node = _NodeDesc("this_node", 1, 1)
 
         self._state_holder = FakeRendezvousStateHolder()
@@ -565,12 +627,14 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         )
 
         mock_datetime = self._datetime_patch.start()
-        mock_datetime.utcnow.return_value = self._now
+        mock_datetime.now.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
 
-    def _create_settings(self) -> RendezvousSettings:
+    def _create_settings(
+        self, cas_backoff_max_seconds: float = 0.3
+    ) -> RendezvousSettings:
         return RendezvousSettings(
             run_id="dummy_run_id",
             min_nodes=self._min_nodes,
@@ -578,10 +642,11 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
             timeout=self._timeout,
             keep_alive_interval=timedelta(seconds=30),
             keep_alive_max_attempt=3,
+            cas_backoff_max_seconds=cas_backoff_max_seconds,
         )
 
     def _create_op_executor(
-        self, settings: Optional[RendezvousSettings] = None
+        self, settings: RendezvousSettings | None = None
     ) -> _DistributedRendezvousOpExecutor:
         self._state_holder.state = self._state
 
@@ -737,6 +802,36 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
 
                     self._mock_state_holder.reset_mock()
 
+    def test_run_assigns_ranks_in_natural_host_order(self) -> None:
+        # Hostnames whose lexicographic order differs from their numeric order.
+        # With a plain sort the ranks would be node10=0, node2=1, node9=2, i.e.
+        # they would not follow the node numbering (see gh-191190).
+        self._node = _NodeDesc("node2", 1, 1)
+
+        self._state = _RendezvousState()
+
+        for addr in ["node10", "node9"]:
+            node = _NodeDesc(addr, 1, 1)
+
+            self._state.participants[node] = 0
+            self._state.last_heartbeats[node] = self._now
+
+        self._state.wait_list.add(self._node)
+
+        self._state.deadline = self._now + self._timeout.last_call
+
+        self._min_nodes = 3
+        self._max_nodes = 3
+
+        self._run_action(_Action.ADD_TO_PARTICIPANTS)
+
+        self.assertTrue(self._state.complete)
+
+        self.assertEqual(
+            {node.addr: rank for node, rank in self._state.participants.items()},
+            {"node2": 0, "node9": 1, "node10": 2},
+        )
+
     def test_run_adds_to_waitlist(self) -> None:
         expected_state = _RendezvousState()
 
@@ -854,6 +949,29 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
             self._mock_state_holder.mock_calls, [call.sync(), call.sync()]
         )
 
+    def test_run_backs_off_only_after_failed_state_write(self) -> None:
+        for has_set, delay in (
+            (False, 0.3),
+            (False, 0.7),
+            (True, 0.7),
+            (None, 0.7),
+            (False, 0),
+        ):
+            with self.subTest(has_set=has_set, delay=delay):
+                executor = self._create_op_executor(self._create_settings(delay))
+                with (
+                    patch.object(self._state_holder, "sync", return_value=has_set),
+                    patch(
+                        "torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay"
+                    ) as mock_delay,
+                ):
+                    executor.run(Mock(return_value=_Action.FINISH), deadline=1)
+
+                if has_set is False and delay > 0:
+                    mock_delay.assert_called_once_with(seconds=(0, delay))
+                else:
+                    mock_delay.assert_not_called()
+
 
 class AbstractTestRendezvousOp(ABC):
     assertEqual: Callable
@@ -878,7 +996,7 @@ class AbstractTestRendezvousOp(ABC):
         )
 
         mock_datetime = self._datetime_patch.start()
-        mock_datetime.utcnow.return_value = self._now
+        mock_datetime.now.return_value = self._now
 
         self._time_patch = patch(
             "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
@@ -1150,14 +1268,15 @@ class DummyStore(Store):
 
 class DynamicRendezvousHandlerTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._node = _NodeDesc("this_node", 1, 1)
 
         self._min_nodes = 1
         self._max_nodes = 1
 
-        self._join_timeout: Optional[timedelta] = None
-        self._close_timeout: Optional[timedelta] = None
-        self._heartbeat_timeout: Optional[timedelta] = None
+        self._join_timeout: timedelta | None = None
+        self._close_timeout: timedelta | None = None
+        self._heartbeat_timeout: timedelta | None = None
 
         self._keep_alive_interval = timedelta(seconds=30)
 
@@ -1247,6 +1366,39 @@ class DynamicRendezvousHandlerTest(TestCase):
             self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, TEST_ADDR)
             self.assertEqual(rdzv_info.bootstrap_store_info.master_port, TEST_PORT)
             self.assertNotEqual(handler._shared_tcp_store_server, handler._store)
+
+    def test_share_store_creates_tcp_store_when_rank_changes_to_zero(self):
+        self._max_nodes = 2
+        other_node = _NodeDesc("aaa_node", 1, 1)
+        self._state.participants[other_node] = 0
+        self._state.last_heartbeats[other_node] = datetime.now(timezone.utc)
+
+        handler = self._create_handler()
+
+        shared_store_info = RendezvousStoreInfo(TEST_ADDR, TEST_PORT)
+        with patch.object(RendezvousStoreInfo, "build", return_value=shared_store_info):
+            rdzv_info = handler.next_rendezvous()
+
+        self.assertEqual(rdzv_info.rank, 1)
+        self.assertIsNone(handler._shared_tcp_store_server)
+
+        del self._state.participants[other_node]
+        del self._state.last_heartbeats[other_node]
+        self._min_nodes = 1
+        self._max_nodes = 1
+        handler._settings = RendezvousSettings(
+            run_id="dummy_run_id",
+            min_nodes=1,
+            max_nodes=1,
+            timeout=RendezvousTimeout(),
+            keep_alive_interval=self._keep_alive_interval,
+            keep_alive_max_attempt=3,
+        )
+
+        rdzv_info = handler.next_rendezvous()
+
+        self.assertEqual(rdzv_info.rank, 0)
+        self.assertEqual(handler._shared_tcp_store_server, self._tcp_store_mock)
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
     def test_next_rendezvous_skews_the_first_join_attempt(self, mock_delay) -> None:
@@ -1411,7 +1563,7 @@ class DynamicRendezvousHandlerTest(TestCase):
     def test_keep_alive_updates_last_heartbeat(self, mock_datetime) -> None:
         now = datetime(2000, 1, 1, hour=0, minute=0)
 
-        mock_datetime.utcnow.return_value = now
+        mock_datetime.now.return_value = now
 
         self._state.last_heartbeats[self._node] = now - (self._keep_alive_interval * 2)
 
@@ -1499,12 +1651,13 @@ class DummyRendezvousBackend(RendezvousBackend):
 
 class DynamicRendezvousHandlerFromBackendTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._run_id = "dummy_run_id"
         self._store = DummyStore()
         self._backend = DummyRendezvousBackend()
         self._min_nodes = 3
         self._max_nodes = 6
-        self._timeout: Optional[RendezvousTimeout] = RendezvousTimeout()
+        self._timeout: RendezvousTimeout | None = RendezvousTimeout()
 
     def _create_handler(self) -> DynamicRendezvousHandler:
         return DynamicRendezvousHandler.from_backend(
@@ -1567,6 +1720,7 @@ class DynamicRendezvousHandlerFromBackendTest(TestCase):
 
 class CreateHandlerTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._store = DummyStore()
 
         self._backend = DummyRendezvousBackend()
@@ -1676,6 +1830,7 @@ class _CapturingThread(threading.Thread):
 
 class IntegrationTest(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self._store = HashStore()
         self._handlers = []
         self._backend = _InMemoryRendezvousBackend()
@@ -1828,7 +1983,7 @@ class IntegrationTest(TestCase):
             def set(self, key, value):
                 pass
 
-        prefix_store = CustomPrefixStore(spec=dist.PrefixStore)
+        prefix_store = CustomPrefixStore()
         prefix_store_class_mock.return_value = prefix_store
         tcp_store = Mock(spec=dist.TCPStore)
         original_addr = "original_addr"

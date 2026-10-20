@@ -16,7 +16,6 @@ import warnings
 from collections import defaultdict, OrderedDict
 from pathlib import Path
 from pprint import pprint
-from typing import Optional
 
 import numpy as np
 from prettytable import PrettyTable
@@ -159,7 +158,7 @@ def run(
     return result_entry
 
 
-def main(save_path: Optional[Path], error_path: Optional[Path]):
+def main(save_path: Path | None, error_path: Path | None):
     table = PrettyTable()
     entries = defaultdict(list)
 

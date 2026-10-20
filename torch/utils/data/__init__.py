@@ -74,4 +74,5 @@ __all__ = [
 ]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ is not sorted")

@@ -468,7 +468,7 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernelWithDictInput_witho
   EXPECT_EQ(2, captured_dict_size);
 }
 
-string kernelWithDictInputWithOutput(Dict<string, string> input1) {
+std::string kernelWithDictInputWithOutput(Dict<string, string> input1) {
   return input1.at("key2");
 }
 

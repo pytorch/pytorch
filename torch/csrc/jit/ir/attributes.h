@@ -33,7 +33,7 @@ enum class AttributeKind {
 };
 static inline const char* toString(AttributeKind kind) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static const char* names[] = {
+  static constexpr const char* names[] = {
       "f",
       "c",
       "cs",
@@ -168,7 +168,7 @@ struct IRAttributeError : public std::exception {
       ss << "required keyword attribute '" << name.toUnqualString()
          << "' has the wrong type";
     }
-    msg = ss.str();
+    msg = std::move(ss).str();
   }
   const char* what() const noexcept override {
     return msg.c_str();

@@ -1,4 +1,4 @@
-# This example was adapated from https://github.com/muhrin/milad
+# This example was adapted from https://github.com/muhrin/milad
 # It is licensed under the GLPv3 license. You can find a copy of it
 # here: https://www.gnu.org/licenses/gpl-3.0.en.html .
 

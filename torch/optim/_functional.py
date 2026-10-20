@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 r"""Functional interface."""
+
 import math
 
 from torch import Tensor
@@ -11,6 +11,7 @@ from .adamax import adamax  # type: ignore[attr-defined]  # noqa: F401
 from .adamw import adamw  # type: ignore[attr-defined]  # noqa: F401
 from .asgd import asgd  # type: ignore[attr-defined]  # noqa: F401
 from .nadam import nadam  # type: ignore[attr-defined]  # noqa: F401
+from .optimizer import _functional_api_doc
 from .radam import radam  # type: ignore[attr-defined]  # noqa: F401
 from .rmsprop import rmsprop  # type: ignore[attr-defined]  # noqa: F401
 from .rprop import rprop  # type: ignore[attr-defined]  # noqa: F401
@@ -32,11 +33,7 @@ def sparse_adam(
     beta2: float,
     lr: float,
     maximize: bool,
-):
-    r"""Functional API that performs Sparse Adam algorithm computation.
-
-    See :class:`~torch.optim.SparseAdam` for details.
-    """
+) -> None:
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -52,7 +49,7 @@ def sparse_adam(
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
 
-        def make_sparse(values):
+        def make_sparse(values: Tensor) -> Tensor:
             constructor = grad.new
             if grad_indices.dim() == 0 or values.dim() == 0:
                 return constructor().resize_as_(grad)
@@ -81,3 +78,15 @@ def sparse_adam(
         step_size = lr * math.sqrt(bias_correction2) / bias_correction1
 
         param.add_(make_sparse(-step_size * numer.div_(denom)))
+
+
+sparse_adam.__doc__ = (
+    _functional_api_doc.format(optimizer="SparseAdam")
+    + r"""
+
+.. note::
+    ``state_steps`` must contain the current step value for each parameter.
+    This function reads these values but does not increment them; the caller must
+    increment each step before the corresponding update.
+"""
+)

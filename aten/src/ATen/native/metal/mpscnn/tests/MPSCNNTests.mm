@@ -104,7 +104,7 @@ typedef bool (^Func)(void);
 bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
   std::stringstream ss;
   std::copy(sizes.begin(), sizes.end(), std::ostream_iterator<int>(ss, " "));
-  __block std::string str1 = ss.str();
+  __block std::string str1 = std::move(ss).str();
   c10::InferenceMode guard;
   bool b = block();
   void (^print)(NSString*) = ^(NSString* result) {
@@ -120,7 +120,7 @@ void PRINT_TENSOR(std::string name, const at::Tensor& tensor) {
     for (int i = 0; i < t.numel(); ++i) {
       NSString* sf =
           [NSString stringWithFormat:@"%.2f", t.data_ptr<float>()[i]];
-      str += sf.UTF8String;
+      str += sf.UTF8String ?: "";
       str += ", ";
     }
     std::cout << str << std::endl;

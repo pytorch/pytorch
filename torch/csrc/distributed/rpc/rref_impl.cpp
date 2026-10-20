@@ -1,11 +1,8 @@
 #include <torch/csrc/distributed/rpc/rref_impl.h>
 
 #include <ATen/record_function.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <fmt/format.h>
-#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -70,18 +67,23 @@ RRefForkData RRef::fork() const {
 void RRef::handleError(RPCErrorType errorType, const JitFuture& jitFuture) {
   static std::unordered_map<
       RPCErrorType,
-      std::function<void(const JitFuture& jitFuture)>,
+      std::function<void(RRef*, const JitFuture&)>,
       std::hash<int>>
       errorHandlers = {
           {RPCErrorType::TIMEOUT,
-           [this](const JitFuture& /* unused */) { setTimedOut(); }},
+           [](RRef* rref, const JitFuture& /* unused */) {
+             rref->setTimedOut();
+           }},
           {RPCErrorType::INTENTIONAL_FAILURE,
-           [this](const JitFuture& /* unused */) { setTimedOut(); }},
-          {RPCErrorType::UNKNOWN_ERROR, [](const JitFuture& jitFuture) {
+           [](RRef* rref, const JitFuture& /* unused */) {
+             rref->setTimedOut();
+           }},
+          {RPCErrorType::UNKNOWN_ERROR,
+           [](RRef* /* unused */, const JitFuture& jitFuture) {
              // Default error handler
              RRefContext::handleException(jitFuture);
            }}};
-  errorHandlers.find(errorType)->second(jitFuture);
+  errorHandlers.find(errorType)->second(this, jitFuture);
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -290,12 +292,12 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {
     return os << "OwnerRRef("
-              << "rref_id=" << rref.rrefId() << ")";
+              << "rref_id=" << rref.rrefId() << ')';
   } else {
     return os << "UserRRef("
               << "rref_id=" << rref.rrefId()
               << ", fork_id=" << static_cast<const UserRRef*>(&rref)->forkId()
-              << ")";
+              << ')';
   }
 }
 

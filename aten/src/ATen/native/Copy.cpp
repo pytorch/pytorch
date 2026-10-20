@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
-#include <ATen/native/Copy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -15,9 +14,10 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
+
+#include <cstring>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -36,13 +36,22 @@
 #endif
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmConvert.h>
+C10_DIAGNOSTIC_POP()
 #endif
 
 namespace {
 
 using namespace at;
+
+bool has_same_dense_layout(const Tensor& self, const Tensor& src) {
+  return self.sizes().equals(src.sizes()) &&
+      ((self.is_contiguous() && src.is_contiguous()) ||
+       (self.is_non_overlapping_and_dense() &&
+        self.strides().equals(src.strides())));
+}
 
 bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
   const int MIN_SZ = 60 * 60;
@@ -59,13 +68,14 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
-            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kHalf, kBool, kBFloat16,            \
+            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
             AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
-            kComplexHalf, kHalf, kBool, kBFloat16, \
-            TYPE, NAME, __VA_ARGS__)
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(    \
+            kComplexHalf, kBComplex32, kHalf,      \
+            kBool, kBFloat16, TYPE, NAME,          \
+            __VA_ARGS__)
 #endif
 
 // special case copy where tensor is contiguous and src is a transposed matrix
@@ -132,6 +142,32 @@ bool is_supported_device(Device device) {
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
+// Shell dtypes have no defined value conversion. Rejecting casts on the host
+// keeps every backend consistent with tracing; on CUDA they would otherwise
+// device-assert in the dynamic-cast kernel.
+void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
+  if (dst == src || !(isShellType(dst) || isShellType(src))) {
+    return;
+  }
+  if (dst == ScalarType::Float4_e2m1fn_x2 ||
+      src == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Casting from ", src, " to ", dst, " is not supported. "
+        "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+        "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+        "the nibbles (low 4 bits are the first element, high 4 bits the "
+        "second); to encode, pack fp4 codes into torch.uint8 and "
+        ".view(torch.float4_e2m1fn_x2).");
+  }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Casting from ", src, " to ", dst, " is not supported: ",
+      isShellType(src) ? src : dst,
+      " is a shell dtype with no defined conversions. Use .view() to "
+      "reinterpret the bytes as a same-size integer dtype instead.");
+}
+
 } // namespace
 
 namespace at::native {
@@ -151,11 +187,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   // https://github.com/pytorch/pytorch/issues/88543
   #ifdef USE_FBGEMM
     if (((self.dtype() == at::kFloat && src.dtype() == at::kHalf) ||
-         (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
+        (self.dtype() == at::kHalf && src.dtype() == at::kFloat)) &&
         (self.device().is_cpu() && src.device().is_cpu()) &&
-        ((self.is_contiguous() && src.is_contiguous()) ||
-         (self.is_non_overlapping_and_dense() && self.strides() == src.strides())) &&
-        (self.sizes() == src.sizes())) {
+        has_same_dense_layout(self, src)) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
@@ -197,6 +231,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if (self.is_same(src)) {
     return self;
   }
+
+  // Checked for every device, including meta and out-of-tree backends, so
+  // eager and FakeTensor tracing reject the same casts.
+  check_shell_dtype_cast(src.scalar_type(), self.scalar_type());
 
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {
@@ -254,8 +292,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   // Exit early if self and src are views of the same data
+  const bool is_alias = self.is_alias_of(src);
   const bool is_same_data = (
-      self.is_alias_of(src) &&
+      is_alias &&
       self.storage_offset() == src.storage_offset() &&
       self.strides().equals(src.strides()) &&
       self.sizes().equals(src.sizes()) &&
@@ -267,6 +306,25 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     return self;
   }
 
+  // The typed bool copy kernel canonicalizes non-standard true values, and
+  // TensorIterator parallelizes copies at or above GRAIN_SIZE.
+  if (self.numel() < at::internal::GRAIN_SIZE &&
+      self.scalar_type() == src.scalar_type() &&
+      self.scalar_type() != at::kBool &&
+      self.device().is_cpu() && src.device().is_cpu() &&
+      !self.is_quantized() &&
+      self.is_conj() == src.is_conj() &&
+      self.is_neg() == src.is_neg() &&
+      !is_alias &&
+      has_same_dense_layout(self, src)) {
+    if (self.numel() > 0) {
+      std::memcpy(
+          self.data_ptr(),
+          src.const_data_ptr(),
+          static_cast<size_t>(self.numel()) * self.itemsize());
+    }
+    return self;
+  }
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
@@ -350,9 +408,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
-    NoNamesGuard guard;
     if (self._is_zerotensor()) {
      TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
     }
@@ -361,7 +417,6 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
     }
     copy_impl(self, src, non_blocking);
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 

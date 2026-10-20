@@ -1,6 +1,6 @@
 import json
 
-from torch._export.serde.aoti_schema import ExternKernelNode, ExternKernelNodes, Node
+from torch._export.serde.schema import ExternKernelNode, ExternKernelNodes, Node
 from torch._export.serde.serialize import _dataclass_to_dict, EnumEncoder
 from torch._inductor.ir import ExternKernelNode as inductor_ExternKernelNode
 
@@ -8,7 +8,10 @@ from torch._inductor.ir import ExternKernelNode as inductor_ExternKernelNode
 def serialize_extern_kernel_node(
     extern_kernel_node: inductor_ExternKernelNode,
 ) -> ExternKernelNode:
-    assert isinstance(extern_kernel_node.node, Node)
+    if not isinstance(extern_kernel_node.node, Node):
+        raise AssertionError(
+            f"expected node to be a Node, got {type(extern_kernel_node.node)}"
+        )
     return ExternKernelNode(
         name=extern_kernel_node.name,
         node=extern_kernel_node.node,

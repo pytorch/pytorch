@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -12,8 +11,8 @@ from torch.types import _Number, _size
 __all__ = ["Gamma"]
 
 
-def _standard_gamma(concentration):
-    return torch._standard_gamma(concentration)
+def _standard_gamma(concentration, generator=None):
+    return torch._standard_gamma(concentration, generator=generator)
 
 
 class Gamma(ExponentialFamily):
@@ -34,6 +33,7 @@ class Gamma(ExponentialFamily):
             (often referred to as beta), rate = 1 / scale
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
@@ -56,9 +56,9 @@ class Gamma(ExponentialFamily):
 
     def __init__(
         self,
-        concentration: Union[Tensor, float],
-        rate: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        concentration: Tensor | float,
+        rate: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.concentration, self.rate = broadcast_all(concentration, rate)
         if isinstance(concentration, _Number) and isinstance(rate, _Number):
@@ -76,11 +76,24 @@ class Gamma(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
+    def sample(
+        self,
+        sample_shape: _size = torch.Size(),
+        *,
+        generator: torch.Generator | None = None,
+    ) -> Tensor:
+        with torch.no_grad():
+            return self.rsample(sample_shape, generator=generator)
+
+    def rsample(
+        self,
+        sample_shape: _size = torch.Size(),
+        generator: torch.Generator | None = None,
+    ) -> Tensor:
         shape = self._extended_shape(sample_shape)
-        value = _standard_gamma(self.concentration.expand(shape)) / self.rate.expand(
-            shape
-        )
+        value = _standard_gamma(
+            self.concentration.expand(shape), generator=generator
+        ) / self.rate.expand(shape)
         value.detach().clamp_(
             min=torch.finfo(value.dtype).tiny
         )  # do not record in autograd graph
@@ -109,6 +122,7 @@ class Gamma(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration - 1, -self.rate)
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x, y):
         return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())
 

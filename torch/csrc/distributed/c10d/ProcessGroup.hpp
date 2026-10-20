@@ -1,7 +1,10 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/distributed/c10d/Hooks.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
+#include <atomic>
+#include <map>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -10,8 +13,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Deprecated.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
 // versions 1.7 and 1.8.
@@ -34,13 +37,16 @@ C10_EXPORT void register_work(
 
 C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
+C10_EXPORT std::vector<at::Tensor> wait_tensors(at::TensorList tensors);
+
 // We only call `unregister_work()` in one case:
 // 1. If the work object is created from a non-functional collective call within
 //    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
 //
 // Q: What about the functional collective case?
 // A: The unregistration of work object for functional collective is done in
-//    the required user-side explicit call to `wait_tensor()`.
+//    the required user-side explicit call to `wait_tensor()` or
+//    `wait_tensors()`.
 C10_EXPORT void unregister_work(const c10::intrusive_ptr<c10d::Work>& work);
 
 C10_EXPORT size_t get_work_registry_size();
@@ -71,6 +77,21 @@ C10_EXPORT bool allow_inflight_collective_as_graph_input();
 //
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
+  struct TORCH_API MergeOptions : torch::CustomClassHolder {
+    explicit MergeOptions(
+        const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        const std::optional<std::string> group_name = std::nullopt,
+        const std::optional<std::string> group_desc = std::nullopt)
+        : timeout(timeout), group_name(group_name), group_desc(group_desc) {}
+    ~MergeOptions() override = default;
+    MergeOptions(const MergeOptions&) = delete;
+    MergeOptions& operator=(const MergeOptions&) = delete;
+
+    std::chrono::milliseconds timeout;
+    std::optional<std::string> group_name;
+    std::optional<std::string> group_desc;
+  };
+
   enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
@@ -131,19 +152,29 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   ~ProcessGroup() override;
 
   virtual int getRank() const {
-    return rank_;
+    // Backend state is the canonical source of truth for rank/size (e.g. a
+    // reconfigure-style backend can change them). Fall back to the
+    // constructor-provided values when there is no default backend, which is a
+    // legitimate state for custom multi-backend process groups.
+    if (backendType_ == BackendType::UNDEFINED) {
+      return rank_;
+    }
+    return getDefaultBackend()->getRank();
   }
 
   virtual int getSize() const {
-    return size_;
+    if (backendType_ == BackendType::UNDEFINED) {
+      return size_;
+    }
+    return getDefaultBackend()->getSize();
   }
 
-  // Returns an unique opaque ID of this process group object.
+  // Returns a unique opaque ID of this process group object.
   int64_t getID() const {
     return reinterpret_cast<std::intptr_t>(this);
   }
 
-  // Returns an unique opaque ID of a backend for the specific backend type
+  // Returns a unique opaque ID of a backend for the specific backend type
   // that can correlate with this process group's collectives.
   int64_t getBackendID(BackendType backend_type) const {
     return reinterpret_cast<std::intptr_t>(getBackend(backend_type).get());
@@ -157,11 +188,21 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendType_;
   }
 
-  inline bool backendSupportsSequenceNumbers(BackendType backendType) {
-    if (backendType == BackendType::GLOO || backendType == BackendType::NCCL ||
-        backendType == BackendType::XCCL || backendType == BackendType::UCC)
-      return true;
-    return false;
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->setTimeout(timeout);
+    }
+  }
+
+  // Experimental. Forward a temporary timeout extension to every backend.
+  virtual void addEphemeralTimeout(const std::chrono::milliseconds& timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->addEphemeralTimeout(timeout);
+    }
+  }
+
+  int64_t incrementSplitCount() {
+    return splitCounter_++;
   }
 
   virtual void startCoalescing(c10::DeviceType deviceType) {
@@ -192,7 +233,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     int64_t,
                     int64_t,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
     // it as it is now.
@@ -202,7 +244,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootRank,
         opts.rootTensor,
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
@@ -225,7 +268,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     const std::optional<at::Tensor>& sparse_indices,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(op.call(
         tensors,
@@ -233,7 +277,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.sparseIndices,
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
@@ -253,14 +298,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              const c10::intrusive_ptr<::c10d::ReduceOp>&,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
 
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.asyncOp,
-        opts.timeout.count());
+        opts.timeout.count(),
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
@@ -282,7 +329,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              int64_t,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
     auto work = op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -290,7 +338,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.rootRank,
         opts.rootTensor,
         opts.asyncOp,
-        opts.timeout.count());
+        opts.timeout.count(),
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : tensors) {
@@ -313,14 +362,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              at::TensorList,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor_list : outputTensors) {
@@ -335,8 +386,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
   // is interpreted as a contiguous collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
-  // Note: this function will be deprecated in near future.
-  virtual c10::intrusive_ptr<Work> _allgather_base(
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) {
@@ -348,19 +399,32 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
     return work;
+  }
+
+  // Deprecated: use all_gather_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::_allgather_base is deprecated, use all_gather_single instead.")
+  virtual c10::intrusive_ptr<Work> _allgather_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single(outputBuffer, inputBuffer, opts);
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -377,13 +441,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const std::vector<std::vector<at::Tensor>>&,
                              const at::TensorList&,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                             bool)>();
+                             bool,
+                             OptionalCollectiveConfig)>();
 
     auto work = op.call(
         outputTensorLists,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-        opts.asyncOp);
+        opts.asyncOp,
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor_list : outputTensorLists) {
@@ -395,10 +461,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  // This function is a coalesced version of `allgather_into_tensor` (currently
-  // still named as `_allgather_base`). Each tensor in the vector corresponds to
-  // an input/output of one `allgather_into_tensor` operation.
-  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  // Coalesced version of all_gather_single. Each tensor in the vector
+  // corresponds to an input/output of one all_gather_single operation.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) {
@@ -409,13 +475,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const at::TensorList,
                 const at::TensorList,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                bool)>();
+                bool,
+                OptionalCollectiveConfig)>();
 
     auto work = op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-        opts.asyncOp);
+        opts.asyncOp,
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
@@ -423,6 +491,17 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
     }
     return work;
+  }
+
+  // Deprecated: use all_gather_single_coalesced instead. Kept as an alias for
+  // backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::allgather_into_tensor_coalesced is deprecated, use all_gather_single_coalesced instead.")
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    return all_gather_single_coalesced(outputTensors, inputTensors, opts);
   }
 
   virtual c10::intrusive_ptr<Work> gather(
@@ -437,14 +516,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
     auto work = op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.asyncOp,
-        opts.timeout.count());
+        opts.timeout.count(),
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor_list : outputTensors) {
@@ -454,6 +535,51 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
     }
     return work;
+  }
+
+  // Gathers a single tensor inputBuffer from every rank into a single flat
+  // outputBuffer on the root rank. Single-tensor analog of gather.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::gather_into_tensor_", "")
+            .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
+                at::Tensor&,
+                at::Tensor&,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                int64_t,
+                bool,
+                int64_t,
+                OptionalCollectiveConfig)>();
+
+    auto work = std::get<1>(op.call(
+        outputBuffer,
+        inputBuffer,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        opts.rootRank,
+        opts.asyncOp,
+        opts.timeout.count(),
+        opts.config));
+
+    if (c10d::allow_inflight_collective_as_graph_input()) {
+      c10d::register_work(outputBuffer, work);
+    }
+    return work;
+  }
+
+  // Deprecated: use gather_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::gather_into_tensor is deprecated, use gather_single instead.")
+  virtual c10::intrusive_ptr<Work> gather_into_tensor(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    return gather_single(outputBuffer, inputBuffer, opts);
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
@@ -501,14 +627,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
@@ -518,7 +646,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
@@ -531,14 +660,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
     auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
@@ -546,10 +677,21 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  // This function is a coalesced version of `reduce_scatter_tensor` (currently
-  // still named as `_reduce_scatter_base`). Each tensor in the vector
-  // corresponds to an input/output of one `reduce_scatter_tensor` operation.
-  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  // Deprecated: use reduce_scatter_single instead. Kept as an alias for
+  // backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::_reduce_scatter_base is deprecated, use reduce_scatter_single instead.")
+  virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single(outputBuffer, inputBuffer, opts);
+  }
+
+  // Coalesced version of reduce_scatter_single. Each tensor in the vector
+  // corresponds to an input/output of one reduce_scatter_single operation.
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
@@ -562,7 +704,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
 
     auto work = op.call(
         outputTensors,
@@ -570,7 +713,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
         opts.asyncOp,
-        opts.timeout.count());
+        opts.timeout.count(),
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
@@ -580,7 +724,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return work;
   }
 
-  virtual c10::intrusive_ptr<Work> alltoall_base(
+  // Deprecated: use reduce_scatter_single_coalesced instead. Kept as an alias
+  // for backward compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::reduce_scatter_tensor_coalesced is deprecated, use reduce_scatter_single_coalesced instead.")
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    return reduce_scatter_single_coalesced(outputTensors, inputTensors, opts);
+  }
+
+  // Named after the torchcomms backend naming scheme.
+  virtual c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
@@ -595,7 +751,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              std::vector<int64_t>,
                              std::vector<int64_t>,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
     auto work = op.call(
         outputBuffer,
         inputBuffer,
@@ -603,12 +760,27 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         outputSplitSizes,
         inputSplitSizes,
         opts.asyncOp,
-        opts.timeout.count());
+        opts.timeout.count(),
+        opts.config);
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
     }
     return work;
+  }
+
+  // Deprecated: use all_to_all_single instead. Kept as an alias for backward
+  // compatibility.
+  C10_DEPRECATED_MESSAGE(
+      "ProcessGroup::alltoall_base is deprecated, use all_to_all_single instead.")
+  virtual c10::intrusive_ptr<Work> alltoall_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    return all_to_all_single(
+        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
   }
 
   virtual c10::intrusive_ptr<Work> alltoall(
@@ -624,13 +796,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const at::TensorList&,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
     auto work = std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.config));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       for (const auto& tensor : outputTensors) {
@@ -661,41 +835,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         wait_all_ranks);
   }
 
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
-  virtual void setSequenceNumberForGroup() {
-    auto backendType = getBackendType();
-    // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendSupportsSequenceNumbers(backendType)) {
-      getDefaultBackend()->setSequenceNumberForGroup();
-    } else {
-      TORCH_CHECK(
-          false,
-          c10::str(
-              "ProcessGroup ",
-              getBackendName(),
-              " does not yet support sequence numbers."));
-    }
-  }
-
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
-    auto backendType = getBackendType();
-
-    // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendSupportsSequenceNumbers(backendType)) {
-      return getDefaultBackend()->getSequenceNumberForGroup();
-    } else {
-      TORCH_CHECK(
-          false,
-          c10::str(
-              "ProcessGroup ",
-              getBackendName(),
-              " does not yet support sequence numbers."));
-    }
+    return getDefaultBackend()->getSequenceNumberForGroup();
   }
 
   virtual c10::intrusive_ptr<Work> send(
@@ -769,7 +913,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) {
-    static at::Tensor tensor;
+    at::Tensor tensor;
     // TODO: if nccl was specified then use it
     auto device = opts.device;
     if (device.has_value()) {
@@ -818,6 +962,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return !deviceTypeToBackendType_.empty();
   }
 
+  bool hasBackendForDeviceType(c10::DeviceType deviceType) {
+    return deviceTypeToBackendType_.find(deviceType) !=
+        deviceTypeToBackendType_.end();
+  }
+
   void setBackend(
       c10::DeviceType deviceType,
       BackendType backendType,
@@ -826,13 +975,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     deviceTypeToBackendType_[deviceType] = backendType;
     deviceTypes_.insert(deviceType);
     // if the backendType is already set then reuse it for this device
-    if (backendTypeToBackend_.find(backendType) !=
-        backendTypeToBackend_.end()) {
-      auto existingBackend = backendTypeToBackend_.at(backendType);
+    if (auto it = backendTypeToBackend_.find(backendType);
+        it != backendTypeToBackend_.end()) {
+      const auto& existingBackend = it->second;
       deviceTypeToBackend_[deviceType] = existingBackend;
-      TORCH_CHECK(
-          existingBackend->getBoundDeviceId() ==
-          (*backend)->getBoundDeviceId());
+      // Python's binding defaults backend to None; skip the check when absent.
+      if (backend.has_value()) {
+        TORCH_CHECK(
+            existingBackend->getBoundDeviceId() ==
+            (*backend)->getBoundDeviceId());
+      }
     } else {
       // check if backend has value
       if (backend.has_value()) {
@@ -942,6 +1094,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return bound_device_id_;
   }
 
+  c10::intrusive_ptr<c10d::Store> getStore() const {
+    return store_;
+  }
+
   void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
@@ -949,12 +1105,138 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     bound_device_id_ = device;
   }
 
+  bool getUsePgForSymmMemRendezvous() const {
+    return getDefaultBackend()->getUsePgForSymmMemRendezvous();
+  }
+
+  void setUsePgForSymmMemRendezvous(bool value) {
+    getDefaultBackend()->setUsePgForSymmMemRendezvous(value);
+  }
+
+  // Fault Tolerance / Reconfigure API. Forwards to the default backend; see
+  // Backend.hpp for semantics.
+  virtual bool supportsReconfigure() const {
+    TORCH_CHECK(
+        !hasMultipleBackends(),
+        "ProcessGroup reconfigure APIs do not support process groups with multiple backends.");
+    return getDefaultBackend()->supportsReconfigure();
+  }
+
+  virtual ReconfigureHandle get_reconfigure_handle() const {
+    TORCH_CHECK(
+        !hasMultipleBackends(),
+        "ProcessGroup reconfigure APIs do not support process groups with multiple backends.");
+    return getDefaultBackend()->get_reconfigure_handle();
+  }
+
+  virtual c10::intrusive_ptr<Work> reconfigure(const ReconfigureOptions& opts) {
+    TORCH_CHECK(
+        !hasMultipleBackends(),
+        "ProcessGroup reconfigure APIs do not support process groups with multiple backends.");
+    return getDefaultBackend()->reconfigure(opts);
+  }
+
+  // Window & One-sided (RMA) API. Forwards to the default backend; see
+  // Backend.hpp and Window.hpp for semantics.
+  virtual bool supportsWindow() const {
+    return getDefaultBackend()->supportsWindow();
+  }
+
+  virtual c10::intrusive_ptr<Window> new_window(
+      const std::optional<at::Tensor>& tensor = std::nullopt) {
+    return getDefaultBackend()->new_window(tensor);
+  }
+
+  // Hook API. Abort hooks forward to the default backend; pre/post collective
+  // hooks are registered on the process group and fire around every collective
+  // issued through it (see firePreHook / firePostHook). Hooks are keyed by an
+  // opaque hook_id so they can be individually unregistered. Registration is
+  // expected to happen at setup time, not concurrently with collectives. See
+  // Hooks.hpp.
+  virtual bool supportsAbortHooks() const {
+    return getDefaultBackend()->supportsAbortHooks();
+  }
+
+  virtual void registerAbortHook(int64_t hook_id, AbortHook hook) {
+    getDefaultBackend()->registerAbortHook(hook_id, std::move(hook));
+  }
+
+  virtual void unregisterAbortHook(int64_t hook_id) {
+    getDefaultBackend()->unregisterAbortHook(hook_id);
+  }
+
+  // Completion hooks forward to the default backend for the same reason abort
+  // hooks do: completion is detected inside the backend, not by the dispatcher
+  // kernels that fire the pre/post hooks below.
+  virtual bool supportsCompletionHooks() const {
+    return getDefaultBackend()->supportsCompletionHooks();
+  }
+
+  virtual void registerCompletionHook(int64_t hook_id, CompletionHook hook) {
+    getDefaultBackend()->registerCompletionHook(hook_id, std::move(hook));
+  }
+
+  virtual void unregisterCompletionHook(int64_t hook_id) {
+    getDefaultBackend()->unregisterCompletionHook(hook_id);
+  }
+
+  virtual void registerPreHook(int64_t hook_id, PreHook hook) {
+    preHooks_[hook_id] = std::move(hook);
+  }
+
+  virtual void unregisterPreHook(int64_t hook_id) {
+    preHooks_.erase(hook_id);
+  }
+
+  virtual void registerPostHook(int64_t hook_id, PostHook hook) {
+    postHooks_[hook_id] = std::move(hook);
+  }
+
+  virtual void unregisterPostHook(int64_t hook_id) {
+    postHooks_.erase(hook_id);
+  }
+
+  // This creates a new subgroup using the specified ranks.
+  // The current rank must be included in the list of new_ranks.
+  virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
+      const std::vector<int>& ranks,
+      const std::optional<std::chrono::milliseconds>& timeout,
+      const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
+      const std::optional<std::string>& name,
+      const std::optional<std::string>& groupDesc,
+      const std::optional<std::vector<c10::Device>>& devices = std::nullopt);
+
+  // This creates a new subgroup using the specified ranks.
+  // The current rank must be included in the list of new_ranks.
+  virtual c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
+      const c10::intrusive_ptr<Store>& store,
+      const MergeOptions& opts,
+      const int& size);
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
+  bool hasMultipleBackends() const {
+    if (backendTypeToBackend_.size() > 1) {
+      return true;
+    }
+    if (deviceTypeToBackendType_.empty()) {
+      return false;
+    }
+    const auto firstBackendType = deviceTypeToBackendType_.begin()->second;
+    for (const auto& pair : deviceTypeToBackendType_) {
+      if (pair.second != firstBackendType) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   c10::intrusive_ptr<c10d::Store> store_;
+  // Fallback rank/size used only when there is no default backend; the default
+  // backend is otherwise the source of truth (see getRank/getSize).
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int rank_;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
@@ -962,6 +1244,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   BackendType backendType_;
   std::string pg_desc_;
+  int64_t splitCounter_{0};
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
@@ -969,13 +1252,151 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;
-  std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
+  // This mapping is ordered, as splitGroup must call split on the underlying
+  // backends in a consistent order.
+  std::map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
       backendTypeToBackend_;
 
   std::optional<at::Device> bound_device_id_;
+
+  // Pre/post collective hooks, keyed by an opaque hook_id, fired around every
+  // collective. They are invoked from the dispatcher kernels (Ops.cpp) rather
+  // than here, so they fire wherever a c10d op is dispatched -- including
+  // replay of a captured graph that re-dispatches the op directly. See
+  // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
+  // observe another hook's state (or be observed by it) picks its id instead of
+  // depending on an unspecified traversal.
+  std::map<int64_t, PreHook> preHooks_;
+  std::map<int64_t, PostHook> postHooks_;
+  // Monotonic id correlating a pre-hook call with its matching post-hook call.
+  std::atomic<int64_t> hookOpIdCounter_{0};
+
+  static std::vector<at::Tensor> flattenTensorLists(
+      const std::vector<std::vector<at::Tensor>>& tensorLists) {
+    std::vector<at::Tensor> flat;
+    for (const auto& tensors : tensorLists) {
+      flat.insert(flat.end(), tensors.begin(), tensors.end());
+    }
+    return flat;
+  }
+
+  int64_t firePreHookImpl(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      std::vector<at::Tensor> input_tensors,
+      std::vector<at::Tensor> output_tensors) {
+    int64_t op_id = hookOpIdCounter_++;
+    if (!preHooks_.empty()) {
+      PreHookArgs args{
+          name,
+          async_op,
+          std::move(input_tensors),
+          std::move(output_tensors),
+          root,
+          op_id};
+      for (auto& entry : preHooks_) {
+        entry.second(args);
+      }
+    }
+    return op_id;
+  }
+
+ public:
+  // Fire registered pre-hooks for a collective and return the op_id assigned to
+  // it (0 when no hooks are registered). The tensor lists are only copied /
+  // flattened into the hook args when a pre-hook is registered, so the common
+  // no-hook path adds no work. Overloaded for the various collective tensor
+  // shapes (flat, list-of-lists, single tensor, none). Invoked from the
+  // dispatcher kernels in Ops.cpp; see firePostHook for the matching post-hook.
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const std::vector<at::Tensor>& input_tensors,
+      const std::vector<at::Tensor>& output_tensors = {}) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(name, async_op, root, input_tensors, output_tensors);
+  }
+
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const std::vector<at::Tensor>& input_tensors,
+      const std::vector<std::vector<at::Tensor>>& output_tensor_lists) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(
+        name,
+        async_op,
+        root,
+        input_tensors,
+        flattenTensorLists(output_tensor_lists));
+  }
+
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const std::vector<std::vector<at::Tensor>>& input_tensor_lists,
+      const std::vector<at::Tensor>& output_tensors) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(
+        name,
+        async_op,
+        root,
+        flattenTensorLists(input_tensor_lists),
+        output_tensors);
+  }
+
+  int64_t firePreHook(
+      HookOpName name,
+      bool async_op,
+      int64_t root,
+      const at::Tensor& input_tensor,
+      const at::Tensor& output_tensor) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(
+        name, async_op, root, {input_tensor}, {output_tensor});
+  }
+
+  int64_t firePreHook(HookOpName name, bool async_op, int64_t root) {
+    if (preHooks_.empty() && postHooks_.empty()) {
+      return 0;
+    }
+    return firePreHookImpl(name, async_op, root, {}, {});
+  }
+
+  // Fire registered post-hooks for a collective, correlated with the matching
+  // pre-hook via op_id.
+  void firePostHook(
+      HookOpName name,
+      bool async_op,
+      int64_t op_id,
+      const c10::intrusive_ptr<Work>& work) {
+    if (postHooks_.empty()) {
+      return;
+    }
+    PostHookArgs args{name, async_op, work, op_id};
+    for (auto& entry : postHooks_) {
+      entry.second(args);
+    }
+  }
 };
+
+// Thread local functions for managing the currently active process group.
+TORCH_API c10::intrusive_ptr<ProcessGroup>& currentProcessGroup();
+TORCH_API void setProcessGroup(c10::intrusive_ptr<ProcessGroup> processGroup);
 
 } // namespace c10d

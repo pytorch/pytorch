@@ -116,7 +116,7 @@ static std::vector<std::string> _single_input_general_shape_aten_funcs = {
     "__getitem__",
 };
 
-// Theses are prim::CallFunctions for ops that doesn't require observation and
+// These are prim::CallFunctions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
 // TODO: [Need verify] looks like we can quantize simple functionals that just
@@ -136,7 +136,7 @@ static std::vector<std::string> _single_input_general_value_call_funcs = {
     "leaky_relu",
 };
 
-// Theses are aten functions for ops that doesn't require observation and
+// These are aten functions for ops that doesn't require observation and
 // have a single input Tensor
 // Also these ops do computation on the value of Tensor
 // e.g. `aten::avg_pool2d(%input_tensor, ...)`
@@ -281,7 +281,7 @@ static bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      // ate::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
+      // aten::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
       // %mode_enum, %sparse, %per_sample_weights, %include_last_offset)
       AtenFuncArgs(
           {{"conv1d", 1},

@@ -30,13 +30,13 @@ static constexpr const char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
 //   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
-//   2. Accumurate the guard to RPC context.
+//   2. Accumulate the guard to RPC context.
 //   3. Call post hooks of the original AccumulateGrad.
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
  public:
   DistAccumulateGradCaptureHook(
-      std::shared_ptr<AccumulateGrad> accumulateGrad,
+      c10::intrusive_ptr<AccumulateGrad> accumulateGrad,
       ContextPtr autogradContext)
       : accumulateGrad_(std::move(accumulateGrad)),
         autogradContext_(std::move(autogradContext)) {}
@@ -65,11 +65,11 @@ class DistAccumulateGradCaptureHook
     for (const auto& hook : accumulateGrad_->post_hooks()) {
       (*hook)(kEmptyOutput, inputGrads);
     }
-    return inputGrads[0];
+    return std::move(inputGrads[0]);
   }
 
  private:
-  std::shared_ptr<AccumulateGrad> accumulateGrad_;
+  c10::intrusive_ptr<AccumulateGrad> accumulateGrad_;
   ContextPtr autogradContext_;
 };
 
@@ -98,7 +98,12 @@ void DistEngine::globalCpuThread(
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
       for (const auto i : c10::irange(variables.size())) {
-        inputs.add(i, std::move(variables[i]), std::nullopt, std::nullopt);
+        inputs.add(
+            i,
+            std::move(variables[i]),
+            std::nullopt,
+            std::nullopt,
+            graphRoot.get());
       }
       execute_graph_task_until_ready_queue_empty(
           /*node_task*/ NodeTask(graphTask, graphRoot, std::move(inputs)),
@@ -178,7 +183,7 @@ void DistEngine::computeDependencies(
     const ContextPtr& autogradContext,
     const edge_list& rootEdges,
     const variable_list& grads,
-    const std::shared_ptr<Node>& graphRoot,
+    const c10::intrusive_ptr<Node>& graphRoot,
     edge_list& outputEdges,
     bool retainGraph) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
@@ -319,8 +324,8 @@ void DistEngine::computeDependencies(
           // support. See NOTE [Deprecated capture hooks] for more context.
           capture.DO_NOT_USE_DEPRECATED_register_capture_hook(
               std::make_unique<DistAccumulateGradCaptureHook>(
-                  std::dynamic_pointer_cast<AccumulateGrad>(
-                      accumulateGradFn->shared_from_this()),
+                  c10::static_intrusive_pointer_cast<AccumulateGrad>(
+                      accumulateGradFn->getptr()),
                   autogradContext));
         }
       }
@@ -400,7 +405,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
 c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
     runEngineAndAccumulateGradients(
         const ContextPtr& autogradContext,
-        const std::shared_ptr<Node>& graphRoot,
+        const c10::intrusive_ptr<Node>& graphRoot,
         const edge_list& outputEdges,
         bool incrementOutstandingTasks) {
   // Cleanup previous state for outstanding RPCs. Outstanding RPCs could be
@@ -443,7 +448,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
       const variable_list& grads = futureGrads.constValue().toTensorVector();
       TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
       accumulateGradFuture->markCompleted(c10::IValue());
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       accumulateGradFuture->setErrorIfNeeded(std::current_exception());
     }
   });
@@ -453,7 +458,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
 
 c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
     const ContextPtr& autogradContext,
-    const std::shared_ptr<SendRpcBackward>& sendFunction,
+    const c10::intrusive_ptr<SendRpcBackward>& sendFunction,
     bool retainGraph) {
   // Typically the local autograd engine ensures stream synchronizations between
   // nodes in the graph. However, for distributed autograd the sendFunction
@@ -478,7 +483,8 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
       initializedContextIds_.end()) {
     edge_list outputEdges;
     // Pass in a dummy graphRoot since all send functions are the roots.
-    auto dummyRoot = std::make_shared<GraphRoot>(edge_list(), variable_list());
+    auto dummyRoot =
+        c10::make_intrusive<GraphRoot>(edge_list(), variable_list());
     computeDependencies(
         autogradContext, {}, {}, dummyRoot, outputEdges, retainGraph);
 
@@ -522,7 +528,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
                 // Perform cleanup at the end of the backward pass (before
                 // we mark the future as completed).
                 DistEngine::getInstance().cleanupBackwardPass(autogradContext);
-              } catch (std::exception& e) {
+              } catch (std::exception&) {
                 callbackFuture->setErrorIfNeeded(std::current_exception());
                 return;
               }
@@ -534,7 +540,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
                 callbackFuture->setError(rpcFuture.exception_ptr());
               }
             });
-          } catch (std::exception& e) {
+          } catch (std::exception&) {
             callbackFuture->setErrorIfNeeded(std::current_exception());
           }
         });
@@ -569,8 +575,8 @@ void DistEngine::execute(
   variable_list grads;
   validateRootsAndRetrieveEdges(roots, rootEdges, grads);
 
-  std::shared_ptr<Node> graphRoot =
-      std::make_shared<GraphRoot>(rootEdges, grads);
+  c10::intrusive_ptr<Node> graphRoot =
+      c10::make_intrusive<GraphRoot>(rootEdges, grads);
   edge_list outputEdges;
   // Compute dependencies locally, starting from all roots and all 'send'
   // functions.

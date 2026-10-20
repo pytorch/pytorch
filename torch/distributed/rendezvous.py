@@ -9,9 +9,8 @@ except ImportError as e:
 import numbers
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import timedelta
-from typing import Callable, Optional
 
 from torch.distributed import FileStore, Store, TCPStore
 
@@ -71,7 +70,7 @@ def _get_use_libuv_from_query_dict(query_dict: dict[str, str]) -> bool:
     return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
 
-def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):
+def _rendezvous_helper(url: str, rank: int, world_size_opt: int | None, **kwargs):
     result = urlparse(url)
     if world_size_opt is None:
         world_size = -1
@@ -83,9 +82,10 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         world_size = world_size_opt
     if rank != -1 or world_size != -1 or world_size_opt is None:
         query_dict = _query_to_dict(result.query)
-        assert "rank" not in query_dict and "world_size" not in query_dict, (
-            f"The url: {url} has node-specific arguments(rank, world_size) already."
-        )
+        if "rank" in query_dict or "world_size" in query_dict:
+            raise AssertionError(
+                f"The url: {url} has node-specific arguments(rank, world_size) already."
+            )
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
@@ -93,6 +93,7 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         result = result._replace(
             query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
         )
+        # pyrefly: ignore [bad-assignment]
         url = urlunparse(result)
 
     if result.scheme not in _rendezvous_handlers:
@@ -158,11 +159,27 @@ def _torchelastic_use_agent_store() -> bool:
     return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
 
 
+def _agent_store_serves(hostname, port) -> bool:
+    """Whether the elastic agent is the one serving a store at ``hostname:port``.
+
+    ``TORCHELASTIC_USE_AGENT_STORE`` only promises a server at the agent's own
+    ``MASTER_ADDR:MASTER_PORT``, which the agent exports alongside it. Honoring
+    the flag for any other endpoint makes every rank a client of a store nobody
+    hosts. ``TCPStore``'s C++ constructor applies the same address check before
+    it forgives a failed server bind.
+    """
+    return (
+        _torchelastic_use_agent_store()
+        and os.environ.get("MASTER_ADDR") == hostname
+        and os.environ.get("MASTER_PORT") == str(port)
+    )
+
+
 def _create_c10d_store(
     hostname, port, rank, world_size, timeout, use_libuv=True
 ) -> Store:
     """
-    Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
+    Smartly creates a c10d Store object on ``rank`` based on whether we need to reuse agent store.
 
     The TCPStore server is assumed to be hosted
     on ``hostname:port``.
@@ -170,21 +187,21 @@ def _create_c10d_store(
     By default, the TCPStore server uses the asynchronous implementation
     ``LibUVStoreDaemon`` which utilizes libuv.
 
-    If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
-    the agent leader (node rank 0) hosts the TCPStore server (for which the
-    endpoint is specified by the given ``hostname:port``). Hence
+    If ``torchelastic_use_agent_store()`` is ``True`` *and* ``hostname:port`` is
+    the agent's own ``MASTER_ADDR:MASTER_PORT``, then it is assumed that the
+    agent leader (node rank 0) hosts the TCPStore server there. Hence
     ALL ranks will create and return a TCPStore client (e.g. ``start_daemon=False``).
 
-    If ``torchelastic_use_agent_store()`` is ``False``, then rank 0 will host
-    the TCPStore (with multi-tenancy) and it is assumed that rank 0's hostname
-    and port are correctly passed via ``hostname`` and ``port``. All
-    non-zero ranks will create and return a TCPStore client.
+    Otherwise rank 0 will host the TCPStore (with multi-tenancy) and it is
+    assumed that rank 0's hostname and port are correctly passed via
+    ``hostname`` and ``port``. All non-zero ranks will create and return a
+    TCPStore client.
     """
     # check if port is uint16_t
     if not 0 <= port < 2**16:
         raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
-    if _torchelastic_use_agent_store():
+    if _agent_store_serves(hostname, port):
         # We create a new TCPStore for every retry so no need to add prefix for each attempt.
         return TCPStore(
             host_name=hostname,
@@ -213,7 +230,7 @@ def _tcp_rendezvous_handler(
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
-    if not result.port:
+    if result.port is None:
         raise _error("port number missing")
     query_dict = _query_to_dict(result.query)
     if "rank" not in query_dict:
@@ -225,7 +242,8 @@ def _tcp_rendezvous_handler(
     world_size = int(query_dict["world_size"])
     use_libuv = _get_use_libuv_from_query_dict(query_dict)
 
-    assert result.hostname is not None
+    if result.hostname is None:
+        raise AssertionError("hostname cannot be None")
 
     store = _create_c10d_store(
         result.hostname, result.port, rank, world_size, timeout, use_libuv

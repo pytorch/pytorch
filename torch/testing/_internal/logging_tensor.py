@@ -2,37 +2,17 @@
 
 import torch
 from torch.utils._pytree import tree_map
-from typing import Optional
 from collections.abc import Iterator
 import logging
 import contextlib
 import itertools
+from torch.utils._dtype_abbrs import dtype_abbrs as _dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
 logger = logging.getLogger("LoggingTensor")
-
-_dtype_abbrs = {
-    torch.bfloat16: "bf16",
-    torch.float64: "f64",
-    torch.float32: "f32",
-    torch.float16: "f16",
-    torch.complex32: "c32",
-    torch.complex64: "c64",
-    torch.complex128: "c128",
-    torch.int8: "i8",
-    torch.int16: "i16",
-    torch.int32: "i32",
-    torch.int64: "i64",
-    torch.bool: "b8",
-    torch.uint8: "u8",
-    torch.float8_e4m3fn: "f8e4m3fn",
-    torch.float8_e5m2: "f8e5m2",
-    torch.float8_e4m3fnuz: "f8e4m3fnuz",
-    torch.float8_e5m2fnuz: "f8e5m2fnuz",
-}
 
 # How the chain of calls works for LoggingTensor:
 # 1. Call torch.sin
@@ -61,7 +41,7 @@ class LoggingTensor(torch.Tensor):
         # The wrapping tensor (LoggingTensor) shouldn't hold any
         # memory for the class in question, but it should still
         # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls, elem.size(),
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing
@@ -85,7 +65,10 @@ class LoggingTensor(torch.Tensor):
 
         with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)  # noqa: G004
+        logging.getLogger("LoggingTensor").info(
+            f"{func.__module__}.{func.__name__}",  # noqa: G004
+            extra={"lt_args": args, "lt_kwargs": kwargs, "lt_rs": rs},
+        )
         return rs
 
 class LoggingTensorMode(TorchDispatchMode):
@@ -93,7 +76,10 @@ class LoggingTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         rs = func(*args, **kwargs)
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)  # noqa: G004
+        logging.getLogger("LoggingTensor").info(
+            f"{func.__module__}.{func.__name__}",  # noqa: G004
+            extra={"lt_args": args, "lt_kwargs": kwargs, "lt_rs": rs},
+        )
         return rs
 
 class LoggingTensorReentrant(LoggingTensor):
@@ -103,7 +89,7 @@ class LoggingTensorReentrant(LoggingTensor):
 class LoggingTensorHandler(logging.Handler):
     def __init__(
             self, log_list: list[str], use_shortid_for_all_tensors: bool,
-            with_type: bool, tracebacks_list: Optional[list]) -> None:
+            with_type: bool, tracebacks_list: list | None) -> None:
         logging.Handler.__init__(self)
         self.log_list = log_list
         self.use_shortid_for_all_tensors = use_shortid_for_all_tensors
@@ -132,17 +118,17 @@ class LoggingTensorHandler(logging.Handler):
     def emit(self, record):
         fmt_args = ", ".join(
             itertools.chain(
-                (str(tree_map(self._fmt, a)) for a in record.args[0]),
-                (f"{k}={str(tree_map(self._fmt, v))}" for k, v in record.args[1].items()),
+                (str(tree_map(self._fmt, a)) for a in record.lt_args),
+                (f"{k}={str(tree_map(self._fmt, v))}" for k, v in record.lt_kwargs.items()),
             )
         )
-        fmt_rets = tree_map(functools.partial(self._fmt, with_type=True), record.args[2])
+        fmt_rets = tree_map(functools.partial(self._fmt, with_type=True), record.lt_rs)
         self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
         if self.tracebacks_list is not None:
             self.tracebacks_list.append(record.traceback)
 
 def log_input(name: str, var: object) -> None:
-    logger.info("input", (name,), {}, var)  # noqa: PLE1205
+    logger.info("input", extra={"lt_args": (name,), "lt_kwargs": {}, "lt_rs": var})
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):

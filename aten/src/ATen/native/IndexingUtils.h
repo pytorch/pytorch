@@ -5,6 +5,13 @@
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nonzero.h>
+#endif
+
 namespace at::native {
 
 [[noreturn]]
@@ -15,7 +22,8 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 
 [[maybe_unused]] static std::vector<Tensor> expandTensors(
     const Tensor& self,
-    IOptTensorListRef indices) {
+    IOptTensorListRef indices,
+    bool ensure_same_device = false) {
   // If indices come in as ByteTensor or BoolTensor (masks), expand them into
   // the equivalent indexing by LongTensors
   std::vector<Tensor> result;
@@ -38,10 +46,19 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
           }
         }
         // Replace with nonzeros
-        auto nonzero = index.nonzero();
+        at::Tensor nonzero;
+        if (ensure_same_device && index.device() != self.device()) {
+          bool non_blocking = index.is_cpu() && self.device().is_cuda();
+          auto out = at::empty({0}, index.options().dtype(kLong).pinned_memory(non_blocking));
+          nonzero = at::nonzero_out(out, index).to(self.device(), non_blocking);
+        } else {
+          nonzero = index.nonzero();
+        }
         for (const auto j : c10::irange(index.dim())) {
           result.emplace_back(nonzero.select(1, j));
         }
+      } else if (ensure_same_device && index.device() != self.device()) {
+        result.emplace_back(index.to(self.device()));
       } else {
         result.emplace_back(index);
       }
@@ -92,6 +109,9 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };
   auto isNull = [](const Tensor & tensor){ return !tensor.defined(); };
   auto start = std::find_if(tl.begin(), tl.end(), isDefined);
+  if (start == tl.end()) {
+    return true;
+  }
   auto stop = std::find_if(tl.rbegin(), tl.rend(), isDefined);
   auto it = std::find_if(start, stop.base(), isNull);
   return it == stop.base();
@@ -109,6 +129,7 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
+  transposedIndices.reserve(self.dim());
   for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);
@@ -131,6 +152,7 @@ transposeToFrontAndInvPerm(const Tensor& self, TensorList indices) {
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
   invPerm.resize(self.dim());
+  transposedIndices.reserve(self.dim());
   for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);

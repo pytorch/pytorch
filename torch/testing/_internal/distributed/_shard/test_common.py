@@ -2,7 +2,6 @@
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
@@ -13,8 +12,8 @@ class SimpleMegatronLM(nn.Module):
         self.gelu = nn.GELU()
         self.fc2 = nn.Linear(*linear_size[1], dtype=dtype)
         if rank is not None:
-            self.fc1.cuda(rank)
-            self.fc2.cuda(rank)
+            self.fc1.to(torch.device(rank))
+            self.fc2.to(torch.device(rank))
 
     def forward(self, inp):
         return self.fc2(self.gelu(self.fc1(inp)))

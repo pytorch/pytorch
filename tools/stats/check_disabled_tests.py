@@ -173,7 +173,7 @@ def save_results(
     all_tests: dict[str, dict[str, int]],
 ) -> None:
     """
-    Save the result to S3, which then gets put into the HUD backened database
+    Save the result to S3, which then gets put into the HUD backend database
     """
     should_be_enabled_tests = {
         name: stats
@@ -209,7 +209,7 @@ def save_results(
 
     # Log the results
     print(f"The following {len(should_be_enabled_tests)} tests should be re-enabled:")
-    for test_id, stats in should_be_enabled_tests.items():
+    for test_id in should_be_enabled_tests:
         disabled_test_name, name, classname, filename = get_disabled_test_name(test_id)
         print(f"  {disabled_test_name} from {filename}")
 

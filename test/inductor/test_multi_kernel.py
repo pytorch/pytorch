@@ -1,14 +1,17 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import os
 import re
 import unittest
+from types import SimpleNamespace
 
 import torch
 from torch import nn
 from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.runtime.benchmarking import set_gpu_benchmark_lock_context
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -17,8 +20,14 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_triton,
+)
 
 
 class TransformerSnippet(nn.Module):
@@ -44,6 +53,16 @@ def _contains_multi_kernel_code(wrapper_code: str):
     )
 
 
+def _contains_size_hint_multi_kernel_code(wrapper_code: str):
+    return (
+        re.search(
+            r"multi_kernel_[^ ]* = async_compile.size_hint_multi_kernel[(]",
+            wrapper_code,
+        )
+        is not None
+    )
+
+
 def make_cpp_wrapper_test(orig_test, **extra_args):
     """
     Wrap an existing test into a new test with cpp-wrapper enabled.
@@ -54,7 +73,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     """
 
     @config.patch("cpp_wrapper", True)
-    @skipIfXpu(msg="cpp wrapper doesn't currently work on the XPU stack")
+    @config.patch("triton.autotune_at_compile_time", True)
     def fn(self):
         # The same kernel may have been compiled by previous tests with
         # cpp_wrapper disabled. Clear the cache so we go ahead to re-compile
@@ -71,10 +90,96 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
     {
         "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),
         "benchmark_kernel": True,
+        "multi_kernel_hints": [64, 256, 4096],
     }
 )
 @instantiate_parametrized_tests
 class MultiKernelTest(TestCase):
+    @staticmethod
+    def _benchmark_lock_call(events):
+        def kernel(index):
+            return SimpleNamespace(
+                clone_args=lambda *args, **kwargs: (args, kwargs),
+                run=lambda *args, **kwargs: events.append(f"run_{index}"),
+                device_props=SimpleNamespace(type="cuda"),
+            )
+
+        multi_kernel_call = object.__new__(MultiKernelCall)
+        multi_kernel_call._kernels = [kernel(0), kernel(1)]
+        multi_kernel_call.arg_index = {
+            0: [slice(0, 1)],
+            1: [slice(0, 1)],
+        }
+        return multi_kernel_call
+
+    def test_benchmark_sub_kernels_holds_gpu_lock_across_candidates(self):
+        events = []
+        multi_kernel_call = self._benchmark_lock_call(events)
+
+        @contextlib.contextmanager
+        def benchmark_lock():
+            events.append("lock_enter")
+            try:
+                yield
+            finally:
+                events.append("lock_exit")
+
+        def benchmark(fn, **kwargs):
+            index = len([event for event in events if event.startswith("benchmark_")])
+            events.append(f"benchmark_{index}")
+            fn()
+            return 2.0 - index
+
+        previous = set_gpu_benchmark_lock_context(benchmark_lock)
+        try:
+            with unittest.mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+                side_effect=benchmark,
+            ):
+                timings = multi_kernel_call.benchmark_sub_kernels("arg")
+        finally:
+            set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(timings, [2.0, 1.0])
+        self.assertEqual(
+            events,
+            [
+                "lock_enter",
+                "benchmark_0",
+                "run_0",
+                "benchmark_1",
+                "run_1",
+                "lock_exit",
+            ],
+        )
+
+    def test_benchmark_sub_kernels_releases_gpu_lock_on_failure(self):
+        events = []
+        multi_kernel_call = self._benchmark_lock_call(events)
+
+        @contextlib.contextmanager
+        def benchmark_lock():
+            events.append("lock_enter")
+            try:
+                yield
+            finally:
+                events.append("lock_exit")
+
+        previous = set_gpu_benchmark_lock_context(benchmark_lock)
+        try:
+            with (
+                unittest.mock.patch(
+                    "torch._inductor.codegen.multi_kernel.benchmarker.benchmark",
+                    side_effect=RuntimeError("benchmark failed"),
+                ),
+                self.assertRaisesRegex(RuntimeError, "benchmark failed"),
+            ):
+                multi_kernel_call.benchmark_sub_kernels("arg")
+        finally:
+            set_gpu_benchmark_lock_context(previous)
+
+        self.assertEqual(events, ["lock_enter", "lock_exit"])
+
     def test_softmax(self, expect_multi_kernel=True):
         x = torch.rand(2, 1024).to(GPU_TYPE)
         ref = torch.softmax(x, -1)
@@ -90,6 +195,66 @@ class MultiKernelTest(TestCase):
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+
+    @requires_triton()
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
+    def test_triton_gemm(self):
+        def fn(x, y):
+            return x @ y
+
+        compiled_fn = torch.compile(
+            fn,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        x = torch.randn(4096, 4096, device=GPU_TYPE)
+        y = torch.randn(4096, 4096, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        act, wrapper_code = run_and_get_code(compiled_fn, x, y)
+        ref = fn(x, y)
+
+        # wrapper_code will contains 2 entries if cpp_wrapper=True.
+        # One for the first pass and one for the second pass.
+        # We mainly care about the wrapper for the final pass here.
+        wrapper_code = wrapper_code[-1]
+        # fp32 accumulation-order divergence between the triton template and
+        # hipblasLt at K=4096; measured and derived in issue #196494.
+        rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
+        self.assertEqual(ref, act, **rocm_tol)
+        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
+
+    @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
+    @requires_triton()
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    def test_triton_relu_fused_gemm(self):
+        def fn(x, y):
+            return (x @ y).relu()
+
+        compiled_fn = torch.compile(
+            fn,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        x = torch.randn(4096, 4096, device=GPU_TYPE)
+        y = torch.randn(4096, 4096, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        act, wrapper_code = run_and_get_code(compiled_fn, x, y)
+        ref = fn(x, y)
+
+        # wrapper_code will contains 2 entries if cpp_wrapper=True.
+        # One for the first pass and one for the second pass.
+        # We mainly care about the wrapper for the final pass here.
+        wrapper_code = wrapper_code[-1]
+        # fp32 accumulation-order divergence between the triton template and
+        # hipblasLt at K=4096; measured and derived in issue #196494.
+        rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
+        self.assertEqual(ref, act, **rocm_tol)
+        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
@@ -115,12 +280,13 @@ class MultiKernelTest(TestCase):
             picked_kernel = self.picked_kernel
             return out
 
-        with unittest.mock.patch.object(
-            MultiKernelCall, "run", mock_run
-        ), unittest.mock.patch.object(
-            MultiKernelCall,
-            "benchmark_sub_kernels",
-            lambda *args, **kwargs: mock_latency,
+        with (
+            unittest.mock.patch.object(MultiKernelCall, "run", mock_run),
+            unittest.mock.patch.object(
+                MultiKernelCall,
+                "benchmark_sub_kernels",
+                lambda *args, **kwargs: mock_latency,
+            ),
         ):
             torch.compile(f)(x)
         self.assertEqual(picked_kernel, force_kernel)
@@ -190,8 +356,8 @@ class MultiKernelTest(TestCase):
         once for input and once for output. They are ruled out as in-out argument because
         they are considered as graph inputs.
 
-        Multi-kernel previously assumes that we never pass the same argument mutli times
-        for a kernel. No mater if we change inductor behavior to assure that, it's better
+        Multi-kernel previously assumes that we never pass the same argument multi times
+        for a kernel. No matter if we change inductor behavior to assure that, it's better
         to make multi-kernel being able to handle those cases.
         """
         bn = nn.BatchNorm2d(3).to(GPU_TYPE)
@@ -231,7 +397,7 @@ class MultiKernelTest(TestCase):
 
     def test_reduction_scratch_buffer(self, force_multi_kernel=1):
         """
-        The explicited realized buffer in the test function will be passed in
+        The explicitly realized buffer in the test function will be passed in
         as a scratch buffer for the non-persistent reduction kernel but
         can be skipped for the persistent reduction kernel.
 

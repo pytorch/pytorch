@@ -5,6 +5,9 @@
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
+// At the moment caching allocator is only exposed to mobile cpu allocator.
+#ifdef C10_MOBILE
+
 TEST(CPUCachingAllocatorTest, check_alloc_free) {
   c10::CPUCachingAllocator caching_allocator;
   c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
@@ -41,10 +44,9 @@ TEST(CPUCachingAllocatorTest, check_alloc_inside_free_outside) {
 }
 
 int main(int argc, char* argv[]) {
-// At the moment caching allocator is only exposed to mobile cpu allocator.
-#ifdef C10_MOBILE
   ::testing::InitGoogleTest(&argc, argv);
   at::manual_seed(42);
   return RUN_ALL_TESTS();
-#endif /* C10_Mobile */
 }
+
+#endif /* C10_Mobile */

@@ -13,7 +13,8 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
+from collections.abc import Callable, Mapping
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -46,6 +47,12 @@ class GuardFilterEntry:
     derived_guard_types: tuple[str, ...]
     is_global: bool
     orig_guard: Guard
+    # Snapshot of orig_guard.code_list (the rendered checks, as GuardFn's
+    # code_parts) as of the inspection build. A later build_guards over the
+    # kept guards rebinds that attribute, so reading it off orig_guard later
+    # yields whatever the last build that included the guard emitted; a
+    # dropped guard is never rebuilt, so for it the snapshot is only defensive.
+    code_parts: tuple[str, ...] = ()
 
 
 class GuardFn(Protocol):
@@ -54,9 +61,9 @@ class GuardFn(Protocol):
     code_parts: list[str]
     verbose_code_parts: list[str]
     global_scope: dict[str, object]
-    guard_fail_fn: Optional[Callable[[GuardFail], None]]
-    cache_entry: Optional[CacheEntry]
-    extra_state: Optional[ExtraState]
+    guard_fail_fn: Callable[[GuardFail], None] | None
+    cache_entry: CacheEntry | None
+    extra_state: ExtraState | None
 
     # maps locals of user function to bool
     def __call__(self, f_locals: dict[str, object]) -> bool: ...
@@ -75,13 +82,14 @@ class ConvertFrameReturn:
     # default return is no compiled code (i.e. `return None`):
     # strategy is to skip non-recursively, for all future intercepted frames too
 
-    # eval fram execution strategy for this frame
+    # eval frame execution strategy for this frame
     frame_exec_strategy: FrameExecStrategy = dataclasses.field(
         default_factory=lambda: FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
     # also apply frame_exec strategy to future frames with same code
     apply_to_code: bool = True
-    guarded_code: Optional[GuardedCode] = None
+    guarded_code: GuardedCode | None = None
+    skip_reason: str | None = None
 
 
 def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
@@ -95,12 +103,20 @@ class DynamoCallbackFn(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: Optional[CacheEntry],
+        cache_entry: CacheEntry | None,
         frame_state: FrameState,
     ) -> ConvertFrameReturn: ...
 
 
-DynamoCallback = Union[DynamoCallbackFn, None, bool]
+DynamoCallback = DynamoCallbackFn | None | bool
+
+
+CompilerConfig = Mapping[str, Any]
+
+
+@runtime_checkable
+class CompilerConfigProvider(Protocol):
+    def get_compiler_config(self) -> CompilerConfig | None: ...
 
 
 class DynamoGuardHook(Protocol):
@@ -112,6 +128,13 @@ class DynamoGuardHook(Protocol):
         index: int,
         last: bool,
     ) -> None: ...
+
+
+class DynamoGuardCompleteHook(Protocol):
+    def __call__(
+        self,
+        cache_hit: bool,
+    ) -> bool: ...
 
 
 class ProfilerStartHook(Protocol):
@@ -129,4 +152,4 @@ class ProfilerEndHook(Protocol):
 class BytecodeHook(Protocol):
     def __call__(
         self, code: types.CodeType, new_code: types.CodeType
-    ) -> Optional[types.CodeType]: ...
+    ) -> types.CodeType | None: ...

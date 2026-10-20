@@ -1,0 +1,17 @@
+version: 1
+paths:
+include:
+  - "**/*.py"
+exclude:
+  - ".*"
+  - ".*/**"
+  - "**/.*/**"
+  - "**/.*"
+  - "torch/distributed/nccl4py_backend.py"
+  - "**/_*/**"
+  - "**/_*.py"
+  - "**/test/**"
+  - "**/benchmarks/**"
+  - "**/test_*.py"
+  - "**/*_test.py"
+  - "tools/**"

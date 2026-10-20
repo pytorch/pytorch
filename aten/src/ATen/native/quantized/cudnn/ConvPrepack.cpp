@@ -12,7 +12,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
 
 #include <utility>
 
@@ -135,7 +134,7 @@ class QConvPackWeightInt8Cudnn final {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
     for ([[maybe_unused]] const auto idx : c10::irange(kSpatialDim)) {
-      output_padding.push_back((int64_t)0);
+      output_padding.push_back(0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
                 /*transpose=*/false);

@@ -3,10 +3,8 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/executor.h>
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
-#include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
-#include <c10/util/Flags.h>
-#include <stdexcept>
+#include <c10/util/Exception.h>
 
 namespace torch::jit {
 
@@ -70,7 +68,7 @@ std::vector<at::Tensor> debugLaunchGraph(
   Stack stack = fmap<IValue>(inputs);
   const auto key = fuser::registerFusion(fusion_group);
   fuser::runFusion(key, stack);
-  return fmap(stack, [](const IValue& iv) { return iv.toTensor(); });
+  return fmap(std::move(stack), [](const IValue& iv) { return iv.toTensor(); });
 }
 
 std::string debugGetFusedKernelCode(
@@ -93,9 +91,8 @@ std::string debugGetFusedKernelCode(
   const auto key = fuser::registerFusion(fusion_group);
 
   std::string code;
-  if (!fuser::runFusion(key, stack, &code)) {
-    throw std::runtime_error("Could not run fusion for graph");
-  }
+  TORCH_CHECK(
+      fuser::runFusion(key, stack, &code), "Could not run fusion for graph")
 
   return code;
 }

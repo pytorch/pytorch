@@ -4,7 +4,8 @@ from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def to_channels_last(x):
-    assert x.dim() == 4
+    if x.dim() != 4:
+        raise AssertionError(f"Expected 4D tensor, but got {x.dim()}D")
 
     # NCHW -> NHWC
     stride_order = [3, 0, 2, 1]
@@ -13,7 +14,8 @@ def to_channels_last(x):
         ir.FlexibleLayout.stride_ordered(x.shape, stride_order),
     )
     y.copy_(x)
-    assert torch.allclose(x, y)
+    if not torch.allclose(x, y):
+        raise AssertionError("Tensor copy failed: x and y are not close")
     return y
 
 
@@ -49,10 +51,11 @@ def bench_conv(with_stack=True):
         torch.cuda.synchronize()
 
     p.export_chrome_trace("/tmp/chrome.json")
-    assert torch.allclose(baseline_out, test_out, atol=1e-3, rtol=1e-3), (
-        baseline_out[0][0][0][:32],
-        test_out[0][0][0][:32],
-    )
+    if not torch.allclose(baseline_out, test_out, atol=1e-3, rtol=1e-3):
+        raise AssertionError(
+            f"baseline_out and test_out are not close: "
+            f"baseline={baseline_out[0][0][0][:32]}, test={test_out[0][0][0][:32]}"
+        )
 
     baseline_ms = benchmarker.benchmark_gpu(baseline_fn, rep=40)
     test_ms = benchmarker.benchmark_gpu(test_fn, rep=40)

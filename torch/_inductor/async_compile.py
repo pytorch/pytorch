@@ -3,15 +3,21 @@ from __future__ import annotations
 
 import atexit
 import functools
+import json
 import logging
 import multiprocessing
 import os
+import re
 import sys
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+)
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -34,31 +40,60 @@ from torch._inductor.codecache import (
     ROCmCodeCache,
     StaticAutotunerFuture,
     torch_key,
+    XPUCodeCache,
 )
-from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.subproc_pool import (
+    AnyPool,
+    SubprocException,
+    SubprocPool,
+)
+from torch._inductor.compile_worker.tracked_process_pool import (
+    TrackedProcessPoolExecutor,
+)
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
+    _set_triton_libdevice_path,
     _set_triton_ptxas_path,
+    _worker_compile_pycodecache_kernel,
     _worker_compile_triton,
+    _worker_compile_triton_thread,
 )
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
+from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0: Optional[float] = None
+_t0: float | None = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 log = logging.getLogger(__name__)
+
+_triton_kernel_metrics: dict[str, dict[str, Any]] | None = None
+
+size_hints_regex = re.compile(
+    r"size_hints=(\{.*?\})",
+)
+
+
+def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
+    env_vars = [
+        "TORCHINDUCTOR_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "TORCHINDUCTOR_CUTLASS_DIR",
+    ]
+    return {v: os.environ.get(v) for v in env_vars}
 
 
 def pre_fork_setup():
@@ -71,13 +106,10 @@ def pre_fork_setup():
 
     # Computing the triton key can be slow. If we call it before fork,
     # it will be cached for the forked subprocesses.
-    try:
-        from triton.compiler.compiler import triton_key
+    from torch._inductor.runtime.triton_compat import HAS_TRITON, triton_key
 
+    if HAS_TRITON:
         triton_key()
-    except ImportError:
-        # Triton might not be installed or might be an old version.
-        pass
 
 
 def caching_device_properties():
@@ -87,18 +119,60 @@ def caching_device_properties():
 
 
 def _compile_start() -> None:
-    global _t0
+    global _t0, _triton_kernel_metrics
     if _t0 is None:
         _t0 = time()
+    if _triton_kernel_metrics is None:
+        _triton_kernel_metrics = {}
 
 
 def _compile_end() -> None:
-    global _cumulative_compile_time, _t0
+    global _cumulative_compile_time, _t0, _triton_kernel_metrics
     if _t0 is not None:
         t1 = time()
         _cumulative_compile_time += t1 - _t0
         _t0 = None
         # print("CUMULATIVE COMPILE TIME", _cumulative_compile_time)
+    if _triton_kernel_metrics:
+        # Log triton kernel info
+        sorted_info = dict(sorted(_triton_kernel_metrics.items()))
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "triton_kernel_info",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(sorted_info),
+        )
+        _triton_kernel_metrics = None
+
+
+def _add_triton_kernel_info(kernel_name: str, info: dict[str, Any]):
+    global _triton_kernel_metrics
+    # Must be called between _compile_start and _compile_end
+    if _triton_kernel_metrics is not None:
+        _triton_kernel_metrics[kernel_name] = info
+
+
+def _emit_triton_kernel_compile_metric(
+    kernel: CachingAutotuner,
+    kernel_name: str,
+    elapsed_us: int,
+) -> None:
+    """Emit per-kernel ``compile_time_us`` to both the dynamo
+    ``_triton_kernel_metrics`` map and the ``MetricsContext`` top-N.
+
+    Note: ``kernel.autotune_cache_info`` is only mutated in place when
+    non-empty; when ``None`` or ``{}`` the metric still reaches
+    ``_triton_kernel_metrics`` via a throwaway dict, but the kernel
+    attribute stays untouched.
+    """
+    info = kernel.autotune_cache_info or {}
+    info["compile_time_us"] = elapsed_us
+    _add_triton_kernel_info(kernel_name, info)
+    get_metrics_context().add_top_n(
+        "triton_kernel_compile_times_us", kernel_name, elapsed_us
+    )
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -113,19 +187,22 @@ def shutdown_compile_workers() -> None:
     """Shut down all outstanding compile-worker pools."""
     for pool in _pool_set:
         pool.shutdown()
+    AsyncCompile._ready_future = None
     after_fork()
 
 
 def after_fork():
     """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
+    AsyncCompile._ready_future = None
     AsyncCompile.process_pool.cache_clear()
+    AsyncCompile.thread_pool.cache_clear()
 
 
 try:
     os.register_at_fork(after_in_child=after_fork)
 except AttributeError:
-    pass  # register_at_fork does not exists on windows
+    pass  # register_at_fork does not exist on windows
 
 
 def get_compile_threads() -> int:
@@ -138,7 +215,33 @@ def get_compile_threads() -> int:
     return config.compile_threads
 
 
-@clear_on_fresh_inductor_cache
+def _process_pool_allowed() -> bool:
+    # Multiprocessing daemons are not allowed to create child processes. This
+    # only applies to direct multiprocessing modes: SubprocPool starts its
+    # sidecar with subprocess.Popen, so the sidecar does not inherit the
+    # multiprocessing daemon flag and can own its own ProcessPoolExecutor.
+    return (
+        config.worker_start_method == "subprocess"
+        or not multiprocessing.current_process().daemon
+    )
+
+
+@clear_on_fresh_cache
+class FrozenTritonKernels:
+    """
+    The precompile runtime cache's frozen Triton kernels. They outlive
+    CompiledTritonKernels.cache_clear(), which runs on every compile, and are
+    only dropped when fresh_cache() / clear_caches() resets Inductor's caches.
+    """
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_triton_kernels
+
+        clear_triton_kernels()
+
+
+@clear_on_fresh_cache
 class CompiledTritonKernels:
     """
     In memory cache for storing compiled triton kernels.
@@ -175,7 +278,7 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
-    def get(kernel_src: str) -> Optional[CodeCacheFuture]:
+    def get(kernel_src: str) -> CodeCacheFuture | None:
         key = CompiledTritonKernels.key(kernel_src)
         return CompiledTritonKernels._cache.get(key, None)
 
@@ -193,13 +296,23 @@ class CompiledTritonKernels:
 
 
 class AsyncCompile:
+    """
+    Utilities to compile in thread pools or subprocess pools (in the case of Triton).
+    """
+
+    _ready_future: Future[Any] | None = None
+    _metal_sources: list[tuple[str, str, list[str]]] | None = None
+
     def __init__(self) -> None:
         pass
 
     @staticmethod
     @functools.lru_cache(1)
     def pool() -> ThreadPoolExecutor:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
         return ThreadPoolExecutor(get_compile_threads())
 
     @staticmethod
@@ -210,7 +323,19 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool() -> AnyPool:
-        assert get_compile_threads() > 1
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
+        if not _process_pool_allowed():
+            raise RuntimeError(
+                "Inductor async compile process pools are disabled in daemonic "
+                "multiprocessing processes. Set "
+                "torch._inductor.config.worker_start_method = 'subprocess' "
+                "(or TORCHINDUCTOR_WORKER_START=subprocess) to use the "
+                "SubprocPool path, which is not affected by the daemon restriction."
+            )
+        AsyncCompile._ready_future = None
         log.info(
             "Creating '%s' pool with %d workers",
             config.worker_start_method,
@@ -220,37 +345,99 @@ class AsyncCompile:
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(get_compile_threads())
+            pool = SubprocPool(
+                get_compile_threads(), quiesce=config.quiesce_async_compile_pool
+            )
         else:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
                 os.environ["TORCH_WARM_POOL"] = "0"
+            # Only need pre-fork setup for process pools, not thread pools
             pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
-            pool = ProcessPoolExecutor(
+            pool = TrackedProcessPoolExecutor(
                 get_compile_threads(),
                 mp_context=ctx,
                 initializer=partial(_async_compile_initializer, os.getpid()),
             )
-            # when this pool is created in a subprocess object, the normal exit handler
-            # doesn't run, and we need to register our own handler.
-            # exitpriority has to be high, because another one of the finalizers will
-            # kill the worker thread that sends the shutdown message to the workers...
-            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
-        # Set an attribute we can check to see if the pool is ready.
-        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
+        # When this pool is created in a multiprocessing subprocess, the normal
+        # atexit handler may not run, and we need to register our own handler.
+        # exitpriority has to be high, because another one of the finalizers will
+        # kill the worker thread that sends the shutdown message to the workers.
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+
+        _pool_set.add(pool)
+        return pool
+
+    @staticmethod
+    @functools.lru_cache(1)
+    def thread_pool() -> ThreadPoolExecutor:
+        """
+        Thread pool for Triton compilation in nogil mode.
+
+        Separate from pool() to allow different sizing/configuration
+        for CPU-intensive Triton compilation workloads.
+        """
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
+        log.info(
+            "Creating thread pool with %d workers for nogil Triton compilation",
+            get_compile_threads(),
+        )
+        pool = ThreadPoolExecutor(
+            get_compile_threads(),
+            thread_name_prefix="triton_compile_",
+        )
         _pool_set.add(pool)
         return pool
 
     @classmethod
+    def should_use_thread_workers(cls) -> bool:
+        """
+        Determine if thread workers should be used instead of process workers.
+
+        Returns True when running free-threaded Python or when explicitly
+        configured via compile_worker_mode.
+        """
+        from torch._inductor.utils import should_use_thread_workers
+
+        return should_use_thread_workers()
+
+    @classmethod
+    def get_worker_pool(cls) -> ThreadPoolExecutor | AnyPool:
+        """
+        Get the appropriate worker pool based on configuration.
+
+        Returns thread pool for nogil mode, process pool otherwise.
+        """
+        if cls.should_use_thread_workers():
+            return cls.thread_pool()
+        else:
+            return cls.process_pool()
+
+    @classmethod
     def warm_pool(cls) -> None:
-        if get_compile_threads() <= 1:
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
             return
         _compile_start()
-        # Pool is initialized on first access
-        cls.process_pool()
+        # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
+        # but its ProcessPoolExecutor does not initialize until a wakeup() call or the first
+        # job is submitted.
+        # For thread pools, this is a no-op since thread pool creation is very cheap.
+        if cls.should_use_thread_workers():
+            cls.thread_pool()
+        else:
+            cls.process_pool()
         _compile_end()
+
+    @classmethod
+    def wait_pool_ready(cls, timeout=120) -> None:
+        cls.use_process_pool()
+        if cls._ready_future is not None:
+            cls._ready_future.result(timeout=timeout)
 
     @classmethod
     def submit(cls, task: Callable[..., Any]) -> Any:
@@ -258,10 +445,69 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    def use_process_pool(self):
-        return (
-            get_compile_threads() > 1 and self.process_pool().ready_future.done()  # type: ignore[union-attr]
-        )
+    @classmethod
+    def use_process_pool(cls):
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
+            return False
+
+        # Proton instrumentation backend requires compilation to happen in the main
+        # process so it can instrument the Triton IR during JIT compilation.
+        # Force synchronous compilation when proton profiling is enabled.
+        if config.triton.proton_profiling:
+            return False
+
+        # Create a dummy job to check if the pool is ready. Submit it here instead of at
+        # pool creation so we don't launch the full pool of worker subprocesses until
+        # we're sure they're needed.
+        if not cls._ready_future:
+            cls._ready_future = cls.process_pool().submit(cls._get_ready)
+        return cls._ready_future.done()
+
+    @classmethod
+    def wait_process_pool_ready(cls, timeout: float = 120) -> bool:
+        """Block (up to ``timeout`` s) until the process pool is ready, returning
+        whether it's usable.
+
+        Like use_process_pool() but blocking. Use when a backend's serial
+        fallback is far costlier than the warmup wait -- e.g. NVGEMM subprocess
+        precompile, where skipping the pool forces ~15x-slower lazy compilation
+        at benchmark time. (use_process_pool()'s non-blocking readiness check can
+        race pool warmup when little other compilation precedes the decision.)
+        On timeout, degrade gracefully (return False -> serial) rather than hang
+        on a stuck worker.
+        """
+        if get_compile_threads() <= 1 or not _process_pool_allowed():
+            return False
+        if config.triton.proton_profiling:
+            return False
+        if not cls._ready_future:
+            cls._ready_future = cls.process_pool().submit(cls._get_ready)
+        try:
+            cls._ready_future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            log.warning(
+                "Process pool not ready after %ss; falling back to serial", timeout
+            )
+            return False
+        except (BrokenProcessPool, RuntimeError) as e:
+            # A warmup worker died or the pool was closed. The readiness probe
+            # failing must degrade to serial (the documented contract), not
+            # propagate and abort the caller's algorithm selection.
+            log.warning("Process pool unusable (%s); falling back to serial", e)
+            return False
+        return True
+
+    @classmethod
+    def wakeup(cls) -> None:
+        """
+        If using a SubprocPool, signal the sidecar process to start up its
+        ProcessPoolExecutor.
+        """
+        if not cls.use_process_pool():
+            return
+        pool = cls.process_pool()
+        if isinstance(pool, SubprocPool):
+            pool.wakeup()
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         """
@@ -283,7 +529,7 @@ class AsyncCompile:
           cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
           in the parent lazily when we require it.
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
-          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+          and pickled to us via `CachingAutotuner.save_cache_hook`.
         """
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code
@@ -304,48 +550,127 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        is_parallel = self.use_process_pool()
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+        from torch.compiler._runtime_cache import (
+            load_triton_kernel,
+            record_triton_kernel,
+        )
+
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
 
+        source_key = CompiledTritonKernels.key(source_code)
+        if (kernel := load_triton_kernel(source_key)) is not None:
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            kernel.set_compile_info(compile_id, is_backward)
+            kernel._reload_kernel = reload_kernel_in_parent
+            record_triton_kernel(source_key, kernel)
+            return kernel
+
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
             # Set reload_kernel_from_src properly based on source_code
             if isinstance(future, StaticAutotunerFuture):
+                # Remove the future now that we've cache hit
+                CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                record_triton_kernel(source_key, future.static_autotuner)
             if is_parallel:
                 return future
             else:
                 return future.result()
 
+        # Cache miss
+        check_compilation_allowed(
+            "Triton kernel cache miss",
+            "no_compilation() only serves Triton kernels already in Inductor's "
+            "in-process kernel cache (statically launchable ones restored from a "
+            "cache bundle); loading a kernel through triton.compile, even from "
+            "Triton's on-disk cache, counts as compilation.",
+        )
         if is_parallel:
+            # Ensure libdevice path is set in os.environ before passing to workers
+            _set_triton_libdevice_path()
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
-            extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+            env_vars = [
+                "TORCHINDUCTOR_CACHE_DIR",
+                "TRITON_CACHE_DIR",
+                "TRITON_LIBDEVICE_PATH",
+            ]
+            extra_env = {v: os.environ.get(v) for v in env_vars}
+            extra_config = {
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
+            }
 
-            task = self.process_pool().submit(
-                _worker_compile_triton,
+            if len(torch._inductor.config.autotune_lookup_table) > 0:
+                m = size_hints_regex.search(source_code)
+                if m:
+                    size_hints_str = m.group(1)
+                else:
+                    size_hints_str = str(None)
+
+                triton_src = source_code.split("@triton.jit\n")[1]
+                from torch._inductor.runtime.triton_heuristics import (
+                    generate_lookup_hash_from_source_code,
+                )
+
+                fn_hash = generate_lookup_hash_from_source_code(
+                    size_hints_str, triton_src
+                )
+
+                if fn_hash in torch._inductor.config.autotune_lookup_table:
+                    extra_config["autotune_lookup_table"] = {  # type: ignore[assignment]
+                        fn_hash: torch._inductor.config.autotune_lookup_table[fn_hash]
+                    }
+
+            # Select appropriate pool and worker function based on mode
+            pool = self.get_worker_pool()
+            worker_fn = (
+                _worker_compile_triton_thread
+                if self.should_use_thread_workers()
+                else _worker_compile_triton
+            )
+
+            task = pool.submit(
+                worker_fn,
                 load_kernel,
                 extra_env,
+                extra_config,
             )
 
             def get_result() -> CachingAutotuner:
-                kernel, elapsed_us = task.result()
+                try:
+                    kernel, elapsed_us = task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
+
+                # Only restore after unpickle in process mode
+                # Thread mode doesn't pickle, so kernel is already in correct state
+                if not self.should_use_thread_workers():
+                    kernel.restore_after_unpickle(old_values=None)
+
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
-                get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                )
+                record_triton_kernel(source_key, kernel)
+                _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
             future = LambdaFuture(get_result, future=task)
@@ -357,26 +682,39 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
-                start_ns = time_ns()
-                _set_triton_ptxas_path()
-                kernel = load_kernel()
-                kernel.set_compile_info(compile_id, is_backward)
-                kernel.precompile(
-                    warm_cache_only=False,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                )
-                elapsed_us = (time_ns() - start_ns) // 1000
-                get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                )
-                return kernel
+                fail = None
+                try:
+                    start_ns = time_ns()
+                    _set_triton_ptxas_path()
+                    _set_triton_libdevice_path()
+                    kernel = load_kernel()
+                    kernel.set_compile_info(compile_id, is_backward)
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    )
+                    record_triton_kernel(source_key, kernel)
+                    elapsed_us = (time_ns() - start_ns) // 1000
+                    _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
+                    return kernel
+                except Exception as e:
+                    fail = str(e)
+                    raise
+                finally:
+                    log_triton_builds(fail=fail)
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
+
+    def size_hint_multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import SizeHintMultiKernelCall
+
+        return SizeHintMultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
@@ -396,17 +734,24 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cuda(self, source_code, dst_file_ext, aot_compile=False):
-        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-
+    def cutlass(self, cache_cls, source_code, dst_file_ext, aot_compile=False):
         def task():
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
-                CUDACodeCache.compile(source_code, "o")
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+                output_path, *_ = cache_cls.compile(source_code, "o")
+                cache_cls.aot_kernels_o.append(output_path)
+            return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
+
+    def cuda(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+        return self.cutlass(CUDACodeCache, source_code, dst_file_ext, aot_compile)
+
+    def xpu(self, source_code, dst_file_ext, aot_compile=False):
+        kernel_code_log.info("XPU Kernel:\n%s", source_code)
+        return self.cutlass(XPUCodeCache, source_code, dst_file_ext, aot_compile)
 
     def rocm(
         self,
@@ -418,7 +763,8 @@ class AsyncCompile:
 
         def task():
             if aot_compile:
-                _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                output_path, *_ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+                ROCmCodeCache.aot_kernels_o.append(output_path)
             if config.rocm.generate_test_runner:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
@@ -435,6 +781,304 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
+    def _load_kernel_wrapper(self, kernel_name, main_suffix, wrapper_cls, key, path):
+        """Reload a kernel module from PyCodeCache and wrap the entry point."""
+        mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+        main_func_name = f"{kernel_name}_{main_suffix}"
+        return wrapper_cls(getattr(mod, main_func_name), kernel_path=path)
+
+    def cutedsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
+        """
+        Compile CuteDSL (CUTLASS Python DSL) kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the CuteDSL kernel, as a string
+            precompile_metadata: Optional dict with shapes/dtypes for triggering
+                real CuTe DSL compilation in the subprocess worker.
+
+        Note:
+            CuteDSL currently requires source files to do its compilation, there we
+            use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            CuteDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
+
+        kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
+        _compile_start()
+
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            extra_env = _pycodecache_kernel_compile_env()
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> CuteDSLKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "CuteDSL kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name, MAIN_SUFFIX, CuteDSLKernelWrapper, key, path
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+    def flydsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
+        """
+        Compile FlyDSL kernels.
+
+        FlyDSL generated source is written through PyCodeCache and its
+        `{kernel_name}_main` entry point is exposed through the standard
+        kernel ``.run()`` interface.
+        """
+        from torch._inductor.codegen.flydsl import flydsl_utils
+        from torch._inductor.codegen.flydsl.flydsl_kernel import (
+            FlyDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
+
+        if not flydsl_utils.runtime_available():
+            raise RuntimeError("FlyDSL runtime is unavailable")
+
+        kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
+        _compile_start()
+
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            extra_env = _pycodecache_kernel_compile_env()
+            extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ.get(
+                "FLYDSL_RUNTIME_CACHE_DIR"
+            )
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> FlyDSLKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "FlyDSL kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name,
+                    MAIN_SUFFIX,
+                    FlyDSLKernelWrapper,
+                    key,
+                    path,
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            return self._load_kernel_wrapper(
+                kernel_name,
+                MAIN_SUFFIX,
+                FlyDSLKernelWrapper,
+                key,
+                path,
+            )
+
+    def pallas(self, kernel_name: str, source_code: str):
+        """
+        Compile Pallas (JAX experimental) kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the Pallas kernel, as a string
+
+        Note:
+            Pallas kernels are Python code that uses JAX and Pallas APIs.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.pallas import MAIN_SUFFIX, PallasKernelWrapper
+
+        kernel_code_log.info("Pallas Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find Pallas main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
+    def nv_universal_gemm(
+        self, kernel_name: str, source_code: str, precompile_metadata=None
+    ):
+        """
+        Compile NVIDIA Universal GEMM kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the kernel, as a string
+            precompile_metadata: Optional dict with shapes/dtypes for triggering
+                real CuTe DSL compilation in the subprocess worker.
+
+        Note:
+            NVIDIA Universal GEMM kernels are Python code that calls the cutlass.operators library.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernelWrapper,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            MAIN_SUFFIX,
+        )
+
+        kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
+        _compile_start()
+
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            extra_env = _pycodecache_kernel_compile_env()
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> NVUniversalGemmKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "NV Universal GEMM kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name, MAIN_SUFFIX, NVUniversalGemmKernelWrapper, key, path
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find NVIDIA Universal GEMM main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
+                )
+
+            return NVUniversalGemmKernelWrapper(
+                getattr(mod, main_func_name), kernel_path=path
+            )
+
+    def nvgemm_precompile(
+        self,
+        kernel_name,
+        variant_name,
+        accumulator_type,
+        input_tensor_meta,
+        output_tensor_meta,
+        cuda_ctx,
+        scale_type_a=None,
+        scale_type_b=None,
+        swizzle_type_a=None,
+        swizzle_type_b=None,
+        has_bias_epilogue=False,
+        has_output_scale=False,
+        swap_ab=False,
+        metadata=None,
+    ):
+        """Submit NVGEMM kernel precompilation to the subprocess pool.
+
+        Compiles the CuTeDSL kernel artifact in a subprocess worker so the
+        thread-unsafe kernel.compile() call is process-isolated. The compiled
+        artifact is saved to the disk cache; the main process loads it on the
+        next cache lookup during benchmarking.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            _worker_nvgemm_autotuning_precompile,
+        )
+
+        extra_env = _pycodecache_kernel_compile_env()
+
+        return self.process_pool().submit(
+            _worker_nvgemm_autotuning_precompile,
+            kernel_name,
+            variant_name,
+            accumulator_type,
+            input_tensor_meta,
+            output_tensor_meta,
+            extra_env,
+            cuda_ctx,
+            scale_type_a,
+            scale_type_b,
+            swizzle_type_a,
+            swizzle_type_b,
+            has_bias_epilogue,
+            has_output_scale,
+            swap_ab,
+            metadata,
+        )
+
+    def metal(self, kernel_name: str, source: str, headers: list[str]) -> None:
+        """Register a Metal kernel body; wait() compiles all registered kernels into one library."""
+        if self._metal_sources is None:
+            self._metal_sources = []
+        self._metal_sources.append((kernel_name, source, headers))
+
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
             with dynamo_timed(
@@ -442,10 +1086,50 @@ class AsyncCompile:
                 log_pt2_compile_event=True,
                 dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
+                waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+                self._precompile_module_level_kernels(scope)
+
+        if self._metal_sources:
+            from torch._inductor.runtime.runtime_utils import compile_mps_shaders
+
+            scope.update(compile_mps_shaders(self._metal_sources))
+            self._metal_sources.clear()
 
         _compile_end()
+
+    def _precompile_module_level_kernels(self, scope: dict[str, Any]) -> None:
+        # A module-level kernel def builds an uncompiled CachingAutotuner when the wrapper
+        # runs outside the compile that produced it (e.g. `python wrapper.py`); compile
+        # those here, concurrently, rather than serially at each kernel's first launch.
+        # They compile in process, on threads: JITFunction.cache_key hashes the def's
+        # source and starting line, which a process worker compiling the kernel's own
+        # string-form module does not reproduce. As with _worker_compile_triton_thread,
+        # only the Triton compile runs on the threads; launchers load on this thread.
+        # The interpreter leaves even string-form kernels uncompiled; keep it that way.
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        pending = {
+            key: value
+            for key, value in scope.items()
+            if isinstance(value, CachingAutotuner)
+            and not value.compile_results
+            and not value.launchers
+        }
+        if not pending:
+            return
+        _set_triton_ptxas_path()
+        _set_triton_libdevice_path()
+        pool = self.thread_pool()
+        warm = partial(CachingAutotuner.precompile, warm_cache_only=True)
+        futures: dict[str, Future[Any] | CodeCacheFuture] = {
+            k: pool.submit(warm, v) for k, v in pending.items()
+        }
+        for key, _ in self._results(futures):
+            pending[key].precompile()
 
     def _wait_futures(self, scope: dict[str, Any]) -> None:
         kernels = {
@@ -453,17 +1137,35 @@ class AsyncCompile:
             for key, value in scope.items()
             if isinstance(value, (Future, CodeCacheFuture))
         }
+        scope.update(self._results(kernels))
+
+    def _results(
+        self, kernels: dict[str, Future[Any] | CodeCacheFuture]
+    ) -> Iterator[tuple[str, Any]]:
         pbar = tqdm(
             total=len(kernels),
             desc="Inductor Compilation",
             disable=config.disable_progress,
             delay=0,
         )
+        # compile_worker_wait_timeout=0 (default) means "wait forever"; map
+        # it to None so both Future.result() and CodeCacheFuture.result()
+        # receive the same "no timeout" sentinel.
+        wait_timeout = config.compile_worker_wait_timeout or None
         for key, result in kernels.items():
             if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                 pbar.set_postfix_str(key)
             try:
-                scope[key] = result.result()
+                kernel = result.result(timeout=wait_timeout)
+            except FuturesTimeoutError as e:
+                # concurrent.futures.TimeoutError became an alias of the
+                # builtin TimeoutError in Python 3.11; on 3.10 it is a
+                # distinct class, so catch it explicitly.
+                raise RuntimeError(
+                    f"Inductor compile-worker future for {key!r} did not "
+                    f"complete within {wait_timeout}s. Override with "
+                    "TORCHINDUCTOR_COMPILE_WORKER_WAIT_TIMEOUT=<seconds>."
+                ) from e
             except BrokenProcessPool as e:
                 raise RuntimeError(
                     "A compilation subprocess exited unexpectedly. This "
@@ -472,20 +1174,27 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
+            yield key, kernel
 
 
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-    # The subprocess pool is only used for the Triton backend
-    or not has_triton_package()
-    # Skip for fbcode. We have internal reports of usages inside multiprocessing
-    # pools that lead a multiplicative number of compile subprocesses.
-    or config.is_fbcode()
-):
-    pass
-else:
+def maybe_warm_pool() -> None:
+    if (
+        os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
+        or os.environ.get("TORCH_WARM_POOL", "1") != "1"
+        # The subprocess pool is only used for the Triton backend
+        or not has_triton_package()
+        # Skip for fbcode. We have internal reports of usages inside multiprocessing
+        # pools that lead a multiplicative number of compile subprocesses.
+        or config.is_fbcode()
+    ):
+        return
+
     AsyncCompile.warm_pool()
+    # TODO: This starts the SubprocPool's internal process pool as early as possible at
+    # the expense of creating a bunch of worker processes that might not be needed. We
+    # could start them lazily if we're willing to lose a small amount of compile time.
+    AsyncCompile.wakeup()
+
 
 # On exit give the workers a chance to clean themselves up. Without this the
 # resource_tracker can complain about leaked semaphores coming from the

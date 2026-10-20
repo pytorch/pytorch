@@ -57,7 +57,7 @@ inline int64_t target_index_checked(
 }
 
 template <typename scalar_t>
-static inline void multi_margin_loss_cpu_kernel(
+inline void multi_margin_loss_cpu_kernel(
     Tensor& output,
     const scalar_t* input_data,
     const int64_t* target_data,
@@ -82,7 +82,7 @@ static inline void multi_margin_loss_cpu_kernel(
     }
   } else {
     accscalar_t sum = 0;
-    auto output_acc = output.data_ptr<scalar_t>();
+    auto output_acc = output.mutable_data_ptr<scalar_t>();
     for (const auto t : c10::irange(nframe)) {
       const auto idx = target_index_checked(target_data, t, dim);
       sum += multi_margin_inner_sum_cpu(
@@ -148,7 +148,7 @@ void multi_margin_loss_out_cpu_template(
 }
 
 template <typename scalar_t>
-static void multi_margin_loss_backward_cpu_kernel(
+void multi_margin_loss_backward_cpu_kernel(
     scalar_t* grad_input_data,
     const Tensor& grad_output,
     const scalar_t* input_data,

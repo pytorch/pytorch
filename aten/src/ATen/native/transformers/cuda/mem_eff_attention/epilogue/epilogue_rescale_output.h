@@ -125,7 +125,7 @@ class MemoryEfficientAttentionNormalize {
       FragmentSource const& source) const {
     assert(!isFirst);
 
-    // Convert source to interal compute numeric type
+    // Convert source to internal compute numeric type
     NumericArrayConverter<ElementCompute, ElementSource, kCount, Round>
         source_converter;
     NumericArrayConverter<ElementCompute, ElementAccumulator, kCount, Round>
@@ -164,7 +164,7 @@ class MemoryEfficientAttentionNormalize {
       const {
     assert(isFirst);
 
-    // Convert source to interal compute numeric type
+    // Convert source to internal compute numeric type
     NumericArrayConverter<ElementCompute, ElementAccumulator, kCount, Round>
         accumulator_converter;
 

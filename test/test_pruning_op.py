@@ -4,12 +4,18 @@ import hypothesis.strategies as st
 from hypothesis import given
 import numpy as np
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TestCase,
+    run_tests,
+    skipIfTorchDynamo,
+)
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 
 class PruningOpTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     # Generate rowwise mask vector based on indicator and threshold value.
     # indicator is a vector that contains one value per weight row and it
@@ -18,7 +24,7 @@ class PruningOpTest(TestCase):
     def _generate_rowwise_mask(self, embedding_rows):
         indicator = torch.from_numpy((np.random.random_sample(embedding_rows)).astype(np.float32))
         threshold = float(np.random.random_sample())
-        mask = torch.BoolTensor([True if val >= threshold else False for val in indicator])
+        mask = torch.BoolTensor([val >= threshold for val in indicator])
         return mask
 
     def _test_rowwise_prune_op(self, embedding_rows, embedding_dims, indices_type, weights_dtype):

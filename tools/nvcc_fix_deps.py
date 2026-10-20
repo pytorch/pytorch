@@ -1,4 +1,4 @@
-"""Tool to fix the nvcc's dependecy file output
+"""Tool to fix the nvcc's dependency file output
 
 Usage: python nvcc_fix_deps.py nvcc [nvcc args]...
 

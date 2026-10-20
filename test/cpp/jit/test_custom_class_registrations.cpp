@@ -71,6 +71,11 @@ struct _StaticMethod : torch::CustomClassHolder {
   static int64_t staticMethod(int64_t input) {
     return 2 * input;
   }
+  static int64_t staticMethodWithDefault(
+      int64_t input,
+      std::optional<int64_t> scale) {
+    return scale.value_or(2) * input;
+  }
 };
 
 struct FooGetterSetter : torch::CustomClassHolder {
@@ -312,8 +317,8 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     if (inputs.size() != input_names_.size()) {
       std::stringstream err;
       err << "Expected " << input_names_.size() << " inputs, but got "
-          << inputs.size() << "!";
-      throw std::runtime_error(err.str());
+          << inputs.size() << '!';
+      TORCH_CHECK(false, std::move(err).str());
     }
     for (size_t i = 0; i < inputs.size(); ++i) {
       environment[input_names_[i]] = inputs[i];
@@ -335,8 +340,8 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
           inputs.push_back(constants_.at(input_name));
         } else {
           std::stringstream err;
-          err << "Instruction referenced unknown value " << input_name << "!";
-          throw std::runtime_error(err.str());
+          err << "Instruction referenced unknown value " << input_name << '!';
+          TORCH_CHECK(false, std::move(err).str());
         }
       }
 
@@ -345,18 +350,18 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
       const auto& op = std::get<0>(instr);
       if (op == "add") {
         if (inputs.size() != 2) {
-          throw std::runtime_error("Unexpected number of inputs for add op!");
+          TORCH_CHECK(false, "Unexpected number of inputs for add op!");
         }
         result = inputs[0] + inputs[1];
       } else if (op == "mul") {
         if (inputs.size() != 2) {
-          throw std::runtime_error("Unexpected number of inputs for mul op!");
+          TORCH_CHECK(false, "Unexpected number of inputs for mul op!");
         }
         result = inputs[0] * inputs[1];
       } else {
         std::stringstream err;
-        err << "Unknown operator " << op << "!";
-        throw std::runtime_error(err.str());
+        err << "Unknown operator " << op << '!';
+        TORCH_CHECK(false, std::move(err).str());
       }
 
       // Write back result into environment
@@ -365,7 +370,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
     }
 
     if (!output_name_) {
-      throw std::runtime_error("Output name not specified!");
+      TORCH_CHECK(false, "Output name not specified!");
     }
 
     return environment.at(*output_name_);
@@ -376,7 +381,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   // for more info.
 
   // This is the type we will use to marshall information on disk during
-  // ser/de. It is a simple tuple composed of primitive types and simple
+  // Ser/De. It is a simple tuple composed of primitive types and simple
   // collection types like vector, optional, and dict.
   using SerializationType = std::tuple<
       std::vector<std::string> /*input_names_*/,
@@ -421,7 +426,9 @@ struct FlattenWithTensorOp : public torch::CustomClassHolder {
   explicit FlattenWithTensorOp(at::Tensor t) : t_(t) {}
 
   at::Tensor get() {
-    return t_;
+    // Need to return a copy of the tensor, otherwise the tensor will be
+    // aliased with a tensor that may be modified by the user or backend.
+    return t_.clone();
   }
 
   std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
@@ -437,7 +444,9 @@ struct ContainsTensor : public torch::CustomClassHolder {
   explicit ContainsTensor(at::Tensor t) : t_(t) {}
 
   at::Tensor get() {
-    return t_;
+    // Need to return a copy of the tensor, otherwise the tensor will be
+    // aliased with a tensor that may be modified by the user or backend.
+    return t_.clone();
   }
 
   std::tuple<std::tuple<std::string, at::Tensor>> __obj_flatten__() {
@@ -465,7 +474,12 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
   m.class_<_StaticMethod>("_StaticMethod")
       .def(torch::init<>())
-      .def_static("staticMethod", &_StaticMethod::staticMethod);
+      .def_static("staticMethod", &_StaticMethod::staticMethod)
+      .def_static(
+          "staticMethodWithDefault",
+          &_StaticMethod::staticMethodWithDefault,
+          "",
+          {torch::arg("input"), torch::arg("scale") = torch::arg::none()});
 
   m.class_<DefaultArgs>("_DefaultArgs")
       .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
@@ -503,7 +517,15 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<FlattenWithTensorOp>("_FlattenWithTensorOp")
       .def(torch::init<at::Tensor>())
       .def("get", &FlattenWithTensorOp::get)
-      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__);
+      .def("__obj_flatten__", &FlattenWithTensorOp::__obj_flatten__)
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<FlattenWithTensorOp>& self)
+              -> at::Tensor { return self->get(); },
+          // __setstate__
+          [](at::Tensor data) -> c10::intrusive_ptr<FlattenWithTensorOp> {
+            return c10::make_intrusive<FlattenWithTensorOp>(std::move(data));
+          });
 
   m.class_<ConstantTensorContainer>("_ConstantTensorContainer")
       .def(torch::init<at::Tensor>())
@@ -577,15 +599,15 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           "__str__",
           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
             std::stringstream ss;
-            ss << "[";
+            ss << '[';
             for (size_t i = 0; i < self->stack_.size(); ++i) {
               ss << self->stack_[i];
               if (i != self->stack_.size() - 1) {
                 ss << ", ";
               }
             }
-            ss << "]";
-            return ss.str();
+            ss << ']';
+            return std::move(ss).str();
           });
   // clang-format off
         // The following will fail with a static assert telling you you have to
@@ -708,7 +730,8 @@ at::Tensor takes_foo_tensor_return(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
 }
 
 void queue_push(c10::intrusive_ptr<TensorQueue> tq, at::Tensor x) {
-  tq->push(x);
+  // clone the tensor to avoid aliasing
+  tq->push(x.clone());
 }
 
 at::Tensor queue_pop(c10::intrusive_ptr<TensorQueue> tq) {
@@ -739,6 +762,16 @@ TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
   m.impl("queue_pop", queue_pop);
   m.impl("queue_size", queue_size);
   m.impl("takes_foo_tensor_return", takes_foo_tensor_return);
+}
+
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, CUDA, m) {
+  m.impl("queue_push", queue_push);
+  m.impl("queue_pop", queue_pop);
+}
+
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, XPU, m) {
+  m.impl("queue_push", queue_push);
+  m.impl("queue_pop", queue_pop);
 }
 
 TORCH_LIBRARY_IMPL(_TorchScriptTesting, Meta, m) {

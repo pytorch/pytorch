@@ -59,6 +59,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RangeUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
@@ -72,7 +73,7 @@
 
 namespace torch::lazy {
 
-// Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
+// Copied from ATen/native/utils/ParamUtils.h, which apparently I can't include
 // from here?
 static std::vector<int64_t> expand_param_if_needed(
     at::IntArrayRef list_param,
@@ -84,8 +85,8 @@ static std::vector<int64_t> expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param;
-    TORCH_CHECK(false, ss.str());
+       << "dimensions, but got " << param_name << '=' << list_param;
+    TORCH_CHECK(false, std::move(ss).str());
   } else {
     return list_param.vec();
   }
@@ -103,19 +104,16 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
 
   AT_DISPATCH_ALL_TYPES_AND(
       c10::kBFloat16, out.scalar_type(), "compute_shape_arange_out", [&]() {
-        // Note: acc_type further defines an accumulataion type depending on the
+        // Note: acc_type further defines an accumulation type depending on the
         // scalar_t and whether its on cuda vs cpu.
         using accscalar_t = at::acc_type<scalar_t, false>;
-        auto xstart = start.to<accscalar_t>();
-        auto xend = end.to<accscalar_t>();
-        auto xstep = step.to<accscalar_t>();
 
         // we use double precision for (start - end) / step
         // to compute size_d for consistency across devices.
         // The problem with using accscalar_t is that accscalar_t might be
         // float32 on gpu for a float32 scalar_t, but double on cpu for the
         // same, and the effective output size starts differing on CPU vs GPU
-        // because of precision issues, which we dont want. the corner-case we
+        // because of precision issues, which we don't want. the corner-case we
         // do want to take into account is int64_t, which has higher precision
         // than double NOLINTNEXTLINE(bugprone-branch-clone)
         if constexpr (std::is_same_v<scalar_t, int64_t>) {
@@ -129,18 +127,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
               step.to<double>());
         }
 
-        TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-        TORCH_CHECK(
-            std::isfinite(static_cast<double>(xstart)) &&
-                std::isfinite(static_cast<double>(xend)),
-            "unsupported range: ",
-            xstart,
-            " -> ",
-            xend);
-        TORCH_CHECK(
-            ((xstep > 0) && (xend >= xstart)) ||
-                ((xstep < 0) && (xend <= xstart)),
-            "upper bound and larger bound inconsistent with step sign");
+        at::native::arange_check_bounds(start, end, step);
 
         TORCH_CHECK(
             size_d >= 0 &&
@@ -238,7 +225,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
     auto pad_idx = pad.size() - ((i + 1) * 2);
     auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
     TORCH_CHECK(
-        new_dim > 0,
+        new_dim >= 0,
         "The input size ",
         input_sizes[l_diff + i],
         ", plus negative padding ",
@@ -294,7 +281,7 @@ std::vector<Shape> compute_shape_convolution(
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
   // at::convolution performs parameter expansion before running kernels on
-  // expanded parameters we must do the same.  Shape formulae access differnent
+  // expanded parameters we must do the same.  Shape formulae access different
   // dimensions of e.g. output_padding, but output_padding may be passed in as a
   // scalar.  Sadly, accessing output_padding[1] in this case gives incorrect
   // results rather than indexing error
@@ -367,7 +354,7 @@ static std::vector<Shape> compute_shape_nonzero(
   for (auto dim_size : t.sizes()) {
     max_elements *= dim_size;
   }
-  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
+  return {Shape(at::kLong, {max_elements, t.dim()})};
 }
 
 std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
@@ -519,12 +506,6 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   return {Shape(tensors[0].scalar_type(), out_shape)};
 }
 
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
-    const at::Tensor& self,
-    bool upper) {
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
     const at::Tensor& input,
     const ::std::optional<at::Tensor>& weight,
@@ -540,7 +521,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
 
   // A separate mean and var needs to be kept for each channel.
   TORCH_CHECK(
-      input.sizes().size() >= 2,
+      input.dim() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
 
@@ -581,7 +562,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
 
   // A separate mean and var needs to be kept for each channel.
   TORCH_CHECK(
-      input.sizes().size() >= 2,
+      input.dim() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
 
@@ -594,6 +575,42 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
       std::vector<int64_t>{num_features});
 
   return shapes;
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_group_norm(
+    const at::Tensor& input,
+    const ::std::optional<at::Tensor>& weight,
+    const ::std::optional<at::Tensor>& bias,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
+  return {
+      {input.scalar_type(), input.sizes().vec()},
+      {input.scalar_type(), {N, group}},
+      {input.scalar_type(), {N, group}}};
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_group_norm_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
+    const at::Tensor& mean,
+    const at::Tensor& rstd,
+    const ::std::optional<at::Tensor>& weight,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    ::std::array<bool, 3> output_mask) {
+  auto param_type{
+      weight && weight->defined() ? weight->scalar_type()
+                                  : input.scalar_type()};
+  return {
+      {input.scalar_type(),
+       output_mask[0] ? input.sizes().vec() : c10::IntArrayRef{}},
+      {param_type, output_mask[1] ? c10::IntArrayRef{C} : c10::IntArrayRef{}},
+      {param_type, output_mask[2] ? c10::IntArrayRef{C} : c10::IntArrayRef{}}};
 }
 
 std::vector<Shape> compute_shape_native_layer_norm(

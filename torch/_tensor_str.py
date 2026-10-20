@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import inf
@@ -15,7 +15,7 @@ class __PrinterOptions:
     threshold: float = 1000
     edgeitems: int = 3
     linewidth: int = 80
-    sci_mode: Optional[bool] = None
+    sci_mode: bool | None = None
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -120,6 +120,7 @@ def tensor_totype(t):
         if (
             t.is_mps
             or (t.is_xpu and not torch.xpu.get_device_properties(t.device).has_fp64)
+            or t.is_maia
         )
         else torch.double
     )
@@ -167,8 +168,7 @@ class _Formatter:
                 # support for them is removed
                 nonzero_finite_vals = nonzero_finite_vals.float()
 
-            # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
-
+            # Convert to double (or float) for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
             nonzero_finite_abs = tensor_totype(nonzero_finite_vals.abs())
             nonzero_finite_min = tensor_totype(nonzero_finite_abs.min())
             nonzero_finite_max = tensor_totype(nonzero_finite_abs.max())
@@ -178,14 +178,18 @@ class _Formatter:
                     self.int_mode = False
                     break
 
+            self.sci_mode = (
+                nonzero_finite_max / nonzero_finite_min > 1000.0
+                or nonzero_finite_max > 1.0e8
+                or nonzero_finite_min < 1.0e-4
+                if PRINT_OPTS.sci_mode is None
+                else PRINT_OPTS.sci_mode
+            )
+
             if self.int_mode:
                 # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
                 # to indicate that the tensor is of floating type. add 1 to the len to account for this.
-                if (
-                    nonzero_finite_max / nonzero_finite_min > 1000.0
-                    or nonzero_finite_max > 1.0e8
-                ):
-                    self.sci_mode = True
+                if self.sci_mode:
                     for value in nonzero_finite_vals:
                         value_str = f"{{:.{PRINT_OPTS.precision}e}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
@@ -195,12 +199,7 @@ class _Formatter:
                         self.max_width = max(self.max_width, len(value_str) + 1)
             else:
                 # Check if scientific representation should be used.
-                if (
-                    nonzero_finite_max / nonzero_finite_min > 1000.0
-                    or nonzero_finite_max > 1.0e8
-                    or nonzero_finite_min < 1.0e-4
-                ):
-                    self.sci_mode = True
+                if self.sci_mode:
                     for value in nonzero_finite_vals:
                         value_str = f"{{:.{PRINT_OPTS.precision}e}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
@@ -208,9 +207,6 @@ class _Formatter:
                     for value in nonzero_finite_vals:
                         value_str = f"{{:.{PRINT_OPTS.precision}f}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
-
-        if PRINT_OPTS.sci_mode is not None:
-            self.sci_mode = PRINT_OPTS.sci_mode
 
     def width(self):
         return self.max_width
@@ -251,7 +247,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
         element_length += formatter2.width() + 1
 
     elements_per_line = max(
-        1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
+        1, math.floor((PRINT_OPTS.linewidth - indent) / (element_length))
     )
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
@@ -295,7 +291,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
 
 # formatter2 is only used for printing complex tensors.
 # For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
-# and tensor.imag respesectively
+# and tensor.imag respectively
 def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
     dim = self.dim()
 
@@ -311,7 +307,7 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
                 _tensor_str_with_formatter(
                     self[i], indent + 1, summarize, formatter1, formatter2
                 )
-                for i in range(0, PRINT_OPTS.edgeitems)
+                for i in range(PRINT_OPTS.edgeitems)
             ]
             + ["..."]
             + [
@@ -326,7 +322,7 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
             _tensor_str_with_formatter(
                 self[i], indent + 1, summarize, formatter1, formatter2
             )
-            for i in range(0, self.size(0))
+            for i in range(self.size(0))
         ]
 
     tensor_str = ("," + "\n" * (dim - 1) + " " * (indent + 1)).join(slices)
@@ -336,14 +332,6 @@ def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=N
 def _tensor_str(self, indent):
     if self.numel() == 0:
         return "[]"
-
-    if self.has_names():
-        # There are two main codepaths (possibly more) that tensor printing goes through:
-        # - tensor data can fit comfortably on screen
-        # - tensor data needs to be summarized
-        # Some of the codepaths don't fully support named tensors, so we send in
-        # an unnamed tensor to the formatting code as a workaround.
-        self = self.rename(None)
 
     summarize = self.numel() > PRINT_OPTS.threshold
 
@@ -410,7 +398,7 @@ def get_summarized_data(self):
     if not PRINT_OPTS.edgeitems:
         return self.new_empty([0] * self.dim())
     elif self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
+        start = [self[i] for i in range(PRINT_OPTS.edgeitems)]
         end = [self[i] for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))]
         return torch.stack([get_summarized_data(x) for x in (start + end)])
     else:
@@ -473,9 +461,9 @@ def _str_intern(inp, *, tensor_contents=None):
     )
     if self.is_sparse:
         suffixes.append("size=" + str(tuple(self.shape)))
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -512,10 +500,10 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsr,
         torch.sparse_bsc,
     }:
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         suffixes.append("size=" + str(tuple(self.shape)))
-        is_meta = self.is_meta or isinstance(self, FakeTensor)
+        is_meta = self.is_meta or is_fake_tensor(self)
         if not is_meta:
             suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
@@ -611,9 +599,9 @@ def _str_intern(inp, *, tensor_contents=None):
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
         # Circular import problem, so we import it here
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
-        if self.is_meta or isinstance(self, FakeTensor):
+        if self.is_meta or is_fake_tensor(self):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
@@ -661,17 +649,16 @@ def _str_intern(inp, *, tensor_contents=None):
         grad_fn_name = "Invalid"
 
     if grad_fn_name is None and grad_fn is not None:  # type: ignore[possibly-undefined]
+        # pyrefly: ignore [unbound-name]
         grad_fn_name = type(grad_fn).__name__
         if grad_fn_name == "CppFunction":
+            # pyrefly: ignore [unbound-name]
             grad_fn_name = grad_fn.name().rsplit("::", 1)[-1]
 
     if grad_fn_name is not None:
         suffixes.append(f"grad_fn=<{grad_fn_name}>")
     elif inp.requires_grad:
         suffixes.append("requires_grad=True")
-
-    if self.has_names():
-        suffixes.append(f"names={self.names}")
 
     if tangent is not None:
         suffixes.append(f"tangent={tangent}")
@@ -695,7 +682,8 @@ def _str_intern(inp, *, tensor_contents=None):
 
 def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
     level = torch._C._functorch.maybe_get_level(tensor)
-    assert level != -1
+    if level == -1:
+        raise AssertionError("expected functorch level to be >= 0, got -1")
 
     if torch._C._functorch.is_functionaltensor(tensor):
         # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
@@ -708,7 +696,8 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
     indented_value_repr = textwrap.indent(value_repr, " " * 4)
     if torch._C._functorch.is_batchedtensor(tensor):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
-        assert bdim != -1
+        if bdim == -1:
+            raise AssertionError("expected batch dimension to be >= 0, got -1")
         return (
             f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n{indented_value_repr}\n)"
         )

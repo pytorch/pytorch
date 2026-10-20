@@ -27,7 +27,6 @@
 //
 
 #include <cstdint>
-#include <c10/util/C++17.h>
 #include <c10/util/Load.h>
 #include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -36,6 +35,7 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cpu/vec/vec.h>
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
 
@@ -46,7 +46,7 @@ using namespace vec;
 template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
-                 std::index_sequence<INDEX...>) {
+                 std::index_sequence<INDEX...> /*unused*/) {
   return std::make_tuple(
       c10::load<typename traits::template arg<INDEX>::type>(
           data[INDEX] + i * strides[INDEX])...);
@@ -65,7 +65,7 @@ dereference_vec_impl(char* C10_RESTRICT data[],
                      const typename traits::result_type& opt_scalar,
                      size_t S,
                      int64_t i,
-                     std::index_sequence<INDEX...>) {
+                     std::index_sequence<INDEX...> /*unused*/) {
   using Vec = typename traits::result_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
@@ -81,6 +81,31 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
+template <typename traits, std::size_t... INDEX>
+typename traits::ArgsTuple
+dereference_vec_partial_impl(char* C10_RESTRICT data[],
+                             const typename traits::result_type& opt_scalar,
+                             size_t S,
+                             int64_t i,
+                             [[maybe_unused]] int64_t count,
+                             std::index_sequence<INDEX...> /*unused*/) {
+  using Vec = typename traits::result_type;
+  using scalar_t = typename Vec::value_type;
+  return std::make_tuple(
+      S == INDEX + 1 ?
+      opt_scalar :
+      Vec::loadu(data[INDEX] + i * sizeof(scalar_t), count)...);
+}
+
+// Loads only `count` elements per operand; the lanes beyond `count` are zeroed
+// by Vectorized::loadu, so no memory past the end of the operands is touched.
+template <typename traits>
+typename traits::ArgsTuple
+dereference_vec_partial(char* C10_RESTRICT data[], const typename traits::result_type& opt_scalar, size_t S, int64_t i, int64_t count) {
+  using Indices = std::make_index_sequence<traits::arity>;
+  return dereference_vec_partial_impl<traits>(data, opt_scalar, S, i, count, Indices{});
+}
+
 template <typename func_t,
     std::enable_if_t<!std::is_void_v<typename function_traits<func_t>::result_type>>* = nullptr>
 inline void
@@ -89,7 +114,7 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
   using result_type = typename traits::result_type;
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
-    *out_ptr = c10::guts::apply(op, dereference<traits>(
+    *out_ptr = std::apply(op, dereference<traits>(
         &data[1],
         &strides[1],
         i));
@@ -102,7 +127,7 @@ inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   for (; i < n; i++) {
-    c10::guts::apply(op, dereference<traits>(
+    std::apply(op, dereference<traits>(
         &data[0],
         &strides[0],
         i));
@@ -162,7 +187,7 @@ void handle_tuple_outputs(char* C10_RESTRICT data[],
 }
 
 // Loop operation for `cpu_kernel_multiple_outputs`.
-// 1. Use `c10::guts::apply` to make dynamic method invocation
+// 1. Use `std::apply` to make dynamic method invocation
 //    for the lambda passed in `cpu_kernel_multiple_outputs`.
 // 2. Iterate over the members of the returned tuple, set the corresponding
 //    output tensor by the tuple member in `handle_tuple_outputs` function.
@@ -183,7 +208,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   }
 
   for (; i < n; i++) {
-    auto output = c10::guts::apply(op, dereference<traits>(
+    auto output = std::apply(op, dereference<traits>(
       &data[num_outputs],
       &strides[num_outputs],
       i));
@@ -195,9 +220,14 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
 // the same type and contiguous with one exception: a single input may be
 // a scalar (stride 0). It's position is indicated by the argument `S`. If `S`
 // is 0, then there are no scalar inputs.
+//
+// The trailing elements are handled with masked loads/stores through `vop` as
+// well, not through `op`: a kernel whose scalar and vectorized lambdas are not
+// numerically identical would otherwise give different results depending on an
+// element's position within the tensor.
 template <typename func_t, typename vec_func_t>
 inline void
-vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, vec_func_t&& vop) {
+vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, [[maybe_unused]] func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<vec_func_t>;
   using scalar_t = typename function_traits<func_t>::result_type;
   using Vec = Vectorized<scalar_t>;
@@ -213,17 +243,16 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
     auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
-    auto out1 = c10::guts::apply(vop, std::move(args1));
-    auto out2 = c10::guts::apply(vop, std::move(args2));
+    auto out1 = std::apply(vop, std::move(args1));
+    auto out2 = std::apply(vop, std::move(args2));
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
-  if (i < n) {
-    int64_t strides[ntensors];
-    for (const auto arg : c10::irange(ntensors)) {
-      strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
-    }
-    basic_loop(data, strides, i, n, std::forward<func_t>(op));
+  for (; i < n; i += Vec::size()) {
+    const int64_t count = std::min(static_cast<int64_t>(Vec::size()), n - i);
+    auto args = dereference_vec_partial<traits>(&data[1], opt_scalar, S, i, count);
+    auto out = std::apply(vop, std::move(args));
+    out.store(data[0] + i * sizeof(scalar_t), count);
   }
 }
 
@@ -231,7 +260,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 template <typename traits, typename cb_t>
 inline void unroll_contiguous_scalar_checks(
     const int64_t* /*strides*/,
-    std::index_sequence<>,
+    std::index_sequence<> /*unused*/,
     cb_t&& cb) {
   cb(0);
 }
@@ -239,7 +268,7 @@ inline void unroll_contiguous_scalar_checks(
 template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
 inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
-    std::index_sequence<INDEX0, INDEX...>,
+    std::index_sequence<INDEX0, INDEX...> /*unused*/,
     cb_t&& cb) {
   if (is_contiguous_scalar<traits, INDEX0 + 1>(strides)) {
     cb(INDEX0 + 1);
@@ -302,13 +331,15 @@ VectorizedLoop2d<op_t, vop_t> make_vectorized_loop2d(
 }
 
 template <typename func_t>
-void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
+void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE, bool check_dynamic_casting = true) {
   using traits = function_traits<func_t>;
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  if (check_dynamic_casting) {
+    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  }
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
@@ -316,6 +347,11 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
       basic_loop(data, strides, 0, n, op);
   }, grain_size);
   iter.cast_outputs();
+}
+
+template <typename func_t>
+void cpu_kernel_opaque(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
+  return cpu_kernel(iter, op, grain_size, false);
 }
 
 // This function helps write elementwise kernels that requires multiple outputs.

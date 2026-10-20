@@ -158,7 +158,7 @@ if __name__ == "__main__":
     model_arg.add_argument(
         "--torchbench-model",
         "--torchbench_model",
-        help="name of torchbench model, e.g. hf_Bert",
+        help="name of torchbench model, e.g. BERT_pytorch",
     )
     model_arg.add_argument(
         "--toy-model", "--toy_model", action="store_true", help="use toy model instead"

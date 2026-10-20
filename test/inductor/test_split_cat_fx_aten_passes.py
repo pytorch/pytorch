@@ -5,7 +5,7 @@ import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 try:
@@ -17,7 +17,7 @@ except Exception:
     has_fbgemm = False
 
 
-class TestSplitCat(torch.nn.Module):
+class _TestSplitCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -49,7 +49,23 @@ class TestSplitCat(torch.nn.Module):
         return torch.ops.aten.cat.default([cat_1, cat_2], 1)
 
 
-class TestSplitCatPartial(torch.nn.Module):
+class _TestSplitCatSingular(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+        cat = torch.ops.aten.cat.default([x, y], 1)
+        split = torch.ops.aten.split.Tensor(cat, 32, 1)
+        getitem = split[0]
+        cat_1 = torch.ops.aten.cat.default(
+            [getitem],
+            1,
+        )
+        cat_2 = torch.ops.aten.cat.default([getitem, z], 1)
+        return torch.ops.aten.cat.default([cat_1, cat_2], 1)
+
+
+class _TestSplitCatPartial(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -135,7 +151,7 @@ class TestSplitCatPartial(torch.nn.Module):
         return cat
 
 
-class TestMoveViewAferCat(torch.nn.Module):
+class _TestMoveViewAferCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -175,7 +191,7 @@ class TestMoveViewAferCat(torch.nn.Module):
         return torch.cat([clone, cat_1], 1)
 
 
-class TestSelectCat(torch.nn.Module):
+class _TestSelectCat(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
@@ -208,9 +224,10 @@ class TestSplitCatAten(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
-        for key1 in ref_dict.keys():
+        for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            assert key2 in res_dict, f"{key1} does not exist in traced module"
+            if key2 not in res_dict:
+                raise AssertionError(f"{key1} does not exist in traced module")
             if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
                 return False
         return True
@@ -232,7 +249,7 @@ class TestSplitCatAten(TestCase):
             self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
         )
 
-    @requires_cuda
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -247,7 +264,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
         ]
-        module = TestSplitCat()
+        module = _TestSplitCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -264,7 +281,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 96, device=torch.device(device=GPU_TYPE)),
         ]
-        module = TestSplitCatPartial()
+        module = _TestSplitCatPartial()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -275,7 +292,33 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "split_cat_aten_pass": {"threshold_to_cat": 5},
+        },
+    )
+    def test_split_cat_post_grad_singular(self):
+        counters.clear()
+        inputs = [
+            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = _TestSplitCatSingular()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 4)
+        self.assertEqual(counters["inductor"]["split_cat_aten_pass"], 0)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -289,7 +332,7 @@ class TestSplitCatAten(TestCase):
             torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
             torch.randn(1024, 6, 128, device=torch.device(device=GPU_TYPE)),
         ]
-        module = TestSelectCat()
+        module = _TestSelectCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -300,7 +343,7 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -313,7 +356,7 @@ class TestSplitCatAten(TestCase):
         inputs = [
             torch.randn(7, 8, 96, device=torch.device(device=GPU_TYPE)),
         ]
-        module = TestMoveViewAferCat()
+        module = _TestMoveViewAferCat()
         traced = torch.compile(module)
         ref = module(*inputs)
         res = traced(*inputs)
@@ -323,6 +366,115 @@ class TestSplitCatAten(TestCase):
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad_not_merged(self):
+        def mixed_inputs(x, y):
+            return torch.cat([x.select(1, 0), x.select(1, 1) * 2.0], dim=1)
+
+        def other_input(x, y):
+            cat = torch.cat([x.select(1, 0), y.select(1, 1)], dim=1)
+            return cat, x.select(1, 1)
+
+        def negative_index(x, y):
+            return torch.cat([x.select(1, -1), x.select(1, 0)], dim=1)
+
+        def non_contiguous(x, y):
+            x = x.transpose(0, 2)
+            return torch.cat([x.select(1, 0), x.select(1, 1)], dim=1)
+
+        inputs = [torch.randn(4, 2, 4), torch.randn(4, 2, 4)]
+        for fn in (mixed_inputs, other_input, negative_index, non_contiguous):
+            with self.subTest(fn=fn.__name__):
+                counters.clear()
+                torch._dynamo.reset()
+                self.assertEqual(torch.compile(fn)(*inputs), fn(*inputs))
+                self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 0)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad_merged_negative_dim_and_index(self):
+        def fn(x):
+            return torch.cat([x.select(-2, i) for i in range(-4, 0)], dim=-1)
+
+        counters.clear()
+        x = torch.randn(3, 4, 5)
+        self.assertEqual(torch.compile(fn)(x), fn(x))
+        self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "select_cat_aten_pass": {},
+        },
+    )
+    def test_select_cat_post_grad_does_not_alias(self):
+        # the merged cat is a new tensor, not a view of its input
+        def input_mutated(x):
+            cat = torch.cat([x.select(1, i) for i in range(4)], dim=1)
+            x.add_(100)
+            return cat
+
+        def output_returned(x):
+            return torch.cat([x.select(1, i) for i in range(4)], dim=1)
+
+        for fn in (input_mutated, output_returned):
+            with self.subTest(fn=fn.__name__):
+                counters.clear()
+                torch._dynamo.reset()
+                x = torch.randn(3, 4, 5)
+                x_ref, x_res = x.clone(), x.clone()
+                ref, res = fn(x_ref), torch.compile(fn)(x_res)
+                self.assertEqual(res, ref)
+                self.assertEqual(x_res, x_ref)
+                self.assertEqual(counters["inductor"]["select_cat_aten_pass"], 1)
+                res.add_(1)
+                self.assertEqual(x_res, x_ref)
+
+
+class TestSplitCatAtenNormalizationPasses(TestCase):
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+        },
+    )
+    def test_split_aten_normalization(self):
+        def arg_only_size_same(x):
+            return torch.ops.aten.split.Tensor(x, 300, 1)
+
+        def arg_only_size_different(x):
+            return torch.ops.aten.split.Tensor(x, 320, 1)
+
+        args = [
+            torch.randn(4096, 300),
+        ]
+        for fn, expected_split_norm_count in [
+            (arg_only_size_same, 1),
+            (arg_only_size_different, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["normalization_aten_pass"],
+                expected_split_norm_count,
+                msg=lambda msg: f"{msg}\nfor {fn}",
+            )
+            counters.clear()
 
 
 if __name__ == "__main__":

@@ -9,10 +9,11 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
-    requires_cuda_with_enough_memory,
+    requires_gpu_with_enough_memory,
 )
 
 
@@ -111,6 +112,7 @@ class InplacePaddingTest(TestCase):
         self.assertEqual(num_inplace_padding(), 1)
 
     @inductor_config.patch(cpp_wrapper=True)
+    @inductor_config.patch("triton.autotune_at_compile_time", True)
     def test_pad_non_zero_cpp_wrapper(self):
         def f(x):
             x = x + 1
@@ -134,8 +136,16 @@ class InplacePaddingTest(TestCase):
             compile_time_autotune_called = True
             out = orig_generate_and_run_autotune_block(wrapper)
             call_code = wrapper.kernel_autotune_calls.getvalue()
-            FileCheck().check(
-                f"buf0 = generate_example_value((2048, 2047), (2048, 1), '{GPU_TYPE}:0', torch.float32, 0, (2048, 2048))"
+            # buf0 is inplace-padded: its autotune example input is over-allocated
+            # to the padded storage size (2048 * 2048 = 4194304 elements) and then
+            # strided to the logical (2048, 2047) shape with the padded row stride
+            # of 2048.
+            FileCheck().check_regex(
+                r"_autotune_storage_[0-9]+ = generate_example_value\(\(4194304,\), "
+                rf"\(1,\), '{GPU_TYPE}:0', torch\.float32, 0, \(4194304,\)\)"
+            ).run(call_code)
+            FileCheck().check_regex(
+                r"buf0 = torch\.as_strided\(.*, \(2048, 2047\), \(2048, 1\), 0\)"
             ).run(call_code)
             return out
 
@@ -209,8 +219,26 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @requires_cuda_with_enough_memory(2e10)
+    def test_negative_padding(self):
+        """
+        Negative padding (shrinking the tensor) should not trigger inplace padding
+        and should evaluate correctly without ValueRangeError.
+        """
+
+        def f(x, y):
+            x = aten.constant_pad_nd(x + 1.0, (0, -2, 0, 0), 12345.0)
+            return x @ y
+
+        M, N = 64, 64
+        x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
+        y = torch.randn(N - 2, M, device=GPU_TYPE)
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
+
+        self.assertEqual(num_inplace_padding(), 0)
+
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
+    @serialTest()
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
@@ -231,15 +259,16 @@ class InplacePaddingTest(TestCase):
             loss.backward()
             return loss
 
-        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x = torch.randn(B * T, C, requires_grad=True).to(GPU_TYPE).bfloat16()
         x.retain_grad()
-        y = torch.randint(0, V, (B * T,)).cuda()
+        y = torch.randint(0, V, (B * T,)).to(GPU_TYPE)
 
         opt_f = torch.compile(f)
 
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-        assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+        if not same(expect, actual, tol=1e-2):
+            raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
         # We may disable inplace_padding via env-var to test perf.
         self.assertEqual(num_inplace_padding(), int(inductor_config.inplace_padding))
@@ -252,7 +281,9 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
+    @serialTest()
     def test_linear_and_cel_max_autotune(self):
         self.test_linear_and_cel()
 

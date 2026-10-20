@@ -39,7 +39,10 @@ def save_and_load(sm):
 def bundle_jpeg_image(img_tensor, quality):
     # turn NCHW to HWC
     if img_tensor.dim() == 4:
-        assert img_tensor.size(0) == 1
+        if img_tensor.size(0) != 1:
+            raise AssertionError(
+                f"img_tensor.size(0) must be 1, got {img_tensor.size(0)}"
+            )
         img_tensor = img_tensor[0].permute(1, 2, 0)
     pixels = img_tensor.numpy()
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
@@ -92,3 +95,10 @@ class TestBundledImages(TestCase):
             im2_tensor = torch.ops.fb.image_decode_to_NCHW(byte_tensor, weight, bias)
             self.assertEqual(raw_data.shape, im2_tensor.shape)
             self.assertEqual(raw_data, im2_tensor, atol=0.1, rtol=1e-01)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

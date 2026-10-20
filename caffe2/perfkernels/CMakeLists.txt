@@ -7,11 +7,11 @@ if(INTERN_BUILD_MOBILE)
 endif()
 
 # ---[ CPU files.
-file(GLOB common_srcs *.cc)
-file(GLOB avx_srcs *_avx.cc)
-file(GLOB avx2_srcs *_avx2.cc)
-file(GLOB avx512_srcs *_avx512.cc)
-file(GLOB sve_srcs *_sve.cc)
+file(GLOB common_srcs CONFIGURE_DEPENDS *.cc)
+file(GLOB avx_srcs CONFIGURE_DEPENDS *_avx.cc)
+file(GLOB avx2_srcs CONFIGURE_DEPENDS *_avx2.cc)
+file(GLOB avx512_srcs CONFIGURE_DEPENDS *_avx512.cc)
+file(GLOB sve_srcs CONFIGURE_DEPENDS *_sve.cc)
 # exclude avx, avx2, avx512, and sve srcs from common_srcs
 exclude(common_srcs "${common_srcs}" ${avx_srcs})
 exclude(common_srcs "${common_srcs}" ${avx2_srcs})
@@ -29,9 +29,9 @@ if(CXX_AVX2_FOUND)
 
   if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     target_compile_options(Caffe2_perfkernels_avx2
-        PRIVATE "/arch:AVX2"
-        PRIVATE "/D__FMA__"
-        PRIVATE "/D__F16C__")
+        PRIVATE "/arch:AVX2")
+    target_compile_definitions(Caffe2_perfkernels_avx2
+        PRIVATE "__FMA__" "__F16C__")
   else()
     target_compile_options(Caffe2_perfkernels_avx2
         PRIVATE "-mavx2"

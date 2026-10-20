@@ -16,7 +16,6 @@
 #include <ATen/core/Tensor.h>
 #include <functional>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 
 #include <algorithm>
 
@@ -251,7 +250,7 @@ TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnbox
   callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, c10::DispatchKeySet(c10::DispatchKey::CPU), dummyTensor(c10::DispatchKey::CUDA));
   EXPECT_TRUE(called_kernel_cpu);
 
-  // Ensure that disptach key from tensor is not used here.
+  // Ensure that dispatch key from tensor is not used here.
   called_kernel_cpu = false;
   expectThrows<c10::Error>([&] {
     callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, c10::DispatchKeySet(c10::DispatchKey::CUDA), dummyTensor(c10::DispatchKey::CPU));
@@ -1787,8 +1786,7 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
 }
 
 TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool fpga_called, math_called = false;
+  bool fpga_called = false, math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn", torch::dispatch(c10::DispatchKey::FPGA, [&](const Tensor& x) { fpga_called = true; return x; }));
   m.impl("fn", c10::DispatchKey::CompositeImplicitAutograd, [&](const Tensor& x) { math_called = true; return x; });
@@ -2031,7 +2029,7 @@ TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
       if (op_name.overload_name != "") {
           error_str += "." + op_name.overload_name;
       }
-      error_str += "\n";
+      error_str += '\n';
   }
   ASSERT_EQ(danglingImpls.size(), 0) << error_str;
 }
@@ -2210,6 +2208,24 @@ Tensor symint_op3(const Tensor& self, const c10::SymInt& length) {
   return self.clone();
 }
 
+Tensor symint_array_ref_op(
+    const Tensor& self,
+    const c10::SymIntArrayRef& sizes) {
+  return self.clone();
+}
+
+Tensor optional_symint_op(
+    const Tensor& self,
+    const std::optional<c10::SymInt>& length) {
+  return self.clone();
+}
+
+Tensor optional_symint_array_ref_op(
+    const Tensor& self,
+    const at::OptionalSymIntArrayRef& sizes) {
+  return self.clone();
+}
+
 TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
@@ -2218,6 +2234,46 @@ TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   expectThrows<c10::Error>([&] {
     m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op3));
   }, "doesn't match the expected function schema");
+}
+
+TEST(OperatorRegistrationTest, TestSymIntArrayRefErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_array_ref_op(Tensor self, SymInt[] sizes) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "symint_array_ref_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(symint_array_ref_op));
+  }, "pass SymInt and std::optional<SymInt> by value, and SymIntArrayRef and OptionalSymIntArrayRef directly (not as const references)");
+}
+
+TEST(OperatorRegistrationTest, TestOptionalSymIntErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::optional_symint_op(Tensor self, SymInt? length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "optional_symint_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(optional_symint_op));
+  }, "std::optional<SymInt> by value");
+}
+
+TEST(OperatorRegistrationTest, TestOptionalSymIntArrayRefErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def(
+      "_test::optional_symint_array_ref_op(Tensor self, SymInt[]? sizes) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "optional_symint_array_ref_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(optional_symint_array_ref_op));
+  }, "OptionalSymIntArrayRef directly");
 }
 
 }

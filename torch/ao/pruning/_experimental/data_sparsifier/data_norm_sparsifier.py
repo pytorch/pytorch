@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 from functools import reduce
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.nn import functional as F
@@ -16,7 +16,7 @@ class DataNormSparsifier(BaseDataSparsifier):
     r"""L1-Norm Sparsifier
     This sparsifier computes the *L1-norm* of every sparse block and "zeroes-out" the
     ones with the lowest norm. The level of sparsity defines how many of the
-    blocks is removed.
+    blocks are removed.
     This sparsifier is controlled by three variables:
     1. `sparsity_level` defines the number of *sparse blocks* that are zeroed-out
     2. `sparse_block_shape` defines the shape of the sparse blocks. Note that
@@ -32,22 +32,23 @@ class DataNormSparsifier(BaseDataSparsifier):
         zeros_per_block: Number of zeros in a sparse block
     Note::
         All arguments to the DataNormSparsifier constructor are "default"
-        arguments and could be overriden by the configuration provided in the
+        arguments and could be overridden by the configuration provided in the
         `add_data` step.
     """
 
     def __init__(
         self,
-        data_list: Optional[list[tuple[str, Any]]] = None,
+        data_list: list[tuple[str, Any]] | None = None,
         sparsity_level: float = 0.5,
         sparse_block_shape: tuple[int, int] = (1, 4),
-        zeros_per_block: Optional[int] = None,
+        zeros_per_block: int | None = None,
         norm: str = "L1",
     ):
         if zeros_per_block is None:
             zeros_per_block = reduce(operator.mul, sparse_block_shape)
 
-        assert norm in ["L1", "L2"], "only L1 and L2 norm supported at the moment"
+        if norm not in ["L1", "L2"]:
+            raise AssertionError("only L1 and L2 norm supported at the moment")
 
         defaults = {
             "sparsity_level": sparsity_level,

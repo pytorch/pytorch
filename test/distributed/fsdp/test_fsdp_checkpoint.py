@@ -18,7 +18,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest, get_devtype
+from torch.testing._internal.common_fsdp import (
+    _maybe_wrap_fsdp,
+    FSDPTestContinuous,
+    get_devtype,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -57,6 +61,9 @@ def get_patched_save_on_cpu():
 
 @contextlib.contextmanager
 def patch_save_on_cpu(new_save_on_cpu):
+    global _save_on_cpu_called
+    previous_save_on_cpu_called = _save_on_cpu_called
+    _save_on_cpu_called = False
     orig_save_on_cpu = (
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
     )
@@ -66,12 +73,13 @@ def patch_save_on_cpu(new_save_on_cpu):
     try:
         yield
     finally:
+        _save_on_cpu_called = previous_save_on_cpu_called
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = (
             orig_save_on_cpu
         )
 
 
-class TestFSDPCheckpoint(FSDPTest):
+class TestFSDPCheckpoint(FSDPTestContinuous):
     class SequentialModule(nn.Module):
         def __init__(
             self,
@@ -107,9 +115,12 @@ class TestFSDPCheckpoint(FSDPTest):
             return self.ffn(x)
 
     def _verify_parity(self, losses, outputs, models):
-        assert losses
-        assert outputs
-        assert models
+        if not losses:
+            raise AssertionError("Expected losses to be non-empty")
+        if not outputs:
+            raise AssertionError("Expected outputs to be non-empty")
+        if not models:
+            raise AssertionError("Expected models to be non-empty")
         for l, o in zip(losses[1:], outputs[1:]):
             self.assertEqual(losses[0], l)
             self.assertEqual(outputs[0], o)
@@ -302,7 +313,7 @@ class TestModel(nn.Module):
         return self.l2(self.relu(self.checkpoint2(self.checkpoint1(self.l1(x)))))
 
 
-class TestFSDPCheckpointSubmodule(FSDPTest):
+class TestFSDPCheckpointSubmodule(FSDPTestContinuous):
     # TODO: grad value checks occasionally fails when use_reentrant = True
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [False])

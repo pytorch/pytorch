@@ -211,11 +211,11 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_add_nc_q8(
       qnnpack_operator /* add op */,
       qa_contig.size(0) /* batch size */,
-      (uint8_t*)qa_contig.data_ptr<c10::quint8>() /* a data */,
+      reinterpret_cast<const uint8_t*>(qa_contig.const_data_ptr<c10::quint8>()) /* a data */,
       num_elems /* A stride */,
-      (uint8_t*)qb_contig.data_ptr<c10::quint8>() /* b data */,
+      reinterpret_cast<const uint8_t*>(qb_contig.const_data_ptr<c10::quint8>()) /* b data */,
       num_elems /* B stride */,
-      (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+      reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()) /* output data */,
       num_elems /* sum stride */);
   TORCH_INTERNAL_ASSERT(
       setupStatus == pytorch_qnnp_status_success,
@@ -256,9 +256,8 @@ enum xnn_status xnnp_define_q_tensor(const Tensor& tensor, MemoryFormat format, 
 
 template <typename scalar_t, bool ReLUFused = false>
 Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
-  const string func_name = "xnnp_add()";
-  TORCH_CHECK(qa.ndimension() > 0, func_name, ": Got empty input tensor.");
-  TORCH_CHECK(at::native::xnnpack::available(), func_name, ": XNNPACK is not available")
+  TORCH_CHECK(qa.ndimension() > 0, __func__, ": Got empty input tensor.");
+  TORCH_CHECK(at::native::xnnpack::available(), __func__, ": XNNPACK is not available")
 
   // using qa memory format for qb to allow xnnpack kernel to flatten all the
   // dims
@@ -294,7 +293,7 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     &subgraph_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn create subgraph failed(", status,")!");
+      __func__, ": xnn create subgraph failed(", status,")!");
   std::unique_ptr<xnn_subgraph, decltype(&xnn_delete_subgraph)> subgraph(
       subgraph_ptr, &xnn_delete_subgraph);
 
@@ -311,7 +310,7 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   );
   TORCH_CHECK(
       status == xnn_status_success && input0_id != XNN_INVALID_VALUE_ID,
-      func_name, ": xnn define input 0 failed(", status,")!");
+      __func__, ": xnn define input 0 failed(", status,")!");
 
   // Defining the quantized input 1
   status = xnnp_define_q_tensor(
@@ -324,7 +323,7 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   );
   TORCH_CHECK(
       status == xnn_status_success && input1_id != XNN_INVALID_VALUE_ID,
-      func_name, ": xnn define input 1 failed(", status,")!");
+      __func__, ": xnn define input 1 failed(", status,")!");
 
   // Defining the quantized output
   status = xnnp_define_q_tensor(
@@ -337,7 +336,7 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   );
   TORCH_CHECK(
       status == xnn_status_success && output_id != XNN_INVALID_VALUE_ID,
-      func_name, ": xnn define output failed(", status,")!");
+      __func__, ": xnn define output failed(", status,")!");
 
   const struct xnn_binary_params binary_params = {output_min, output_max};
   status = xnn_define_binary(
@@ -350,24 +349,24 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     0);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn define binary add failed(", status,")!");
+      __func__, ": xnn define binary add failed(", status,")!");
 
   // create runtime
   xnn_runtime_t runtime_ptr = nullptr;
   status = xnn_create_runtime_v2(subgraph_ptr, caffe2::pthreadpool_(), 0, &runtime_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn create runtime failed(", status,")!");
+      __func__, ": xnn create runtime failed(", status,")!");
   TORCH_CHECK(
       runtime_ptr != nullptr,
-      func_name, ": xnn create runtime failed because runtime_ptr is null");
+      __func__, ": xnn create runtime failed because runtime_ptr is null");
   std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
       runtime_ptr, &xnn_delete_runtime);
 
   std::array<xnn_external_value, 3> external = {
-    xnn_external_value{input0_id, reinterpret_cast<void*>(qa_contig.data_ptr<scalar_t>())},
-    xnn_external_value{input1_id, reinterpret_cast<void*>(qb_contig.data_ptr<scalar_t>())},
-    xnn_external_value{output_id, reinterpret_cast<void*>(qy.data_ptr<scalar_t>())}};
+    xnn_external_value{input0_id, reinterpret_cast<void*>(qa_contig.mutable_data_ptr<scalar_t>())},
+    xnn_external_value{input1_id, reinterpret_cast<void*>(qb_contig.mutable_data_ptr<scalar_t>())},
+    xnn_external_value{output_id, reinterpret_cast<void*>(qy.mutable_data_ptr<scalar_t>())}};
 
   status = xnn_setup_runtime(
     runtime_ptr,
@@ -375,11 +374,11 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     external.data());
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn setup runtime failed(", status,")!");
+      __func__, ": xnn setup runtime failed(", status,")!");
   status = xnn_invoke_runtime(runtime_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn invoke runtime failed(", status,")!");
+      __func__, ": xnn invoke runtime failed(", status,")!");
 
   return qy;
 }
@@ -430,9 +429,11 @@ Tensor acl_qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   acl_add->configure();
 
-  acl_add->qa_tensor.allocator()->import_memory(qa_contig.data_ptr());
-  acl_add->qb_tensor.allocator()->import_memory(qb_contig.data_ptr());
-  acl_add->qdst_tensor.allocator()->import_memory(dst.data_ptr());
+  acl_add->qa_tensor.allocator()->import_memory(
+      const_cast<void*>(qa_contig.const_data_ptr()));
+  acl_add->qb_tensor.allocator()->import_memory(
+      const_cast<void*>(qb_contig.const_data_ptr()));
+  acl_add->qdst_tensor.allocator()->import_memory(dst.mutable_data_ptr());
 
   acl_add->q_add.run();
 
@@ -462,7 +463,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif // USE_XNNPACK
 
 #ifdef USE_PYTORCH_QNNPACK
-    if(qa.sizes() == qb.sizes() && /* qnnpack does not support boardcasting */
+    if(qa.sizes() == qb.sizes() && /* qnnpack does not support broadcasting */
       qa.scalar_type() == kQUInt8) {
     return qnnpack_add<ReLUFused>(qa, qb, scale, zero_point);
     }
@@ -536,6 +537,48 @@ Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
   return qadd_scalar_out(std::move(qa), b.item(), std::move(out));
 }
 
+DEFINE_DISPATCH(qadd_tensor_cpu_stub);
+DEFINE_DISPATCH(qadd_relu_tensor_cpu_stub);
+template <bool ReLUFused = false>
+Tensor int8_add_tensor_onednn(
+    const Tensor& self, double self_scale, int64_t self_zero_point,
+    const Tensor& other, double other_scale, int64_t other_zero_point,
+    double output_scale, int64_t output_zero_point, c10::ScalarType output_dtype) {
+  // Both inputs should have the same shape and both in uint8 dtype.
+  // If output_dtype is uint8, output is requantized with output scale/zero point.
+  // Otherwise, output scale should be 1 and zero point 0.
+  TORCH_CHECK(self.sizes() == other.sizes(),
+              "Quantized add operands should have the same size.");
+  TORCH_CHECK(self.scalar_type() == at::kByte && other.scalar_type() == at::kByte,
+              "Quantized add operands should be of type uint8, but got ",
+              self.scalar_type(), " and ", other.scalar_type());
+  TORCH_CHECK(output_dtype == at::kByte || output_dtype == at::kFloat || output_dtype == at::kBFloat16 || output_dtype == at::kHalf,
+              "Quantized add output should be of type uint8, float, bfloat16 or float16, but got ",
+              output_dtype);
+  if (output_dtype != at::kByte) {
+    TORCH_CHECK(output_scale == 1.0 && output_zero_point == 0,
+                "Quantized add output scale and zero point should be 1 and 0 for "
+                "output_dtype ", output_dtype, ", but got scale = ",
+                output_scale, " and zero point = ", output_zero_point);
+  }
+  at::Tensor out = at::empty_like(self, self.options().dtype(output_dtype));
+
+
+  if constexpr (ReLUFused) {
+    qadd_relu_tensor_cpu_stub(
+        self.device().type(), out, self, self_scale, self_zero_point,
+        other, other_scale, other_zero_point,
+        output_scale, output_zero_point);
+  } else {
+    qadd_tensor_cpu_stub(
+        self.device().type(), out, self, self_scale, self_zero_point,
+        other, other_scale, other_zero_point,
+        output_scale, output_zero_point);
+  }
+
+  return out;
+}
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::add"),                 TORCH_FN(qadd</*ReLUFused=*/false>));
   m.impl(TORCH_SELECTIVE_NAME("quantized::add.out"),             TORCH_FN(qadd_out</*ReLUFused=*/false>));
@@ -562,6 +605,11 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::add"), TORCH_FN(qadd</*ReLUFused=*/false>));
+}
+
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qadd.tensor"), TORCH_FN(int8_add_tensor_onednn<false>));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qadd_relu.tensor"), TORCH_FN(int8_add_tensor_onednn<true>));
 }
 
 }  // namespace

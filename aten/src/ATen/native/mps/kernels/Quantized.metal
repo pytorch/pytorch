@@ -3,7 +3,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
+kernel void weight_to_int4pack(device const int *W [[buffer(0)]],
                                device uchar *outputData [[buffer(1)]],
                                constant uint2 &sizes [[buffer(2)]],
                                uint2 thread_index [[thread_position_in_grid]]) {
@@ -86,9 +86,9 @@ kernel void weight_to_int4pack(constant int *W [[buffer(0)]],
    @param [in] tid_in_simdgruop is thread id in simdgroup. e.g. in simdgroup of size 32 it can be in [0-31].
 */
 template <typename T, unsigned group_size>
-kernel void int4pack_mm(constant T *A [[buffer(0)]],
-                        constant uchar *B [[buffer(1)]],
-                        constant T *scales_and_zeros [[buffer(2)]],
+kernel void int4pack_mm(device const T *A [[buffer(0)]],
+                        device const uchar *B [[buffer(1)]],
+                        device const T *scales_and_zeros [[buffer(2)]],
                         device T *output_data [[buffer(3)]],
                         constant uint3 &sizes [[buffer(4)]], // M, K, N
                         uint3 thread_index [[thread_position_in_grid]],
@@ -108,11 +108,11 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   constexpr int k_jump = threads_per_channel * ks_per_thread;
 
   using vecT = typename c10::metal::vec4type_t<T>;
-  constant vecT *A_ptr = reinterpret_cast<constant vecT *>(A + m * K);
-  constant uchar *B_ptr = B + ((n * K) / k_pack_factor);
+  device const vecT *A_ptr = reinterpret_cast<device const vecT*>(A + m * K);
+  device const uchar *B_ptr = B + ((n * K) / k_pack_factor);
 
   thread float4 result = float4(0.0);
-  // We multipy group of 4 channels with these scales.
+  // We multiply group of 4 channels with these scales.
   // Because corresponding values from weight matrix are effectively left
   // shifted. This is to avoid doing right shift on those values which ends up
   // affecting performance. This is the trick applied in MLX kernels.
@@ -149,13 +149,13 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
     float a_val_sum = a_val[0] + a_val[1] + a_val[2] + a_val[3];
 
     float4x4 b_mat;
-    ushort b_val0 = (reinterpret_cast<constant ushort *>(
+    ushort b_val0 = (reinterpret_cast<device const ushort*>(
         B_ptr + (k + 0 * K) / k_pack_factor))[0];
-    ushort b_val1 = (reinterpret_cast<constant ushort *>(
+    ushort b_val1 = (reinterpret_cast<device const ushort*>(
         B_ptr + (k + 1 * K) / k_pack_factor))[0];
-    ushort b_val2 = (reinterpret_cast<constant ushort *>(
+    ushort b_val2 = (reinterpret_cast<device const ushort*>(
         B_ptr + (k + 2 * K) / k_pack_factor))[0];
-    ushort b_val3 = (reinterpret_cast<constant ushort *>(
+    ushort b_val3 = (reinterpret_cast<device const ushort*>(
         B_ptr + (k + 3 * K) / k_pack_factor))[0];
     b_mat[0] = scale0 * float4(float(b_val0 & 0x000f), float(b_val0 & 0x00f0),
                                float(b_val0 & 0x0f00), float(b_val0 & 0xf000));
@@ -182,8 +182,8 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
 #define INSTANTIATE_INT4MV(DTYPE, GSIZE)                                       \
   template [[host_name("int4pack_mm_" #GSIZE "_" #DTYPE)]] kernel void         \
   int4pack_mm<DTYPE, GSIZE>(                                                   \
-      constant DTYPE * A [[buffer(0)]], constant uchar * B [[buffer(1)]],      \
-      constant DTYPE * scales_and_zeros [[buffer(2)]],                         \
+      device const DTYPE * A [[buffer(0)]], device const uchar * B [[buffer(1)]],      \
+      device const DTYPE * scales_and_zeros [[buffer(2)]],                         \
       device DTYPE * output_data [[buffer(3)]],                                \
       constant uint3 & sizes [[buffer(4)]],                                    \
       uint3 thread_index [[thread_position_in_grid]],                          \
@@ -197,12 +197,10 @@ INSTANTIATE_INT4MV(float, 128);
 INSTANTIATE_INT4MV(half, 128);
 INSTANTIATE_INT4MV(float, 256);
 INSTANTIATE_INT4MV(half, 256);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_INT4MV(bfloat, 32);
 INSTANTIATE_INT4MV(bfloat, 64);
 INSTANTIATE_INT4MV(bfloat, 128);
 INSTANTIATE_INT4MV(bfloat, 256);
-#endif
 
 // ------------------------------ int8 MM For M >= 12 ------------------------------------
 /**
@@ -213,7 +211,7 @@ INSTANTIATE_INT4MV(bfloat, 256);
  * 1. Load A and B blocks (32x32 and 64x32 respectively) into shared memory.
  * 2. In 4 simdgroups, calculate the outer product of the loaded blocks. Each simdgroup produces a 2x4 8x8 result.
  *      2.1 For how to use outer product to perform matrix multiplication, refer to
- *           http://mlwiki.org/index.php/Matrix-Matrix_Multiplication#Sum_of_Outer_Products
+ *           https://web.archive.org/web/20230521063455/http://mlwiki.org/index.php/Matrix-Matrix_Multiplication#Sum_of_Outer_Products
  * 3. Repeat 1 & 2 along K axis, with K block size 32, accumulate the result in the 2x4 8x8 block.
  * 4. Dequantize the final result and store it in the output matrix.
  *
@@ -234,15 +232,13 @@ template <> struct BlockType<half> {
   using simdgroup_type8x8 = simdgroup_half8x8;
   using type4 = half4;
 };
-#if __METAL_VERSION__ >= 310
 template <> struct BlockType<bfloat> {
   using simdgroup_type8x8 = simdgroup_bfloat8x8;
   using type4 = bfloat4;
 };
-#endif
 
 template<typename T>
-float2 get_scale_zero_q8(constant T * scalesAndZeros, uint2 index) {
+float2 get_scale_zero_q8(device const T * scalesAndZeros, uint2 index) {
     T scale = scalesAndZeros[index[0]];
     return float2(scale, 0.0);
 }
@@ -258,11 +254,11 @@ float2 get_scale_zero_q8(constant T * scalesAndZeros, uint2 index) {
 #define SG_MAT_ROW 8
 
 // T: input type, W: weight type
-template<typename T, typename W, float2 (*get_scale_zero_func)(constant T *, uint2)>
+template<typename T, typename W, float2 (*get_scale_zero_func)(device const T *, uint2)>
 kernel void kernel_mul_mm(
-    constant T                 * A              [[buffer(0)]],
-    constant char              * B              [[buffer(1)]],
-    constant T                 * scalesAndZeros [[buffer(2)]],
+    device const T                 * A              [[buffer(0)]],
+    device const char              * B              [[buffer(1)]],
+    device const T                 * scalesAndZeros [[buffer(2)]],
     device T                   * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
     threadgroup char           * shared_memory  [[threadgroup(0)]], // threadgroup buffer at index 0
@@ -306,11 +302,11 @@ kernel void kernel_mul_mm(
         simdgroup_C[i] = make_filled_simdgroup_matrix<float, 8>(0.f);
     }
 
-    constant T * a_ptr = (constant T *)((constant char *)A
+    device const T * a_ptr = (device const T *)((device const char *)A
         + nbytes_A_row * (threadgroup_M * BLOCK_SIZE_M + thread_row_A)
         + nbytes_A * (BLOCK_SIZE_K / THREAD_PER_ROW_A * (tiitg % THREAD_PER_ROW_A)));
 
-    constant W * b_ptr = (constant W *)(B
+    device const W * b_ptr = (device const W *)(B
         + nbytes_B_row * (threadgroup_N * BLOCK_SIZE_N + thread_row_B)
         + nbytes_B * (BLOCK_SIZE_K / THREAD_PER_ROW_B * (tiitg % THREAD_PER_ROW_B)));
 /**
@@ -363,7 +359,7 @@ Load weight and input into shared memory:
 
         #pragma unroll(2)
         for (short i = 0; i < 2; i++) {
-            *((threadgroup T4 *)(shared_memory_A + (tiitg % THREAD_PER_ROW_A) * 8 * 32 + 8 * (tiitg / THREAD_PER_ROW_A)) + i) = *((constant T4 *)a_ptr + i);
+            *((threadgroup T4 *)(shared_memory_A + (tiitg % THREAD_PER_ROW_A) * 8 * 32 + 8 * (tiitg / THREAD_PER_ROW_A)) + i) = *((device const T4 *)a_ptr + i);
         }
 
         a_ptr += BLOCK_SIZE_K;
@@ -477,9 +473,9 @@ Outer product:
 template                                                                 \
 [[host_name("large_m_int8pack_mm_" #DTYPE)]]                             \
 kernel void kernel_mul_mm<DTYPE, WDTYPE, DEQUANT_FUNC>(                  \
-    constant DTYPE             * A              [[buffer(0)]],           \
-    constant char              * B              [[buffer(1)]],           \
-    constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
+    device const DTYPE             * A              [[buffer(0)]],           \
+    device const char              * B              [[buffer(1)]],           \
+    device const DTYPE             * scalesAndZeros [[buffer(2)]],           \
     device   DTYPE             * outputData     [[buffer(3)]],           \
     constant uint3             & sizes          [[buffer(4)]],           \
     threadgroup char           * shared_memory  [[threadgroup(0)]],      \
@@ -490,9 +486,7 @@ kernel void kernel_mul_mm<DTYPE, WDTYPE, DEQUANT_FUNC>(                  \
 
 INSTANTIATE_MM(float, char, get_scale_zero_q8);
 INSTANTIATE_MM(half, char, get_scale_zero_q8);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_MM(bfloat, char, get_scale_zero_q8);
-#endif
 // ------------------------------ int8 MM For M < 12 ------------------------------------
 /* Matrix vector multiplication, used for small M size for matrix multiplication as well.
 
@@ -538,9 +532,9 @@ K │                  ├──┼──┼──┼──┤  Group 1  │    
 
 template<typename T>
 kernel void kernel_mul_mv(
-    constant T                 * A              [[buffer(0)]],
-    constant char              * B              [[buffer(1)]],
-    constant T                 * scalesAndZeros [[buffer(2)]],
+    device const T                 * A              [[buffer(0)]],
+    device const char              * B              [[buffer(1)]],
+    device const T                 * scalesAndZeros [[buffer(2)]],
     device T                   * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
     threadgroup char           * shared_memory  [[threadgroup(0)]],
@@ -572,8 +566,8 @@ kernel void kernel_mul_mv(
     const uint offset0 = first_row * K;
 
     // x: weight, y: input
-    constant char * x = (constant char *) B + offset0;
-    constant T    * y = (constant T    *) A + threadgroup_M*K;
+    device const char * x = (device const char *) B + offset0;
+    device const T    * y = (device const T    *) A + threadgroup_M*K;
 
     // Load data to shared memory
     threadgroup T * shared_scale = (threadgroup T *)(shared_memory); // length 8 * sizeof(float)
@@ -593,7 +587,7 @@ kernel void kernel_mul_mv(
 
     // N_SIMDWIDTH = 32 means we have 32 weights in 1 simdgroup.
     // Find the starting point of input that this thread need to work on, load yb into yl.
-    constant T * yb = y + ix * N_SIMDWIDTH + NB_Q8_0*il;
+    device const T * yb = y + ix * N_SIMDWIDTH + NB_Q8_0*il;
 
     // each thread in a SIMD group deals with NB_Q8_0 quants at a time
     for (short ib = ix; ib < nb; ib += nw/4) {
@@ -608,7 +602,7 @@ kernel void kernel_mul_mv(
             // row offset: row * K
             // col offset: ib * N_SIMDWIDTH + il * NB_Q8_0
             // x index: row * K + ib * N_SIMDWIDTH + il * NB_Q8_0
-            constant int8_t * qs = (constant int8_t *)(x + row * K + ib * N_SIMDWIDTH + il * NB_Q8_0);
+            device const int8_t * qs = (device const int8_t *)(x + row * K + ib * N_SIMDWIDTH + il * NB_Q8_0);
             for (short batch = 0; batch < 2; batch++) {
                 short offset = batch * 4;
                 xl[batch][row] = {(float)qs[offset], (float)qs[offset+1], (float)qs[offset+2], (float)qs[offset+3]};
@@ -633,9 +627,9 @@ kernel void kernel_mul_mv(
 template                                                                        \
 [[host_name("int8pack_mv_" #DTYPE)]]                                            \
 kernel void kernel_mul_mv<DTYPE>(                                               \
-    constant DTYPE             * A              [[buffer(0)]],                  \
-    constant char              * B              [[buffer(1)]],                  \
-    constant DTYPE             * scalesAndZeros [[buffer(2)]],                  \
+    device const DTYPE             * A              [[buffer(0)]],                  \
+    device const char              * B              [[buffer(1)]],                  \
+    device const DTYPE             * scalesAndZeros [[buffer(2)]],                  \
     device   DTYPE             * outputData     [[buffer(3)]],                  \
     constant uint3             & sizes          [[buffer(4)]],                  \
     threadgroup char           * shared_memory  [[threadgroup(0)]],             \
@@ -646,6 +640,4 @@ kernel void kernel_mul_mv<DTYPE>(                                               
 
 INSTANTIATE_MV(float);
 INSTANTIATE_MV(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_MV(bfloat);
-#endif

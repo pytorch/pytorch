@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# this script makes it easy parallize collecting data across using multiple GPUs
+# This script makes it easy to parallelize data collection across multiple GPUs
 
 # Check if tmux is installed
 if ! command -v tmux &> /dev/null; then

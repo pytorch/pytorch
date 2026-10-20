@@ -113,7 +113,7 @@ r""" Global method to create quantizer and call quantizer quantize_APoT
         quantization levels: Tensor with fp quantization levels
         level indices: Tensor with integer quantization level indices
     Returns:
-        result: ApoT Tensor representation of tensor2quantize
+        result: APoT Tensor representation of tensor2quantize
 """
 
 

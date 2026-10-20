@@ -226,6 +226,38 @@ __global__ void CatArrayBatchedCopy_contig(
     }
 }
 
+
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size, int alignment, int elems_per_vec>
+__global__ void CatArrayBatchedCopy_vectorized(
+    char* output,
+    CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+    TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
+    const int concatDim,
+    IndexType trailingSize) {
+
+    IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
+    IndexType nElements = inputs.nElements[blockIdx.y] / elems_per_vec;
+
+    if(tid >= nElements) return;
+
+    const char * data = (char*)inputs.input[blockIdx.y];
+    IndexType offset = inputs.offset[blockIdx.y] * trailingSize / elems_per_vec;
+    IndexType dimSize = inputs.dimSize[blockIdx.y] * trailingSize / elems_per_vec;
+    int64_t dataOffset = (int64_t)offset  * alignment; // in bytes
+
+    IndexType stride = gridDim.x * blockDim.x;
+
+    while( tid < nElements){
+      int64_t elementOffset = (int64_t)CatArrIndexToOffset<IndexType, Dims>::compute(
+                    os.tensorSize, os.tensorStride, dimSize, concatDim, tid) * alignment; // in bytes
+      auto vec = at::native::memory::ld_vec<alignment>(data + (int64_t)alignment * tid);
+      at::native::memory::st_vec<alignment>(output + dataOffset + elementOffset, vec);
+      tid += stride;
+    }
+}
+
+
+
 /*
   Specialized implementation of the CatArrayBatchedCopy written to generate wide memory loads
   to improve memory bandwidth throughput.
@@ -267,7 +299,7 @@ __global__ void CatArrayBatchedCopy_alignedK_contig(
       }
 
       using LT = at::native::memory::aligned_vector<T, kILP>;
-      ((LT*)reg_data)[0] = const_cast<LT*>((LT*)(data + inputOffset))[0];
+      ((LT*)reg_data)[0] = ((LT*)(data + inputOffset))[0];
 
       #pragma unroll
       for (int i = 0; i < kILP; ++i) {
@@ -296,12 +328,30 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   scalar_t *data = (scalar_t *)(out.mutable_data_ptr());
   CatArrInputTensorMetadata<scalar_t, unsigned int, batch_size, stride_size> catMetaData;
   TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> outputParam;
+  // If all batches are contiguous we can call a specialized implementation
+  // which requires the input tensor addresses to be aligned to a
+  // 16 Byte boundary.
+
+  constexpr bool isContig = stride_size == 1;
+#ifndef USE_ROCM
+  // CatArrayBatchedCopy_contig is faster on ROCm, see #118685.
+  bool isAligned = true;
+  constexpr int alignment = 16;
+#endif
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
+  // for contig case, we'll canonicalize output strides, so that
+  // we don't have arbitrary strides for dims of size 0
+  size_t stride0 = 1;
   if (memory_format == c10::MemoryFormat::Contiguous) {
-    for (int i = 0; i < nDims; ++i) {
+    for (int i = nDims - 1; i >= 0; --i) {
       outputParam.tensorSize[i] = out.size(i);
-      outputParam.tensorStride[i] = out.stride(i);
+      if (isContig) {
+        outputParam.tensorStride[i] = stride0;
+        stride0 *= out.size(i);
+      } else {
+        outputParam.tensorStride[i] = out.stride(i);
+      }
     }
   } else if (memory_format == c10::MemoryFormat::ChannelsLast || memory_format == c10::MemoryFormat::ChannelsLast3d) {
     // permute the semantics of dims from NCHW to NHWC so that the input
@@ -320,12 +370,17 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
-  // If all batches are contiguous we can call a specialized implementation
-  // which requires the input tensor addresses to be aligned to a
-  // 16 Byte boundary.
 
-  bool isContig = true;
-  bool isAligned = true;
+#ifndef USE_ROCM
+  // for channels last computing slice size correctly is much more involved, so we never send it
+  // on the fully vectorized path
+  // we need output stride in cat dimension to be multiple of alignment,
+  // if we ever use it to compute offsets
+  // for catting in 0th dimension it doesn't matter
+  bool isInOutAligned = isContig && at::native::memory::get_alignment(data) >= alignment &&
+                        memory_format == c10::MemoryFormat::Contiguous && (dimension == 0 ||
+                        outputParam.tensorStride[dimension - 1] * sizeof(scalar_t) % alignment == 0);
+#endif
   unsigned int max_elements_per_tensor = 0;
 
   // Now we loop
@@ -341,6 +396,18 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       // high-dimensional tensor
       if (inputs[i+batchCounter].get().numel() > 0) {
         dimSize = inputs[i+batchCounter].get().size(dimension);
+#ifndef USE_ROCM
+        if (isInOutAligned) {
+          auto t = inputs[i+batchCounter].get();
+          // similarly to output stride, we cannot trust stride value to
+          // determine slice size if the corresponding dimension is 1
+          // we have to multiply all the subsequent sizes
+          int64_t slice_size = dimension == 0 ? t.numel() : t.sizes()[dimension - 1] != 1 ?
+             t.strides()[dimension - 1] : c10::multiply_integers(t.sizes().begin() + dimension, t.sizes().end());
+          slice_size *= sizeof(scalar_t);
+          isInOutAligned &= (slice_size % alignment == 0);
+        }
+#endif
       }
 
       catMetaData.input[batchCounter] = (scalar_t*)(inputs[i+batchCounter].get().const_data_ptr());
@@ -348,13 +415,11 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
 
-#ifdef USE_ROCM
-      // On ROCm, CatArrayBatchedCopy_contig is faster
-      isAligned = false;
-#else
+#ifndef USE_ROCM
       // If at least one of the inputs is not aligned, we can't call the
       // CatArrayBatchedCopy_alignedK_contig
       isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
+      isInOutAligned &= at::native::memory::get_alignment(catMetaData.input[batchCounter]) >= alignment;
 #endif
 
       if (stride_size > 1) {
@@ -365,7 +430,6 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
           catMetaData.tensorStride[batchCounter].tensorStride[j] = strides[j];
         }
         catMetaData.isContiguous[batchCounter] = false;
-        isContig = false;
       } else {
         catMetaData.isContiguous[batchCounter] = true;
       }
@@ -388,50 +452,109 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
           max_elements_per_tensor, batchCounter);
 #else
     dim3 applyBlock, catGrid;
-    if (isContig && sizeof(scalar_t) > 2) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_16>(
+    if constexpr (isContig) {
+      if (isInOutAligned) {
+        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, alignment>(
           max_elements_per_tensor, batchCounter);
-    } else if (isContig && sizeof(scalar_t) == 2) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_8>(
-          max_elements_per_tensor, batchCounter);
+      } else if (isAligned && sizeof(scalar_t) > 2) {
+        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_16>(
+            max_elements_per_tensor, batchCounter);
+      } else if (isAligned && sizeof(scalar_t) == 2) {
+        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t, ALIGNED_VEC_LOAD_BYTES_8>(
+            max_elements_per_tensor, batchCounter);
+      } else {
+        applyBlock = dim3(32 * 16);
+        getCatGrid(batchCounter, catGrid);
+      }
     } else {
       applyBlock = dim3(32 * 16);
       getCatGrid(batchCounter, catGrid);
     }
 #endif
+    int nDimsLocal = nDims;
+#ifndef USE_ROCM
+    int32_t trailingSize = 0;
+    TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> kernelOutputParam;
+    if (isInOutAligned) {
+      // in this case we can and should flatten the tensors after the cat dim
+      // we want to view the tensors as if consisting of `alignment`-sized elements
+      // however, we might not be able to cleanly divide just the last dim -
+      // it might not be the multiple of alignment.
+      // however, we know that the full concatted slice is multiple of alignment,
+      // so if we flatten all the dims after and including concat dim,
+      // it will be divisible by alignment
+      // then we need to divide last out size by elems_per_vec,
+      // and divide all strides except last by elems_per_vec (last stride is 1 always)
+      // for input, we will fix up the sizes and strides in the kernel directly
+      kernelOutputParam = outputParam;
+      nDimsLocal = dimension + 1;
+      constexpr auto elems_per_vec = alignment / sizeof(scalar_t);
+      auto out_size = dimension == 0 ? out.numel() : kernelOutputParam.tensorStride[dimension-1];
+      kernelOutputParam.tensorSize[dimension] = out_size / elems_per_vec;
+      trailingSize = outputParam.tensorStride[dimension];
+      kernelOutputParam.tensorStride[dimension] = 1;
+      for (int i = 0; i < dimension; ++i) {
+        kernelOutputParam.tensorStride[i] /= elems_per_vec;
+      }
+    }
+#endif
 
+    int cat_dim = dimension;
     if (memory_format != c10::MemoryFormat::Contiguous) {
-      switch (dimension) {
+      switch (cat_dim) {
       case 0:
         break;
       case 1:
-        dimension = nDims - dimension;
+        cat_dim = nDimsLocal - cat_dim;
         break;
       default:
-        dimension--;
+        cat_dim--;
       }
     }
     // Template Declarations for dim = 1, 2, 3, 4
+    // #ifdef can't nest in a macro body, so ROCm (contig/generic only) and
+    // CUDA (the full aligned/vectorized chain) get separate definitions.
+#ifdef USE_ROCM
 #define HANDLE_CASE(DIMS) \
-    if (isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
-      CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_16><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-    } else if (isContig && isAligned && sizeof(scalar_t) == 2) { \
-      CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_8><<<\
-          catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
-    } else if (isContig) {\
+    if constexpr (isContig) {\
       CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
     } else {\
       CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
     }\
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    switch (nDims) {
+#else
+#define HANDLE_CASE(DIMS) \
+    if constexpr (isContig) {\
+      if (isInOutAligned) {\
+        constexpr auto elems_per_vec = alignment / sizeof(scalar_t); \
+        CatArrayBatchedCopy_vectorized<scalar_t, unsigned int, DIMS, batch_size, stride_size, alignment, elems_per_vec><<<\
+        catGrid, applyBlock, 0, stream.stream()>>>(\
+          reinterpret_cast<char*>(data), catMetaData, kernelOutputParam, cat_dim, trailingSize);\
+      } else if (isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
+        CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_16><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      } else if (isAligned && sizeof(scalar_t) == 2) { \
+        CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_8><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      } else {\
+        CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+            catGrid, applyBlock, 0, stream.stream()>>>(\
+                data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+      }\
+    } else {\
+      CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
+    }\
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
+    switch (nDimsLocal) {
       case 1:
         HANDLE_CASE(1);
         break;
@@ -514,6 +637,7 @@ TORCH_IMPL_FUNC(cat_out_cuda)
             }),
             AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16,
@@ -547,6 +671,7 @@ TORCH_IMPL_FUNC(cat_out_cuda)
             }),
             AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16,

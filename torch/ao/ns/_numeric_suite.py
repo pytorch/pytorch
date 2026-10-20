@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -20,10 +21,10 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
 
 
 def _find_match(
-    str_list: Union[dict[str, Any], list[str]],
+    str_list: dict[str, Any] | list[str],
     key_str: str,
     postfix: str,
-) -> Optional[str]:
+) -> str | None:
     split_str = key_str.split(".")
     if split_str[-1] == postfix:
         match_string = "".join(key_str.split(".")[0:-1])
@@ -63,15 +64,14 @@ def compare_weights(
 
     Example usage::
 
-        wt_compare_dict = compare_weights(
-            float_model.state_dict(), qmodel.state_dict())
+        wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
         for key in wt_compare_dict:
             print(
                 key,
                 compute_error(
-                    wt_compare_dict[key]['float'],
-                    wt_compare_dict[key]['quantized'].dequantize()
-                )
+                    wt_compare_dict[key]["float"],
+                    wt_compare_dict[key]["quantized"].dequantize(),
+                ),
             )
 
     Args:
@@ -137,7 +137,7 @@ def _get_logger_dict_helper(
     def get_prefix(prefix):
         return prefix if prefix == "" else prefix + "."
 
-    for name, child in mod.named_children():
+    for child in mod.children():
         if isinstance(child, Logger):
             target_dict[get_prefix(prefix) + "stats"] = child.stats
             break
@@ -412,7 +412,7 @@ def compare_model_stub(
     float shadow module. This dict can be used to compare and compute the module
     level quantization error.
 
-    This function first call prepare_model_with_stubs() to swap the quantized
+    This function first calls prepare_model_with_stubs() to swap the quantized
     module that we want to compare with the Shadow module, which takes quantized
     module, corresponding float module and logger as input, and creates a forward
     path inside to make the float module to shadow quantized module sharing the
@@ -422,10 +422,17 @@ def compare_model_stub(
 
     Example usage::
 
-        module_swap_list = [torchvision.models.quantization.resnet.QuantizableBasicBlock]
-        ob_dict = compare_model_stub(float_model,qmodel,module_swap_list, data)
+        module_swap_list = [
+            torchvision.models.quantization.resnet.QuantizableBasicBlock
+        ]
+        ob_dict = compare_model_stub(float_model, qmodel, module_swap_list, data)
         for key in ob_dict:
-            print(key, compute_error(ob_dict[key]['float'], ob_dict[key]['quantized'].dequantize()))
+            print(
+                key,
+                compute_error(
+                    ob_dict[key]["float"], ob_dict[key]["quantized"].dequantize()
+                ),
+            )
 
     Args:
         float_model: float model used to generate the q_model
@@ -532,9 +539,9 @@ def compare_model_outputs(
             print(
                 key,
                 compute_error(
-                    act_compare_dict[key]['float'],
-                    act_compare_dict[key]['quantized'].dequantize()
-                )
+                    act_compare_dict[key]["float"],
+                    act_compare_dict[key]["quantized"].dequantize(),
+                ),
             )
 
     Args:

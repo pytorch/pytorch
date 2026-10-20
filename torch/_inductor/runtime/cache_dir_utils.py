@@ -5,6 +5,8 @@ import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 
+from torch._environment import is_fbcode
+
 
 # Factoring out to file without torch dependencies
 
@@ -12,15 +14,22 @@ from contextlib import contextmanager
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
+        cache_dir = default_cache_dir()
+    cache_dir = os.path.abspath(cache_dir)
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
 
 def default_cache_dir() -> str:
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
+    try:
+        username = getpass.getuser()
+    except (KeyError, ModuleNotFoundError, OSError):
+        getuid = getattr(os, "getuid", None)
+        username = f"uid_{getuid()}" if callable(getuid) else "unknown_user"
+    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", username)
     return os.path.join(
-        tempfile.gettempdir(),
+        tempfile.gettempdir() if not is_fbcode() else "/var/tmp",
         "torchinductor_" + sanitized_username,
     )
 
@@ -37,11 +46,15 @@ def triton_cache_dir(device: int) -> str:
 
 @contextmanager
 def temporary_cache_dir(directory: str) -> Generator[None, None, None]:
+    from torch._inductor.utils import clear_caches
+
     original = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = directory
     try:
+        clear_caches()
         yield
     finally:
+        clear_caches()
         if original is None:
             del os.environ["TORCHINDUCTOR_CACHE_DIR"]
         else:

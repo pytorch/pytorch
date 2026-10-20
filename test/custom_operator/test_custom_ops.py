@@ -1,6 +1,5 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: cpp-extensions"]
 
-import os.path
 import sys
 import tempfile
 import unittest
@@ -10,14 +9,23 @@ from model import get_custom_op_library_path, Model
 import torch
 import torch._library.utils as utils
 from torch import ops
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 torch.ops.import_module("pointwise")
 
 
 class TestCustomOperators(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         self.library_path = get_custom_op_library_path()
         ops.load_library(self.library_path)
 
@@ -55,12 +63,14 @@ class TestCustomOperators(TestCase):
     def test_abstract_impl_pystub_faketensor(self):
         from functorch import make_fx
 
-        x = torch.randn(3, device="cpu")
+        x = torch.randn(3)
         self.assertNotIn("my_custom_ops", sys.modules.keys())
 
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.UnsupportedOperatorException
-        ):
+        unsupported_error = expectedIfCppFakeTensor(
+            RuntimeError,
+            torch._subclasses.fake_tensor.UnsupportedOperatorException,
+        )
+        with self.assertRaises(unsupported_error):
             gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
         torch.ops.import_module("my_custom_ops")
@@ -143,16 +153,13 @@ def forward(self, arg0_1):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually.
-        file = tempfile.NamedTemporaryFile(delete=False)
-        try:
+        with tempfile.NamedTemporaryFile() as file:
             file.close()
             model.save(file.name)
             loaded = torch.jit.load(file.name)
-        finally:
-            os.unlink(file.name)
 
-        output = loaded.forward(torch.ones(5))
-        self.assertTrue(output.allclose(torch.ones(5) + 1))
+            output = loaded.forward(torch.ones(5))
+            self.assertTrue(output.allclose(torch.ones(5) + 1))
 
 
 if __name__ == "__main__":

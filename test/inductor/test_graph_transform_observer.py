@@ -11,7 +11,7 @@ import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
 try:
@@ -22,13 +22,16 @@ except ImportError:
     HAS_PYDOT = False
 
 
-HAS_DOT = True if shutil.which("dot") is not None else False
+HAS_DOT = shutil.which("dot") is not None
 
 
 class TestGraphTransformObserver(TestCase):
     def test_sdpa_rewriter(self):
         if not (
-            HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION and HAS_PYDOT and HAS_DOT
+            HAS_GPU_AND_TRITON
+            and PLATFORM_SUPPORTS_FUSED_ATTENTION
+            and HAS_PYDOT
+            and HAS_DOT
         ):
             return
 
@@ -49,9 +52,9 @@ class TestGraphTransformObserver(TestCase):
         compiled_fn = torch.compile(dot_prod_attention, fullgraph=True)
 
         tensor_shape = (4, 2, 16, 32)
-        q = torch.randn(tensor_shape, device="cuda")
-        k = torch.randn(tensor_shape, device="cuda")
-        v = torch.randn(tensor_shape, device="cuda")
+        q = torch.randn(tensor_shape, device=GPU_TYPE)
+        k = torch.randn(tensor_shape, device=GPU_TYPE)
+        v = torch.randn(tensor_shape, device=GPU_TYPE)
         compiled_fn(q, k, v)
 
         found_input_svg = False

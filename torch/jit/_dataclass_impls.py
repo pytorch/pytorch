@@ -4,8 +4,8 @@ import ast
 import dataclasses
 import inspect
 import os
+from collections.abc import Callable
 from functools import partial
-from typing import Callable
 
 from torch._jit_internal import FAKE_FILENAME_PREFIX, is_optional
 from torch._sources import ParsedDef, SourceContext

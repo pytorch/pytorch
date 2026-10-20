@@ -1,6 +1,6 @@
-# Helper to get the id of the currently running job in a GitHub Actions
-# workflow. GitHub does not provide this information to workflow runs, so we
-# need to figure it out based on what they *do* provide.
+# Helper to get the id and name of the currently running job in a GitHub Actions
+# workflow. GitHub provides the id as job.check_run_id, but not the name.
+from __future__ import annotations
 
 import argparse
 import json
@@ -11,8 +11,13 @@ import sys
 import time
 import urllib
 import urllib.parse
-from typing import Any, Callable, Optional
+from typing import Any, TYPE_CHECKING
 from urllib.request import Request, urlopen
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from email.message import Message
 
 
 def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
@@ -39,12 +44,29 @@ def parse_json_and_links(conn: Any) -> tuple[Any, dict[str, dict[str, str]]]:
     return json.load(conn), links
 
 
+def retry_delay(
+    status_code: int, response_headers: Message, backoff_timeout: float
+) -> float:
+    # Secondary rate limits carry Retry-After, and asking again before it elapses
+    # is what escalates them, so never wait less than it asks. Only GitHub's own
+    # rate-limit statuses count: proxies attach the header to 503s that the short
+    # backoff can legitimately clear.
+    if status_code not in (403, 429):
+        return backoff_timeout
+    # isdecimal rather than isdigit: headers arrive latin-1 decoded, and the
+    # superscript digits in that range satisfy isdigit but raise in float.
+    retry_after = response_headers.get("Retry-After", "").strip()
+    if retry_after.isdecimal():
+        return max(backoff_timeout, float(retry_after))
+    return backoff_timeout
+
+
 def fetch_url(
     url: str,
     *,
-    headers: Optional[dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
-    retries: Optional[int] = 3,
+    retries: int | None = 3,
     backoff_timeout: float = 0.5,
 ) -> Any:
     if headers is None:
@@ -53,18 +75,26 @@ def fetch_url(
         with urlopen(Request(url, headers=headers)) as conn:
             return reader(conn)
     except urllib.error.HTTPError as err:
-        if isinstance(retries, (int, float)) and retries > 0:
-            time.sleep(backoff_timeout)
+        # A depleted core quota resets on GitHub's schedule, up to an hour out, so
+        # retrying inside the backoff cannot succeed and only multiplies the burn
+        # against a limit every concurrent job in the repo shares.
+        quota_depleted = err.headers.get("X-RateLimit-Remaining", "").strip() == "0"
+        if not quota_depleted and isinstance(retries, (int, float)) and retries > 0:
+            delay = retry_delay(err.code, err.headers, backoff_timeout)
+            time.sleep(delay)
             return fetch_url(
                 url,
                 headers=headers,
                 reader=reader,
-                retries=retries - 1,
+                # Waiting out a Retry-After already gave GitHub the pause it asked
+                # for; repeating it would multiply a minute-scale stall by the retry
+                # count inside a step that cannot time itself out.
+                retries=0 if delay > backoff_timeout else retries - 1,
                 backoff_timeout=backoff_timeout,
             )
         exception_message = (
             "Is github alright?",
-            f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
+            f"Received status code '{err.code}' when attempting to retrieve {url}:\n",
             f"{err.reason}\n\nheaders={err.headers}",
         )
         raise RuntimeError(exception_message) from err
@@ -86,8 +116,9 @@ def parse_args() -> Any:
 def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
-    assert type(jobs) is list
-    while "next" in links.keys():
+    if type(jobs) is not list:
+        raise AssertionError(f"Expected jobs to be a list, got {type(jobs).__name__}")
+    while "next" in links:
         response, links = fetch_url(
             links["next"]["url"], headers=headers, reader=parse_json_and_links
         )
@@ -96,10 +127,11 @@ def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     return jobs
 
 
-# Our strategy is to retrieve the parent workflow run, then filter its jobs on
+# Without job.check_run_id, we retrieve the parent workflow run, then filter its jobs on
 # RUNNER_NAME to figure out which job we're currently running.
 #
-# Why RUNNER_NAME? Because it's the only thing that uniquely identifies a job within a workflow.
+# Why RUNNER_NAME? Because without job.check_run_id, it's the only thing that uniquely
+# identifies a job within a workflow.
 # GITHUB_JOB doesn't work, as it corresponds to the job yaml id
 # (https://bit.ly/37e78oI), which has two problems:
 # 1. It's not present in the workflow job JSON object, so we can't use it as a filter.
@@ -121,6 +153,16 @@ def find_job_id_name(args: Any) -> tuple[str, str]:
         "Authorization": "token " + GITHUB_TOKEN,
     }
 
+    # Read from the environment so the action and an older checkout of this
+    # script stay compatible. Fall back to the runner name search on failure.
+    if check_run_id := os.environ.get("CHECK_RUN_ID"):
+        try:
+            url = f"{PYTORCH_GITHUB_API}/actions/jobs/{check_run_id}"
+            job = fetch_url(url, headers=REQUEST_HEADERS, reader=json.load)
+            return (job["id"], job["name"])
+        except Exception as e:
+            print(f"Failed to get job {check_run_id}: {e!r}", file=sys.stderr)
+
     url = f"{PYTORCH_GITHUB_API}/actions/runs/{args.workflow_run_id}/jobs?per_page=100"
     jobs = fetch_jobs(url, REQUEST_HEADERS)
 
@@ -136,10 +178,10 @@ def find_job_id_name(args: Any) -> tuple[str, str]:
 
 
 def set_output(name: str, val: Any) -> None:
+    print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
-        print(f"setting {name}={val}")
     else:
         print(f"::set-output name={name}::{val}")
 

@@ -1,10 +1,11 @@
 #include <torch/csrc/autograd/python_engine.h>
 
+#include <torch/csrc/Exceptions.h>
+
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -13,6 +14,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/autograd/python_node_creation_hook.h>
 #include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -57,10 +59,6 @@ PythonEngine::~PythonEngine() {
   Engine::stop();
 }
 
-#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
-#define IS_PYTHON_3_9_PLUS
-#endif
-
 void PythonEngine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
@@ -72,11 +70,7 @@ void PythonEngine::thread_init(
   // Create a PyThreadState, but release the GIL. This lets
   // pybind11::gil_scoped_acquire calls inside thread_main acquire the GIL
   // without having to create a new PyThreadState each time.
-#if defined(IS_PYTHON_3_9_PLUS)
   auto gil = std::make_unique<pybind11::gil_scoped_acquire>();
-#else
-  pybind11::gil_scoped_acquire gil;
-#endif
   pybind11::gil_scoped_release no_gil;
   Engine::thread_init(device, ready_queue, false);
 
@@ -85,7 +79,6 @@ void PythonEngine::thread_init(
     decrement_non_reentrant_thread_count();
   }
 
-#if defined(IS_PYTHON_3_9_PLUS)
   // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if
   // runtime is finalizing
   if (!Py_IsInitialized()) {
@@ -96,12 +89,11 @@ void PythonEngine::thread_init(
     auto ptr = gil.release();
     operator delete(ptr);
   }
-#endif
 }
 
 void PythonEngine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
-    const std::shared_ptr<Node>& fn,
+    const c10::intrusive_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
   auto python_err = dynamic_cast<python_error*>(&e);
@@ -118,6 +110,11 @@ std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
 std::unique_ptr<SavedVariableHooks> PythonEngine::
     get_default_saved_variable_hooks() {
   return PyDefaultSavedVariableHooks::get_hooks();
+}
+
+std::vector<std::unique_ptr<NodeCreationHook>> PythonEngine::
+    get_node_creation_hooks() {
+  return PyDefaultNodeCreationHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(
@@ -144,7 +141,7 @@ variable_list PythonEngine::execute(
 
 c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> graph_root,
+    c10::intrusive_ptr<Node> graph_root,
     InputBuffer&& input_buffer) {
   try {
     return Engine::execute_with_graph_task(
@@ -163,11 +160,11 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
-  std::shared_ptr<torch::autograd::Node> grad_fn_sp;
+  c10::intrusive_ptr<torch::autograd::Node> grad_fn_sp;
   if (THPFunction_Check(grad_fn)) {
-    grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
+    grad_fn_sp = reinterpret_cast<THPFunction*>(grad_fn)->cdata;
   } else if (THPCppFunction_Check(grad_fn)) {
-    grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
+    grad_fn_sp = reinterpret_cast<THPCppFunction*>(grad_fn)->cdata;
   } else {
     TORCH_CHECK(
         false,
@@ -284,18 +281,10 @@ static PyObject* THPEngine_run_backward(
     PyObject* grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = THPVariable_Unpack(grad);
-      if (grad_var.has_names()) {
-        TORCH_WARN(
-            "Autograd was passed a named grad tensor with dims ",
-            grad_var.names(),
-            ". Autograd does not yet support named tensor semantics, so all names ",
-            "will be ignored. In practice all computed gradients will still be correct "
-            "according to regular tensor semantics.");
-      }
       grads.push_back(grad_var);
     } else {
       TORCH_CHECK(
-          grad == Py_None,
+          Py_IsNone(grad),
           "element ",
           i,
           " of gradients tuple is not a Tensor or None");
@@ -345,12 +334,12 @@ static PyObject* THPEngine_run_backward(
             "One of the differentiated Tensors does not require grad");
         if (!grad_fn) {
           // NOTE [ Autograd Unreachable Input ]
-          // Since input has no grad_accumulator, its guaranteed to be
+          // Since input has no grad_accumulator, it's guaranteed to be
           // unreachable. We initialize an edge pointing to a non-nullptr Node
           // so nodes in the graph (e.g., mul when an operand is scalar) that
           // have edges pointing to nullptr don't get erroneously assigned
           // `needed = True` in exec_info.
-          output_edges.emplace_back(std::make_shared<Identity>(), 0);
+          output_edges.emplace_back(c10::make_intrusive<Identity>(), 0);
         } else {
           output_edges.emplace_back(grad_fn, output_nr);
         }
@@ -381,8 +370,9 @@ static PyObject* THPEngine_run_backward(
     for (const auto i : c10::irange(num_inputs)) {
       TORCH_CHECK(
           allow_unreachable || outputs[i].defined(),
-          "One of the "
-          "differentiated Tensors appears to not have been used "
+          "The differentiated Tensor at index ",
+          i,
+          " appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
           "desired behavior.");
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
@@ -406,23 +396,10 @@ static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
     pybind11::gil_scoped_acquire gil;
     THPObjectPtr result{PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) {
-      // Note [ Persisting PyErr state across autograd engine threads ]
-      //
-      // Since the autograd engine is multi-threaded, and Python error state is
-      // local to each thread, it must preserve the python error from the worker
-      // thread and rethrow it as-is in the calling thread. This is done via
-      // persisting the error in the two places that can encounter Python
-      // errors: (1) evaluate function and (2) queued callbacks.
-      //
-      // TODO: the engine is not actually responsible for persisting the error
-      // in the custom autograd Function case today! See the note above
-      // `raise_python_error()` function in python_function.cpp and
-      // python_hooks.cpp for more details. Persisting an extra time in the
-      // engine is fine because doing so is a no-op when the python_error has
-      // already been persisted.
-      python_error err;
-      err.persist();
-      throw std::move(err);
+      // See Note [ Persisting PyErr state across autograd engine threads ],
+      // above throw_python_error() in torch/csrc/Exceptions.h. Persisting an
+      // extra time here is a no-op if the error has already been persisted.
+      torch::throw_python_error();
     }
   });
   Py_RETURN_NONE;
@@ -451,12 +428,12 @@ static PyObject* THPEngine_new(
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPEngine_methods[] = {
-    {(char*)"run_backward",
+    {"run_backward",
      castPyCFunctionWithKeywords(THPEngine_run_backward),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
-    {(char*)"is_checkpoint_valid",
+    {"queue_callback", THPEngine_queue_callback, METH_O, nullptr},
+    {"is_checkpoint_valid",
      THPEngine_is_checkpoint_valid,
      METH_NOARGS,
      nullptr},
@@ -510,9 +487,9 @@ static void child_atfork() {
 
 bool THPEngine_initModule(PyObject* module) {
 #ifndef _WIN32
-  if (pthread_atfork(nullptr, nullptr, child_atfork) != 0) {
-    throw std::runtime_error("unable to set pthread_atfork handler");
-  }
+  TORCH_CHECK(
+      pthread_atfork(nullptr, nullptr, child_atfork) == 0,
+      "unable to set pthread_atfork handler");
 #endif
   if (PyType_Ready(&THPEngineType) < 0)
     return false;

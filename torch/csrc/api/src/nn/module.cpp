@@ -2,8 +2,6 @@
 
 #include <torch/ordered_dict.h>
 
-#include <torch/csrc/autograd/generated/VariableType.h>
-
 #include <c10/util/Exception.h>
 
 #include <ostream>
@@ -64,7 +62,7 @@ const std::string& Module::name() const noexcept {
 }
 
 std::shared_ptr<Module> Module::clone(
-    const std::optional<Device>& device) const {
+    const std::optional<Device>& /*device*/) const {
   TORCH_CHECK(
       false,
       "clone() has not been implemented for ",
@@ -355,11 +353,11 @@ void Module::pretty_print_recursive(
     stream << "(\n";
     const std::string next_indentation = indentation + "  ";
     for (const auto& child : children_) {
-      stream << next_indentation << "(" << child.key() << "): ";
+      stream << next_indentation << '(' << child.key() << "): ";
       child.value()->pretty_print_recursive(stream, next_indentation);
       stream << '\n';
     }
-    stream << indentation << ")";
+    stream << indentation << ')';
   }
 }
 

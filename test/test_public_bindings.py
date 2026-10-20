@@ -7,7 +7,7 @@ import logging
 import os
 import pkgutil
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
@@ -59,6 +59,7 @@ class TestPublicBindings(TestCase):
         #
         #   {elem for elem in dir(torch._C) if not elem.startswith("_")}
         torch_C_allowlist_superset = {
+            "AcceleratorError",
             "AggregationType",
             "AliasDb",
             "AnyType",
@@ -182,7 +183,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileReader",
             "PyTorchFileWriter",
             "qscheme",
-            "read_vitals",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -209,7 +209,6 @@ class TestPublicBindings(TestCase):
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
-            "set_vital",
             "Size",
             "StaticModule",
             "Stream",
@@ -230,7 +229,6 @@ class TestPublicBindings(TestCase):
             "Value",
             "set_autocast_gpu_dtype",
             "get_autocast_gpu_dtype",
-            "vitals_enabled",
             "wait",
             "Tag",
             "set_autocast_xla_enabled",
@@ -290,7 +288,8 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         # DO NOT add public modules here.
         private_allowlist = {
-            "torch._inductor.codegen.cuda.cuda_kernel",
+            "torch._inductor.codegen.cutlass.cuda_kernel",
+            "torch._native.flydsl.intrinsics",  # depends on flydsl
             # TODO(#133647): Remove the onnx._internal entries after
             # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
@@ -355,12 +354,33 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
-            "torch._inductor.codegen.cuda.cuda_template",
+            "torch.testing._internal.py312_intrinsics",
+            "torch._inductor.codegen.cutlass.cuda_template",
+            "torch._inductor.codegen.cutedsl._cutedsl_utils",
+            "torch._inductor.codegen.cutedsl._inline_asm",  # depends on cutlass
+            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
+            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
             "torch._inductor.codegen.cpp_template_kernel",
+            "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.dense_gemm_efc",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass.operators
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass.operators
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_utils",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_pipeline",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_fwd_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_gemm_gfx950",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_scheduling",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_buffer_ops",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_gemm_utils",  # depends on flydsl
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels.mxfp8_grouped_gemm_gfx950",  # depends on flydsl
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
@@ -391,9 +411,7 @@ class TestPublicBindings(TestCase):
             "torch.ao.pruning._experimental.data_sparsifier.lightning.tests.test_callbacks",
             "torch.csrc.jit.tensorexpr.scripts.bisect",
             "torch.csrc.lazy.test_mnist",
-            "torch.distributed._shard.checkpoint._fsspec_filesystem",
             "torch.distributed._tensor.examples.visualize_sharding_example",
-            "torch.distributed.checkpoint._fsspec_filesystem",
             "torch.distributed.examples.memory_tracker_example",
             "torch.testing._internal.distributed.rpc.fb.thrift_rpc_agent_test_fixture",
             "torch.utils._cxx_pytree",
@@ -407,9 +425,42 @@ class TestPublicBindings(TestCase):
 
         errors = []
         for mod, exc in failures:
-            if mod in private_allowlist:
-                # make sure mod is actually private
-                assert any(t.startswith("_") for t in mod.split("."))
+            # Prefixes for modules whose top-level imports pull in optional
+            # runtime deps (cutlass, cuda-python, triton, cupti-python) that
+            # aren't available in CPU-only CI. Registrations are no-ops when the
+            # runtime is missing, so it's safe to skip them here.
+            cuda_dep_prefixes = (
+                "torch._native.cutedsl.",
+                "torch._native.ops.reductions.traits",
+                "torch._native.ops.foreach_mm.",
+                "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",
+                "torch._native.ops.norm.rmsnorm_kernels",
+                "torch._native.ops.polar.",
+                "torch._native.ops.reductions.kernel_general",
+                "torch._native.ops.reductions.kernel_rowtile",
+                "torch._native.ops.reductions.tile",
+                "torch._native.ops.reductions.kernel_xcta",
+                "torch._native.ops.reductions.kernel_coltile",
+                "torch._native.ops.reductions.ordered",
+                "torch._native.ops.scatter_add.",
+                "torch._native.ops.topk.",
+                "torch._inductor.kernel.flex_gemm.quack_ops.",
+                "torch._vendor.quack",
+                "torch.profiler._cuspy.",
+            )
+            dsl_names = ("triton", "flydsl")
+            if (
+                mod in private_allowlist
+                or (
+                    mod.startswith("torch._native.ops.")
+                    and any(dsl in mod for dsl in dsl_names)
+                )
+                or mod.startswith(cuda_dep_prefixes)
+            ):
+                if self._is_mod_public(mod):
+                    raise AssertionError(
+                        f"Expected private module name to include '_' segments: {mod}"
+                    )
                 continue
             errors.append(
                 f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
@@ -511,17 +562,20 @@ class TestPublicBindings(TestCase):
                             "does not have `__all__` defined"
                         )
                         fix_is_public = (
-                            f"remove it from the modules's (`{modname}`) `__all__`"
+                            f"remove it from the modules' (`{modname}`) `__all__`"
                             if is_all
                             else f"either define a `__all__` for `{modname}` or add a `_` at the beginning of the name"
                         )
                     else:
-                        assert is_all
+                        if not is_all:
+                            raise AssertionError(
+                                f"Expected {modname}.{elem} to be checked via __all__"
+                            )
                         why_is_public = (
                             f"it is not inside the module's (`{modname}`) `__all__`"
                         )
                         fix_is_public = (
-                            f"add it from the modules's (`{modname}`) `__all__`"
+                            f"add it from the modules' (`{modname}`) `__all__`"
                         )
                     if looks_public:
                         why_looks_public = (

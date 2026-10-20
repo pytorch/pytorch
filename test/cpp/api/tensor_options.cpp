@@ -86,6 +86,13 @@ TEST(TensorOptionsTest, ConstructsWellFromVariables) {
   ASSERT_FALSE(options.requires_grad());
 }
 
+TEST(TensorOptionsTest, MkldnnDeviceAllocationFailsCleanly) {
+  ASSERT_THROWS_WITH(
+      torch::empty({2}, TensorOptions().device(Device(DeviceType::MKLDNN))),
+      "The 'mkldnn' device type is deprecated and cannot be used to allocate "
+      "dense tensors");
+}
+
 TEST(DeviceTest, ParsesCorrectlyFromString) {
   Device device("cpu:0");
   ASSERT_EQ(device, Device(DeviceType::CPU, 0));

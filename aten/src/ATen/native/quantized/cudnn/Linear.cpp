@@ -79,7 +79,7 @@ std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHa
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
-// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
+// reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/legacy_samples/conv_sample.cpp#L295
 //static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
 
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized linear op
@@ -147,12 +147,12 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
     at::SmallVector<void *, 8> data_ptrs;
     at::SmallVector<int64_t, 8> uids;
-    data_ptrs = {input.data_ptr<int8_t>(), weight_transposed.data_ptr<int8_t>(),
-                 requantize_multiplier_tensor.data_ptr(), quantized_output.data_ptr<int8_t>()};
+    data_ptrs = {input.mutable_data_ptr<int8_t>(), weight_transposed.mutable_data_ptr<int8_t>(),
+                 const_cast<void*>(requantize_multiplier_tensor.const_data_ptr()), quantized_output.mutable_data_ptr<int8_t>()};
     uids = {'x', 'w', 's', 'r'};
     if (bias_.has_value()) {
-      data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
-                                         broadcasted_bias.value().data_ptr(), broadcasted_bias.value().data_ptr()});
+      void* bias_ptr = broadcasted_bias.value().mutable_data_ptr();
+      data_ptrs.insert(data_ptrs.end(), {bias_ptr, const_cast<void*>(bias_multiplier_tensor.value().const_data_ptr()), bias_ptr, bias_ptr});
       uids.insert(uids.end(), {'b', 'c', 'd', 'n'});
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
@@ -171,7 +171,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     return;
   }
 
-  // linear_op computes act_int8 * tranpose(w_int8) (matrix multiplication)
+  // linear_op computes act_int8 * transpose(w_int8) (matrix multiplication)
   // where act_int8 and w_int8 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)

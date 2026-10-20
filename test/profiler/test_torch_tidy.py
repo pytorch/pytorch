@@ -1,21 +1,7 @@
 # Owner(s): ["oncall: profiler"]
 
-# if tqdm is not shutdown properly, it will leave the monitor thread alive.
-# This causes an issue in the multithreading test because we check all events
-# in that test with their tids. The events that correspond to these lingering
-# threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
-# Since these are unit tests, it is safe to turn off monitor thread.
-try:
-    import tqdm
-
-    tqdm.tqdm.monitor_interval = 0
-except ImportError:
-    None
-
 import gc
 import re
-import sys
 import textwrap
 import unittest
 import weakref
@@ -25,14 +11,32 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
-from torch._C._profiler import _TensorMetadata
+from torch._C._profiler import _ExtraFields_PyCall, _TensorMetadata
 from torch.profiler import _utils, profile
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_MACOS,
+    IS_WINDOWS,
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
 
 Json = dict[str, Any]
-
-from torch._C._profiler import _ExtraFields_PyCall
 
 
 def find_node_with_name(nodes, name):
@@ -57,7 +61,6 @@ class SimpleNet(nn.Module):
         return self.fc2(self.fc1(x))
 
 
-@unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestTorchTidyProfiler(TestCase):
     def _get_tensor_fields(self, node, index):
         self.assertIsNotNone(node)
@@ -364,6 +367,10 @@ class TestTorchTidyProfiler(TestCase):
                 0          1      Free""",
         )
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO or IS_LINUX or IS_MACOS or IS_WINDOWS,
+        "https://github.com/pytorch/pytorch/issues/87581",
+    )
     def test_module_and_optimizer_ids(self) -> None:
         model = torch.nn.Linear(2, 1, bias=True)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -429,7 +436,7 @@ class TestTorchTidyProfiler(TestCase):
             self.assertEqual(state[0][0], "momentum_buffer")
             self.assertEqual(state[0][1].id, weight_momenumtum_id)
 
-        # Check that we handle first step (lazy initalization) and steady state.
+        # Check that we handle first step (lazy initialization) and steady state.
         check(cold_start=True)
         check(cold_start=False)
 
@@ -727,7 +734,9 @@ class TestTorchTidyProfiler(TestCase):
             p.profiler.kineto_results.experimental_event_tree()
         )
         self.assertEqual(
-            len(modules), 2, f"Expected two parameter list, but got {len(modules)}"
+            len(modules),
+            2,
+            lambda msg: f"{msg}\nExpected two parameter list, but got {len(modules)}",
         )
 
         params = [
@@ -743,7 +752,9 @@ class TestTorchTidyProfiler(TestCase):
             (name, val.storage().data_ptr(), val.grad.storage().data_ptr())
             for name, val in net.fc2._parameters.items()
         ]
-        self.assertEqual(expected, params, f"{expected} vs. {params}")
+        self.assertEqual(
+            expected, params, lambda msg: f"{msg}\n{expected} vs. {params}"
+        )
 
     def _flat_out_extrafields(self, nodes, out=None):
         if out is None:
@@ -762,11 +773,15 @@ class TestTorchTidyProfiler(TestCase):
         return out
 
     def _check_results(self, opt, opts, check_items=False):
-        self.assertEqual(len(opts), 1, f"Expected 1 optimizer: len(opts): {len(opts)}")
+        self.assertEqual(
+            len(opts),
+            1,
+            lambda msg: f"{msg}\nExpected 1 optimizer: len(opts): {len(opts)}",
+        )
         self.assertEqual(
             id(opt),
             opts[0].self_ptr,
-            f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})",
+            lambda msg: f"{msg}\nOptimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})",
         )
         if check_items:
             self.assertEqual(len(opt.param_groups), len(opts))

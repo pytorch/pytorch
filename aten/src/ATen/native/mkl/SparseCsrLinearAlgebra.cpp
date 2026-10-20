@@ -23,7 +23,6 @@ Tensor& _sparse_mm_mkl_(
 #else
   TORCH_CHECK(false, "sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
-  return self; // for stopping compiler warnings.
 }
 } // namespace native
 

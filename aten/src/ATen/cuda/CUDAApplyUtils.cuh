@@ -209,78 +209,12 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 //     bound), and recursively call `ApplyOpN` with `remaining_steps - 1`.
 //  3. At `remaining_steps = 0`,
 //       if `step = 1`, call `op(tensor1_val, tensor2_val, ...)`;
-//       if `step > 1`, call `op(n, tensor1_val1, tensor1_val2, ..., tesor1_valstep,
-//                                  tensor2_val1, tensor2_val2, ..., tesor2_valstep,
+//       if `step > 1`, call `op(n, tensor1_val1, tensor1_val2, ..., tensor1_valstep,
+//                                  tensor2_val1, tensor2_val2, ..., tensor2_valstep,
 //                                       ...
-//                                  tensorN_val1, tensorN_val2, ..., tesorN_valstep);`
+//                                  tensorN_val1, tensorN_val2, ..., tensorN_valstep);`
 //
 // See NOTE [ CUDA_tensor_applyN helpers ] above for how Op may look like.
-
-template <typename Op,
-          typename scalar,
-          typename IndexType,
-          int ADims,
-          int remaining_steps,
-          typename... Offsets>
-struct ApplyOp1 {
-__device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op, int n,
-                  IndexType linearIndex, Offsets... aOffsets) {
-  // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset = sizeof...(Offsets) < n ?
-    detail::IndexToOffset<scalar, IndexType, ADims>::get(linearIndex, a) : 0;
-
-  ApplyOp1<Op, scalar, IndexType, ADims, remaining_steps - 1, const IndexType, Offsets...>::apply(
-    a, op, n, linearIndex + 1, aOffsets..., aOffset
-  );
-}
-};
-
-// Specialize `step=1` case (i.e., `remaining_steps=0` and `len(Offsets)=1`).
-// We don't need to pass in how many elements need to processed in this case.
-template <typename Op,
-          typename scalar,
-          typename IndexType,
-          int ADims,
-          typename Offset>
-struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offset> {
-__device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op,
-                  int n, IndexType linearIndex, Offset offset) {
-  op(a.data[offset]);
-}
-};
-
-template <typename Op,
-          typename scalar,
-          typename IndexType,
-          int ADims,
-          typename... Offsets>
-struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offsets...> {
-__device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op, int n,
-                 IndexType linearIndex, Offsets... offsets) {
-  op(n, a.data[offsets]...);
-}
-};
-
-template <typename Op,
-          typename scalar,
-          typename IndexType,
-          int ADims,
-          int step>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
-C10_LAUNCH_BOUNDS_2(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
-#endif
-__global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
-                                      IndexType totalElements, const Op op) {
-  for (IndexType linearIndex = (blockIdx.x * blockDim.x + threadIdx.x) * step;
-       linearIndex < totalElements;
-       linearIndex += gridDim.x * blockDim.x * step) {
-    ApplyOp1<Op, scalar, IndexType, ADims, step>::apply(
-      a, op, ::min(step, static_cast<int>(totalElements - linearIndex)), linearIndex);
-  }
-}
 
 
 template <typename Op,
@@ -355,9 +289,7 @@ template <typename Op,
           int step,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(max_threads_per_block, min_blocks_per_sm)
-#endif
 __global__ void
 kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
                       detail::TensorInfo<scalar2, IndexType> b,

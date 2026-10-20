@@ -113,7 +113,7 @@ SymIntArrayRef BatchedTensorImpl::sym_sizes_custom() const {
   return sym_sizes_default();
 }
 
-// The following are publically exposed as methods of Tensor
+// The following are publicly exposed as methods of Tensor
 
 IntArrayRef BatchedTensorImpl::strides_custom() const {
   return strides_default();
@@ -126,7 +126,7 @@ SymIntArrayRef BatchedTensorImpl::sym_strides_custom() const {
 
 // TODO: implement proper contiguity on batched tensor, then put
 // sizes_strides_policy back to Default
-bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+c10::SymBool BatchedTensorImpl::sym_is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");
@@ -156,7 +156,6 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
   TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
-  return nullptr;
 }
 
 c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
@@ -164,7 +163,6 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
-  return nullptr;
 }
 
 void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {

@@ -1,13 +1,26 @@
 # Owner(s): ["module: inductor"]
 
 from functools import partial
-from unittest import skipIf
+from unittest import mock, skipIf
 
 import torch
+from torch._inductor import config
+from torch._inductor.codegen.common import (
+    BackendFeature,
+    custom_backend_codegen_configs,
+    custom_backend_passes,
+    device_codegens,
+    has_backend_feature,
+    init_backend_registration,
+    register_backend_for_device,
+)
+from torch._inductor.codegen.cpp import CppScheduling
 from torch._inductor.ir import Pointwise
-from torch._inductor.lowering import make_pointwise, register_lowering
+from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -15,6 +28,15 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     requires_gpu,
 )
+from torch.utils._ordered_set import OrderedSet
+
+
+def _has_aten_fallback_call(code: list[str], op_name: str) -> bool:
+    return any(
+        op_name in line and not line.lstrip().startswith("#")
+        for generated_code in code
+        for line in generated_code.splitlines()
+    )
 
 
 # These tests check issues for lowerings that aren't in the main pytorch repo
@@ -22,7 +44,7 @@ class TestCustomLowering(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.test_inductor_ops = torch.library.Library(  # noqa: TOR901
+        cls.test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
             "test_inductor_ops", "DEF"
         )
         cls.device_list = ["Meta", "CUDA", "XPU"]
@@ -30,7 +52,7 @@ class TestCustomLowering(InductorTestCase):
             setattr(
                 cls,
                 "impl_" + device.lower(),
-                torch.library.Library(  # noqa: TOR901
+                torch.library.Library(  # noqa: SCOPED_LIBRARY
                     "test_inductor_ops", "IMPL", device
                 ),
             )
@@ -133,12 +155,40 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("add_custom", add_custom)
 
         def add_custom_lowering(a, b):
-            fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
+            if torch.version.hip:
+                # ROCm GCN assembly
+                fn = partial(
+                    ops.inline_asm_elementwise,
+                    asm="v_add_f32 $0, $1, $2",
+                    constraints="=v, v, v",
+                )
+            else:
+                fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
             return make_pointwise(fn)(a, b)
 
         register_lowering(
             torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None
         )(add_custom_lowering)
+
+    def test_register_lowering_custom_dict(self):
+        custom_lowering_dict = {}
+
+        from torch._inductor.lowering import register_lowering
+
+        @torch.library.custom_op("helion_test::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @register_lowering(
+            torch.ops.helion_test.foo, lowering_dict=custom_lowering_dict
+        )
+        def foo_lowering(x):
+            return x
+
+        if torch.ops.helion_test.foo not in custom_lowering_dict:
+            raise AssertionError
+        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
+            raise AssertionError
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
@@ -190,7 +240,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
@@ -205,7 +255,22 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
+    def test_reused_inline_asm_realized(self):
+        def fn(inp):
+            y = torch.ops.test_inductor_ops.tanh_approx(inp)
+            return y.sum(dim=0), y.sum(dim=1)
+
+        inp = torch.randn(32, 64, device=GPU_TYPE)
+        expected = (torch.tanh(inp).sum(dim=0), torch.tanh(inp).sum(dim=1))
+        actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), inp)
+
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual("\n".join(code).count("tanh.approx.f32"), 1)
+
+    @requires_gpu()
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):
@@ -218,6 +283,158 @@ class TestCustomLowering(InductorTestCase):
         out1 = a + b
         out2 = fn_opt(a, b)
         self.assertEqual(out1, out2)
+
+    @config.patch(joint_graph_constant_folding=False)
+    def test_constant_creation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(1)
+
+        make_fallback(torch.ops.aten.lift_fresh_copy.default)
+        self.assertTrue(
+            torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
+        )
+
+
+class TestJaggedAtenLowerings(InductorTestCase):
+    """Fused vs. fallback behavior of the jagged <-> padded dense lowerings."""
+
+    def test_jagged_to_padded_dense_fused_or_fallback(self, device):
+        values = torch.randn(10, 5, device=device)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        def fn(values, offsets, max_length):
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                values, [offsets], [max_length], padding_value
+            )
+
+        # The fused kernel uses indirect_indexing + masked, so only backends
+        # declaring BackendFeature.INDIRECT_INDEXING fuse; the rest fall back.
+        expected = fn(values, offsets, max_length)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), values, offsets, max_length
+        )
+        self.assertEqual(actual, expected)
+        # get_kernel_metadata emits the op in comment blocks even when the
+        # lowering fuses it, so only inspect executable code lines.
+        if has_backend_feature(torch.device(device), BackendFeature.INDIRECT_INDEXING):
+            self.assertFalse(
+                _has_aten_fallback_call(
+                    code, "torch.ops.aten._jagged_to_padded_dense_forward.default("
+                )
+            )
+        else:
+            self.assertTrue(
+                _has_aten_fallback_call(
+                    code, "torch.ops.aten._jagged_to_padded_dense_forward.default("
+                )
+            )
+
+    def test_padded_dense_to_jagged_fused_or_fallback(self, device):
+        values = torch.randn(10, 5, device=device)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        total_L = values.shape[0]
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], 1.3
+        )
+
+        def fn(padded, offsets, total_L):
+            return torch.ops.aten._padded_dense_to_jagged_forward(
+                padded, [offsets], total_L
+            )
+
+        # get_inverse_offsets emits ops.bucketize and the fused gather uses
+        # indirect_indexing, so only backends declaring both BUCKETIZE and
+        # INDIRECT_INDEXING take the fused path; the rest fall back.
+        expected = fn(padded, offsets, total_L)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), padded, offsets, total_L
+        )
+        self.assertEqual(actual, expected)
+        has_bucketize = has_backend_feature(
+            torch.device(device), BackendFeature.BUCKETIZE
+        )
+        has_indirect_indexing = has_backend_feature(
+            torch.device(device), BackendFeature.INDIRECT_INDEXING
+        )
+        fused = has_bucketize and has_indirect_indexing
+        # get_kernel_metadata emits the op in comment blocks even when the
+        # lowering fuses it, so only inspect executable code lines.
+        if fused:
+            self.assertFalse(
+                _has_aten_fallback_call(
+                    code, "torch.ops.aten._padded_dense_to_jagged_forward.default("
+                )
+            )
+        else:
+            self.assertTrue(
+                _has_aten_fallback_call(
+                    code, "torch.ops.aten._padded_dense_to_jagged_forward.default("
+                )
+            )
+
+
+class TestJaggedOutOfTreeBackend(InductorTestCase):
+    """An out-of-tree backend opts into (or out of) the fused jagged lowerings
+    by declaring the feature on its registered scheduling."""
+
+    def test_lowering_falls_back_when_scheduling_drops_feature(self):
+        # Same op fuses on the default CPU scheduling (which declares
+        # INDIRECT_INDEXING); registering a scheduling without it must make
+        # the lowering pick the ATen fallback. This is the mechanism an
+        # out-of-tree backend controls via register_backend_for_device.
+        init_backend_registration()
+        orig = device_codegens["cpu"]
+
+        class NoIndirectIndexing(CppScheduling):
+            backend_features = OrderedSet(
+                [
+                    BackendFeature.INPLACE_BUFFERS,
+                    BackendFeature.REDUCE_TO_SINGLE_ELEMENT,
+                ]
+            )
+
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 1, 3, 8, 10], dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+
+        def fn(values, offsets, max_length):
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                values, [offsets], [max_length], 1.3
+            )
+
+        with (
+            mock.patch.dict(device_codegens),
+            mock.patch.dict(custom_backend_codegen_configs),
+            mock.patch.dict(custom_backend_passes),
+        ):
+            register_backend_for_device(
+                "cpu",
+                NoIndirectIndexing,
+                orig.wrapper_codegen,
+                orig.cpp_wrapper_codegen,
+                orig.fx_wrapper_codegen,
+            )
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), values, offsets, max_length
+            )
+        self.assertEqual(actual, fn(values, offsets, max_length))
+        self.assertTrue(
+            _has_aten_fallback_call(
+                code, "torch.ops.aten._jagged_to_padded_dense_forward.default("
+            )
+        )
+
+
+instantiate_device_type_tests(
+    TestJaggedAtenLowerings,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

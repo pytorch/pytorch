@@ -11,6 +11,7 @@ import onnx
 import torch
 from torch.onnx._internal.exporter import _dynamic_shapes
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree
 
 
@@ -57,6 +58,8 @@ class SingnatureOnlyLlamaModel(torch.nn.Module):
 
 @common_utils.instantiate_parametrized_tests
 class TestDynamicShapes(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "dynamic_shapes, input_names, expected_dynamic_axes",
         [
@@ -199,6 +202,7 @@ class TestDynamicShapes(common_utils.TestCase):
                 filename,
                 dynamic_axes=dynamic_axes,
                 input_names=input_names,
+                dynamo=False,
             )
             onnx_model = onnx.load(filename)
 
@@ -558,7 +562,7 @@ class TestDynamicShapes(common_utils.TestCase):
         expected_dynamic_shapes = {
             "input_x": [
                 {
-                    0: torch.export.Dim.AUTO,
+                    0: torch.export.Dim.DYNAMIC,
                     1: torch.export.Dim.STATIC,
                 },
                 {
@@ -566,7 +570,7 @@ class TestDynamicShapes(common_utils.TestCase):
                     1: dimx,
                 },
             ],
-            "input_b": {2: torch.export.Dim.AUTO},
+            "input_b": {2: torch.export.Dim.DYNAMIC},
         }
         dynamic_shapes_with_export_dim, need_axis_mapping = (
             _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
@@ -598,7 +602,7 @@ class TestDynamicShapes(common_utils.TestCase):
                 },
                 {
                     0: torch.export.Dim.AUTO,
-                    1: torch.export.Dim.AUTO,
+                    1: torch.export.Dim.DYNAMIC,
                 },
             ],
             {2: torch.export.Dim.STATIC},

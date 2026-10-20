@@ -9,10 +9,10 @@ void tupleIndex(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   auto norm_index =
       normalizeIndex(index, static_cast<int64_t>(tuple->elements().size()));
-  if (norm_index < 0 ||
-      norm_index >= static_cast<int64_t>(tuple->elements().size())) {
-    throw std::out_of_range("Tuple list index out of range");
-  }
+  TORCH_CHECK_INDEX(
+      norm_index >= 0 &&
+          norm_index < static_cast<int64_t>(tuple->elements().size()),
+      "Tuple list index out of range");
   stack.emplace_back(tuple->elements()[norm_index]);
 }
 
@@ -35,8 +35,7 @@ void raiseExceptionWithMessage(Stack& stack) {
 }
 
 void is(Stack& stack) {
-  IValue self, obj;
-  pop(stack, self, obj);
+  auto [self, obj] = pop<IValue, IValue>(stack);
   push(stack, self.is(obj));
 }
 
@@ -45,8 +44,7 @@ void unInitialized(Stack& stack) {
 }
 
 void isNot(Stack& stack) {
-  IValue self, obj;
-  pop(stack, self, obj);
+  auto [self, obj] = pop<IValue, IValue>(stack);
   push(stack, !self.is(obj));
 }
 
@@ -95,8 +93,7 @@ void device(Stack& stack) {
 }
 
 void device_with_index(Stack& stack) {
-  std::string type = pop(stack).toStringRef();
-  auto index = pop(stack).toInt();
+  auto [type, index] = pop<std::string, int64_t>(stack);
   std::string device_str = fmt::format("{}:{}", type, index);
   auto device = c10::Device(device_str);
   push(stack, device);
@@ -113,9 +110,7 @@ void layout(Stack& stack) {
 }
 
 void toPrimDType(Stack& stack) {
-  bool non_blocking = false;
-  bool copy = false;
-  pop(stack, non_blocking, copy);
+  auto [non_blocking, copy] = pop<bool, bool>(stack);
   std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
   std::optional<c10::Device> device = std::nullopt;

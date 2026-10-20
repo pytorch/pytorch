@@ -2,7 +2,7 @@
 
 DATASET_ROOT_DIR=$HOME/datasets/
 
-# wget https://storage.googleapis.com/sgk-sc2020/dlmc.tar.gz -P $DATASET_ROOT_DIR
+# wget https://storage.googleapis.com/sgk-sc2020/dlmc.tar.gz -P $DATASET_ROOT_DIR  # @lint-ignore
 # tar -xvf $DATASET_ROOT_DIR/dlmc.tar.gz
 
 echo "!! SPARSE SPMS TIME BENCHMARK!! "

@@ -9,7 +9,13 @@ import unittest
 from pathlib import Path
 
 import torch
-from torch.testing._internal.common_utils import run_tests, set_cwd, TestCase
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_S390X,
+    run_tests,
+    set_cwd,
+    TestCase,
+)
 
 
 try:
@@ -47,10 +53,17 @@ def get_all_examples():
         "import io",
         "import itertools",
         "",
+        "from typing import Any, ClassVar, Generic, List, Tuple, Union",
+        "from typing_extensions import Literal, get_origin, TypeAlias",
+        "T: TypeAlias = object",
+        "",
         "import numpy",
         "",
         "import torch",
         "import torch.nn.functional as F",
+        "",
+        "from typing_extensions import ParamSpec as _ParamSpec",
+        "ParamSpec = _ParamSpec",
         "",
         # for requires_grad_ example
         # NB: We are parsing this file as Python 2, so we must use
@@ -84,6 +97,8 @@ def get_all_examples():
 
 
 class TestTypeHints(TestCase):
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/98259")
+    @unittest.skipIf(IS_S390X, "flaky on s390x")
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_doc_examples(self):
         """

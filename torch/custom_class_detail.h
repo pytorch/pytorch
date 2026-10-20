@@ -128,8 +128,8 @@ typename c10::guts::infer_function_traits_t<Functor>::return_type
 call_torchbind_method_from_stack(
     Functor& functor,
     jit::Stack& stack,
-    std::index_sequence<ivalue_arg_indices...>) {
-  (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would
+    std::index_sequence<ivalue_arg_indices...> /*unused*/) {
+  (void)stack; // when sizeof...(ivalue_arg_indices) == 0, this argument would
                  // be unused and we have to silence the compiler warning.
 
   constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
@@ -138,7 +138,7 @@ call_torchbind_method_from_stack(
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
   // TODO We shouldn't use c10::impl stuff directly here. We should use the
   // KernelFunction API instead.
-  return (functor)(c10::impl::ivalue_to_arg<
+  return functor(c10::impl::ivalue_to_arg<
                    typename c10::impl::decay_if_not_tensor<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>::type,
@@ -208,7 +208,14 @@ class TORCH_API class_base {
       const std::type_info& intrusivePtrClassTypeid,
       const std::type_info& taggedCapsuleClass);
 
+  // Copies the argument names and default values to the function schema
+  // taking care to preserve the first argument (self)
   static c10::FunctionSchema withNewArguments(
+      const c10::FunctionSchema& schema,
+      std::initializer_list<arg> default_args);
+
+  // Copies the argument names and default values to the function schema
+  static c10::FunctionSchema withNewArgumentsStatic(
       const c10::FunctionSchema& schema,
       std::initializer_list<arg> default_args);
   std::string qualClassName;

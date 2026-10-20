@@ -65,7 +65,7 @@ struct WorkEntry {
 // That is, The process may be multi-threaded, and multiple threads may make
 // MPI calls, but only one at a time: MPI calls are not made concurrently from
 // two distinct threads (all MPI calls are serialized). However, with
-// MPI_THREAD_SERIALIZED, ProcessGroupMPI will only support a singe process
+// MPI_THREAD_SERIALIZED, ProcessGroupMPI will only support a single process
 // group. In other words, no more than 1 process group can be created globally.
 //
 // If you would like to use multiple ProcessGroupMPI, it requires your MPI
@@ -172,7 +172,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -197,12 +197,12 @@ class TORCH_API ProcessGroupMPI : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputTensor,
       at::Tensor& inputTensor,
       std::vector<int64_t>& outputSplitSizes,
@@ -249,7 +249,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
       const std::optional<std::vector<at::Tensor>>& inputTensors =
           std::nullopt);
 
-  bool stop_;
+  bool stop_{false};
 
   std::mutex pgMutex_;
   std::thread workerThread_;

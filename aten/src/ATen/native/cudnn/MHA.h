@@ -3,6 +3,9 @@
 
 namespace at::native {
 
+// Check the pointer and stride alignment cuDNN requires for varlen tensors.
+bool has_aligned_varlen_layout(const Tensor& tensor);
+
 void run_cudnn_SDP_fprop(
     int64_t b,
     int64_t h,
@@ -38,6 +41,8 @@ void run_cudnn_SDP_fprop_nestedtensor(
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
+    const std::optional<Tensor>& seqused_k,
+    const std::optional<Tensor>& page_table,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
@@ -57,6 +62,33 @@ void run_cudnn_SDP_bprop(
     float scaling_factor,
     bool is_causal,
     float dropout_probability,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset);
+
+void run_cudnn_SDP_bprop_nestedtensor(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,

@@ -9,6 +9,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/core/DimVector.h>
+#include <c10/core/SymBool.h>
 #include <c10/util/Exception.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
@@ -99,7 +100,18 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
+  auto t_sizes = tensor.sym_sizes();
+  auto e_sizes = to_expand.sym_sizes();
+  bool same = t_sizes.size() == e_sizes.size();
+  if (same) {
+    for (size_t i = 0; i < t_sizes.size(); ++i) {
+      if (!TORCH_GUARD_OR_FALSE(sym_eq(t_sizes[i], e_sizes[i]))) {
+        same = false;
+        break;
+      }
+    }
+  }
+  if (same) {
     return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
   return c10::MaybeOwned<Tensor>::owned(
@@ -188,7 +200,7 @@ inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
 expand_outplace(const Tensor& to_expand1, const Tensor& to_expand2) {
   auto s1 = to_expand1.sym_sizes();
   auto s2 = to_expand2.sym_sizes();
-  if (s1.equals(s2)) {
+  if (TORCH_GUARD_OR_FALSE(c10::sym_equals(s1, s2))) {
     return std::make_tuple(
         c10::MaybeOwned<Tensor>::borrowed(to_expand1),
         c10::MaybeOwned<Tensor>::borrowed(to_expand2));
@@ -421,14 +433,14 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   // expands a list of Tensors; ignores undefined (null) tensors
   bool first = true;
   SymDimVector sizes;
-  for (const auto i : c10::irange(to_expand.size())) {
-    if (!to_expand[i].defined()) {
+  for (const auto& to_expand_elem : to_expand) {
+    if (!to_expand_elem.defined()) {
       continue;
     } else if (first) {
-      sizes = to_expand[i].sym_sizes();
+      sizes = to_expand_elem.sym_sizes();
       first = false;
     } else {
-      sizes = infer_size_symdimvector(sizes, to_expand[i].sym_sizes());
+      sizes = infer_size_symdimvector(sizes, to_expand_elem.sym_sizes());
     }
   }
 
@@ -436,7 +448,8 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   for (const auto i : c10::irange(to_expand.size())) {
     if (!to_expand[i].defined()) {
       continue;
-    } else if (to_expand[i].sym_sizes().equals(sizes)) {
+    } else if (TORCH_GUARD_OR_FALSE(
+                   c10::sym_equals(to_expand[i].sym_sizes(), sizes))) {
       result[i] = to_expand[i];
     } else {
       result[i] = to_expand[i].expand_symint(sizes);
@@ -461,9 +474,17 @@ inline Tensor _sum_to(
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_eq(shape[i - leading_dims], 1)) &&
-        TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(sizes[i], 1))) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(shape[i - leading_dims], 1)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(sizes[i], 1))) {
       reduce_dims.push_back(i);
+    } else {
+      // if we assume no reduction due to unbacked we ensure that at runtime.
+      TORCH_MAYBE_SYM_CHECK(
+          sym_eq(shape[i - leading_dims], sizes[i]),
+          "non-reduction path was assumed due to unbacked symbols expected those two sizes to be the same:",
+          shape[i - leading_dims],
+          ", ",
+          sizes[i])
     }
   }
 

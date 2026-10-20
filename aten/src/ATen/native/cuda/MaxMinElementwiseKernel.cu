@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
@@ -12,20 +13,20 @@
 namespace at::native {
 
 void maximum_kernel_cuda(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
+  if (iter.common_dtype() == ScalarType::Bool) {
     opmath_symmetric_gpu_kernel_with_scalars<bool>(
         iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a || b;
     });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_elementwise_cuda", [&]() {
+  } else if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_V2(iter.common_dtype(), "max_elementwise_cuda", AT_WRAP([&]() {
       opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
           iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::max(a, b);
       });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "max_elementwise_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "max_elementwise_cuda", [&]() {
       opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
           iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         if (a != a) {
@@ -41,18 +42,18 @@ void maximum_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void minimum_kernel_cuda(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Bool) {
+  if (iter.common_dtype() == ScalarType::Bool) {
     opmath_symmetric_gpu_kernel_with_scalars<bool>(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a && b;
     });
-  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cuda", [&]() {
+  } else if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_V2(iter.common_dtype(), "minimum_cuda", AT_WRAP([&]() {
       opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::min(a, b);
       });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "min_elementwise_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "min_elementwise_cuda", [&]() {
       opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         if (a != a) {
           return a;

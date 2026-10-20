@@ -34,7 +34,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
  public:
   using ContainedType = Contained;
 
-  /// Default constructs the contained module if if has a default constructor,
+  /// Default constructs the contained module if it has a default constructor,
   /// else produces a static error.
   ///
   /// NOTE: This uses the behavior of template
@@ -130,7 +130,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// NOTE: std::forward is qualified to prevent VS2017 emitting
   ///       error C2872: 'std': ambiguous symbol
   template <typename Arg>
-  decltype(auto) operator[](Arg&& arg) {
+  auto operator[](Arg&& arg) {
     return (*impl_)[::std::forward<Arg>(arg)];
   }
 

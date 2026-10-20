@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: pt2"]
 name: inductor-periodic
 
 on:
@@ -11,11 +12,14 @@ on:
     - cron: 45 4,12 * * 0,6
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
   cancel-in-progress: true
 
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
+  actions: read
 
 jobs:
   get-default-label-prefix:
@@ -27,226 +31,194 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
-  linux-focal-cuda12_6-py3_10-gcc9-periodic-dynamo-benchmarks-build:
-    name: cuda12.6-py3.10-gcc9-sm86-periodic-dynamo-benchmarks
+  periodic-dynamo-benchmarks-build:
+    name: periodic-dynamo-benchmarks-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.6'
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
+      cuda-arch-list: '8.0;8.6'
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "inductor_huggingface_unbacked_parity", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86aavx2-11-41-a10g" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
     secrets: inherit
 
-  linux-focal-cuda12_6-py3_10-gcc9-periodic-dynamo-benchmarks-test:
-    name: cuda12.6-py3.10-gcc9-sm86-periodic-dynamo-benchmarks
+  periodic-dynamo-benchmarks-test:
+    name: periodic-dynamo-benchmarks-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_6-py3_10-gcc9-periodic-dynamo-benchmarks-build
+    needs:
+      - periodic-dynamo-benchmarks-build
+      - get-default-label-prefix
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+      build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
+      docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
     secrets: inherit
 
-  linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build:
+  rocm-periodic-dynamo-benchmarks-build:
     if: github.repository_owner == 'pytorch'
-    name: rocm-py3_10-periodic-dynamo-benchmarks
+    name: rocm-periodic-dynamo-benchmarks-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
     with:
-      build-environment: linux-focal-rocm-py3_10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
-      sync-tag: rocm-build
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      build-environment: linux-jammy-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
+      ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi300.2" },
+          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
+      build-additional-packages: "fbgemm"
     secrets: inherit
 
-  linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-test:
-    permissions:
-      id-token: write
-      contents: read
-    name: rocm-py3_10-periodic-dynamo-benchmarks
+  rocm-periodic-dynamo-benchmarks-test:
+    name: rocm-periodic-dynamo-benchmarks-test
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build
+    needs: rocm-periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-focal-rocm-py3_10
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm-py3_10-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+      build-environment: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.build-environment }}
+      docker-image: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp:
-    name: cuda12.6-py3.10-gcc9-sm80
+  inductor-smoke-build:
+    name: inductor-smoke-build
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "mt-l-x86iavx512-11-125-a100" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
     secrets: inherit
 
-  linux-focal-cuda12_6-py3_10-gcc9-inductor-test-gcp:
-    name: cuda12.6-py3.10-gcc9-sm80
+  inductor-smoke-test:
+    name: inductor-smoke-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp
+    needs:
+      - inductor-smoke-build
+      - get-default-label-prefix
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm80
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
-      # disable monitor in smoke perf tests for more investigation
-      disable-monitor: true
+      build-environment: ${{ needs.inductor-smoke-build.outputs.build-environment }}
+      docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build:
-    name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
+
+  periodic-inductor-benchmarks-cpu-build:
+    name: periodic-inductor-benchmarks-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-py3.11-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
-          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
+          { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-8-32" },
+          { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-8-32" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_avx2_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iavx2-40-160" },
+          { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
         ]}
+      build-additional-packages: "vision audio torchao"
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: cpu
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-test:
-    name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
+  periodic-inductor-benchmarks-cpu-test:
+    name: periodic-inductor-benchmarks-cpu-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build
+    needs:
+      - periodic-inductor-benchmarks-cpu-build
+      - get-default-label-prefix
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-    secrets: inherit
-
-
-  linux-focal-cuda12_6-py3_10-gcc9-inductor-build:
-    name: cuda12.6-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-default-label-prefix
-    with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.6'
-      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      sync-tag: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
-      test-matrix: |
-        { include: [
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  linux-focal-cuda12_6-py3_10-gcc9-inductor-test:
-    name: cuda12.6-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
-    with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-default-label-prefix
-    with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
-      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      sync-tag: linux-jammy-cpu-py3_9-gcc11-inductor-build
-      test-matrix: |
-        { include: [
-          { config: "cpu_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_aot_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-cpu-py3_9-gcc11-inductor-test:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
-    with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      build-environment: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.periodic-inductor-benchmarks-cpu-build.outputs.test-matrix }}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: cpu
     secrets: inherit

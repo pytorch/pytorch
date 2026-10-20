@@ -1,6 +1,5 @@
 import abc
 from dataclasses import dataclass
-from typing import Optional, Union
 
 import torch.nn as nn
 from torch.distributed._shard.sharder import Sharder
@@ -62,9 +61,9 @@ class ShardingPlan:
         >>> )
     """
 
-    plan: dict[str, Union[ShardingSpec, Sharder]]
-    output_plan: Optional[dict[str, ShardingSpec]] = None
-    return_local_tensor: Optional[list[str]] = None
+    plan: dict[str, ShardingSpec | Sharder]
+    output_plan: dict[str, ShardingSpec] | None = None
+    return_local_tensor: list[str] | None = None
 
 
 class ShardingPlanner(abc.ABC):
@@ -76,7 +75,7 @@ class ShardingPlanner(abc.ABC):
     @abc.abstractmethod
     def build_plan(self, module: nn.Module) -> ShardingPlan:
         """
-        Given a nn.Module, define how to shard the module across
+        Given an nn.Module, define how to shard the module across
         ranks, return a ShardingPlan
         Args:
             module (:class:`torch.nn.Module`):

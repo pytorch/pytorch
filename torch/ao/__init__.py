@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING as _TYPE_CHECKING
 if _TYPE_CHECKING:
     from types import ModuleType
 
-    from torch.ao import (  # noqa: TC004
+    from torch.ao import (
         nn as nn,
         ns as ns,
         pruning as pruning,

@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import unittest
 from typing import Any
 
 import sympy
@@ -12,15 +11,101 @@ from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_cuda import IS_SM89
+from torch.testing import assert_close
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-class TestingHeuristics(InductorChoices):
+class TestVarianceReductionHeuristic(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _skip_if_not_cuda(self):
+        if GPU_TYPE != "cuda":
+            self.skipTest("CUDA-specific variance heuristic")
+
+    def _dtypes(self):
+        dtypes = [torch.float16]
+        if torch.cuda.is_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        return dtypes
+
+    def test_var_mean_uses_two_step_for_non_split_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        for dtype in self._dtypes():
+            x = torch.randn([4, 4096], device=GPU_TYPE, dtype=dtype)
+            expected = fn(x)
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+            self.assertEqual(result, expected)
+            self.assertIn("tl.sum", source_code)
+            self.assertNotIn("welford_reduce", source_code)
+
+    def test_var_mean_keeps_welford_for_float32_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        x = torch.randn([4, 4096], device=GPU_TYPE, dtype=torch.float32)
+        expected = fn(x)
+        result, (source_code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+
+        self.assertEqual(result, expected)
+        self.assertIn("welford_", source_code)
+
+    @config.patch("triton.force_cooperative_reductions", True)
+    def test_var_mean_keeps_welford_for_small_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        for dtype in self._dtypes():
+            x = torch.randn([4, 512], device=GPU_TYPE, dtype=dtype)
+            expected = fn(x)
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+            self.assertEqual(result, expected)
+            self.assertIn("welford_", source_code)
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.use_two_step_variance_threshold": 2_000_000,
+        }
+    )
+    def test_var_mean_keeps_welford_for_split_reductions(self):
+        self._skip_if_not_cuda()
+
+        def fn(x):
+            return torch.var_mean(x, dim=-1, correction=0)
+
+        for dtype in self._dtypes():
+            x = torch.randn([2, 1024 * 1024], device=GPU_TYPE, dtype=dtype)
+            expected = fn(x)
+            result, (source_code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), x
+            )
+
+            self.assertEqual(result, expected)
+            self.assertIn("welford_", source_code)
+
+
+class _TestingHeuristics(InductorChoices):
     def __init__(self, *, cooperative: bool, persistent: bool, cfg: dict[str, int]):
         super().__init__()
         self.cooperative = cooperative
@@ -57,15 +142,107 @@ class CooperativeReductionTests(TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         torch._dynamo.reset()
 
-    def run_and_check(self, fn, args, *, expect_kernel_count=1):
-        expected = fn(*args)
-        fn = torch.compile(fn, fullgraph=True)
-        result, (source_code,) = run_and_get_code(fn, *args)
-        self.assertEqual(result, expected)
+    def run_and_check(self, fn, args, dtype=None, *, expect_kernel_count=1):
+        # Cooperative reductions accumulate in a different order than eager, so a
+        # single fixed tolerance is too tight for large-magnitude reductions
+        # (e.g. sum over ~1M elements). Scale rtol with the input dtype's
+        # precision, keeping atol tight and the float64/default path tight. sum is
+        # a large-magnitude relative-error problem, so rtol alone covers it; a loose
+        # atol would slash sensitivity for small-magnitude outputs (softmax ~1e-6,
+        # mean over 1M ~1e-3) sharing this parametrization.
+        RTOL, ATOL = {
+            torch.float16: (1e-2, 1e-6),
+            torch.bfloat16: (1e-2, 1e-6),
+            torch.float32: (1e-3, 1e-6),
+        }.get(dtype, (1e-5, 1e-6))
+
+        # Compute the reference in float64 for reduced-precision inputs so the
+        # eager baseline does not itself carry the same accumulation error that
+        # the compiled reduction does.
+        ref_dtype = dtype
+        if dtype in (torch.float16, torch.float32):
+            ref_dtype = torch.float64
+
+        # Cast to the determined reference dtype
+        args_ref = [tensor.to(ref_dtype) for tensor in args]
+
+        # Calculate expected output
+        raw_expected = fn(*args_ref)
+
+        if isinstance(raw_expected, (tuple, list)):
+            # If it's a tuple or list, apply .to(dtype) to each tensor within it
+            # Also, handle cases where dtype might not be provided (e.g., for bool reductions)
+            if dtype is not None:
+                expected = type(raw_expected)(
+                    [
+                        t.to(dtype) if isinstance(t, torch.Tensor) else t
+                        for t in raw_expected
+                    ]
+                )
+            else:
+                expected = type(raw_expected)(
+                    [
+                        t.to(torch.float64) if isinstance(t, torch.Tensor) else t
+                        for t in raw_expected
+                    ]
+                )
+        else:
+            # If it's a single tensor
+            if dtype is not None:
+                expected = raw_expected.to(dtype)
+            else:
+                expected = raw_expected.to(torch.float64)
+
+        fn_compiled = torch.compile(fn, fullgraph=True)
+        result, (source_code,) = run_and_get_code(fn_compiled, *args)
+
+        # For comparison, ensure result is also a tuple/list if expected is
+        if isinstance(expected, (tuple, list)):
+            if isinstance(result, torch.Tensor):
+                result = (result,)
+            elif not isinstance(result, type(expected)):
+                result = type(expected)(result)
+
+            if dtype is not None:
+                result = type(result)(
+                    [t.to(dtype) if isinstance(t, torch.Tensor) else t for t in result]
+                )
+            else:
+                result = type(result)(
+                    [
+                        t.to(torch.float64) if isinstance(t, torch.Tensor) else t
+                        for t in result
+                    ]
+                )
+        else:
+            if dtype is not None and isinstance(result, torch.Tensor):
+                result = result.to(dtype)
+            elif isinstance(result, torch.Tensor):
+                result = result.to(torch.float64)
+
+        # Apply assert_close with fixed tolerances for tensor comparisons
+        if isinstance(result, torch.Tensor) and isinstance(expected, torch.Tensor):
+            assert_close(result, expected, rtol=RTOL, atol=ATOL)
+        elif isinstance(result, (tuple, list)) and isinstance(expected, (tuple, list)):
+            # Iterate through elements for comparison
+            for r_item, e_item in zip(result, expected):
+                if isinstance(r_item, torch.Tensor) and isinstance(
+                    e_item, torch.Tensor
+                ):
+                    assert_close(r_item, e_item, rtol=RTOL, atol=ATOL)
+                else:
+                    # Fallback to assertEqual for non-tensor elements (e.g., bool, int)
+                    self.assertEqual(r_item, e_item)
+        else:
+            # Fallback to assertEqual for other types not handled by assert_close
+            self.assertEqual(result, expected)
+
         if "@triton_heuristics.fixed_config" in source_code:
             self.assertIn("cooperative_reduction_grid", source_code)
         else:
             self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
+        if GPU_TYPE == "cuda":
+            self.assertIn("'launch_cooperative_grid': True", source_code)
         if "async_compile.multi_kernel" not in source_code:
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count, expect_kernel_count
@@ -89,15 +266,12 @@ class CooperativeReductionTests(TestCase):
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     def test_reduction_fns(self, name, dtype):
-        if IS_SM89 and dtype == torch.float64 and name in ["std", "var_mean"]:
-            raise unittest.SkipTest("Timeouts on SM89")
-
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
         reduction_fn = getattr(torch, name)
-        args = [torch.randn(1, 1024**2, device="cuda", dtype=dtype) for _ in range(2)]
-        self.run_and_check(fn, args)
+        args = [torch.randn(1, 1024**2, device=GPU_TYPE, dtype=dtype) for _ in range(2)]
+        self.run_and_check(fn, args, dtype)
 
     def test_bool_reduction_fns(self):
         def fn(x, y):
@@ -110,7 +284,7 @@ class CooperativeReductionTests(TestCase):
                 torch.all(x > y),
             ]
 
-        args = [torch.randn(1024, device="cuda") for _ in range(2)]
+        args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         source_code = self.run_and_check(fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
@@ -124,7 +298,7 @@ class CooperativeReductionTests(TestCase):
         def fn(x):
             return x.mean(), x.std() + x.min()
 
-        args = [torch.randn([bs, count], device="cuda")]
+        args = [torch.randn([bs, count], device=GPU_TYPE)]
         self.run_and_check(fn, args)
 
     def test_chained_reductions(self):
@@ -133,7 +307,7 @@ class CooperativeReductionTests(TestCase):
                 x = x + torch.softmax(x, 1)
             return x
 
-        args = [torch.randn(4, 100000, device="cuda")]
+        args = [torch.randn(4, 100000, device=GPU_TYPE)]
         source_code = self.run_and_check(fn, args)
         if "async_compile.multi_kernel" in source_code:
             return
@@ -144,7 +318,7 @@ class CooperativeReductionTests(TestCase):
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )
-        self.assertEqual(source_code.count("empty_strided_cuda"), 5)
+        self.assertEqual(source_code.count(f"empty_strided_{GPU_TYPE}"), 5)
 
     def test_reduce_split(self):
         def fn(a, b):
@@ -153,8 +327,8 @@ class CooperativeReductionTests(TestCase):
             return a1, b1
 
         inps = [
-            torch.rand(2048, 512, device="cuda"),
-            torch.rand(20, 20, device="cuda"),
+            torch.rand(2048, 512, device=GPU_TYPE),
+            torch.rand(20, 20, device=GPU_TYPE),
         ]
         self.run_and_check(fn, inps, expect_kernel_count=2)
 
@@ -178,7 +352,7 @@ class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
 class TestFixedConfigs(TestCase):
     def _check(self, fn, args, *, persistent=False, cooperative=True, cfg):
         expected = fn(*args)
-        heuristic = TestingHeuristics(
+        heuristic = _TestingHeuristics(
             persistent=persistent, cooperative=cooperative, cfg=cfg
         )
         with torch._inductor.virtualized.V.set_choices_handler(heuristic):
@@ -210,7 +384,7 @@ class TestFixedConfigs(TestCase):
         def fn(x):
             return torch.softmax(x + 1, dim=-1) + x
 
-        args = [torch.randn(8, 8000, device="cuda")]
+        args = [torch.randn(8, 8000, device=GPU_TYPE)]
         self._check(fn, args, persistent=persistent, cooperative=cooperative, cfg=cfg)
 
     @parametrize(
@@ -235,7 +409,7 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 64, "RSPLIT": rsplit, "num_warps": 8}
         if not persistent:
             cfg["R0_BLOCK"] = 64
-        args = [torch.randn(x, r, device="cuda")]
+        args = [torch.randn(x, r, device=GPU_TYPE)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
     @parametrize("persistent", [True, False])
@@ -255,8 +429,8 @@ class TestFixedConfigs(TestCase):
         args = [
             torch.stack(
                 [
-                    torch.arange(10, 4096, device="cuda"),
-                    -torch.arange(10, 4096, device="cuda"),
+                    torch.arange(10, 4096, device=GPU_TYPE),
+                    -torch.arange(10, 4096, device=GPU_TYPE),
                 ]
             )
         ]
@@ -266,12 +440,12 @@ class TestFixedConfigs(TestCase):
                 [
                     torch.tensor(
                         [0.0] * 150 + [float("inf")] * 150,
-                        device="cuda",
+                        device=GPU_TYPE,
                         dtype=torch.float32,
                     ),
                     torch.tensor(
                         [0.0] * 150 + [-float("inf")] * 150,
-                        device="cuda",
+                        device=GPU_TYPE,
                         dtype=torch.float32,
                     ),
                 ]
@@ -294,12 +468,12 @@ class TestFixedConfigs(TestCase):
         cfg = {"XBLOCK": 128, "RSPLIT": rsplit, "num_warps": 16, "num_stages": 1}
         if not persistent:
             cfg["R0_BLOCK"] = 64
-        args = [torch.randn(1024, device="cuda") for _ in range(2)]
+        args = [torch.randn(1024, device=GPU_TYPE) for _ in range(2)]
         self._check(fn, args, persistent=persistent, cfg=cfg)
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests(needs="filelock")

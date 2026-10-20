@@ -16,7 +16,7 @@
 #endif
 
 namespace ao::sparse {
-int register_linear_params();
+
 
 #ifdef USE_FBGEMM
 
@@ -46,11 +46,11 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
         scales,
         zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
 
   packW->unpack(weight_ptr_int8);
 
@@ -65,10 +65,10 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 
 LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
-  const int64_t N = static_cast<int64_t>(output_channels_);
-  const int64_t K = static_cast<int64_t>(input_channels_);
+  const int64_t N = output_channels_;
+  const int64_t K = input_channels_;
 
-  float* w_scales_ptr = w_scales_.data_ptr<float>();
+  const float* w_scales_ptr = w_scales_.const_data_ptr<float>();
 
   at::Tensor weight_origin;
   if (q_scheme_ == c10::kPerTensorAffine) {
@@ -100,11 +100,11 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
         scales,
         zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
 
   bcsr_matrix_->unpack(
       weight_ptr_int8,

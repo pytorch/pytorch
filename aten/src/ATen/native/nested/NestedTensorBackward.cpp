@@ -2,14 +2,11 @@
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
-#include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <c10/core/DeviceType.h>
 
 #include <utility>
 
@@ -31,7 +28,7 @@ std::tuple<Tensor, Tensor> matmul_backward_nested(
   if (grad_input_mask[1]) {
     grad_other = at::matmul(self.transpose(-1, -2), grad);
   }
-  return std::make_tuple(grad_self, grad_other);
+  return std::make_tuple(std::move(grad_self), std::move(grad_other));
 }
 
 std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
@@ -135,7 +132,7 @@ Tensor _nested_sum_backward_cpu(
   // (2) the gradient nested tensors are stored contiguously in the buffer
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, self_grad_buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
-    auto* self_grad_data = self_grad_buffer.data_ptr<scalar_t>();
+    auto* self_grad_data = self_grad_buffer.mutable_data_ptr<scalar_t>();
     const auto* output_grad_data = grad_buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
@@ -270,7 +267,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   }
   if (M > 0) {
     LayerNormBackwardKernel(
-        input_buffer.is_cuda() ? kCUDA : kCPU,
+        input_buffer.device().type(),
         grad_buffer,
         input_buffer,
         mean,

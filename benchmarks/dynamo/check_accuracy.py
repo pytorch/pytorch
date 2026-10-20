@@ -10,11 +10,37 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
-    "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
+    "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
+    # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
+    "mobilenetv3_large_100",
+    # https://github.com/pytorch/pytorch/issues/163670
+    "vision_maskrcnn",
+    # Old TorchBench SAM is flaky even with mask IoU checking.
+    # Borderline mask thresholding can flip a single pixel and give IoU=0
+    # when both masks are nearly empty.
+    # https://github.com/pytorch/pytorch/issues/176776
+    "sam",
 }
+
+
+def get_eager_nondeterministic_models(expected_filename: str) -> set[str]:
+    expected_filename = expected_filename.replace(os.sep, "/")
+    if expected_filename.endswith("ci_expected_accuracy/inductor_timm_training.csv"):
+        return {
+            "mobilenetv2_100",
+            "tf_efficientnet_b0",
+        }
+    if expected_filename.endswith(
+        "ci_expected_accuracy/inductor_torchbench_training.csv"
+    ):
+        return {
+            "mnasnet1_0",
+            "mobilenet_v2",
+            "shufflenet_v2_x1_0",
+        }
+    return set()
 
 
 def get_field(csv, model_name: str, field: str):
@@ -27,48 +53,36 @@ def get_field(csv, model_name: str, field: str):
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
+    eager_nondeterministic_models = get_eager_nondeterministic_models(expected_filename)
 
     if "rocm" in expected_filename:
         flaky_models.update(
             {
-                "alexnet",
-                "cait_m36_384",
-                "demucs",
-                "densenet121",
-                "detectron2_fcos_r_50_fpn",
-                "doctr_det_predictor",
-                "doctr_reco_predictor",
-                "hf_BigBird",
-                "hf_Longformer",
-                "hf_Reformer",
-                "hf_Roberta_base",
-                "hf_T5",
-                "hf_T5_base",
-                "levit_128",
-                "llava",
-                "microbench_unbacked_tolist_sum",
+                "Background_Matting",
                 "mnasnet1_0",
-                "mobilenet_v2",
-                "pytorch_CycleGAN_and_pix2pix",
-                "pytorch_stargan",
+                "llava",
+                "repvgg_a2",
                 "resnet152",
                 "resnet18",
                 "resnet50",
-                "resnext50_32x4d",
-                "sam",
-                "sam_fast",
-                "shufflenet_v2_x1_0",
-                "squeezenet1_1",
-                "stable_diffusion_text_encoder",
-                "stable_diffusion_unet",
-                "timm_efficientdet",
-                "timm_efficientnet",
-                "timm_nfnet",
-                "timm_regnet",
-                "timm_resnest",
-                "timm_vovnet",
                 "torchrec_dlrm",
+                "shufflenet_v2_x1_0",
                 "vgg16",
+                "BERT_pytorch",
+                # LLM
+                "google/gemma-2-2b",
+                "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
+                # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
+                "alexnet",
+                "demucs",
+                # Same class of eager non determinism, surfaced on gfx950 by the
+                # ROCm 7.2 -> 7.14 upgrade in #188429. Each of these was observed
+                # both passing and failing across consecutive runs of the same
+                # commit, so a pinned expected value goes red on whichever
+                # outcome it did not predict. See #192862.
+                "convnextv2_nano.fcmae_ft_in22k_in1k",
+                "vit_base_patch14_dinov2.lvd142m",
+                "torch_multimodal_clip",
             }
         )
 
@@ -76,10 +90,22 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if accuracy == expected_accuracy:
+        if accuracy is None:
+            status = "MISSING_ACCURACY:"
+            failed.append(model)
+        elif expected_accuracy is None:
+            status = "MISSING_EXPECTED:"
+            failed.append(model)
+        elif accuracy == expected_accuracy:
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue
+        elif (
+            expected_accuracy == "pass"
+            and accuracy == "eager_two_runs_differ"
+            and model in eager_nondeterministic_models
+        ):
+            status = "EAGER_NONDETERMINISTIC:"
         elif model in flaky_models:
             if accuracy == "pass":
                 # model passed but marked xfailed

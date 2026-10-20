@@ -9,7 +9,7 @@ namespace torch::unwind {
 template <typename T>
 struct RangeTable {
   RangeTable() {
-    // guarentee that lower_bound[-1] is always valid
+    // guarantee that lower_bound[-1] is always valid
     addresses_.push_back(0);
     payloads_.emplace_back(std::nullopt);
   }

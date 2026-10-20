@@ -1,11 +1,10 @@
 # Owner(s): ["module: cpp-extensions"]
 
+import importlib
 import os
 import re
-import subprocess
 import unittest
 from itertools import repeat
-from pathlib import Path
 from typing import get_args, get_origin, Union
 
 import torch
@@ -14,9 +13,11 @@ import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     skipIfTorchDynamo,
-    TEST_XPU,
     xfailIfTorchDynamo,
 )
 
@@ -46,6 +47,16 @@ except ImportError as e:
     ) from e
 
 
+# cpu and mps use the ATen-dispatched .cpp extension (device-agnostic ops);
+# cuda and xpu use backend-specific kernel extensions from setup.py.
+_SIGMOID_ADD_BACKENDS = {
+    "cpu": "torch_test_cpp_extension.cpp",
+    "mps": "torch_test_cpp_extension.cpp",
+    "cuda": "torch_test_cpp_extension.cuda",
+    "xpu": "torch_test_cpp_extension.sycl",
+}
+
+
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
@@ -56,6 +67,8 @@ class TestCppExtensionAOT(common.TestCase):
     (test_cpp_extensions_aot_no_ninja vs test_cpp_extensions_aot_ninja)
     failed.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_extension_function(self):
         x = torch.randn(4, 4)
@@ -87,70 +100,10 @@ class TestCppExtensionAOT(common.TestCase):
         expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cuda_extension(self):
-        import torch_test_cpp_extension.cuda as cuda_extension
-
-        x = torch.zeros(100, device="cuda", dtype=torch.float32)
-        y = torch.zeros(100, device="cuda", dtype=torch.float32)
-
-        z = cuda_extension.sigmoid_add(x, y).cpu()
-
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
-
-    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
-    def test_mps_extension(self):
-        import torch_test_cpp_extension.mps as mps_extension
-
-        tensor_length = 100000
-        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
-
-        cpu_output = mps_extension.get_cpu_add_output(x, y)
-        mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
-
-        self.assertEqual(cpu_output, mps_output.to("cpu"))
-
-    @unittest.skipIf(not TEST_XPU, "XPU not found")
-    @unittest.skipIf(
-        os.getenv("USE_NINJA", "0") == "0",
-        "sycl extension requires ninja to build",
-    )
-    def test_sycl_extension(self):
-        import torch_test_cpp_extension.sycl as sycl_extension
-
-        x = torch.zeros(100, device="xpu", dtype=torch.float32)
-        y = torch.zeros(100, device="xpu", dtype=torch.float32)
-
-        z = sycl_extension.sigmoid_add(x, y).cpu()
-
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
-
-    @common.skipIfRocm
-    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cublas_extension(self):
-        from torch_test_cpp_extension import cublas_extension
-
-        x = torch.zeros(100, device="cuda", dtype=torch.float32)
-        z = cublas_extension.noop_cublas_function(x)
-        self.assertEqual(z, x)
-
-    @common.skipIfRocm
-    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    def test_cusolver_extension(self):
-        from torch_test_cpp_extension import cusolver_extension
-
-        x = torch.zeros(100, device="cuda", dtype=torch.float32)
-        z = cusolver_extension.noop_cusolver_function(x)
-        self.assertEqual(z, x)
-
     @unittest.skipIf(IS_WINDOWS, "Not available on Windows")
     def test_no_python_abi_suffix_sets_the_correct_library_name(self):
-        # For this test, run_test.py will call `python setup.py install` in the
+        # For this test, run_test.py will call
+        # `python -m pip install . -v --no-build-isolation` in the
         # cpp_extensions/no_python_abi_suffix_test folder, where the
         # `BuildExtension` class has a `no_python_abi_suffix` option set to
         # `True`. This *should* mean that on Python 3, the produced shared
@@ -167,7 +120,49 @@ class TestCppExtensionAOT(common.TestCase):
         has_value = cpp_extension.function_taking_optional(None)
         self.assertFalse(has_value)
 
-    @common.skipIfRocm
+
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionAOTDevice(common.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("device_type", list(_SIGMOID_ADD_BACKENDS))
+    def test_sigmoid_add_extension(self, device_type):
+        module_name = _SIGMOID_ADD_BACKENDS[device_type]
+        if not torch.get_device_module(device_type).is_available():
+            raise unittest.SkipTest(f"{device_type} not available")
+        if device_type == "xpu" and os.getenv("USE_NINJA", "0") == "0":
+            raise unittest.SkipTest("sycl extension requires ninja to build")
+        ext = importlib.import_module(module_name)
+        x = torch.zeros(100, device=device_type, dtype=torch.float32)
+        y = torch.zeros(100, device=device_type, dtype=torch.float32)
+        z = ext.sigmoid_add(x, y).cpu()
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
+
+
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionAOTCUDA(common.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cublas_extension(self):
+        from torch_test_cpp_extension import cublas_extension
+
+        x = torch.zeros(100, device="cuda", dtype=torch.float32)
+        z = cublas_extension.noop_cublas_function(x)
+        self.assertEqual(z, x)
+
+    @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cusolver_extension(self):
+        from torch_test_cpp_extension import cusolver_extension
+
+        x = torch.zeros(100, device="cuda", dtype=torch.float32)
+        z = cusolver_extension.noop_cusolver_function(x)
+        self.assertEqual(z, x)
+
+    @common.skipIfRocm(msg="dlink build path has no ROCm arch handling")
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(
@@ -183,119 +178,23 @@ class TestCppExtensionAOT(common.TestCase):
         test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
 
-    @unittest.skipIf(not TEST_CUDA, "python_agnostic is a CUDA extension + needs CUDA")
-    @unittest.skipIf(not common.IS_LINUX, "test requires linux tools ldd and nm")
-    def test_python_agnostic(self):
-        # For this test, run_test.py will call `python setup.py bdist_wheel` in the
-        # cpp_extensions/python_agnostic_extension folder, where the extension and
-        # setup calls specify py_limited_api to `True`. To approximate that the
-        # extension is indeed python agnostic, we test
-        #   a. The extension wheel name contains "cp39-abi3", meaning the wheel
-        # should be runnable for any Python 3 version after and including 3.9
-        #   b. The produced shared library does not have libtorch_python.so as a
-        # dependency from the output of "ldd _C.so"
-        #   c. The .so does not need any python related symbols. We approximate
-        # this by running "nm -u _C.so" and grepping that nothing starts with "Py"
 
-        dist_root = os.path.join("cpp_extensions", "python_agnostic_extension", "dist")
-        matches = list(Path(dist_root).glob("*.whl"))
-        self.assertEqual(len(matches), 1, msg=str(matches))
-        whl_file = matches[0]
-        self.assertRegex(str(whl_file), r".*python_agnostic-0\.0-cp39-abi3-.*\.whl")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCppExtensionAOTMPS(common.TestCase):
+    hw_classification = HardwareClassification.MPS
 
-        build_root = os.path.join(
-            "cpp_extensions", "python_agnostic_extension", "build"
-        )
-        matches = list(Path(build_root).glob("**/*.so"))
-        self.assertEqual(len(matches), 1, msg=str(matches))
-        so_file = matches[0]
-        lddtree = subprocess.check_output(["ldd", so_file]).decode("utf-8")
-        self.assertFalse("torch_python" in lddtree)
+    @unittest.skipIf(not torch.backends.mps.is_available(), "MPS not found")
+    def test_mps_extension(self):
+        import torch_test_cpp_extension.mps as mps_extension
 
-        missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
-        self.assertFalse("Py" in missing_symbols)
+        tensor_length = 100000
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
 
-    @unittest.skipIf(not TEST_CUDA, "some aspects of this test require CUDA")
-    def test_libtorch_agnostic(self):
-        import libtorch_agnostic
+        cpu_output = mps_extension.get_cpu_add_output(x, y)
+        mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
 
-        # (1) first test that SGD CPU kernel works
-        param = torch.rand(5, device="cpu")
-        grad = torch.rand_like(param)
-        weight_decay = 0.01
-        lr = 0.001
-        maximize = False
-
-        new_param = libtorch_agnostic.ops.sgd_out_of_place(
-            param, grad, weight_decay, lr, maximize
-        )
-        torch._fused_sgd_(
-            (param,),
-            (grad,),
-            (),
-            weight_decay=weight_decay,
-            momentum=0.0,
-            lr=lr,
-            dampening=0.0,
-            nesterov=False,
-            maximize=maximize,
-            is_first_step=False,
-        )
-        self.assertEqual(new_param, param)
-
-        # (2) then test that we don't hog unnecessary memory
-        def _run_identity(prior_mem, device):
-            t = torch.rand(32, 32, device=device)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            identi_t = libtorch_agnostic.ops.identity(t)
-            assert identi_t is t
-
-        device = torch.cuda.current_device()
-        init_mem = torch.cuda.memory_allocated(device)
-
-        for _ in range(3):
-            _run_identity(init_mem, device)
-            curr_mem = torch.cuda.memory_allocated(device)
-            self.assertEqual(curr_mem, init_mem)
-
-        # (3a) test calling our dispatcher on easy API like abs
-        t = torch.rand(32, 16, device=device) - 0.5
-
-        def _make_cuda_tensors(prior_mem):
-            cuda_t = libtorch_agnostic.ops.my_abs(t)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_t, torch.abs(t))
-
-        init_mem = torch.cuda.memory_allocated(device)
-        for _ in range(3):
-            _make_cuda_tensors(init_mem)
-            curr_mem = torch.cuda.memory_allocated(device)
-            self.assertEqual(curr_mem, init_mem)
-
-        # (3b) and on factory API like ones_like
-        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
-        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
-
-        def _make_cuda_tensors(prior_mem):
-            cuda_t = libtorch_agnostic.ops.my_ones_like(t, t.device)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_t, torch.ones_like(t, device=t.device))
-
-        init_mem = torch.cuda.memory_allocated(device)
-        for _ in range(3):
-            _make_cuda_tensors(init_mem)
-            curr_mem = torch.cuda.memory_allocated(device)
-            self.assertEqual(curr_mem, init_mem)
-
-        # (4) test multiple returns
-        t1 = torch.rand(2, 3, device="cuda")
-        t2 = torch.rand(3, 2, device="cpu")
-        t3 = torch.rand(2, device="cpu")
-
-        exp, neg, is_leaf = libtorch_agnostic.ops.exp_neg_is_leaf(t1, t2, t3)
-        self.assertEqual(exp, torch.exp(t1))
-        self.assertEqual(neg, torch.neg(t2))
-        self.assertEqual(is_leaf, t3.is_leaf)
+        self.assertEqual(cpu_output, mps_output.to("cpu"))
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -311,6 +210,8 @@ class TestPybindTypeCasters(common.TestCase):
     second argument to `PYBIND11_TYPE_CASTER` should be the type we expect to
     receive in python, in these tests we verify this at run-time.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @staticmethod
     def expected_return_type(func):
@@ -355,7 +256,8 @@ class TestPybindTypeCasters(common.TestCase):
         """
         # Verify that all functions have the same return type.
         union_type = {self.expected_return_type(f) for f in funcs}
-        assert len(union_type) == 1
+        if len(union_type) != 1:
+            raise AssertionError(f"expected 1 union type, got {len(union_type)}")
         union_type = union_type.pop()
         self.assertIs(Union, get_origin(union_type))
         # SymInt is inconvenient to test, so don't require it
@@ -394,9 +296,26 @@ class TestPybindTypeCasters(common.TestCase):
             with self.subTest(msg=f"check {[f.__name__ for f in funcs]}"):
                 self.check_union(funcs)
 
+    def test_pybind_layout_types(self):
+        layouts = [
+            torch.strided,
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+            torch._mkldnn,
+            torch.jagged,
+        ]
+        for layout in layouts:
+            with self.subTest(msg=f"check {layout}"):
+                self.assertEqual(cpp_extension.roundtrip_layout(layout), layout)
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_unregistered(self):
         torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
@@ -433,13 +352,13 @@ class TestMAIATensor(common.TestCase):
         weight = torch.empty(6, 4, 2, 2, device="maia", requires_grad=True)
         bias = torch.empty(6, device="maia")
 
-        # Make sure forward is overriden
+        # Make sure forward is overridden
         out = torch.nn.functional.conv2d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(maia_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])
 
-        # Make sure backward is overriden
+        # Make sure backward is overridden
         # Double backward is dispatched to _convolution_double_backward.
         # It is not tested here as it involves more computation/overrides.
         grad = torch.autograd.grad(out, input, out, create_graph=True)
@@ -481,6 +400,8 @@ class TestMAIATensor(common.TestCase):
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRNGExtension(common.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -518,6 +439,8 @@ class TestRNGExtension(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not TEST_CUDA, "CUDA not found")
 class TestTorchLibrary(common.TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_torch_library(self):
         import torch_test_cpp_extension.torch_library  # noqa: F401
 
@@ -535,6 +458,8 @@ class TestTorchLibrary(common.TestCase):
         self.assertFalse(s(False, False))
         self.assertIn("torch_library::logical_and", str(s.graph))
 
+
+instantiate_parametrized_tests(TestCppExtensionAOTDevice)
 
 if __name__ == "__main__":
     common.run_tests()

@@ -68,20 +68,10 @@ using ::c10::TypeKind;
 
 using ::c10::fmap;
 
-namespace prim {
-using namespace ::c10::prim;
-}
-namespace attr {
-using namespace ::c10::attr;
-}
-namespace aten {
-using namespace ::c10::aten;
-}
-namespace cuda {
-#if !defined(USE_ROCM)
-using namespace ::c10::cuda;
-#endif
-} // namespace cuda
+namespace prim = ::c10::prim;
+namespace attr = ::c10::attr;
+namespace aten = ::c10::aten;
+namespace cuda = ::c10::cuda;
 
 struct Function;
 struct GraphFunction;
@@ -330,7 +320,7 @@ struct TORCH_API Node {
   // subblocks
   std::vector<Block*> blocks_;
   Graph* graph_;
-  Block* owning_block_;
+  Block* owning_block_{nullptr};
   std::optional<SourceRange> source_range_;
   ScopePtr scope_;
   std::optional<InlinedCallStackPtr> callstack_;
@@ -338,7 +328,7 @@ struct TORCH_API Node {
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
   // change the schema. note: mutable because schema_ is effectively a cache
-  mutable const Operator* op_;
+  mutable const Operator* op_{nullptr};
   topo_position_t topo_position_ = 0;
   // a managing wrapper for Python to allow invalidation
   std::shared_ptr<Wrap<Node>> wrap_;
@@ -502,19 +492,43 @@ struct TORCH_API Node {
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_CHECK(
+        inputs_.size() == 1,
+        "Tried to access a single input on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        inputs_.size(),
+        " outputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   Value* output() {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_CHECK(
+        outputs_.size() == 1,
+        "Tried to access a single output on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        outputs_.size(),
+        " outputs. You may consider using node.outputs() instead.");
     return outputs_.at(0);
   }
   const Value* output() const {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_CHECK(
+        outputs_.size() == 1,
+        "Tried to access a single output on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        outputs_.size(),
+        " outputs. You may consider using node.outputs() instead.");
     return outputs_.at(0);
   }
   const Value* input() const {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_CHECK(
+        inputs_.size() == 1,
+        "Tried to access a single input on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        inputs_.size(),
+        " outputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
@@ -616,7 +630,7 @@ struct TORCH_API Node {
   // as the equivalents phi-nodes in standard SSA form,
   // defining a new Value to represent any term that has multiple
   // definitions depending on how control flowed. Outputs of the node containing
-  // control flow serve a similiar purpose defining new values for variables
+  // control flow serve a similar purpose defining new values for variables
   // that would have different definitions depending on which way control
   // flowed.
 
@@ -946,9 +960,11 @@ struct TORCH_API Node {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
-    if (child == nullptr) {
-      throw IRAttributeError(name, true);
-    }
+    TORCH_CHECK(
+        child != nullptr,
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' has the wrong type");
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
@@ -961,9 +977,11 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    if (required && it == values_.end()) {
-      throw IRAttributeError(name, false);
-    }
+    TORCH_CHECK(
+        !required || it != values_.end(),
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' is undefined");
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -973,9 +991,11 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    if (required && it == values_.end()) {
-      throw IRAttributeError(name, false);
-    }
+    TORCH_CHECK(
+        !required || it != values_.end(),
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' is undefined");
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -1236,6 +1256,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
     const Block& block = *block_;
     return block.nodes();
   }
+  size_t numNodes() const {
+    return all_nodes.size();
+  }
   Node* param_node() {
     return block_->param_node();
   }
@@ -1374,7 +1397,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // kwargs using Python argument matching rules, and checks that the op matches
   // a known schema.
   //
-  // If this node successfully completes, it guarentees the node
+  // If this node successfully completes, it guarantees the node
   // is a correctly-formed invocation of opname
   TORCH_API Value* insert(
       Symbol opname,
@@ -1451,7 +1474,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   void cloneFrom(Graph& src);
 };
 
-/** \brief An utility class for setting temporary insertion points.
+/** \brief A utility class for setting temporary insertion points.
  *
  * When an object of this class is created, it stores the current insertion
  * point, sets the new one, and restores the original insertion point when the
@@ -1471,7 +1494,7 @@ struct WithInsertPoint {
   Node* prev_;
 };
 
-/** \brief An utility class for setting temporary scopes.
+/** \brief A utility class for setting temporary scopes.
  *
  * When an object of this class is created, it stores the current scope, sets
  * the new one, and restores the original scope when the object is destroyed.

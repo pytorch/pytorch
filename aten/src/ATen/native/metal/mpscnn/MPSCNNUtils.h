@@ -1,5 +1,9 @@
+#include <c10/macros/Macros.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+C10_DIAGNOSTIC_POP()
 #include <string>
 
 // This is a utility macro that can be used to throw an exception when a Metal
@@ -8,6 +12,13 @@
 #define METAL_THROW_IF_ERROR(error, preamble)                                    \
   do {                                                                           \
     if C10_LIKELY(error) {                                                       \
+      /* Compiled two ways: CMake builds it into the mac wheel (APPLE AND        \
+         USE_PYTORCH_METAL), and buck builds it for xplat, where opt and         \
+         production modes add -DSTRIP_ERROR_MESSAGES. TORCH_CHECK would be a     \
+         faithful swap in the first and would discard the whole NSError payload  \
+         in the second, so the raw throw is the only form that keeps the         \
+         message in both. */                                                     \
+      /* @allow-raw-throw: TORCH_CHECK would lose the message in xplat opt */    \
       throw c10::Error(                                                          \
           {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},                 \
           c10::str(                                                              \

@@ -56,7 +56,7 @@ C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
  * in this overloaded version
  */
 template <typename T, typename V>
-C10_HOST_DEVICE inline std::enable_if_t<!(std::is_floating_point_v<T>), T>uniform_int(V val) {
+C10_HOST_DEVICE inline std::enable_if_t<!std::is_floating_point_v<T>, T>uniform_int(V val) {
   if constexpr (std::is_same_v<T, bool>) {
     return static_cast<bool>(val & 1);
   } else if constexpr (std::is_same_v<T, int64_t>) {
@@ -117,7 +117,7 @@ C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
 template <>
 C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
   // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
-  return median + sigma * at::tan(c10::pi<double> * (val - static_cast<double>(0.5)));
+  return median + sigma * at::tan(c10::pi<double> * (val - 0.5));
 }
 
 /**

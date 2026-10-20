@@ -1,13 +1,31 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import functools
 import gc
+import math
+import unittest
+import weakref
+from unittest import mock
 
 import torch
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
+import torch.distributed as dist
+import torch.nn as nn
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
+from torch.distributed.tensor import init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
+    run_tests,
+    TEST_CUDA,
+    TEST_HPU,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -15,12 +33,16 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+device_type = torch.device(get_devtype())
+
+
 class TestFullyShardMemory(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(2, torch.cuda.device_count())
+        return min(2, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_HPU, " 'empty_cache' is not supported on hpu")
     def test_fully_shard_training_memory(self):
         self.run_subtests(
             {
@@ -49,17 +71,32 @@ class TestFullyShardMemory(FSDPTest):
             )
         ):
             return  # skip since not a common use case
-        assert (
-            self.world_size == 2
-        ), f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+        if self.world_size != 2:
+            raise AssertionError(
+                f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+            )
         torch.manual_seed(42)
         # Pre-run a linear forward (gemm and bias) and backward (gemm) to
         # allocate the cuBLAS workspaces before measuring the memory usage
         # since the workspace size can differ between hardwares
-        lin = torch.nn.Linear(768, 768, device="cuda")
-        inp = torch.randn(1, 768, device="cuda")
+        lin = torch.nn.Linear(768, 768, device=device_type)
+        # NOTE: before https://github.com/pytorch/pytorch/pull/163955,
+        # the input shape was (1, 768), so that the forward gemm used
+        # cublaslt, and the backward used cublas.
+        # With the aforementioned PR, and with shape (1, 768),
+        # the cublas path is used both in forward and in backward,
+        # altering peak memory usage not accounting for cublaslt.
+        # Here we change the input shape to (2, 768), and that swaps
+        # the cublas/cublaslt selection in the forward/backward,
+        # but that does not affect the peak memory usage stored in `base_mem_mb`.
+        # Reasons for the flip:
+        # before PR: no Lt in addmm when mat2 has nrows/ncols <= 1,
+        # after PR: no Lt in addmm when either mat1 or mat2 have nrows/ncols <= 1,
+        # since the input preparation can swap matrices based on output
+        # row-/col-majorness.
+        inp = torch.randn(2, 768, device=device_type)
         lin(inp).sum().backward()
-        torch.cuda.empty_cache()
+        torch.get_device_module(device_type).empty_cache()
         base_mem_mb = self._get_peak_active_memory_mb()
         vocab_size = 32
         model_args = ModelArgs(
@@ -108,7 +145,7 @@ class TestFullyShardMemory(FSDPTest):
         self.assertLessEqual(curr_mem_mb - base_mem_mb, init_mem_mb)
 
         # Use a small input to minimize activation memory usage
-        inp = torch.randint(0, vocab_size, (1, 4), device="cuda")
+        inp = torch.randint(0, vocab_size, (1, 4), device=device_type.type)
 
         # Forward:
         loss = model(inp)
@@ -130,7 +167,8 @@ class TestFullyShardMemory(FSDPTest):
                 # Sharded parameters
                 expected_mem_mb += model_sharded_numel * 4 / 1e6
         else:
-            assert not use_cpu_offload
+            if use_cpu_offload:
+                raise AssertionError("Expected use_cpu_offload to be False")
             # Sharded parameters, unsharded parameters, 1x max unsharded block parameters
             # (copy-out) and other (peak at end of forward)
             expected_mem_mb = (
@@ -160,7 +198,8 @@ class TestFullyShardMemory(FSDPTest):
                     # 2x sharded parameters/gradients
                     expected_mem_mb += 2 * model_sharded_numel * 4 / 1e6
         else:
-            assert not use_cpu_offload
+            if use_cpu_offload:
+                raise AssertionError("Expected use_cpu_offload to be False")
             # Sharded parameters, unsharded parameters, 1.5x max unsharded
             # block parameters (reduce-scatter input/output), and other (peak
             # at beginning of backward)
@@ -169,7 +208,7 @@ class TestFullyShardMemory(FSDPTest):
             ) * 4 / 1e6 + buffer_mb
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
         del loss
-        torch.cuda.reset_peak_memory_stats()
+        torch.get_device_module(device_type).reset_peak_memory_stats()
 
         # Optimizer step: unsharded parameters/gradients freed
         if not run_optim_in_backward:
@@ -187,7 +226,9 @@ class TestFullyShardMemory(FSDPTest):
         # Zero grad: sharded gradients freed
         if not run_optim_in_backward:
             optim.zero_grad()
-        torch.cuda.reset_peak_memory_stats()  # reset after freeing
+        torch.get_device_module(
+            device_type
+        ).reset_peak_memory_stats()  # reset after freeing
         mem_mb = self._get_peak_active_memory_mb()
         expected_mem_mb = 0
         if not use_cpu_offload:
@@ -196,6 +237,65 @@ class TestFullyShardMemory(FSDPTest):
             # 2x sharded optimizer states
             expected_mem_mb += (2 * model_sharded_numel) * 4 / 1e6 + buffer_mb
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_training_memory_no_gc(self):
+        """Memory should not grow across training steps when GC is disabled.
+
+        Regression test: reference cycles in FSDP's autograd integration can
+        hold GPU tensors alive when Python's cyclic GC is disabled. This
+        catches leaks like the one introduced in #173415.
+        """
+        torch.manual_seed(42)
+        gc.disable()
+        try:
+            vocab_size = 1024
+            model_args = ModelArgs(
+                vocab_size=vocab_size,
+                n_layers=6,
+                dim=2048,
+                n_heads=16,
+                weight_tying=False,
+            )
+            model = Transformer(model_args)
+            for module in model.modules():
+                if isinstance(module, TransformerBlock):
+                    fully_shard(module.attention)
+                    fully_shard(module.feed_forward)
+                    fully_shard(module)
+            fully_shard(model)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
+            inp = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+            # Warm-up step to stabilize memory (cuBLAS workspaces, etc.)
+            loss = model(inp)
+            loss.sum().backward()
+            optim.step()
+            optim.zero_grad()
+            gc.collect()  # one-time collection after warm-up
+            torch.get_device_module(device_type).synchronize()
+            mem_after_warmup = self._get_curr_active_memory_mb()
+
+            num_steps = 10
+            for _ in range(num_steps):
+                loss = model(inp)
+                loss.sum().backward()
+                optim.step()
+                optim.zero_grad()
+
+            torch.get_device_module(device_type).synchronize()
+            mem_after_steps = self._get_curr_active_memory_mb()
+            # Allow a small buffer (2 MB) for non-determinism, but no
+            # per-step growth should occur.
+            self.assertLessEqual(
+                mem_after_steps - mem_after_warmup,
+                2,
+                lambda msg: f"{msg}\nMemory grew by {mem_after_steps - mem_after_warmup} MB over "
+                f"{num_steps} steps with gc disabled, indicating a reference "
+                f"cycle leak in FSDP's autograd graph",
+            )
+        finally:
+            gc.enable()
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_del_memory(self):
@@ -227,13 +327,53 @@ class TestFullyShardMemory(FSDPTest):
         mem_mb = self._get_curr_active_memory_mb()
         self.assertEqual(mem_mb, base_mem_mb)
 
+    @skip_if_lt_x_gpu(2)
+    def test_unsharded_grads_freed_after_copy_in(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
+        fully_shard(model)
+        copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
+        cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
+        grad_refs: list[weakref.ref] = []
+        num_alive_grads: list[int] = []
+
+        def recording_copy_in(grads, *args):
+            grad_refs[:] = [weakref.ref(grad) for grad in grads]
+            copy_in(grads, *args)
+
+        def counting_cast_and_view(*args):
+            num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
+            return cast_and_view(*args)
+
+        with (
+            mock.patch.object(
+                _fsdp_collectives, "foreach_reduce_scatter_copy_in", recording_copy_in
+            ),
+            mock.patch.object(
+                _fsdp_collectives,
+                "_cast_and_view_sharded_grads",
+                counting_cast_and_view,
+            ),
+        ):
+            model(torch.randn(4, 16, device=device_type)).sum().backward()
+        # Clearing foreach_reduce's list after the copy-in must free the
+        # unsharded gradients before the reduce allocates its outputs
+        self.assertEqual(num_alive_grads, [0])
+
     def _get_peak_active_memory_mb(self) -> int:
-        mem_stats = torch.cuda.memory_stats()
-        return round(mem_stats["active_bytes.all.peak"] / 1e6)
+        mem_stats = torch.get_device_module(device_type).memory_stats()
+        # HPU uses different memory stat keys.
+        if not TEST_HPU:
+            return round(mem_stats["active_bytes.all.peak"] / 1e6)
+        return round(mem_stats["MaxInUse"] / 1e6)
 
     def _get_curr_active_memory_mb(self) -> int:
-        mem_stats = torch.cuda.memory_stats()
-        return round(mem_stats["active_bytes.all.current"] / 1e6)
+        mem_stats = torch.get_device_module(device_type).memory_stats()
+        # HPU uses different memory stat keys.
+        if not TEST_HPU:
+            return round(mem_stats["active_bytes.all.current"] / 1e6)
+        return round(mem_stats["InUse"] / 1e6)
 
     def _register_optim_in_backward(
         self, model: torch.nn.Module, **optim_kwargs
@@ -248,6 +388,254 @@ class TestFullyShardMemory(FSDPTest):
 
         for param in model.parameters():
             param.register_post_accumulate_grad_hook(optim_hook)
+
+
+class TestFullyShardHSDPSyncCorrectness(FSDPTest):
+    """Sync-correctness guards for HSDP+AR buffer lifetime.
+
+    These tests exercise cases where the AR output buffer could be reclaimed
+    too early by the caching allocator — specifically when `reduce_dtype !=
+    orig_dtype`, so the dtype cast at `_fsdp_collectives.py:_to_dtype_if_needed`
+    materializes a new tensor and makes the original AR buffer refless inside
+    `foreach_reduce`.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.get_device_module(device_type).device_count())
+
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
+    @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
+    def test_ar_buffer_lifetime_mixed_dtype(self):
+        """Regression guard for PR #140044 (`[FSDP2] Fix CUDA sync for bf16
+        HSDP AR, fp32 params`).
+
+        Mechanism: under HSDP+AR when `reduce_dtype != orig_dtype`, the cast
+        at `_to_dtype_if_needed(reduce_output, orig_dtype)` materializes a
+        new tensor and leaves the original (bf16 / fp16) AR output buffer
+        reachable only through `all_reduce_input` inside `foreach_reduce`.
+        PR #140044's `_all_reduce_state` holds that ref across layers — which
+        keeps the buffer off the caching allocator's free list. Without it,
+        the allocator deterministically reuses the same physical block for
+        every layer's reduce-scatter output; under slow AR, each layer's RS
+        overwrites the shared block before the previous layer's AR has
+        finished reading it, so all layers' sharded grads collapse to the
+        last-executed layer's value.
+
+        The test surfaces the race by injecting `torch.cuda._sleep` before
+        `dist.all_reduce`, keeping the AR kernel active for ~500 ms on the
+        AR stream. Sharded grads are compared against a fast-AR reference.
+
+        Parametrized over dtype-mismatch configs so the guard covers the
+        whole surface area of the bug (not just PR #140044's canonical
+        bf16+fp32 setup).
+
+        Passes on current code (PR #140044's `_all_reduce_state` / PR #179443's
+        `comm_ctx.all_reduce_state`). Fails if cross-layer ref tracking is
+        removed. See design doc in
+        `agent_space/fsdp2_early_release_ar_buffer.md` and PR #180900.
+        """
+        self.run_subtests(
+            {
+                "mp_dtype": [torch.bfloat16, torch.float16],
+            },
+            self._test_ar_buffer_lifetime_mixed_dtype,
+        )
+
+    def _test_ar_buffer_lifetime_mixed_dtype(self, mp_dtype: torch.dtype):
+        torch.manual_seed(0)
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, 2),
+            mesh_dim_names=("dp_replicate", "dp_shard"),
+        )
+        # reduce_dtype = mp_dtype, orig_dtype = fp32 → cast fires.
+        mp = MixedPrecisionPolicy(param_dtype=mp_dtype, reduce_dtype=mp_dtype)
+
+        dim = 512
+        model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+        ).to(device_type, dtype=torch.float32)
+        for layer in model:
+            if isinstance(layer, nn.Linear):
+                fully_shard(layer, mesh=mesh, mp_policy=mp)
+        fully_shard(model, mesh=mesh, mp_policy=mp)
+
+        torch.manual_seed(42)
+        inp = torch.randn(4, dim, device=device_type.type, dtype=torch.float32)
+
+        def run_one(slow_ar: bool):
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad = None
+
+            orig_all_reduce = dist.all_reduce
+
+            def slow_all_reduce(*args, **kwargs):
+                torch.get_device_module(device_type)._sleep(
+                    int(500 * get_cycles_per_ms())
+                )
+                return orig_all_reduce(*args, **kwargs)
+
+            patch_ctx = (
+                mock.patch.object(dist, "all_reduce", slow_all_reduce)
+                if slow_ar
+                else contextlib.nullcontext()
+            )
+            with patch_ctx:
+                out = model(inp)
+                loss = out.sum()
+                loss.backward()
+
+            return {
+                name: (
+                    p.grad.to_local().float().sum().item()
+                    if hasattr(p.grad, "to_local")
+                    else p.grad.float().sum().item()
+                )
+                for name, p in model.named_parameters()
+                if p.grad is not None
+            }
+
+        ref = run_one(slow_ar=False)
+        # Repeat the slow-AR run to flush out non-deterministic allocator
+        # scheduling: the race depends on the allocator picking the freed
+        # block for the next layer's RS, which may not fire on every call.
+        for _ in range(3):
+            slow = run_one(slow_ar=True)
+            for name, ref_sum in ref.items():
+                slow_sum = slow[name]
+                # When the reduce-dtype RS-output block is shared across
+                # layers (no `_all_reduce_state` ref holding it alive), slow
+                # AR lets later-layer RSes overwrite the block before
+                # earlier layers' AR completes → every layer's grad
+                # collapses to the last-executed layer's value. Reference
+                # values across the three layers differ by orders of
+                # magnitude; any collapse shows up as a large mismatch here.
+                self.assertFalse(
+                    math.isnan(slow_sum),
+                    lambda msg: f"{msg}\nNaN in slow-AR grad for {name}",
+                )
+                self.assertAlmostEqual(
+                    slow_sum,
+                    ref_sum,
+                    delta=max(abs(ref_sum) * 1e-3, 1e-3),
+                    msg=(
+                        lambda msg: f"{msg}\nHSDP AR buffer lifetime regression ({mp_dtype}): "
+                        f"grad sum for {name} differs under slow AR. "
+                        f"reference={ref_sum:.4f}, slow={slow_sum:.4f}. "
+                        f"All layers collapsing to the same value indicates "
+                        f"the RS-output buffer is being reused across layers "
+                        f"(see PR #140044, PR #180900)."
+                    ),
+                )
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
+    def test_partial_repack_after_slow_all_reduce(self):
+        # No input requires grad, so both post-backwards run in the final
+        # callback. layer's finalize_backward releases its fp32 all-reduce
+        # buffer (its bf16 sharded grads are casts), then aux repacks its
+        # pending partial because aux.second first gets a gradient. The repack
+        # must not reuse that buffer while the slowed all-reduce still uses it.
+        class TwoLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Linear(32, 32, bias=False)
+                self.second = nn.Linear(32, 32, bias=False)
+
+            def forward(self, inp, use_second=True):
+                output = self.first(inp)
+                return output + self.second(inp) if use_second else output
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = TwoLinear()
+                self.aux = TwoLinear()
+
+            def forward(self, inp, use_layer):
+                output = self.aux(inp, use_second=use_layer)
+                return output + self.layer(inp) if use_layer else output
+
+        model = Model().to(device_type, torch.bfloat16)
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        for module in (model.layer, model.aux, model):
+            fully_shard(module, mesh=mesh, mp_policy=mp_policy)
+        orig_all_reduce = dist.all_reduce
+
+        def slow_all_reduce(*args, **kwargs):
+            torch.cuda._sleep(int(200 * get_cycles_per_ms()))
+            return orig_all_reduce(*args, **kwargs)
+
+        with mock.patch.object(dist, "all_reduce", slow_all_reduce):
+            for use_layer, value in ((False, 2.0), (True, 3.0)):
+                model.set_requires_all_reduce(use_layer)
+                inp = torch.full((1, 32), value, device=device_type).bfloat16()
+                model(inp, use_layer).sum().backward()
+        for module, expected in ((model.layer, (3, 3)), (model.aux, (5, 3))):
+            for param, value in zip(module.parameters(), expected):
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, value))
+
+
+class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "all-reduce hook sync test is CUDA-only")
+    def test_all_reduce_hook_buffer_lifetime_mixed_dtype(self):
+        # Without native HSDP, the all-reduce hook and the cast to orig_dtype
+        # read the RS output on the hook stream. If nothing holds it past the
+        # cast, the next RS (for the first linear) can reuse its block before
+        # the slow hook finishes, and the last linear's grad reads that data.
+        torch.manual_seed(0)
+        dim = 512
+        model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+        ).to(device_type)
+        # bf16 reduce with fp32 params, so the cast drops the last RS output ref
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        linears = [layer for layer in model if isinstance(layer, nn.Linear)]
+        for linear in linears:
+            fully_shard(linear, mp_policy=mp)
+        fully_shard(model, mp_policy=mp)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn(4, dim, device=device_type)
+
+        model(inp).sum().backward()
+        ref_grads = [param.grad.to_local().clone() for param in model.parameters()]
+        model.zero_grad()
+
+        sleep_cycles = int(200 * get_cycles_per_ms())
+
+        def slow_hook(output: torch.Tensor) -> None:
+            torch.get_device_module(device_type)._sleep(sleep_cycles)
+
+        for linear in linears:
+            linear.set_all_reduce_hook(slow_hook)
+        model(inp).sum().backward()
+        for param, ref_grad in zip(model.parameters(), ref_grads):
+            self.assertEqual(param.grad.to_local(), ref_grad)
 
 
 if __name__ == "__main__":

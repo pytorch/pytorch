@@ -68,8 +68,6 @@ C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
                 " when calling `" #EXPR "`");                   \
   } while (0)
 
-const char *cusparseGetErrorString(cusparseStatus_t status);
-
 #define TORCH_CUDASPARSE_CHECK(EXPR)                            \
   do {                                                          \
     cusparseStatus_t __err = EXPR;                              \
@@ -117,15 +115,11 @@ constexpr const char* _cusolver_backend_suggestion =            \
   "linear algebra operators with other supported backends. "    \
   "See https://pytorch.org/docs/stable/backends.html#torch.backends.cuda.preferred_linalg_library";
 
-// When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
 // When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
 #define TORCH_CUSOLVER_CHECK(EXPR)                                      \
   do {                                                                  \
     cusolverStatus_t __err = EXPR;                                      \
-    if ((CUDA_VERSION < 11500 &&                                        \
-         __err == CUSOLVER_STATUS_EXECUTION_FAILED) ||                  \
-        (CUDA_VERSION >= 11500 &&                                       \
-         __err == CUSOLVER_STATUS_INVALID_VALUE)) {                     \
+    if (__err == CUSOLVER_STATUS_INVALID_VALUE) {                       \
       TORCH_CHECK_LINALG(                                               \
           false,                                                        \
           "cusolver error: ",                                           \
@@ -187,15 +181,25 @@ constexpr const char* _hipsolver_backend_suggestion =           \
 
 #define AT_CUDA_DRIVER_CHECK(EXPR)                                          \
   do {                                                                      \
+    c10::cuda::CUDAErrorLogCapture __cuda_error_log;                        \
     CUresult __err = EXPR;                                                  \
     if (__err != CUDA_SUCCESS) {                                            \
+      const auto __cuda_error_log_message =                                 \
+          __cuda_error_log.get_error_log_suffix();                          \
       const char* err_str;                                                  \
       [[maybe_unused]] CUresult get_error_str_err =                         \
           at::globalContext().getNVRTC().cuGetErrorString(__err, &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                              \
-        TORCH_CHECK(false, "CUDA driver error: unknown error");             \
+        TORCH_CHECK(                                                        \
+            false,                                                          \
+            "CUDA driver error: unknown error",                            \
+            __cuda_error_log_message);                                      \
       } else {                                                              \
-        TORCH_CHECK(false, "CUDA driver error: ", err_str);                 \
+        TORCH_CHECK(                                                        \
+            false,                                                          \
+            "CUDA driver error: ",                                         \
+            err_str,                                                        \
+            __cuda_error_log_message);                                      \
       }                                                                     \
     }                                                                       \
   } while (0)

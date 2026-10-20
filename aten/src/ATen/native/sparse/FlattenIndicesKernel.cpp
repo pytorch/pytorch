@@ -2,8 +2,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/FlattenIndicesCommon.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/AccumulateType.h>
 
 namespace at::native {
 
@@ -22,11 +20,6 @@ Tensor flatten_indices_cpu_kernel(const Tensor& indices, IntArrayRef size) {
 
 }
 
-REGISTER_ARCH_DISPATCH(flatten_indices_stub, DEFAULT, &flatten_indices_cpu_kernel)
-REGISTER_AVX512_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
-REGISTER_AVX2_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
-REGISTER_VSX_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
-REGISTER_ZVECTOR_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
-REGISTER_SVE256_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
+REGISTER_ALL_CPU_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
 
 } // namespace at::native

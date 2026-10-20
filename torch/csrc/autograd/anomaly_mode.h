@@ -1,7 +1,7 @@
 #pragma once
 
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/Export.h>
-#include <memory>
 #include <string>
 
 namespace torch::autograd {
@@ -30,7 +30,7 @@ struct TORCH_API AnomalyMode {
 ///
 /// Anomaly detection mode is useful for debugging problems happening
 /// in the backward, such as unexpectedly modified tensors or NaNs
-/// occuring in the backward.
+/// occurring in the backward.
 ///
 /// The enabling of anomaly mode is global - as soon as there is one
 /// such guard, it is enabled for all computation and threads. It also
@@ -61,11 +61,11 @@ struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
   virtual void store_stack();
   virtual void print_stack(const std::string& current_node_name);
-  virtual void assign_parent(const std::shared_ptr<Node>& parent_node);
+  virtual void assign_parent(const c10::intrusive_ptr<Node>& parent_node);
 
  private:
   std::string traceback_;
-  std::shared_ptr<Node> parent_;
+  c10::intrusive_ptr<Node> parent_;
 };
 
 } // namespace torch::autograd

@@ -1,15 +1,53 @@
 {
-    "[python]": {
-        "editor.tabSize": 4
-    },
     "files.associations": {
+        ".clang-format": "yaml",
+        ".clang-tidy": "yaml",
+        ".flake8": "ini",
+        ".coveragerc": "ini",
         "*.py.in": "python",
-        "*.pyi.in": "python"
+        "*.pyi.in": "python",
+        "*requirements*.txt": "pip-requirements",
+        "*requirements*.in": "pip-requirements",
+        "*.cpp.in": "cpp",
+        "*.h.in": "cpp",
+        "*.cmake.in": "cmake",
+        "Makefile.*": "makefile",
+        "*.Makefile": "makefile",
+        "BUCK": "starlark",
+        "BUCK.*": "starlark"
     },
     "files.eol": "\n",
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
     "files.trimTrailingWhitespace": true,
-    "python.linting.enabled": true,
-    "python.linting.flake8Enabled": true
+    "cmake.preferredGenerators": [
+        "Ninja",
+        "Unix Makefiles"
+    ],
+    "cmake.configureEnvironment": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+    },
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "cmake.configureArgs": [
+        "-DPython_EXECUTABLE=${workspaceFolder}/venv/bin/python",
+        "-DPython_ROOT_DIR=${workspaceFolder}/venv"
+    ],
+    "[python]": {
+        "editor.tabSize": 4,
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
+    "python.analysis.inlayHints.functionReturnTypes": true,
+    "flake8.importStrategy": "fromEnvironment",
+    "flake8.args": [
+        "--append-config=${workspaceFolder}/.flake8"
+    ],
+    "ruff.importStrategy": "fromEnvironment",
+    "ruff.lineLength": 88,
+    "ruff.organizeImports": false,
+    "ruff.configurationPreference": "filesystemFirst",
+    "mypy-type-checker.importStrategy": "fromEnvironment",
+    "mypy-type-checker.preferDaemon": true,
+    "mypy-type-checker.reportingScope": "workspace"
 }

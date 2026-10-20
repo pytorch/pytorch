@@ -3359,12 +3359,10 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -3539,12 +3537,10 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -3650,12 +3646,10 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -3727,12 +3721,10 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -3794,12 +3786,10 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -3946,12 +3936,10 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -4126,12 +4114,10 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -4237,12 +4223,10 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -4314,12 +4298,10 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
@@ -4381,12 +4363,10 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
           return false;
         }
         float wgt = 1.f;
-        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        float bio;
         if (weights) {
           wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
-        bio = wgt * scale_bias[2 * idx + 1];
+        float bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);

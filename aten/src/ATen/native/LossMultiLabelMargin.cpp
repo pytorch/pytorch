@@ -6,6 +6,8 @@
 #include <ATen/native/LossMulti.h>
 #include <c10/util/irange.h>
 
+#include <utility>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -58,7 +60,7 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
 }
 
 template <typename scalar_t>
-static void multilabel_margin_loss_forward_out_frame(
+void multilabel_margin_loss_forward_out_frame(
     const Tensor& input_contiguous,
     const Tensor& target_contiguous,
     Tensor& output,
@@ -69,10 +71,10 @@ static void multilabel_margin_loss_forward_out_frame(
   using accscalar_t = at::acc_type<scalar_t, false>;
   const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
   const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
-  scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
+  scalar_t* is_target_data = is_target.mutable_data_ptr<scalar_t>();
 
   if (reduction != Reduction::None || output.dim() == 0) {
-    scalar_t* output_data = output.data_ptr<scalar_t>();
+    scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
 
     accscalar_t sum = 0;
 
@@ -108,7 +110,7 @@ static void multilabel_margin_loss_forward_out_frame(
   }
 }
 
-static void multilabel_margin_loss_forward_out_cpu_template(
+void multilabel_margin_loss_forward_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     Tensor& output,
@@ -153,7 +155,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
 }
 
 template <typename scalar_t>
-static void multilabel_margin_loss_backward_out_frame(
+void multilabel_margin_loss_backward_out_frame(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input_contiguous,
@@ -222,7 +224,7 @@ static void multilabel_margin_loss_backward_out_frame(
   }
 }
 
-static void multilabel_margin_loss_backward_out_cpu_template(
+void multilabel_margin_loss_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
@@ -289,7 +291,7 @@ std::tuple<Tensor, Tensor> multilabel_margin_loss_forward_cpu(
   auto is_target = at::empty({0}, self.options());
   at::native::multilabel_margin_loss_forward_out_cpu(
       self, target, reduction, output, is_target);
-  return std::make_tuple(output, is_target);
+  return std::make_tuple(std::move(output), std::move(is_target));
 }
 
 Tensor& multilabel_margin_loss_backward_cpu_out(const Tensor& grad_output,

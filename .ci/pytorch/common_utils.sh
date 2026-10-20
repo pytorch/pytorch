@@ -42,7 +42,7 @@ declare -f -t trap_add
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] && [[ "$BUILD_ENVIRONMENT" != *xpu* ]] ; then
         git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -78,6 +78,33 @@ function pip_install_whl() {
   fi
 }
 
+function pip_build_and_install() {
+  local build_target=$1
+  local wheel_dir=$2
+
+  local found_whl=0
+  for file in "${wheel_dir}"/*.whl
+  do
+    if [[ -f "${file}" ]]; then
+      found_whl=1
+      break
+    fi
+  done
+
+  # Build the wheel if it doesn't exist
+  if [ "${found_whl}" == "0" ]; then
+    python3 -m pip wheel \
+      --no-build-isolation \
+      --no-deps \
+      -w "${wheel_dir}" \
+      "${build_target}"
+  fi
+
+  for file in "${wheel_dir}"/*.whl
+  do
+    pip_install_whl "${file}"
+  done
+}
 
 function pip_install() {
   # retry 3 times
@@ -92,23 +119,25 @@ function pip_uninstall() {
   pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
+function get_pkg_versions() {
+  python3 -c "
+import importlib.metadata as metadata
+import sys
+
+for pkg in sys.argv[1:]:
+    try:
+        print(f'{pkg}=={metadata.version(pkg)}')
+    except metadata.PackageNotFoundError:
+        print(f'{pkg}==NOT_INSTALLED')
+" "$@"
+}
+
 function get_exit_code() {
   set +e
   "$@"
   retcode=$?
   set -e
   return $retcode
-}
-
-function get_bazel() {
-  # Download and use the cross-platform, dependency-free Python
-  # version of Bazelisk to fetch the platform specific version of
-  # Bazel to use from .bazelversion.
-  retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
-  shasum --algorithm=1 --check \
-    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
-  chmod u+x tools/bazel
 }
 
 function install_monkeytype {
@@ -121,17 +150,23 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function detect_cuda_arch() {
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    if command -v nvidia-smi; then
+      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+    elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+      # There won't be nvidia-smi in nogpu tests, so just set TORCH_CUDA_ARCH_LIST to the default
+      # minimum supported value here
+      TORCH_CUDA_ARCH_LIST=8.0
+    fi
+    export TORCH_CUDA_ARCH_LIST
+  fi
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  if [[ "$1" == "cuda" ]]; then
-    # TODO: This is better to be passed as a parameter from _linux-test workflow
-    # so that it can be consistent with what is set in build
-    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
-  else
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
-  fi
-
+  retry pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
 function install_torchtext() {
@@ -139,8 +174,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/data.git@${data_commit}"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${text_commit}"
+  retry pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
+  retry pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
 }
 
 function install_torchvision() {
@@ -153,50 +188,119 @@ function install_torchvision() {
     echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    # Not sure if both are needed, but why not
+    export FORCE_CUDA=1
+    export WITH_CUDA=1
+  fi
+  retry pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
+
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
 }
 
-function install_tlparse() {
-  pip_install --user "tlparse==0.3.30"
-  PATH="$(python -m site --user-base)/bin:$PATH"
-}
+function install_fbgemm() {
+  local build_variant=$1
 
-function install_torchrec_and_fbgemm() {
-  local torchrec_commit
-  torchrec_commit=$(get_pinned_commit torchrec)
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
   fi
+
+  # Check if the wheel has been already been built
+  local wheel_dir=dist/fbgemm_gpu
+  local found_whl=0
+  for file in "${wheel_dir}"/*.whl
+  do
+    if [[ -f "${file}" ]]; then
+      found_whl=1
+      break
+    fi
+  done
+
+  pip_install tabulate==0.9.0 tensordict==0.10.0  # needed for newer fbgemm
+  pip_install patchelf  # needed for rocm fbgemm
+
+  # Build the wheel if it doesn't exist
+  if [ "${found_whl}" == "0" ]; then
+    git clone --recursive https://github.com/pytorch/fbgemm
+    pushd fbgemm/fbgemm_gpu
+    git checkout "${fbgemm_commit}" --recurse-submodules
+    # FIXME: Remove this worakaround after FBGEMM build is fixed
+    # fbgemm emits six empty PT2 wrapper TUs for deprecated optimizers
+    # (has_cpu_support=False, has_gpu_support=False). Under CI's S3-backed sccache
+    # (classic/preprocessor-off mode, whose key ignores both the input path and -o)
+    # these collapse to one cached object that is copied to the other outputs, so every
+    # copy carries the same __hip_cuid symbol and the HIP link fails with
+    # "multiple definition of __hip_cuid_...". Force every compile in this build to
+    # recache so each identical source is compiled independently; clang folds -o into
+    # the CUID hash, giving each object a distinct __hip_cuid. Inline (not exported) and
+    # scoped to the ROCm build so it does not affect the PyTorch build (already built).
+    if [[ "${build_variant}" == "rocm" ]]; then
+      SCCACHE_RECACHE=1 python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    else
+      python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    fi
+    popd
+
+    # Save the wheel before cleaning up
+    mkdir -p dist/fbgemm_gpu
+    cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
+  fi
+
+  # Install fbgemm wheel
+  for file in "${wheel_dir}"/*.whl
+  do
+    pip_install_whl "${file}"
+  done
+
+  # Clean up
+  rm -rf fbgemm
+}
+
+function install_torchrec_and_fbgemm() {
+  local torchrec_commit
+  torchrec_commit=$(get_pinned_commit torchrec)
+
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
 
-    pip_install tabulate  # needed for newer fbgemm
-    pip_install patchelf  # needed for rocm fbgemm
-    git clone --recursive https://github.com/pytorch/fbgemm
-    pushd fbgemm/fbgemm_gpu
-    git checkout "${fbgemm_commit}"
-    python setup.py install \
-      --package_variant=rocm \
-      -DHIP_ROOT_DIR="${ROCM_PATH}" \
-      -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-      -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
-    popd
-    rm -rf fbgemm
+    # Find rocm_version.h header file for ROCm version extract
+    rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
+    if [ ! -f "$rocm_version_h" ]; then
+        rocm_version_h="${ROCM_HOME}/include/rocm_version.h"
+    fi
+
+    # Error out if rocm_version.h not found
+    if [ ! -f "$rocm_version_h" ]; then
+        echo "Error: rocm_version.h not found in expected locations." >&2
+        exit 1
+    fi
+
+    # Extract major, minor and patch ROCm version numbers
+    MAJOR_VERSION=$(grep 'ROCM_VERSION_MAJOR' "$rocm_version_h" | awk '{print $3}')
+    MINOR_VERSION=$(grep 'ROCM_VERSION_MINOR' "$rocm_version_h" | awk '{print $3}')
+    PATCH_VERSION=$(grep 'ROCM_VERSION_PATCH' "$rocm_version_h" | awk '{print $3}')
+    ROCM_INT=$((MAJOR_VERSION * 10000 + MINOR_VERSION * 100 + PATCH_VERSION))
+    echo "ROCm version: $ROCM_INT"
+    export BUILD_ROCM_VERSION="$MAJOR_VERSION.$MINOR_VERSION"
+
+    install_fbgemm "rocm"
   else
-    # See https://github.com/pytorch/pytorch/issues/106971
-    CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
+    # Skip fbgemm for CUDA 13 as it's not compatible yet
+    if [[ "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
+      install_fbgemm "cuda"
+    fi
   fi
 }
 
@@ -212,38 +316,120 @@ function clone_pytorch_xla() {
   fi
 }
 
-function checkout_install_torchbench() {
-  local commit
-  commit=$(get_pinned_commit torchbench)
-  git clone https://github.com/pytorch/benchmark torchbench
-  pushd torchbench
-  git checkout "$commit"
-
-  if [ "$1" ]; then
-    python install.py --continue_on_fail models "$@"
-  else
-    # Occasionally the installation may fail on one model but it is ok to continue
-    # to install and test other models
-    python install.py --continue_on_fail
-  fi
-
-  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regressing speedup metric. This needs to be investigated further
-  pip install transformers==4.38.1
-
-  echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
-  popd
-}
-
 function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git@${commit}"
+  pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
+}
+
+function install_torchcomms() {
+  local commit
+  commit=$(get_pinned_commit torchcomms)
+  export USE_GLOO=1
+  export USE_NCCLX=0
+  export USE_TRANSPORT=0
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    export USE_NCCL=1
+  else
+    export USE_NCCL=0
+  fi
+  pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
+}
+
+function install_nccl4py() {
+  pip_install nccl4py==0.5.0
+}
+
+function install_spmd_types() {
+  local commit
+  commit=$(get_pinned_commit spmd_types)
+  retry pip_build_and_install "git+https://github.com/meta-pytorch/spmd_types.git@${commit}" dist/spmd_types
+}
+
+function install_flash_attn_cute() {
+  echo "Installing FlashAttention 4 from PyPI..."
+  local flash_attn_package=flash-attn-4==4.0.0b31
+  if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
+  fi
+  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
+  pip_install \
+    "$flash_attn_package" \
+    quack-kernels==0.6.5 \
+    apache-tvm-ffi==0.1.12
+  echo "FlashAttention 4 installation complete."
+}
+
+function install_cutlass_dsl() {
+  local cutlass_dsl_package=nvidia-cutlass-dsl==4.8.0
+  if [[
+    "${DESIRED_CUDA:-}" == cu13* ||
+    "${DESIRED_CUDA:-}" == 13.* ||
+    "${CUDA_VERSION:-}" == 13.* ||
+    "${BUILD_ENVIRONMENT:-}" == *cuda13*
+  ]]; then
+    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.8.0"
+  fi
+
+  echo "Installing NVIDIA CUTLASS DSL from PyPI..."
+  # Pin to a version accepted by torch._native's cutedsl version gate
+  # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
+  # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
+  echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_flydsl() {
+  echo "Installing FlyDSL from PyPI..."
+  # Require the published platform wheel instead of attempting an unsupported source build.
+  pip_install --only-binary=:all: flydsl==0.3.4.1
+  echo "FlyDSL installation complete."
+}
+
+function install_nvmath() {
+  echo "Installing nvmath-python from PyPI..."
+  pip_install nvmath-python==0.9.0
+  # nvmath-python upgrades numpy to 2.x; realign scipy to a matching build. See #189034.
+  pip_install "scipy==1.13.1"
+  echo "nvmath-python installation complete."
+}
+
+function install_cutlass_operators() {
+  # cutlass-operators requires Python >= 3.10
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.10\n$py_version" | sort -V | head -n1)" != "3.10" ]]; then
+    echo "Skipping CUTLASS Operators install: requires Python >= 3.10, have $py_version"
+    return 0
+  fi
+
+  echo "Installing CUTLASS Operators from PyPI..."
+
+  # Install CuTeDSL dependency first
+  install_cutlass_dsl
+
+  # Skip [torch] extra so pip does not pull PyPI torch over the CI build.
+  # Pin 0.2.0: Operator.get_workspace_size returns AllocationRequirement
+  # (size_bytes) and CompiledArtifact requires compiled_for.
+  pip_install nvidia-cutlass-operators==0.3.0
+
+  echo "CUTLASS Operators installation complete."
 }
 
 function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
+  if ! which sccache &> /dev/null; then
+    if [[ -n "${SCCACHE_BUCKET:-}" ]]; then
+      # sccache was configured for this build (SCCACHE_BUCKET is set) but the
+      # binary is missing: that's a real misconfiguration, not an optional tool
+      # being absent, so fail the build (callers run under `set -e`).
+      echo "::error::sccache was expected (SCCACHE_BUCKET is set) but the sccache binary was not found; failing the build."
+      return 1
+    fi
+    # sccache genuinely not in use here: warn (#188060) but don't fail the build.
+    echo "::warning::sccache not found, skipping build statistics. If this build was expected to use sccache, check its installation/configuration."
+    return
+  fi
   sccache --show-stats
 
   if [[ -n "${OUR_GITHUB_JOB_ID}" ]]; then

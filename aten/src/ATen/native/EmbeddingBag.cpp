@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -14,8 +15,10 @@
 #include <c10/util/Half.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmConvert.h>
+C10_DIAGNOSTIC_POP()
 #else
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
@@ -106,7 +109,7 @@ bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor&
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
 template <typename data_t, typename index_t>
-static std::enable_if_t<std::is_same_v<data_t, double>, void>
+std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -202,8 +205,8 @@ index_select_add(
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<data_t>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -223,31 +226,36 @@ index_select_add(
       offsets_data = offsets_include_last.data();
     }
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
+    constexpr bool isbf16 = !std::is_same_v<data_t, at::Half>;
+    using fbgemm_data_t = std::conditional_t<
+        std::is_same_v<data_t, at::Half>,
+        fbgemm::float16,
+        fbgemm::bfloat16>;
+    using callback_entry = _CallbackAndBlockSize<
+        /* has_weight */ false,
+        index_t,
+        fbgemm_data_t,
+        isbf16>;
     auto kernel_16bit_index_t = fbgemm_kernel_cache
         ? fbgemm_kernel_cache
-              ->getCallback</* has_weight */ false, index_t, uint16_t>(ddim)
-        : fbgemm::GenerateEmbeddingSpMDM<uint16_t, index_t, index_t, uint16_t>(
-              /* block_size */ ddim,
-              /* has_weight */ false,
-              /* normalize_by_lengths */ false,
-              /* prefetch */ 16,
-              /* is_weight_positional */ false,
-              /* use_offsets */ true,
-              /* is_bf16_out */ isbf16,
-              /* is_bf16_in */ isbf16);
+              ->getCallback<
+                  /* has_weight */ false,
+                  index_t,
+                  fbgemm_data_t,
+                  isbf16>(ddim)
+        : callback_entry::generateCallback(ddim);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
               /* output_size */ end_idx - start_idx,
               /* index_size */ offsets_data[end_idx] - offsets_data[start_idx],
               /* data_size */ src.size(0),
-              /* input */ reinterpret_cast<const uint16_t*>(src_data),
+              /* input */ reinterpret_cast<const fbgemm_data_t*>(src_data),
               /* indices */ select_indices_data + offsets_data[start_idx],
               /* offsets_or_lengths */ offsets_data + start_idx,
               /* weights */ nullptr,
               /* output */
-              reinterpret_cast<uint16_t*>(output_data + start_idx * ddim));
+              reinterpret_cast<fbgemm_data_t*>(output_data + start_idx * ddim));
           if (!success) {
             fbgemm_spmdm_report_error_(
                 end_idx - start_idx,
@@ -380,8 +388,8 @@ index_select_add(const Tensor &select_indices,
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<float>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -404,7 +412,7 @@ index_select_add(const Tensor &select_indices,
 #ifdef USE_FBGEMM
     auto kernel_fp32_index_t =
       fbgemm_kernel_cache ?
-      fbgemm_kernel_cache->getCallback</* has_weight */ false, index_t, float>(ddim) :
+      fbgemm_kernel_cache->getCallback</* has_weight */ false, index_t, float, false>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float, index_t, index_t>(
         /* block_size */ddim,
         /* has_weight */false,
@@ -492,7 +500,7 @@ index_select_add(const Tensor &select_indices,
 // mul (scaling by per_sample_weights)
 // index_add (using add_indices as the index)
 template <typename data_t, typename index_t>
-static std::enable_if_t<std::is_same_v<data_t, double>, void>
+std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -567,8 +575,8 @@ index_select_scale_add(
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<data_t>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -591,6 +599,15 @@ index_select_scale_add(
 
 #if defined(USE_FBGEMM)
     constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
+    using fbgemm_data_t = std::conditional_t<
+        std::is_same_v<data_t, at::Half>,
+        fbgemm::float16,
+        fbgemm::bfloat16>;
+    using callback_entry = _CallbackAndBlockSize<
+        /* has_weight */ true,
+        index_t,
+        fbgemm_data_t,
+        isbf16>;
     if constexpr (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
           reinterpret_cast<const fbgemm::bfloat16*>(scale_data),
@@ -604,28 +621,24 @@ index_select_scale_add(
     }
     auto kernel_16bit_index_t = fbgemm_kernel_cache
         ? fbgemm_kernel_cache
-              ->getCallback</* has_weight */ true, index_t, uint16_t>(ddim)
-        : fbgemm::GenerateEmbeddingSpMDM<uint16_t, index_t, index_t, uint16_t>(
-              /* block_size */ ddim,
-              /* has_weight */ true,
-              /* normalize_by_lengths */ false,
-              /* prefetch */ 16,
-              /* is_weight_positional */ false,
-              /* use_offsets */ true,
-              /* is_bf16_out */ isbf16,
-              /* is_bf16_in */ isbf16);
+              ->getCallback<
+                  /* has_weight */ true,
+                  index_t,
+                  fbgemm_data_t,
+                  isbf16>(ddim)
+        : callback_entry::generateCallback(ddim);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
               /* output_size */ end_idx - start_idx,
               /* index_size */ offsets_data[end_idx] - offsets_data[start_idx],
               /* data_size */ src.size(0),
-              /* input */ reinterpret_cast<const uint16_t*>(src_data),
+              /* input */ reinterpret_cast<const fbgemm_data_t*>(src_data),
               /* indices */ select_indices_data + offsets_data[start_idx],
               /* offsets_or_lengths */ offsets_data + start_idx,
               /* weights */ scale_data_fp32 + offsets_data[start_idx],
               /* output */
-              reinterpret_cast<uint16_t*>(output_data + start_idx * ddim));
+              reinterpret_cast<fbgemm_data_t*>(output_data + start_idx * ddim));
           if (!success) {
             fbgemm_spmdm_report_error_(
                 end_idx - start_idx,
@@ -756,8 +769,8 @@ index_select_scale_add(const Tensor &select_indices,
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<float>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -778,7 +791,7 @@ index_select_scale_add(const Tensor &select_indices,
 #ifdef USE_FBGEMM
     auto kernel_fp32_index_t =
       fbgemm_kernel_cache ?
-      fbgemm_kernel_cache->getCallback</* has_weight */ true, index_t, float>(ddim) :
+      fbgemm_kernel_cache->getCallback</* has_weight */ true, index_t, float, false>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float, index_t, index_t>(
         /* block_size */ddim,
         /* has_weight */true,
@@ -1035,10 +1048,9 @@ static Tensor apply_bag_size(
     Tensor &output,
     const Tensor &bag_size) {
   if (mode == EmbeddingBagMode::MEAN) {
-    auto bag_size_ = at::max(bag_size, at::ones_like(bag_size, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
+    auto bag_size_ = bag_size.clamp_min(1)
                          .to(output.options())
-                         .unsqueeze(1)
-                         .expand_as(output);
+                         .unsqueeze(1);
     output /= bag_size_;
   }
   return output;
@@ -1151,7 +1163,9 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
     if (max_indices) {
       max_indices->copy_(bag_size);
     }
-  } else { // EmbeddingBagMode::MAX
+  } else {
+    TORCH_CHECK(mode == EmbeddingBagMode::MAX, "`mode` must be sum, mean, or max.")
+
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -1565,7 +1579,7 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
               scale = per_sample_weights_data[*per_sample_weights_stride * j];
             }
             if (scale_grad_by_freq) {
-              scale /= counts[indices_data[i]];
+              scale /= counts[index];
             }
             if (mode == EmbeddingBagMode::MEAN) {
               auto bag_size = bag_size_data[source];

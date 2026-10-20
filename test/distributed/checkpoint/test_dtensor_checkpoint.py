@@ -1,10 +1,9 @@
 # Owner(s): ["oncall: distributed"]
-from typing import Union
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
-from torch.distributed._tensor import (
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
@@ -58,15 +57,13 @@ class MyTestModule(torch.nn.Module):
     def extra_state_tensor(self, new_extra_state_tensor: torch.Tensor) -> None:
         self._extra_state_tensor = new_extra_state_tensor
 
-    def get_extra_state(self) -> dict[str, Union[int, torch._tensor.Tensor]]:
+    def get_extra_state(self) -> dict[str, int | torch._tensor.Tensor]:
         return {
             "extra_state": self._extra_state,
             "extra_state_tensor": self._extra_state_tensor,
         }
 
-    def set_extra_state(
-        self, state: dict[str, Union[int, torch._tensor.Tensor]]
-    ) -> None:
+    def set_extra_state(self, state: dict[str, int | torch._tensor.Tensor]) -> None:
         self._extra_state = state["extra_state"]  # pyre-ignore[8]
         self._extra_state_tensor = state["extra_state_tensor"]  # pyre-ignore[8]
 
@@ -106,7 +103,7 @@ class DTensorPlanner(DTensorTestBase):
             replicated_dt,
             submesh_sharded_dt,
             submesh_replicated_dt,
-        ).cuda()
+        ).to(self.device_type)
 
         return (
             model,
@@ -135,7 +132,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'rdt',
                         DTensor(
-                            local_tensor=tensor([4., 5., 6., 7.], device='cuda:0'),
+                            local_tensor=tensor([4., 5., 6., 7.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Replicate()]
                         )
@@ -143,7 +140,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'sdt',
                         DTensor(
-                            local_tensor=tensor([0.], device='cuda:0'),
+                            local_tensor=tensor([0.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)])
                         ),
@@ -151,7 +148,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'submesh_sdt',
                         DTensor(
-                            local_tensor=tensor([8., 9.], device='cuda:0'),
+                            local_tensor=tensor([8., 9.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
                         ),
@@ -159,7 +156,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'submesh_rdt',
                         DTensor(
-                            local_tensor=tensor([12., 13., 14., 15.], device='cuda:0'),
+                            local_tensor=tensor([12., 13., 14., 15.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Replicate()]
                         )
@@ -189,7 +186,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'rdt',
                         DTensor(
-                            local_tensor=tensor([40., 50., 60., 70.], device='cuda:0'),
+                            local_tensor=tensor([40., 50., 60., 70.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Replicate()],
                         )
@@ -197,7 +194,7 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'sdt',
                         DTensor(
-                            local_tensor=tensor([0.], device='cuda:0'),
+                            local_tensor=tensor([0.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)],
                         )
@@ -205,14 +202,14 @@ class DTensorPlanner(DTensorTestBase):
                     (
                         'submesh_sdt',
                         DTensor(
-                            local_tensor=tensor([80., 90.], device='cuda:0'),
+                            local_tensor=tensor([80., 90.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
                         )
                     ),
                     ('submesh_rdt',
                         DTensor(
-                            local_tensor=tensor([120., 130., 140., 150.], device='cuda:0'),
+                            local_tensor=tensor([120., 130., 140., 150.], device=f'{self.device_type}:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Replicate()]
                         )

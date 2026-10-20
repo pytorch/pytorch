@@ -6,9 +6,14 @@
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
+
+namespace xpu {
+// Forward-declares at::xpu::LevelZero
+struct LevelZero;
+} // namespace xpu
+
 
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   ~XPUHooksInterface() override = default;
@@ -27,7 +32,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
         "Cannot query detailed XPU version without ATen_xpu library.");
   }
 
-  virtual int32_t getGlobalIdxFromDevice(const Device& device) const {
+  virtual int32_t getGlobalIdxFromDevice(const Device& /*device*/) const {
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
@@ -62,18 +67,23 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     TORCH_CHECK(false, "Cannot query primary context without ATen_xpu library.");
+  }
+
+  virtual const at::xpu::LevelZero& level_zero() const {
+    TORCH_CHECK(false, "Level zero requires XPU.");
   }
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API XPUHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(XPUHooksRegistry, XPUHooksInterface, XPUHooksArgs);
+TORCH_DECLARE_REGISTRY(XPUHooksRegistry, XPUHooksInterface);
 #define REGISTER_XPU_HOOKS(clsname) \
   C10_REGISTER_CLASS(XPUHooksRegistry, clsname, clsname)
 
@@ -81,4 +91,3 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
-C10_DIAGNOSTIC_POP()

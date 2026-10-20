@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 
 #include <gtest/gtest.h>
@@ -47,6 +48,30 @@ TEST(StringUtilTest, testStrWideSingleMultibyte) {
 }
 } // namespace test_str_wide_single_multibyte
 
+namespace test_str_wide_malformed {
+// The surrogate handling is only compiled off Windows; the Windows path goes
+// through u16u8 instead.
+#ifndef _WIN32
+TEST(StringUtilTest, testStrWideMalformedSurrogate) {
+  // A high surrogate with nothing after it.
+  EXPECT_THROW((void)c10::str(std::wstring(1, L'\xD800')), c10::ValueError);
+  // A low surrogate with no high surrogate before it.
+  EXPECT_THROW((void)c10::str(std::wstring(1, L'\xDC00')), c10::ValueError);
+  // A high surrogate followed by a non-surrogate.
+  std::wstring unpairedHigh;
+  unpairedHigh.push_back(L'\xD800');
+  unpairedHigh.push_back(L'A');
+  EXPECT_THROW((void)c10::str(unpairedHigh), c10::ValueError);
+
+  // A well-formed pair still decodes: U+1F600 as UTF-8.
+  std::wstring pair;
+  pair.push_back(L'\xD83D');
+  pair.push_back(L'\xDE00');
+  EXPECT_EQ(std::string("\xF0\x9F\x98\x80"), c10::str(pair));
+}
+#endif
+} // namespace test_str_wide_malformed
+
 namespace test_str_wide_empty {
 TEST(StringUtilTest, testStrWideEmpty) {
   std::wstring s;
@@ -77,4 +102,105 @@ TEST(StringUtilTest, testStrMulti) {
 }
 } // namespace test_str_multi
 
+namespace test_try_to {
+TEST(tryToTest, Int64T) {
+  const std::vector<std::pair<const char*, int64_t>> valid_examples = {
+      {"123", 123},
+      {"+456", 456},
+      {"-123", -123},
+      {"0x123", 291},
+      {"00123", 83},
+      {"000", 0},
+  };
+  for (const auto& [str, num] : valid_examples) {
+    EXPECT_EQ(c10::tryToNumber<int64_t>(str), num);
+    EXPECT_EQ(c10::tryToNumber<int64_t>(std::string{str}), num);
+  }
+
+  const std::vector<const char*> invalid_examples = {
+      "123abc",
+      "123.45",
+      "",
+      "12345678901234567890", // overflow
+  };
+  for (const auto str : invalid_examples) {
+    EXPECT_FALSE(c10::tryToNumber<int64_t>(str).has_value());
+    EXPECT_FALSE(c10::tryToNumber<int64_t>(std::string{str}).has_value());
+  }
+  EXPECT_FALSE(c10::tryToNumber<int64_t>(nullptr).has_value());
+}
+
+TEST(tryToTest, Double) {
+  const std::vector<std::pair<const char*, double>> valid_examples = {
+      {"123.45", 123.45},
+      {"-123.45", -123.45},
+      {"123", 123.},
+      {".5", 0.5},
+      {"-.02", -0.02},
+      {"5e-2", 5e-2},
+      {"1e+3", 1e3},
+      {"0x123.45", 291.26953125},
+  };
+  for (const auto& [str, num] : valid_examples) {
+    EXPECT_EQ(c10::tryToNumber<double>(str), num);
+    EXPECT_EQ(c10::tryToNumber<double>(std::string{str}), num);
+  }
+
+  const std::vector<const char*> invalid_examples = {
+      "123abc",
+      "",
+      "1e309", // overflow
+  };
+  for (const auto str : invalid_examples) {
+    EXPECT_FALSE(c10::tryToNumber<double>(str).has_value());
+    EXPECT_FALSE(c10::tryToNumber<double>(std::string{str}).has_value());
+  }
+  EXPECT_FALSE(c10::tryToNumber<double>(nullptr).has_value());
+}
+} // namespace test_try_to
+
+namespace test_split {
+TEST(SplitTest, NormalCase) {
+  std::string str = "torch.ops.aten.linear";
+  auto result = c10::split(str, '.');
+  ASSERT_EQ(4, result.size());
+  EXPECT_EQ("torch", result[0]);
+  EXPECT_EQ("ops", result[1]);
+  EXPECT_EQ("aten", result[2]);
+  EXPECT_EQ("linear", result[3]);
+}
+TEST(SplitTest, EmptyString) {
+  auto result = c10::split("", '.');
+  EXPECT_TRUE(result.empty());
+}
+TEST(SplitTest, NoDelimiter) {
+  std::string str = "single";
+  auto result = c10::split(str, '.');
+  ASSERT_EQ(1, result.size());
+  EXPECT_EQ("single", result[0]);
+}
+TEST(SplitTest, ConsecutiveDelimiters) {
+  std::string str = "atom1..atom2";
+  auto result = c10::split(str, '.');
+  ASSERT_EQ(3, result.size());
+  EXPECT_EQ("atom1", result[0]);
+  EXPECT_EQ("", result[1]);
+  EXPECT_EQ("atom2", result[2]);
+}
+} // namespace test_split
+
+namespace test_str_enum {
+TEST(StringUtilTest, testStrEnum) {
+  enum class Foo { Bar = 1, Baz = 2 };
+  EXPECT_EQ(c10::str(Foo::Baz, Foo::Bar), "21");
+
+  enum UnscopedEnum { Bar2 = 1, Baz2 = 2 };
+  EXPECT_EQ(c10::str(Baz2, Bar2), "21");
+
+  static_assert(c10::detail::Streamable<int>::value);
+  static_assert(!c10::detail::Streamable<Foo>::value);
+
+  static_assert(c10::detail::Streamable<UnscopedEnum>::value);
+}
+} // namespace test_str_enum
 } // namespace

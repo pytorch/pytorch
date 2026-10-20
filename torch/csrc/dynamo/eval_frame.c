@@ -1,7 +1,5 @@
 #define PY_SSIZE_T_CLEAN
-#include <opcode.h>
 #include <signal.h>
-#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
@@ -10,15 +8,109 @@
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/utils/python_compat.h>
 
+#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#define Py_BUILD_CORE
+#include <internal/pycore_code.h>
+#include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
+#undef Py_BUILD_CORE
+#endif
+
 PyObject* guard_error_hook = NULL;
+PyObject* guard_complete_hook = NULL;
 
 typedef struct {
   int active_dynamo_threads;
 } ModuleState;
 
-// static int active_dynamo_threads = 0;
-
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+
+// The flags below all describe "the Dynamo region this thread is currently
+// inside".  Stored as per-thread tagged pointers.
+static Py_tss_t isolate_recompiles_key = Py_tss_NEEDS_INIT; // int64_t
+static Py_tss_t skip_guard_eval_key = Py_tss_NEEDS_INIT; // bool
+static Py_tss_t fullgraph_count_key = Py_tss_NEEDS_INIT; // int64_t
+static Py_tss_t fullgraph_error_key = Py_tss_NEEDS_INIT; // bool
+
+// TSS slots hold a void*.  NULL means "never set on this thread" and that's the
+// default.  Scalars are stored biased by +2 so that no real value collides with
+// NULL.  Tagged scalars need no heap allocation, so reads and writes are
+// GIL-free and there is nothing to free at thread exit.
+
+static void* tag_int64(int64_t v) {
+  return (void*)(intptr_t)(v + 2);
+}
+
+static int64_t untag_int64(void* p) {
+  return (int64_t)(intptr_t)p - 2;
+}
+
+static void* tag_bool(bool b) {
+  return tag_int64((int64_t)b);
+}
+
+static bool untag_bool(void* p) {
+  return (bool)untag_int64(p);
+}
+
+static int64_t get_isolate_recompiles_id_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? -1 : untag_int64(p);
+}
+
+static void set_isolate_recompiles_id_raw(Py_tss_t* key, int64_t id) {
+  PyThread_tss_set(key, tag_int64(id));
+}
+
+static bool get_skip_guard_eval_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? false : untag_bool(p);
+}
+
+static void set_skip_guard_eval_raw(Py_tss_t* key, bool v) {
+  PyThread_tss_set(key, tag_bool(v));
+}
+
+// -1 means inactive, >= 0 means active with that many compiled frames.
+static int get_fullgraph_count_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? -1 : (int)untag_int64(p);
+}
+
+static void set_fullgraph_count_raw(Py_tss_t* key, int v) {
+  PyThread_tss_set(key, tag_int64((int64_t)v));
+}
+
+// When true and fullgraph_compiled_frame_count > 0, sub-frames under fullgraph
+// compilation will error (via get_fail_callback) instead of being silently
+// skipped.
+static bool get_fullgraph_error_raw(Py_tss_t* key) {
+  void* p = PyThread_tss_get(key);
+  return p == NULL ? false : untag_bool(p);
+}
+
+static void set_fullgraph_error_raw(Py_tss_t* key, bool v) {
+  PyThread_tss_set(key, tag_bool(v));
+}
+
+bool get_skip_guard_eval_unsafe(void) {
+  return get_skip_guard_eval_raw(&skip_guard_eval_key);
+}
+
+int get_fullgraph_compiled_frame_count(void) {
+  return get_fullgraph_count_raw(&fullgraph_count_key);
+}
+
+void bump_fullgraph_compiled_frame_count(void) {
+  void* p = PyThread_tss_get(&fullgraph_count_key);
+  if (p != NULL) {
+    PyThread_tss_set(&fullgraph_count_key, tag_int64(untag_int64(p) + 1));
+  }
+}
+
+bool get_fullgraph_error_on_nested_compile(void) {
+  return get_fullgraph_error_raw(&fullgraph_error_key);
+}
 
 static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -33,8 +125,38 @@ void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
-// 3.14 Not supported at all. See cpython_defs.c for hints
-#if !(IS_PYTHON_3_14_PLUS)
+int64_t get_current_isolate_recompiles_id(void) {
+  return get_isolate_recompiles_id_raw(&isolate_recompiles_key);
+}
+
+static void set_current_isolate_recompiles_id(int64_t id) {
+  set_isolate_recompiles_id_raw(&isolate_recompiles_key, id);
+}
+
+static PyObject* get_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* args) {
+  return PyLong_FromLongLong(get_current_isolate_recompiles_id());
+}
+
+static PyObject* set_eval_frame_isolate_recompiles_id_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  if (!PyLong_Check(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected an int");
+    return NULL;
+  }
+  int64_t new_id = PyLong_AsLongLong(arg);
+  if (new_id == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int64_t old_id = get_current_isolate_recompiles_id();
+  set_current_isolate_recompiles_id(new_id);
+  return PyLong_FromLongLong(old_id);
+}
+
+// 3.16 Not supported at all. See cpython_defs.c for hints
+#if !(IS_PYTHON_3_16_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -55,7 +177,16 @@ static PyObject* THPPyInterpreterFrame_f_locals(
   return self->locals;
 }
 
-#if IS_PYTHON_3_13_PLUS
+#if IS_PYTHON_3_14_PLUS
+static PyObject* THPPyInterpreterFrame_f_executable(
+    THPPyInterpreterFrame* self,
+    PyObject* _noargs) {
+  if (PyStackRef_IsNull(self->frame->f_executable)) {
+    Py_RETURN_NONE;
+  }
+  return PyStackRef_AsPyObjectNew(self->frame->f_executable);
+}
+#elif IS_PYTHON_3_13_PLUS
 DECLARE_PYOBJ_ATTR(f_executable)
 #else
 DECLARE_PYOBJ_ATTR(f_code)
@@ -108,11 +239,8 @@ static PyObject* THPPyInterpreterFrame_f_back(
 static PyObject* THPPyInterpreterFrame_closure(
     THPPyInterpreterFrame* self,
     PyObject* _noargs) {
-#if IS_PYTHON_3_12_PLUS
-  PyObject* closure = ((PyFunctionObject*)self->frame->f_funcobj)->func_closure;
-  return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
-#elif IS_PYTHON_3_11_PLUS
-  PyObject* closure = ((PyFunctionObject*)self->frame->f_func)->func_closure;
+#if IS_PYTHON_3_11_PLUS
+  PyObject* closure = FUNC(self->frame)->func_closure;
   return closure == NULL ? PyTuple_New(0) : Py_XNewRef(closure);
 #else
   PyCodeObject* code = self->frame->f_code;
@@ -223,16 +351,20 @@ const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-void clear_old_frame_if_python_312_plus(
-    PyThreadState* tstate,
-    THP_EVAL_API_FRAME_OBJECT* frame) {
-#if IS_PYTHON_3_12_PLUS
-
-  THP_PyFrame_Clear(frame);
-  THP_PyThreadState_PopFrame(tstate, frame);
-
-#endif
+#if IS_PYTHON_3_14_PLUS
+static void dup_obj(_PyStackRef* dst, _PyStackRef src) {
+  if (PyStackRef_IsNull(src)) {
+    *dst = PyStackRef_NULL;
+  } else {
+    *dst = PyStackRef_DUP(src);
+  }
 }
+#else
+static void dup_obj(PyObject** dst, PyObject* src) {
+  Py_XINCREF(src);
+  *dst = src;
+}
+#endif
 
 static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
@@ -247,11 +379,10 @@ static PyObject* dynamo_eval_custom_code_impl(
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
+  PyFunctionObject* old_func = FUNC(frame);
 #if IS_PYTHON_3_12_PLUS
-  PyFunctionObject* old_func = (PyFunctionObject*)frame->f_funcobj;
   size_t size = code->co_framesize;
 #else
-  PyFunctionObject* old_func = frame->f_func;
   size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
 #endif
 
@@ -269,14 +400,23 @@ static PyObject* dynamo_eval_custom_code_impl(
 
   Py_INCREF(func);
   // consumes reference to func
-#if IS_PYTHON_3_12_PLUS
+#if IS_PYTHON_3_14_PLUS
+  _PyStackRef func_stackref = PyStackRef_FromPyObjectSteal((PyObject*)func);
+  _PyFrame_Initialize(
+      tstate, shadow, func_stackref, NULL, code, 0, frame->previous);
+#elif IS_PYTHON_3_12_PLUS
   _PyFrame_Initialize(shadow, func, NULL, code, 0);
 #else
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
 #endif
 
+#if IS_PYTHON_3_14_PLUS
+  _PyStackRef* fastlocals_old = frame->localsplus;
+  _PyStackRef* fastlocals_new = shadow->localsplus;
+#else
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
+#endif
   Py_ssize_t n_old = F_CODE(frame)->co_nlocalsplus;
   Py_ssize_t n_new = code->co_nlocalsplus;
 
@@ -314,7 +454,7 @@ static PyObject* dynamo_eval_custom_code_impl(
   //  variables into frame and initializing cell variables
   //  3. CPython interpreter executes the code object
   //
-  // Dynamo hooks the 3th step: before executing the code object, Dynamo
+  // Dynamo hooks the 3rd step: before executing the code object, Dynamo
   // transforms the code object into a new code object. Then, the old frame is
   // not suitable for executing the new code. Therefore, Dynamo needs to
   // manually create and initialize a new frame to execute the new code. The
@@ -377,16 +517,14 @@ static PyObject* dynamo_eval_custom_code_impl(
       !!(F_CODE(frame)->co_flags & CO_VARKEYWORDS);
 
   for (Py_ssize_t i = 0; i < total_argcount_old; i++) {
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[i] = fastlocals_old[i];
+    dup_obj(&fastlocals_new[i], fastlocals_old[i]);
   }
 
   // copy free vars
   Py_ssize_t nfrees_old = PyCode_GetNFreevars(F_CODE(frame));
 
   for (Py_ssize_t i = 0; i < nfrees_old; i++) {
-    Py_XINCREF(fastlocals_old[n_old - 1 - i]);
-    fastlocals_new[n_new - 1 - i] = fastlocals_old[n_old - 1 - i];
+    dup_obj(&fastlocals_new[n_new - 1 - i], fastlocals_old[n_old - 1 - i]);
   }
 
   // copy cell vars, from high index to low index, until it meets a variable
@@ -412,8 +550,7 @@ static PyObject* dynamo_eval_custom_code_impl(
     }
 #endif
 
-    Py_XINCREF(fastlocals_old[i]);
-    fastlocals_new[j] = fastlocals_old[i];
+    dup_obj(&fastlocals_new[j], fastlocals_old[i]);
   }
 
   // NOTE: if you want to evaluate frame instead of shadow in 3.12+,
@@ -471,21 +608,39 @@ static PyObject* dynamo__custom_eval_frame_shim(
   //  - Python callable(): enables TorchDynamo
   PyObject* callback = eval_frame_callback_get();
 
-  if (callback == Py_None) {
+  if (Py_IsNone(callback)) {
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
   return dynamo__custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
-#else // !(IS_PYTHON_3_14_PLUS)
+#else // !(IS_PYTHON_3_15_PLUS)
 
 // Fake definitions for everything we removed
 
 static void enable_eval_frame_shim(PyThreadState* tstate) {}
 static void enable_eval_frame_default(PyThreadState* tstate) {}
+PyObject* dynamo_eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    const char* trace_annotation,
+    int throw_flag) {
+  return NULL;
+}
+THPPyInterpreterFrame* THPPyInterpreterFrame_New(
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+  return NULL;
+}
+PyObject* dynamo_eval_frame_default(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    int throw_flag) {
+  return NULL;
+}
 
-static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {{NULL}};
 
 static PyTypeObject THPPyInterpreterFrameType = {
     PyVarObject_HEAD_INIT(NULL, 0)
@@ -495,7 +650,22 @@ static PyTypeObject THPPyInterpreterFrameType = {
     .tp_getset = THPPyInterpreterFrame_properties,
 };
 
-#endif // !(IS_PYTHON_3_14_PLUS)
+#endif // !(IS_PYTHON_3_15_PLUS)
+
+#if !IS_PYTHON_3_13_PLUS
+
+void clear_old_frame_if_python_312_plus(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
+
+#endif // !IS_PYTHON_3_13_PLUS
 
 static PyObject* increment_working_threads(
     PyThreadState* tstate,
@@ -529,37 +699,44 @@ static PyObject* decrement_working_threads(
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(
-    PyObject* new_callback,
-    PyThreadState* tstate,
-    PyObject* module) {
+static PyObject* set_eval_frame(PyObject* new_callback, PyObject* module) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
   //  - Python callable(): enables TorchDynamo
   PyObject* old_callback = eval_frame_callback_get();
 
-  // owned by caller
-  Py_INCREF(old_callback);
+  // Common case: if Dynamo is actually off, we might see a lot of
+  // traffic setting the callback to None when it was already
+  // None. Skip messing with threading, thread-local storage, and
+  // reference counts.
+  if (old_callback != new_callback) {
+    if (Py_IsNone(new_callback)) {
+      decrement_working_threads(PyThreadState_GET(), module);
+    } else {
+      increment_working_threads(PyThreadState_GET(), module);
+    }
 
-  if (old_callback != Py_None && new_callback == Py_None) {
-    decrement_working_threads(tstate, module);
-  } else if (old_callback == Py_None && new_callback != Py_None) {
-    increment_working_threads(tstate, module);
+    Py_INCREF(new_callback);
+
+    // Set thread local callback. This will drive behavior of our shim, if/when
+    // it is installed.
+    eval_frame_callback_set(new_callback);
+
+    // Transfer owned reference from eval_frame_callback_get() to caller
+    // without Py_DECREF/Py_INCREF.
+  } else {
+    // We retain a reference to old_callback because it's still the
+    // eval_frame_callback, so we need to give the caller their
+    // own reference.
+    Py_INCREF(old_callback);
   }
-
-  Py_INCREF(new_callback);
-  Py_DECREF(old_callback);
-
-  // Set thread local callback. This will drive behavior of our shim, if/when it
-  // is installed.
-  eval_frame_callback_set(new_callback);
 
   return old_callback;
 }
 
 static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
-  if (callback != Py_None && callback != Py_False &&
+  if (!Py_IsNone(callback) && !Py_IsFalse(callback) &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
@@ -567,21 +744,23 @@ static PyObject* set_eval_frame_py(PyObject* module, PyObject* callback) {
   }
   DEBUG_TRACE(
       "python enabled=%d and is run_only=%d",
-      callback != Py_None,
-      callback == Py_False);
-  return set_eval_frame(callback, PyThreadState_GET(), module);
+      !Py_IsNone(callback),
+      Py_IsFalse(callback));
+  return set_eval_frame(callback, module);
 }
 
 static PyObject* set_skip_guard_eval_unsafe(
     PyObject* dummy,
     PyObject* skip_guard_unsafe_flag) {
-  if (skip_guard_unsafe_flag != Py_False && skip_guard_unsafe_flag != Py_True) {
+  if (!Py_IsFalse(skip_guard_unsafe_flag) && !Py_IsTrue(skip_guard_unsafe_flag)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected True/False");
     return NULL;
   }
-  bool old_skip_guard_eval_unsafe = is_skip_guard_eval_unsafe;
-  is_skip_guard_eval_unsafe = skip_guard_unsafe_flag == Py_True;
+  bool old_skip_guard_eval_unsafe =
+      get_skip_guard_eval_raw(&skip_guard_eval_key);
+  set_skip_guard_eval_raw(
+      &skip_guard_eval_key, Py_IsTrue(skip_guard_unsafe_flag));
   if (old_skip_guard_eval_unsafe) {
     Py_RETURN_TRUE;
   }
@@ -591,8 +770,7 @@ static PyObject* set_skip_guard_eval_unsafe(
 static PyObject* get_eval_frame_callback_py(PyObject* dummy, PyObject* args) {
   // New reference
   PyObject* callback = eval_frame_callback_get();
-  Py_INCREF(callback);
-  return callback;
+  return Py_NewRef(callback);
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
@@ -614,16 +792,31 @@ static PyObject* unsupported(PyObject* dummy, PyObject* args) {
   if (!PyArg_ParseTuple(args, "OO", &obj1, &obj2)) {
     return NULL;
   }
-  Py_INCREF(obj2);
-  return obj2;
+  return Py_NewRef(obj2);
 }
 
 static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     obj = NULL;
   }
   Py_XSETREF(guard_error_hook, Py_XNewRef(obj));
   Py_RETURN_NONE;
+}
+
+static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
+  PyObject* old_hook = guard_complete_hook;
+
+  if (Py_IsNone(obj)) {
+    obj = NULL;
+  }
+
+  guard_complete_hook = Py_XNewRef(obj);
+
+  if (old_hook == NULL) {
+    Py_RETURN_NONE;
+  } else {
+    return old_hook;
+  }
 }
 
 // Debugging function for GNU C only.
@@ -656,7 +849,39 @@ static int clear_state(PyObject* module) {
   return -1;
 }
 
-bool is_skip_guard_eval_unsafe = false;
+// Set the fullgraph compiled frame counter and return the old value.
+// If setting to >= 0 (activating) and already active, no-op.
+static PyObject* set_fullgraph_compiled_frame_count_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  long val = PyLong_AsLong(arg);
+  if (val == -1 && PyErr_Occurred()) {
+    return NULL;
+  }
+  int old = get_fullgraph_count_raw(&fullgraph_count_key);
+  if (val >= 0 && old >= 0) {
+    // Already active, no-op.
+  } else {
+    set_fullgraph_count_raw(&fullgraph_count_key, (int)val);
+  }
+  return PyLong_FromLong(old);
+}
+
+// Set fullgraph_error_on_nested_compile and return the old value.
+static PyObject* set_fullgraph_error_on_nested_compile_py(
+    PyObject* dummy,
+    PyObject* arg) {
+  if (!Py_IsFalse(arg) && !Py_IsTrue(arg)) {
+    PyErr_SetString(PyExc_TypeError, "expected True/False");
+    return NULL;
+  }
+  bool old = get_fullgraph_error_raw(&fullgraph_error_key);
+  set_fullgraph_error_raw(&fullgraph_error_key, Py_IsTrue(arg));
+  if (old) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
@@ -664,9 +889,23 @@ static PyMethodDef _methods[] = {
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
-    {"set_code_exec_strategy", set_code_exec_strategy, METH_VARARGS, NULL},
+    {"set_code_exec_strategy",
+     dynamo_set_code_exec_strategy,
+     METH_VARARGS,
+     NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
+    {"set_fullgraph_compiled_frame_count",
+     set_fullgraph_compiled_frame_count_py,
+     METH_O,
+     NULL},
+    {"set_fullgraph_error_on_nested_compile",
+     set_fullgraph_error_on_nested_compile_py,
+     METH_O,
+     NULL},
+    {"set_eval_frame_isolate_recompiles_id", set_eval_frame_isolate_recompiles_id_py, METH_O, NULL},
+    {"get_eval_frame_isolate_recompiles_id", get_eval_frame_isolate_recompiles_id_py, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -700,18 +939,28 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 
+  Py_tss_t* keys[] = {
+      &isolate_recompiles_key,
+      &skip_guard_eval_key,
+      &fullgraph_count_key,
+      &fullgraph_error_key};
+  for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+    if (PyThread_tss_create(keys[i]) != 0) {
+      for (size_t j = 0; j < i; j++) {
+        PyThread_tss_delete(keys[j]);
+      }
+      Py_DECREF(module);
+      PyErr_SetString(
+          PyExc_RuntimeError, "dynamo: unable to create TSS key");
+      return NULL;
+    }
+  }
+
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
 #endif
 
-  if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
-    return NULL;
-  }
-  Py_INCREF(&THPPyInterpreterFrameType);
-  if (PyModule_AddObject(
-          module,
-          "_PyInterpreterFrame",
-          (PyObject*)&THPPyInterpreterFrameType) != 0) {
+  if (PyModule_AddType(module, &THPPyInterpreterFrameType) < 0) {
     return NULL;
   }
 

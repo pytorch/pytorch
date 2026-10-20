@@ -34,12 +34,13 @@ _register_default_op(torch.Tensor.grad_fn.__get__, _sharded_op_impl)  # type: ig
 _register_default_op(torch.Tensor.is_leaf.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 
 
-# device property is ambiguous as from a global prospective,
+# device property is ambiguous as from a global perspective,
 # ShardedTensor.device consists of multiple devices (might even across hosts)
 # We choose to return the current device of the local tensor to represent
 # the device property on each rank
 @_sharded_op_impl(torch.Tensor.device.__get__)
 def tensor_device(types, args=(), kwargs=None, pg=None):
+    # pyrefly: ignore [bad-index]
     self_st = args[0]
     # Validate types
     if not isinstance(self_st, ShardedTensor):
@@ -56,6 +57,7 @@ def tensor_device(types, args=(), kwargs=None, pg=None):
 
 @_sharded_op_impl(torch.Tensor.is_meta.__get__)  # type: ignore[attr-defined]
 def st_is_meta(types, args=(), kwargs=None, pg=None):
+    # pyrefly: ignore [bad-index]
     return args[0].local_tensor().is_meta
 
 
@@ -196,6 +198,7 @@ _register_sharded_op_on_local_shards(
 
 @_sharded_op_impl(torch.Tensor.requires_grad_)
 def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
+    # pyrefly: ignore [bad-index]
     self_st = args[0]
     # Validate types
     if not isinstance(self_st, ShardedTensor):

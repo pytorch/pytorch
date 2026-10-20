@@ -13,6 +13,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -38,7 +39,14 @@ def wrapped_gemm_bias_mul_with_c(a, b, bias, c):
     return lin_res, mul_res
 
 
+@torch.fx.wrap
+def wrapped_cat(tensors, dim):
+    return torch.cat(tensors, dim=dim)
+
+
 class TestSubgraphRewriter(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_subgraph_rewriter_preserves_logic(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -514,8 +522,10 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == "placeholder":
-                assert n.type == int
-                assert m.type == int
+                if n.type is not int:
+                    raise AssertionError(f"Expected n.type to be int, got {n.type}")
+                if m.type is not int:
+                    raise AssertionError(f"Expected m.type to be int, got {m.type}")
 
     def test_subgraph_rewriter_replace_consecutive_submodules(self):
         def f(x):
@@ -546,6 +556,38 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_replace_back_to_back_list_arg_matches(self):
+        class M(torch.nn.Module):
+            def forward(self, x1, x2, x3):
+                y1 = torch.cat([x1, x2], dim=1)
+                return torch.cat([y1, x3], dim=2)
+
+        def pattern(tensors, dim):
+            return torch.cat(tensors, dim=dim)
+
+        def replacement(tensors, dim):
+            return wrapped_cat(tensors, dim)
+
+        traced = symbolic_trace(M())
+
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        self.assertEqual(len(matches), 2)
+        replacement_nodes = [
+            node
+            for node in traced.graph.nodes
+            if node.op == "call_function" and node.target is wrapped_cat
+        ]
+        self.assertEqual(len(replacement_nodes), 2)
+        self.assertIs(replacement_nodes[1].args[0][0], replacement_nodes[0])
+
+        x1 = torch.randn(1, 30, 16)
+        x2 = torch.randn(1, 10, 16)
+        x3 = torch.randn(1, 40, 16)
+        self.assertEqual(M()(x1, x2, x3), traced.forward(x1, x2, x3))
 
     def test_subgraph_rewriter_with_overlapping_matches(self):
         def f(x):
@@ -672,7 +714,10 @@ class TestSubgraphRewriter(JitTestCase):
 
         traced.graph.lint()
         placeholder_nodes = [n for n in traced.graph.nodes if n.op == "placeholder"]
-        assert len(placeholder_nodes) == 3
+        if len(placeholder_nodes) != 3:
+            raise AssertionError(
+                f"Expected 3 placeholder nodes, got {len(placeholder_nodes)}"
+            )
 
         ref_outs = comparison_fn(x1, x2, x3)
         test_outs = traced.forward(x1, x2, x3)
@@ -782,7 +827,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         found_repalcement_node = False
         for node in traced.graph.nodes:
-            if node.target == wrapped_gemm_bias_mul:
+            if node.target is wrapped_gemm_bias_mul:
                 found_repalcement_node = True
                 break
 
@@ -847,7 +892,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         repalcement_node_found = 0
         for node in traced.graph.nodes:
-            if node.target == wrapped_gemm_bias_mul_with_c:
+            if node.target is wrapped_gemm_bias_mul_with_c:
                 repalcement_node_found += 1
 
         self.assertEqual(repalcement_node_found, 2)
@@ -945,7 +990,7 @@ class TestSubgraphRewriter(JitTestCase):
 def forward(self, x):
     _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
     return _reshape_alias_copy_default_1""",
-        )  # noqa: B950
+        )
 
     def test_replacement_with_attrs(self):
         class M(torch.nn.Module):

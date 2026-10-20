@@ -6,17 +6,19 @@ from __future__ import annotations
 import torch
 from torch.onnx._internal.exporter import _capture_strategies
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @common_utils.instantiate_parametrized_tests
 class ExportStrategiesTest(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "strategy_cls",
         [
-            _capture_strategies.TorchExportStrategy,
+            _capture_strategies.TorchExportStrictStrategy,
             _capture_strategies.TorchExportNonStrictStrategy,
             _capture_strategies.TorchExportDraftExportStrategy,
-            _capture_strategies.JitTraceConvertStrategy,
         ],
         name_fn=lambda strategy_cls: strategy_cls.__name__,
     )
@@ -33,25 +35,8 @@ class ExportStrategiesTest(common_utils.TestCase):
 
         result = strategy_cls()(model, (a, b), kwargs=None, dynamic_shapes=None)
         ep = result.exported_program
-        assert ep is not None
-        torch.testing.assert_close(ep.module()(a, b), model(a, b))
-
-    def test_jit_conversion_on_data_dependent_model(self):
-        class Model(torch.nn.Module):
-            def forward(self, a, b):
-                if a.sum() > 0:
-                    return a.cos()
-                # The branch is expected to be specialized
-                return b.sin()
-
-        model = Model()
-        a = torch.tensor(0.0)
-        b = torch.tensor(1.0)
-
-        strategy = _capture_strategies.JitTraceConvertStrategy()
-        result = strategy(model, (a, b), kwargs=None, dynamic_shapes=None)
-        ep = result.exported_program
-        assert ep is not None
+        if ep is None:
+            raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
     def test_draft_export_on_data_dependent_model(self):
@@ -72,54 +57,9 @@ class ExportStrategiesTest(common_utils.TestCase):
             expected_warning = "1 issue(s) found during export, and it was not able to soundly produce a graph."
             self.assertIn(expected_warning, str(cm.output))
         ep = result.exported_program
-        assert ep is not None
+        if ep is None:
+            raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
-
-    def test_jit_trace_supports_dynamic_shapes_as_tuple(self):
-        class Model(torch.nn.Module):
-            def forward(self, a, b):
-                c = torch.relu(a)
-                return c + b
-
-        model = Model()
-        a = torch.tensor([[0.0], [0.0]])
-        b = torch.tensor([[1.0], [1.0]])
-
-        strategy = _capture_strategies.JitTraceConvertStrategy()
-        batch_dim = torch.export.Dim("batch_dim")
-        dynamic_shapes = ({0: batch_dim}, {0: batch_dim})
-        result = strategy(model, (a, b), kwargs=None, dynamic_shapes=dynamic_shapes)
-        if result.exception:
-            raise result.exception
-        ep = result.exported_program
-        assert ep is not None
-        torch.testing.assert_close(ep.module()(a, b), model(a, b))
-        a_size = next(iter(ep.graph.nodes)).meta["val"].size()
-        batch_dim_val = a_size[0]
-        self.assertIsInstance(batch_dim_val, torch.SymInt)
-
-    def test_jit_trace_supports_dynamic_shapes_as_dict(self):
-        class Model(torch.nn.Module):
-            def forward(self, a, b):
-                c = torch.relu(a)
-                return c + b
-
-        model = Model()
-        a = torch.tensor([[0.0], [0.0]])
-        b = torch.tensor([[1.0], [1.0]])
-
-        strategy = _capture_strategies.JitTraceConvertStrategy()
-        batch_dim = torch.export.Dim("batch_dim")
-        dynamic_shapes = {"a": {0: batch_dim}, "b": {0: batch_dim}}
-        result = strategy(model, (a, b), kwargs=None, dynamic_shapes=dynamic_shapes)
-        if result.exception:
-            raise result.exception
-        ep = result.exported_program
-        assert ep is not None
-        torch.testing.assert_close(ep.module()(a, b), model(a, b))
-        a_size = next(iter(ep.graph.nodes)).meta["val"].size()
-        batch_dim_val = a_size[0]
-        self.assertIsInstance(batch_dim_val, torch.SymInt)
 
 
 if __name__ == "__main__":

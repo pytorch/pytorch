@@ -35,26 +35,26 @@ struct ExclusivelyOwnedTensorTraits {
     // incremented.
     const bool isUndefined = toDestroy == UndefinedTensorImpl::singleton();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        toDestroy->refcount_ == 1 || (toDestroy->refcount_ == 0 && isUndefined),
+        toDestroy->refcount() == 1 ||
+            (toDestroy->refcount() == 0 && isUndefined),
         "ExclusivelyOwned<Tensor> destroyed with isUndefined ",
         isUndefined,
         " and refcount ",
-        toDestroy->refcount_,
+        toDestroy->refcount(),
         ", expected 1 or, if isUndefined, 0!");
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        toDestroy->weakcount_ == 1 ||
-            (toDestroy->weakcount_ == 0 &&
+        toDestroy->weakcount() == 1 ||
+            (toDestroy->weakcount() == 0 &&
              toDestroy == UndefinedTensorImpl::singleton()),
         "ExclusivelyOwned<Tensor> destroyed with isUndefined ",
         isUndefined,
         " and weakcount ",
-        toDestroy->weakcount_,
+        toDestroy->weakcount(),
         ", expected 1 or, if isUndefined, 0!");
     if (!isUndefined) {
 #ifndef NDEBUG
       // Needed to pass the debug assertions in ~intrusive_ptr_target.
-      toDestroy->refcount_ = 0;
-      toDestroy->weakcount_ = 0;
+      toDestroy->combined_refcount_.store(0, std::memory_order_relaxed);
 #endif
       delete toDestroy;
     }

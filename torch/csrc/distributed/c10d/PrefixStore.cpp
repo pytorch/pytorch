@@ -105,7 +105,7 @@ void PrefixStore::multiSet(
   store_->multiSet(prefixed_keys, values);
 }
 
-// Returns true if this store support append, multiGet and multiSet
+// Returns true if this store supports append, multiGet and multiSet
 bool PrefixStore::hasExtendedApi() const {
   return store_->hasExtendedApi();
 }
@@ -116,8 +116,8 @@ void PrefixStore::queuePush(
   store_->queuePush(joinKey(key), value);
 }
 
-std::vector<uint8_t> PrefixStore::queuePop(const std::string& key) {
-  return store_->queuePop(joinKey(key));
+std::vector<uint8_t> PrefixStore::queuePop(const std::string& key, bool block) {
+  return store_->queuePop(joinKey(key), block);
 }
 
 int64_t PrefixStore::queueLen(const std::string& key) {
@@ -144,6 +144,20 @@ c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
   TORCH_CHECK(
       store != nullptr, "Underlying Non-PrefixStore shouldn't be null.");
   return store;
+}
+
+std::vector<std::string> PrefixStore::listKeys() {
+  auto keys = store_->listKeys();
+  std::vector<std::string> filteredKeys;
+  filteredKeys.reserve(keys.size());
+
+  for (auto& key : keys) {
+    if (key.starts_with(prefix_)) {
+      key = key.substr(prefix_.size() + 1);
+      filteredKeys.push_back(std::move(key));
+    }
+  }
+  return filteredKeys;
 }
 
 } // namespace c10d

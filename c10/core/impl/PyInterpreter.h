@@ -9,6 +9,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,11 @@
 namespace c10 {
 struct IValue;
 class OperatorHandle;
+struct SafePyObject;
 struct TensorImpl;
+namespace impl {
+struct PyObjectSlot;
+} // namespace impl
 } // namespace c10
 
 namespace torch::jit {
@@ -126,9 +131,12 @@ struct C10_API PyInterpreterVTable {
 
   // Run Py_INCREF on a PyObject.
   virtual void incref(PyObject* pyobj) const = 0;
-  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-  virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
+  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call.
+  virtual void decref(PyObject* pyobj) const = 0;
+  // Run PyUnstable_TryIncRef on a PyObject if it's not NULL.
+  virtual bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const = 0;
+  // Run Py_REFCNT on a PyObject.
+  virtual size_t refcnt(PyObject* pyobj) const = 0;
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this
@@ -143,9 +151,9 @@ struct C10_API PyInterpreterVTable {
   virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
-  // This is only invoked in the multipy/torchdeploy situation from
-  // pythonOpRegistrationTrampoline; this lets us get to the Python
-  // interpreter to actually find the appropriate Python op registration
+  // This is only invoked in the multipy/torchdeploy // codespell:ignore multipy
+  // situation from pythonOpRegistrationTrampoline; this lets us get to the
+  // Python interpreter to actually find the appropriate Python op registration
   // entry to call.
   virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
@@ -168,6 +176,9 @@ struct C10_API PyInterpreterVTable {
 
   virtual bool is_contiguous(const TensorImpl* self, at::MemoryFormat)
       const = 0;
+  virtual c10::SymBool sym_is_contiguous(
+      const TensorImpl* self,
+      at::MemoryFormat) const = 0;
   virtual bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
       const = 0;
   virtual bool is_non_overlapping_and_dense(const TensorImpl* self) const = 0;
@@ -181,6 +192,8 @@ struct C10_API PyInterpreterVTable {
   virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;
+  // torch.fx.experimental._config.backed_size_oblivious
+  virtual bool backed_size_oblivious() const = 0;
 
   virtual void trace_gpu_event_creation(
       c10::DeviceType device_type,
@@ -215,6 +228,111 @@ struct C10_API PyInterpreterVTable {
       uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
+
+  // Note [C++ FakeTensor dispatch]
+  // A fake tensor models a tensor on a logical device without allocating its
+  // data. Running an op on fake tensors must reproduce the outputs' sizes,
+  // strides, dtype, layout, logical device and aliasing; sizes that depend on
+  // tensor data become unbacked symbolic sizes. Fake tensors are backed by
+  // Meta tensors, but Meta alone is not enough: a Meta tensor's device is meta,
+  // not the device being modeled, and data-dependent sizes need fake-mode
+  // state such as the ShapeEnv.
+  //
+  // The C++ Fake fallback draws on several distinct Python implementations:
+  //  - Decompositions (fake_try_decomp) express an op in terms of other ops,
+  //    which then run on fake tensors. They come from the decomposition_table
+  //    and from Python CompositeImplicitAutograd overrides. A decomposition
+  //    suited to symbolic shapes is not always the right choice otherwise:
+  //    under static shapes only torch._decomp decompositions apply, and only
+  //    to non-sparse inputs. An op with a meta_table entry is not decomposed.
+  //  - Python Meta kernels (fake_try_meta) compute output metadata without
+  //    data. This runs the op's Python Meta registration only; C++ Meta kernels
+  //    are reached by redispatching to Meta, not through this callback.
+  //  - Fake-specific implementations cover what Meta can't, such as
+  //    logical-device rules and data-dependent output sizes. Built-in ops use
+  //    FakeTensorMode's op_implementations handlers (fake_try_op_impl), matched
+  //    either by exact op or by a predicate over a family of ops. Custom ops
+  //    use torch.library.register_fake kernels (fake_try_custom_op_impl), which
+  //    reach the fake impl context through torch.library.get_ctx().
+  //  - Prims (fake_try_prim_meta) run the prim's prim_meta_impl.
+  //
+  // Real-tensor propagation (FakeTensorMode's propagate_real_tensors) is a
+  // separate concern. When every fake input has a real tensor behind it,
+  // fake_run_real_op runs the op on those reals before any fake kernel. The
+  // resulting RealOpResult holds the fake args, the real args and the real
+  // output. After fake execution, propagate_real_tensors checks the fake
+  // outputs against the real ones, attaches the reals and hints unbacked
+  // symbols; fake_infer_from_real_out uses it to build outputs for a custom op
+  // that has no fake kernel. Propagation is optional and reals may be missing,
+  // so fake execution must not depend on reading real data.
+  //
+  // Contracts shared by the callbacks below:
+  //  - fake_try_* and fake_infer_from_real_out take the op's arguments in
+  //    schema order on top of stack. On true they have replaced them with the
+  //    op's outputs in schema order. On false (the implementation doesn't apply
+  //    or returned NotImplemented) or on an exception, stack is unchanged.
+  //    Exceptions propagate.
+  //  - Every callback acquires the GIL.
+  //  - Callbacks noted as needing an active mode error if no C++
+  //    FakeTensorMode is active.
+  //  - fake_try_* callbacks other than fake_try_meta re-enable the Fake key, so
+  //    ops inside the Python implementation dispatch back to Fake.
+
+  // has_python_cia is set if op has a Python CIA override, even when this
+  // returns false.
+  virtual bool fake_try_decomp(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      bool has_symbolic_sizes,
+      bool* has_python_cia) const = 0;
+  // Runs under the caller's Meta dispatch and in-kernel state.
+  virtual bool fake_try_meta(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
+  // Needs an active mode. real (nullable, borrowed) is the fake_run_real_op
+  // result, used if a profile-generated fake kernel has no profile for these
+  // inputs.
+  virtual bool fake_try_custom_op_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      PyObject* real) const = 0;
+  // Needs an active mode. Non-fake Meta outputs are converted to fakes on
+  // common_device; this is the only callback that converts its outputs. See
+  // Note [C++ fake op_impl outputs] in torch/csrc/PyInterpreter.cpp.
+  virtual bool fake_try_op_impl(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      c10::Device common_device) const = 0;
+  // Python callback for prims handling: runs the prims op's Python
+  // prim_meta_impl, if it defines one.
+  virtual bool fake_try_prim_meta(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
+  // Needs an active mode. Returns false if op has a fake kernel. real
+  // (borrowed) is the fake_run_real_op result.
+  virtual bool fake_infer_from_real_out(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack,
+      PyObject* real) const = 0;
+  // Needs an active mode. Converts real to a fake tensor through the mode's
+  // fake tensor converter.
+  virtual c10::intrusive_ptr<TensorImpl> to_meta_tensor(
+      const c10::intrusive_ptr<TensorImpl>& real) const = 0;
+  // Whether real tensor inputs are allowed: fake_tensor_tls's override if set,
+  // else the active mode's allow_non_fake_inputs_ (needs an active mode).
+  virtual bool allow_non_fake_inputs() const = 0;
+  // Needs an active mode. Runs op on the reals behind fake_args and returns the
+  // RealOpResult as a new reference, or nullptr if an arg has no real tensor
+  // or the real op raises ZeroDivisionError.
+  virtual PyObject* fake_run_real_op(
+      const c10::OperatorHandle& op,
+      const torch::jit::Stack& fake_args) const = 0;
+  // Needs an active mode. Applies real (borrowed) to the fake outputs on top of
+  // stack, replacing them if the Python side returns new ones.
+  virtual void propagate_real_tensors(
+      const c10::OperatorHandle& op,
+      PyObject* real,
+      torch::jit::Stack* stack) const = 0;
 };
 
 struct C10_API PyInterpreter {
@@ -238,26 +356,6 @@ struct C10_API PyInterpreter {
   // destructors would be disarmed here only begin the destruction process
   // on process shutdown (long after the dlclose has occurred).
   void disarm() noexcept;
-};
-
-// PyInterpreterStatus describes what the state of its interpreter tag
-// is, relative to the thread currently holding the GIL.
-enum class PyInterpreterStatus {
-  // We just allocated the Tensor, it hasn't escaped to other threads,
-  // we know that it definitely hasn't been tagged to be associated
-  // with an interpreter.
-  DEFINITELY_UNINITIALIZED,
-  // We queried the interpreter field and it looked uninitialized.  But
-  // another thread may have raced with us to tag it with some other
-  // interpreter id.  So we will have to do a CEX to make sure we can
-  // actually nab it.
-  MAYBE_UNINITIALIZED,
-  // We queried the interpreter field and it was tagged to belong to us.
-  // This means we have sole write access (as we hold the GIL for this
-  // interpreter)
-  TAGGED_BY_US,
-  // Someone else tagged this.  We can't use this TensorImpl from Python.
-  TAGGED_BY_OTHER,
 };
 
 } // namespace c10::impl

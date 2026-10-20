@@ -7,11 +7,14 @@
 
 namespace c10::utils {
 
-static std::shared_mutex env_mutex;
+static std::shared_mutex& get_env_mutex() {
+  static std::shared_mutex env_mutex;
+  return env_mutex;
+}
 
 // Set an environment variable.
 void set_env(const char* name, const char* value, bool overwrite) {
-  std::lock_guard lk(env_mutex);
+  std::lock_guard lk(get_env_mutex());
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -44,9 +47,32 @@ void set_env(const char* name, const char* value, bool overwrite) {
   return;
 }
 
+// Remove an environment variable.
+void unset_env(const char* name) {
+  std::lock_guard lk(get_env_mutex());
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4996)
+  // On Windows an assignment with an empty value removes the variable.
+  auto full_env_variable = fmt::format("{}=", name);
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  auto err = putenv(full_env_variable.c_str());
+#pragma warning(pop)
+#else
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  auto err = unsetenv(name);
+#endif
+  TORCH_INTERNAL_ASSERT(
+      err == 0,
+      "unsetenv failed for environment \"",
+      name,
+      "\", the error is: ",
+      err);
+}
+
 // Reads an environment variable and returns the content if it is set
 std::optional<std::string> get_env(const char* name) noexcept {
-  std::shared_lock lk(env_mutex);
+  std::shared_lock lk(get_env_mutex());
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4996)
@@ -77,10 +103,10 @@ bool has_env(const char* name) noexcept {
 std::optional<bool> check_env(const char* name) {
   auto env_opt = get_env(name);
   if (env_opt.has_value()) {
-    if (*env_opt == "0") {
+    if (env_opt == "0") {
       return false;
     }
-    if (*env_opt == "1") {
+    if (env_opt == "1") {
       return true;
     }
     TORCH_WARN(

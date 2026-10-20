@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
@@ -86,8 +87,8 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
-const static int kInvalidOpsetVersion = -1;
-const static int kMainOpsetVersion = 20;
+constexpr int kInvalidOpsetVersion = -1;
+constexpr int kMainOpsetVersion = 23;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
 constexpr static std::array<int64_t, kMainOpsetVersion + 1>
@@ -113,6 +114,9 @@ constexpr static std::array<int64_t, kMainOpsetVersion + 1>
         8, // opset 18
         9, // opset 19
         9, // opset 20
+        10, // opset 21
+        10, // opset 22
+        11, // opset 23
 };
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -127,10 +131,14 @@ void validateBlock(
       validateBlock(sub_block, operator_export_type);
     }
     // Macro'ed so we get a marginally better line number on failed export
+    // `name` is spliced into a std::string concatenation, not passed as its own
+    // argument: call sites rely on the leading std::string to anchor chains
+    // that start with a string literal plus a const char*.
 #define FAIL_EXPORT(name)                          \
-  throw std::runtime_error(                        \
+  TORCH_CHECK(                                     \
+      false,                                       \
       std::string("ONNX export failed: ") + name + \
-      "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
+          "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
     // Special error messages for certain types of operators
     if (node->kind() == prim::PythonOp) {
       if (operator_export_type !=
@@ -208,11 +216,10 @@ void CreateExternalFile(
   std::string fullFilePath = folder + "/" + tensorName;
   std::unique_ptr<FILE, decltype(&CloseFile)> fp(
       fopen(fullFilePath.c_str(), "wb"), &CloseFile);
-  if (fp == nullptr) {
-    throw std::runtime_error(
-        std::string("ONNX export failed. Could not open file or directory: ") +
-        fullFilePath);
-  }
+  TORCH_CHECK(
+      fp != nullptr,
+      "ONNX export failed. Could not open file or directory: ",
+      fullFilePath);
   std::string s = get_little_endian_data(tensor);
   fwrite(s.c_str(), tensor.element_size(), tensor.numel(), fp.get());
 } // fclose() called here through CloseFile(), if FILE* is not a null pointer.
@@ -259,8 +266,8 @@ class GraphEncoder {
  private:
   // Using std::map instead of std::unordered_map for initializers
   // in EncodeGraph constructor so that the order in which initializers
-  // get written to the ONNX graph is always the deterministic and
-  // predictable. While this is not a ONNX requirement, it is needed
+  // get written to the ONNX graph is always deterministic and
+  // predictable. While this is not an ONNX requirement, it is needed
   // for testing purposes in tests that use _export_to_pretty_string()
   // for validating ONNX graphs.
   void EncodeGraph(
@@ -491,7 +498,7 @@ static onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
       std::ostringstream err_msg;
       err_msg << "attribute \"" << name.toDisplayString()
               << "\" has unexpected kind: " << toString(at_kind);
-      throw std::runtime_error(err_msg.str());
+      TORCH_CHECK(false, std::move(err_msg).str());
   }
 }
 
@@ -612,8 +619,8 @@ void GraphEncoder::TensorTypeToONNXType(
     auto sizes = tensor_type->symbolic_sizes().sizes().value();
     for (const auto i : c10::irange(sizes.size())) {
       shape->add_dim();
-      if ((dynamic_axes.find(name) != dynamic_axes.end()) &&
-          (dynamic_axes.at(name).find(i) != dynamic_axes.at(name).end())) {
+      if ((dynamic_axes.contains(name)) &&
+          (dynamic_axes.at(name).contains(i))) {
         shape->mutable_dim(i)->set_dim_param(dynamic_axes.at(name).at(i));
         if (!sizes[i].is_static()) {
           symbol_dim_map_[sizes[i]] = dynamic_axes.at(name).at(i);
@@ -621,7 +628,7 @@ void GraphEncoder::TensorTypeToONNXType(
       } else if (sizes[i].is_static()) {
         shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
       } else if (assign_dim_param) {
-        if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
+        if (!symbol_dim_map_.contains(sizes[i])) {
           symbol_dim_map_[sizes[i]] =
               dim_name_prefix + name + "_dim_" + std::to_string(i);
         }
@@ -1158,7 +1165,7 @@ void GraphEncoder::AddAttribute(
       std::ostringstream err_msg;
       err_msg << "attribute \"" << name.toDisplayString()
               << "\" has unexpected kind: " << toString(node->kindOf(name));
-      throw std::runtime_error(err_msg.str());
+      TORCH_CHECK(false, std::move(err_msg).str());
   }
 }
 
@@ -1182,7 +1189,7 @@ void GraphEncoder::EncodeLocalFunctionOpsetImport(
     }
     domains_.insert(domain);
 
-    if (custom_domains.find(domain) == custom_domains.end()) {
+    if (!custom_domains.contains(domain)) {
       custom_domains.insert(domain);
 
       auto* custom_imp = func_proto->add_opset_import();
@@ -1440,10 +1447,9 @@ std::string serialize_model_proto_to_string(
 
 void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
-  if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
-    throw std::runtime_error("Invalid ONNX proto string.");
-    return;
-  }
+  TORCH_CHECK(
+      ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size()),
+      "Invalid ONNX proto string.");
   // 1. baseline check
   // These two checks prevent broken graph being generated
   // And errors out exporting if that happens.

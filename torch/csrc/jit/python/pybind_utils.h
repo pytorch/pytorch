@@ -23,7 +23,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -174,20 +173,20 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
           } catch (py::error_already_set& e) {
-            auto err = std::runtime_error(c10::str(
+            auto err = c10::str(
                 "Got the following error when running the callback: ",
-                e.what()));
+                e.what());
             {
               pybind11::gil_scoped_acquire ag;
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
-              // Clear the Python Error Indicator as we has recorded the
+              // Clear the Python Error Indicator as we have recorded the
               // exception in the response message.
               PyErr_Clear();
             }
 
-            throw std::runtime_error(err);
+            TORCH_CHECK(false, err);
           }
         },
         PyObjectType::get()));
@@ -208,7 +207,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               // Release ownership on py::objects and also restore Python
               // Error Indicator.
               e.restore();
-              // Clear the Python Error Indicator as we has recorded the
+              // Clear the Python Error Indicator as we have recorded the
               // exception in the response message.
               PyErr_Clear();
             }
@@ -370,11 +369,18 @@ using InferredType = c10::InferredType;
 
 InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
+namespace detail {
+
+// Additional implementations for tryToInferType().
+std::optional<InferredType> _tryToInferTypeImpl(py::handle input);
+
+} // namespace detail
+
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
 //   input is an empty container (list, dict)
-//   input is an list with element types that cannot be unified
-//   input is an dict with key or value types that cannot be unified
+//   input is a list with element types that cannot be unified
+//   input is a dict with key or value types that cannot be unified
 inline InferredType tryToInferType(py::handle input) {
   // Try tensor types
   if (THPVariable_Check(input.ptr())) {
@@ -422,6 +428,14 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   }
 
+  // Check for types registered in _tryToInferTypeImpl (e.g. ProcessGroup)
+  // before falling through to the expensive inspect.isclass / JIT compilation
+  // path below.
+  auto ty = detail::_tryToInferTypeImpl(input);
+  if (ty.has_value()) {
+    return ty.value();
+  }
+
   auto enum_type = py::module::import("enum").attr("Enum");
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {
@@ -433,20 +447,22 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   py::bool_ isClass =
-      py::module::import("inspect").attr("isclass")(input.get_type());
+      py::module::import("inspect").attr("isclass")(py::type::handle_of(input));
   if (py::cast<bool>(isClass)) {
     // Assume that the class is compiled already or will compile. Invalidate
     // this later if needed.
     bool class_compiled = true;
 
     // Check if the type is already compiled.
-    py::object existing_ty = py::module::import("torch.jit._state")
-                                 .attr("_get_script_class")(input.get_type());
+    py::object existing_ty =
+        py::module::import("torch.jit._state")
+            .attr("_get_script_class")(py::type::handle_of(input));
 
     if (existing_ty.is_none()) {
       // If not, try to compile it.
-      py::bool_ can_compile = py::module::import("torch._jit_internal")
-                                  .attr("can_compile_class")(input.get_type());
+      py::bool_ can_compile =
+          py::module::import("torch._jit_internal")
+              .attr("can_compile_class")(py::type::handle_of(input));
 
       if (py::cast<bool>(can_compile)) {
         // Try to compile the class. This is wrapped in a try-catch because
@@ -456,7 +472,7 @@ inline InferredType tryToInferType(py::handle input) {
         try {
           py::module::import("torch.jit._script")
               .attr("_recursive_compile_class")(
-                  input.get_type(), SourceRange());
+                  py::type::handle_of(input), SourceRange());
         } catch (...) {
           // Invalidate the assumption that the class compiled so that we don't
           // look up and return its JIT type as the type for the input.
@@ -468,8 +484,9 @@ inline InferredType tryToInferType(py::handle input) {
     // If the class compiled successfully, look up the existing JIT type by
     // qualified name and return it.
     if (class_compiled) {
-      auto script_class = py::module::import("torch.jit._state")
-                              .attr("_get_script_class")(input.get_type());
+      auto script_class =
+          py::module::import("torch.jit._state")
+              .attr("_get_script_class")(py::type::handle_of(input));
 
       if (!script_class.is_none()) {
         auto class_type = py::cast<ClassTypePtr>(script_class);
@@ -539,7 +556,7 @@ inline InferredType tryToInferPrimitiveType(py::handle input) {
 inline InferredType tryToInferContainerType(
     py::handle input,
     bool primitiveTypeOnly = false) {
-  if (six::isTuple(input)) {
+  if (PyTuple_Check(input.ptr())) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
@@ -642,18 +659,18 @@ inline InferredType tryToInferContainerType(
           "are supported ",
           "as inputs or outputs of traced functions",
           ", but instead got value of type ",
-          py::str(input.get_type().attr("__name__")),
+          py::str(py::type::handle_of(input).attr("__name__")),
           "."));
     } else {
       // TODO: this message is not correct anymore, since this InferredType is
-      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // used from a bunch of circumstances unrelated to tracing. We can reuse
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
           "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",
           "are supported ",
           "as inputs or outputs of traced functions",
           ", but instead got value of type ",
-          py::str(input.get_type().attr("__name__")),
+          py::str(py::type::handle_of(input).attr("__name__")),
           "."));
     }
   }
@@ -755,14 +772,6 @@ inline IValue createGenericDict(
   return IValue(elems);
 }
 
-template <class T>
-inline void guardAgainstNamedTensor(const T& var) {
-  TORCH_CHECK(
-      !var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
-      "workaround please drop names via `tensor = tensor.rename(None)`.");
-}
-
 // Extract custom class registered with torchbind
 template <typename T>
 c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
@@ -773,6 +782,47 @@ c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
   return std::move(ivalue).toCustomClass<T>();
 }
 
+inline std::string basicTypeName(py::handle obj) {
+  return py::str(py::type::handle_of(obj).attr("__name__"));
+}
+
+constexpr size_t kMaxElements = 5;
+
+inline std::string sequenceTypeName(py::handle obj) {
+  auto seq = py::reinterpret_borrow<py::sequence>(obj);
+  auto length = py::len(seq);
+
+  if (length == 0) {
+    return basicTypeName(obj);
+  }
+
+  std::stringstream ss;
+  ss << basicTypeName(obj);
+  ss << "(";
+
+  size_t loop_bound = std::min(static_cast<size_t>(length), kMaxElements);
+  bool first = true;
+
+  // Readability cap on error-message output to prevent long sequences.
+  // Assumption: the sequence is homogeneous. This is true for the shape-derived
+  // lists this is meant for. This is NOT guaranteed for an arbitrary list a
+  // caller might pass.
+  for (const auto i : c10::irange(loop_bound)) {
+    if (!first) {
+      ss << ", ";
+    }
+    ss << basicTypeName(seq[i]);
+    first = false;
+  }
+
+  if (length > kMaxElements) {
+    ss << ", ...";
+  }
+
+  ss << ")";
+  return ss.str();
+}
+
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
 inline std::string friendlyTypeName(py::handle obj) {
@@ -780,7 +830,7 @@ inline std::string friendlyTypeName(py::handle obj) {
     auto field_names =
         py::cast<std::vector<std::string>>(py::getattr(obj, "_fields"));
     std::stringstream ss;
-    ss << py::str(obj.get_type().attr("__name__"));
+    ss << basicTypeName(obj);
     ss << " (aka NamedTuple(";
     bool first = true;
     for (auto& field_name : field_names) {
@@ -791,9 +841,11 @@ inline std::string friendlyTypeName(py::handle obj) {
       first = false;
     }
     ss << "))";
-    return ss.str();
+    return std::move(ss).str();
+  } else if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
+    return sequenceTypeName(obj);
   } else {
-    return py::str(obj.get_type().attr("__name__"));
+    return basicTypeName(obj);
   }
 }
 
@@ -837,16 +889,18 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   try {
     return toIValue(object, type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-        " expected value of type ",
-        type->str(),
-        " for return value but instead got value of type ",
-        py::str(object.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(object),
-        "\nCast error details: ",
-        error.what()));
+    TORCH_CHECK(
+        false,
+        c10::str(
+            " expected value of type ",
+            type->str(),
+            " for return value but instead got value of type ",
+            py::str(py::type::handle_of(object).attr("__name__")),
+            ".",
+            "\nValue: ",
+            py::repr(object),
+            "\nCast error details: ",
+            error.what()));
   }
 }
 
@@ -859,7 +913,7 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
     err << "Unknown reference to ScriptClass ";
     err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
-    throw std::runtime_error(err.str());
+    TORCH_CHECK(false, std::move(err).str());
   }
   return py_class;
 }
@@ -1186,6 +1240,10 @@ inline std::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName& qualname) {
+  if (consume_should_skip_torch_function()) {
+    return std::nullopt;
+  }
+
   std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
@@ -1274,8 +1332,23 @@ TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const py::args& args,
     const py::kwargs& kwargs);
 
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs);
+
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object invokeOperatorFromPython(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = std::nullopt);
@@ -1295,6 +1368,16 @@ TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object _get_operation_for_overload_or_packet(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     Symbol symbol,
     const py::args& args,
     const py::kwargs& kwargs,

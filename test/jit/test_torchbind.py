@@ -8,7 +8,10 @@ import sys
 from typing import Optional
 
 import torch
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 
 
 # Make the helper files in test/ importable
@@ -19,17 +22,14 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
-
 @skipIfTorchDynamo("skipping as a precaution")
 class TestTorchbind(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that crash on torchbind static methods (can't downcast to
+        # GraphFunction). Record state baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         load_torchbind_test_lib()
 
     def test_torchbind(self):
@@ -271,9 +271,11 @@ class TestTorchbind(JitTestCase):
         inst = FooBar1234()
         scripted = torch.jit.script(inst)
         eic = self.getExportImportCopy(scripted)
-        assert eic() == "deserialized"
+        if eic() != "deserialized":
+            raise AssertionError(f"Expected 'deserialized', got {eic()!r}")
         for expected in ["deserialized", "was", "i"]:
-            assert eic.f.pop() == expected
+            if eic.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
@@ -292,9 +294,11 @@ class TestTorchbind(JitTestCase):
         # values at instantiation in the test with some transformation, but
         # because it seems we serialize/deserialize multiple times, that
         # transformation isn't as you would it expect it to be.
-        assert eic() == 7
+        if eic() != 7:
+            raise AssertionError(f"Expected 7, got {eic()!r}")
         for expected in [7, 3, 3, 1]:
-            assert eic.f.pop() == expected
+            if eic.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_deepcopy(self):
         class FooBar4321(torch.nn.Module):
@@ -308,9 +312,11 @@ class TestTorchbind(JitTestCase):
         inst = FooBar4321()
         scripted = torch.jit.script(inst)
         copied = copy.deepcopy(scripted)
-        assert copied.forward() == 7
+        if copied.forward() != 7:
+            raise AssertionError(f"Expected 7, got {copied.forward()!r}")
         for expected in [7, 3, 3, 1]:
-            assert copied.f.pop() == expected
+            if copied.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
@@ -323,9 +329,11 @@ class TestTorchbind(JitTestCase):
 
         inst = FooBar4321()
         copied = copy.deepcopy(inst)
-        assert copied() == 7
+        if copied() != 7:
+            raise AssertionError(f"Expected 7, got {copied()!r}")
         for expected in [7, 3, 3, 1]:
-            assert copied.f.pop() == expected
+            if copied.f.pop() != expected:
+                raise AssertionError(f"Expected {expected!r}, got unexpected value")
 
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
@@ -433,6 +441,21 @@ class TestTorchbind(JitTestCase):
 
         self.checkScript(fn, (1,))
 
+    def test_staticmethod_default_args(self):
+        def fn(inp: int) -> int:
+            res = (
+                torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(
+                    inp
+                )
+            )
+            return (
+                torch.classes._TorchScriptTesting._StaticMethod.staticMethodWithDefault(
+                    res, 4
+                )
+            )
+
+        self.checkScript(fn, (1,))
+
     def test_hasattr(self):
         ss = torch.classes._TorchScriptTesting._StackString(["foo", "bar"])
         self.assertFalse(hasattr(ss, "baz"))
@@ -463,3 +486,7 @@ class TestTorchbind(JitTestCase):
             return obj.decrement()
 
         self.checkScript(gn, ())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -1,18 +1,25 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Union
+from typing import Any, cast
 
 import torch
 from torch import nn, optim
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+device_module = torch.get_device_module(device_type)
 
 
 @dataclass
@@ -76,15 +83,15 @@ class TestRuntimeEstimator(TestCase):
         args: tuple[Any, ...],
     ) -> float:
         warmup_iters, actual_iters = 2, 5
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
+        start_event = device_module.Event(enable_timing=True)
+        end_event = device_module.Event(enable_timing=True)
         for _ in range(warmup_iters):
             func(*args)
         start_event.record()
         for _ in range(actual_iters):
             func(*args)
         end_event.record()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         measured_time = start_event.elapsed_time(end_event) / actual_iters
         return measured_time
 
@@ -104,10 +111,10 @@ class TestRuntimeEstimator(TestCase):
     def _init_model_and_args(
         self,
         model_type: str,
-        model_args: Union[ConvArgs, ModelArgs],
+        model_args: ConvArgs | ModelArgs,
         bsz: int,
     ) -> tuple[nn.Module, optim.Optimizer, torch.Tensor]:
-        dev = torch.cuda.current_device()
+        dev = torch.accelerator.current_device_index()
         if model_type == "Transformer":
             model_args = cast(ModelArgs, model_args)
             with torch.device(dev):
@@ -128,8 +135,7 @@ class TestRuntimeEstimator(TestCase):
             raise NotImplementedError("Only Transformer and CNN is supported")
         return (model, optimizer, inp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     def test_transformer_runtime(
         self,
     ):
@@ -165,8 +171,7 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU not available")
     def test_conv_model_runtime(
         self,
     ):

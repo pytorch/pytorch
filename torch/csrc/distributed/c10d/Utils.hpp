@@ -48,34 +48,34 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
-  ss << "(";
+  ss << '(';
   for (const auto i : c10::irange(l.size())) {
     if (i > 0) {
       ss << ", ";
     }
     ss << l[i];
   }
-  ss << ")";
-  return ss.str();
+  ss << ')';
+  return std::move(ss).str();
 }
 
 inline std::string toString(const c10::Layout& layout) {
   std::stringstream ss;
   ss << layout;
-  return ss.str();
+  return std::move(ss).str();
 }
 
 inline void assertSameType(
     const at::DeprecatedTypeProperties& type,
     const std::vector<at::Tensor>& tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    if (!tensors[i].options().type_equal(type.options())) {
-      const std::string expected = type.toString();
-      const std::string actual = tensors[i].toString();
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "mixed types (" + expected + " and " + actual + ")");
-    }
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK_VALUE(
+        tensor.options().type_equal(type.options()),
+        "mixed types (",
+        type.toString(),
+        " and ",
+        tensor.toString(),
+        ")");
   }
 }
 
@@ -130,15 +130,15 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char* val = std::getenv(env[i].c_str());
-    if (val == nullptr) {
+    const auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
-      ret = std::stoi(val);
+      ret = std::stoi(val.value());
     } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
@@ -190,43 +190,39 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
 inline void assertSameSizes(
     const at::IntArrayRef& sizes,
     const std::vector<at::Tensor>& tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    if (!tensors[i].sizes().equals(sizes)) {
-      const auto expected = toString(sizes);
-      const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "mixed sizes (" + expected + " and " + actual + ")");
-    }
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK_VALUE(
+        tensor.sizes().equals(sizes),
+        "mixed sizes (",
+        toString(sizes),
+        " and ",
+        toString(tensor.sizes()),
+        ")");
   }
 }
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
-  if (tensors.empty()) {
-    throw std::invalid_argument("argument is empty");
-  }
+  TORCH_CHECK_VALUE(!tensors.empty(), "argument is empty");
 
   // Ensure all tensors have identical type and shape
   auto options = tensors[0].options();
   auto sizes = tensors[0].sizes();
   for (const auto i : c10::irange(1, tensors.size())) {
-    if (!tensors[i].options().type_equal(options)) {
-      const auto expected = toString(options);
-      const auto actual = toString(tensors[i].options());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "argument contains mixed types (" + expected + " and " + actual +
-          ")");
-    }
-    if (!tensors[i].sizes().equals(sizes)) {
-      const auto expected = toString(sizes);
-      const auto actual = toString(tensors[i].sizes());
-      throw std::invalid_argument(
-          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-          "argument contains mixed types (" + expected + " and " + actual +
-          ")");
-    }
+    TORCH_CHECK_VALUE(
+        tensors[i].options().type_equal(options),
+        "argument contains mixed types (",
+        toString(options),
+        " and ",
+        toString(tensors[i].options()),
+        ")");
+    TORCH_CHECK_VALUE(
+        tensors[i].sizes().equals(sizes),
+        "argument contains mixed types (",
+        toString(sizes),
+        " and ",
+        toString(tensors[i].sizes()),
+        ")");
   }
 }
 
@@ -334,6 +330,111 @@ inline void assertRootTensor(
   }
 }
 
+inline void assertGatherOutputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const std::vector<std::vector<at::Tensor>>& outputTensors,
+    int64_t size) {
+  if (outputTensors.size() != 1) {
+    fn("requires a single-element output list containing a list with " +
+       std::to_string(size) + " tensors.");
+  } else if (outputTensors[0].size() != static_cast<size_t>(size)) {
+    fn("Incorrect output list size " + std::to_string(outputTensors[0].size()) +
+       ". Output list size should be " + std::to_string(size) +
+       ", same as size of the process group.");
+  }
+}
+
+inline void assertScatterInputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const std::vector<std::vector<at::Tensor>>& inputTensors,
+    int64_t size) {
+  if (inputTensors.size() != 1) {
+    fn("requires a single-element input list containing a list with " +
+       std::to_string(size) + " tensors.");
+  } else if (inputTensors[0].size() != static_cast<size_t>(size)) {
+    fn("Incorrect input list size " + std::to_string(inputTensors[0].size()) +
+       ". Input list size should be " + std::to_string(size) +
+       ", same as size of the process group.");
+  }
+}
+
+template <typename TensorList>
+inline void assertEmptyOutputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const TensorList& outputTensors) {
+  if (!outputTensors.empty()) {
+    fn("requires empty output on non-root");
+  }
+}
+
+template <typename TensorList>
+inline void assertEmptyInputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    const TensorList& inputTensors) {
+  if (!inputTensors.empty()) {
+    fn("requires empty input on non-root");
+  }
+}
+
+inline void assertNonEmptyInputTensorList(
+    const std::function<void(const std::string&)>& fn,
+    size_t inputTensorListSize) {
+  if (inputTensorListSize == 0) {
+    fn("requires non-empty input tensor list");
+  }
+}
+
+inline void assertInputOutputTensorListsSameSize(
+    const std::function<void(const std::string&)>& fn,
+    size_t outputTensorListSize,
+    size_t inputTensorListSize) {
+  if (outputTensorListSize != inputTensorListSize) {
+    fn("requires input/output tensor lists to have the same length");
+  }
+}
+
+inline void assertInputTensorListSizeEqualsWorldSize(
+    const std::function<void(const std::string&)>& fn,
+    size_t inputTensorListSize,
+    int64_t worldSize) {
+  if (inputTensorListSize != static_cast<size_t>(worldSize)) {
+    fn("invalid input tensor list size, must be world size");
+  }
+}
+
+inline void assertAllgatherCoalescedOutputTensorLists(
+    const std::function<void(const std::string&)>& fn,
+    const std::vector<std::vector<at::Tensor>>& outputTensorLists,
+    size_t inputTensorListSize,
+    int64_t worldSize) {
+  if (outputTensorLists.size() != static_cast<size_t>(worldSize)) {
+    fn("output lists should be equal to world size");
+  }
+  for (const auto& outputTensorList : outputTensorLists) {
+    const auto actual = outputTensorList.size();
+    if (actual != inputTensorListSize) {
+      fn("invalid output size: (expected length " +
+         std::to_string(inputTensorListSize) + ", got " +
+         std::to_string(actual) + ")");
+    }
+  }
+}
+
+inline void assertAllToAllTensorListSizes(
+    const std::function<void(const std::string&)>& fn,
+    size_t outputTensorListSize,
+    size_t inputTensorListSize,
+    int64_t worldSize) {
+  if (inputTensorListSize != static_cast<size_t>(worldSize)) {
+    fn("input tensor list size " + std::to_string(inputTensorListSize) +
+       " does not match world size " + std::to_string(worldSize));
+  }
+  if (outputTensorListSize != static_cast<size_t>(worldSize)) {
+    fn("output tensor list size " + std::to_string(outputTensorListSize) +
+       " does not match world size " + std::to_string(worldSize));
+  }
+}
+
 inline void assertDense(
     const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
@@ -437,7 +538,7 @@ inline at::Tensor newLikeFlat(
   }
   at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
-  std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
+  std::vector<int64_t> strides{t.numel()};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
@@ -500,6 +601,9 @@ inline void checkSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
     int group_size) {
+  for (const auto split_size : split_sizes) {
+    TORCH_CHECK(split_size >= 0, "Split sizes must be non-negative");
+  }
   if (split_sizes.empty()) {
     TORCH_CHECK(
         tensor.size(0) % group_size == 0,
@@ -573,9 +677,9 @@ using SizeType = uint64_t;
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
 // be inspected if an error occurred.
 //
-// `success_cond` is an expression used to check if an error has happend. So for
-// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
-// is stored in variable `__output` and may be used in `success_cond`.
+// `success_cond` is an expression used to check if an error has happened. So
+// for `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function
+// output is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
 #define SYSCHECK(expr, success_cond)                                           \
   while (true) {                                                               \
@@ -653,7 +757,11 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to send, sent 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToSend -= bytesSent;
@@ -675,7 +783,11 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to recv, got 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToReceive -= bytesReceived;

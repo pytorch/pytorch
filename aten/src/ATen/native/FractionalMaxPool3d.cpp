@@ -37,6 +37,10 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
   int64_t poolSizeH = pool_size[1];
   int64_t poolSizeW = pool_size[2];
 
+  TORCH_CHECK(poolSizeT > 0 && poolSizeH > 0 && poolSizeW > 0,
+    "fractional_max_pool3d(): kernel size should be greater than zero, but got ",
+    poolSizeT, "x", poolSizeH, "x", poolSizeW);
+
   int64_t numBatch = 1;
   int64_t planeDim = 0;
   int64_t timeDim = 1;
@@ -67,13 +71,13 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
   int64_t inputH = input_.size(heightDim);
   int64_t inputW = input_.size(widthDim);
 
-  TORCH_CHECK(outputT + poolSizeT - 1 < inputT,
+  TORCH_CHECK((poolSizeT <= inputT) && (outputT + poolSizeT - 1 < inputT),
            "fractional_max_pool3d_out(): pool time ", poolSizeT,
            " too large relative to input time ", inputT);
-  TORCH_CHECK(outputW + poolSizeW - 1 < inputW,
+  TORCH_CHECK((poolSizeW <= inputW) && (outputW + poolSizeW - 1 < inputW),
            "fractional_max_pool3d_out(): pool width ", poolSizeW,
            " too large relative to input width ", inputW);
-  TORCH_CHECK(outputH + poolSizeH - 1 < inputH,
+  TORCH_CHECK((poolSizeH <= inputH) && (outputH + poolSizeH - 1 < inputH),
            "fractional_max_pool3d_out(): pool height ", poolSizeH,
            " too large relative to input height ", inputH);
 
@@ -99,7 +103,7 @@ namespace at::native {
 namespace {
 
 template<typename scalar_t>
-static void fractional_max_pool3d_out_single_batch_frame(
+void fractional_max_pool3d_out_single_batch_frame(
   const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -169,7 +173,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
 }
 
 template<typename scalar_t>
-static void fractional_max_pool3d_out_frame(
+void fractional_max_pool3d_out_frame(
   const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -242,8 +246,8 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
     [&] {
       fractional_max_pool3d_out_frame<scalar_t>(
         input.const_data_ptr<scalar_t>(),
-        output.data_ptr<scalar_t>(),
-        indices.data_ptr<int64_t>(),
+        output.mutable_data_ptr<scalar_t>(),
+        indices.mutable_data_ptr<int64_t>(),
         randomSamples.const_data_ptr<scalar_t>(),
         numBatch, numPlanes,
         inputT, inputH, inputW,
@@ -257,7 +261,7 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
 namespace {
 
 template<typename scalar_t>
-static void fractional_max_pool3d_backward_out_single_batch_frame(
+void fractional_max_pool3d_backward_out_single_batch_frame(
   scalar_t* gradInput,
   const scalar_t* gradOutput,
   const int64_t* indices,
@@ -287,7 +291,7 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
 }
 
 template<typename scalar_t>
-static void fractional_max_pool3d_backward_out_frame(
+void fractional_max_pool3d_backward_out_frame(
   scalar_t* gradInput,
   const scalar_t* gradOutput,
   const int64_t* indices,
@@ -375,7 +379,7 @@ void fractional_max_pool3d_backward_out_cpu_template(
     "fractional_max_pool3d_backward_out_frame",
     [&]{
       fractional_max_pool3d_backward_out_frame<scalar_t>(
-        gradInput.data_ptr<scalar_t>(),
+        gradInput.mutable_data_ptr<scalar_t>(),
         gradOutput.const_data_ptr<scalar_t>(),
         indices.const_data_ptr<int64_t>(),
         numBatch, numPlanes,

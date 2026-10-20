@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
+import unittest
 from copy import deepcopy
 
 import torch
@@ -8,13 +8,23 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed._composable.replicate import replicate
-from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import fully_shard
+from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    MultiProcContinuousTest,
+    MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    run_tests,
+    TEST_WITH_ROCM,
+    TEST_XPU,
+)
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_module = torch.get_device_module(device_type)
 
 
 class Net(nn.Module):
@@ -28,25 +38,14 @@ class Net(nn.Module):
         return self.fc3(self.fc2(self.fc1(x)))
 
 
-class ReplicateStateDictTest(MultiProcessTestCase):
-    def setUp(self) -> None:
+class ReplicateStateDictTest(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 4
+
+    def setUp(self):
         super().setUp()
-        self._spawn_processes()
-
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    def _init_pg(self):
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+        self._spawn_threads()
 
     def _check_state_dict_parity(self, sd_1, sd_2):
         for k1, k2 in zip(sd_1.keys(), sd_2.keys()):
@@ -60,7 +59,6 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         Tests that replicate() on a single module state_dict
         matches local module state_dict.
         """
-        self._init_pg()
         model = Net()
         replicate_model = replicate(deepcopy(model))
         local_sd = model.state_dict()
@@ -69,10 +67,9 @@ class ReplicateStateDictTest(MultiProcessTestCase):
 
     def test_replicate_non_root_multiple_save_load(self):
         """
-        Tests tha replicate() on multiple submodules matches
+        Tests the replicate() on multiple submodules matches
         local module state_dict.
         """
-        self._init_pg()
         model = Net()
         replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
@@ -84,29 +81,16 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         self._check_state_dict_parity(local_sd, ddp_sd)
 
 
-class ReplicateTest(MultiProcessTestCase):
-    @property
-    def world_size(self) -> int:
-        return 2
+class ReplicateTest(MultiProcContinuousTest):
+    world_size = 2
 
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
+    @classmethod
+    def backend_str(cls) -> str:
+        return "gloo"
 
-    def tearDown(self):
-        super().tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    def _init_pg(self):
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+    @classmethod
+    def device_type(cls) -> str:
+        return "cpu"
 
     def _compare_module(self, mod, replicate_mod):
         local_batch_size = 1
@@ -147,13 +131,17 @@ class ReplicateTest(MultiProcessTestCase):
             torch.manual_seed(iteration)
             input = input[torch.randperm(global_batch_size)]
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180205")
     def test_replicate_single_module(self):
-        self._init_pg()
         model = Net()
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
+    )
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_move_args_kwargs_to_device(self):
         class MyNet(nn.Module):
             def __init__(self) -> None:
@@ -165,25 +153,25 @@ class ReplicateTest(MultiProcessTestCase):
                     inp = inp @ kwarg
                 return self.a(inp)
 
-        self._init_pg()
-        torch.cuda.set_device(self.rank)
-        model = MyNet().cuda()
-        replicate(model, device_id=torch.cuda.current_device())
+        torch.accelerator.set_device_index(self.rank)
+        model = MyNet().to(device_type)
+        replicate(model, device_id=torch.accelerator.current_device_index())
         # CPU input ensures replicate can move arg and kwargs to device.
         a, b = torch.randn(2, 2), torch.randn(2, 2)
         model(a, kwarg=b).sum().backward()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_ignore_module(self):
-        self._init_pg()
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         # Seed ensures diff input and thus different local grads across ranks.
         torch.manual_seed(self.rank)
-        torch.cuda.manual_seed(self.rank)
-        model = Net().cuda()
+        device_module.manual_seed(self.rank)
+        model = Net().to(device_type)
         replicate(model, ignored_modules=[model.fc1])
         # CPU input ensures that replicate can move input to GPU as DDP does.
-        inp = torch.randn(5, 2, device="cuda") * (self.rank + 1)
+        inp = torch.randn(5, 2, device=device_type) * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
         # FC1 grads should not be synchronized, FC2 and 3 should be.
@@ -203,8 +191,10 @@ class ReplicateTest(MultiProcessTestCase):
             for g in rest:
                 self.assertEqual(grad, g)
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180127"
+    )
     def test_replicate_multi_module(self):
-        self._init_pg()
         model = Net()
         replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
@@ -212,19 +202,20 @@ class ReplicateTest(MultiProcessTestCase):
         replicate(replicate_model.fc3)
         self._compare_module(model, replicate_model)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/180265")
     def test_replicate_with_kwargs(self):
-        self._init_pg()
         model = Net()
         replicate_model = replicate(
             deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
         )
         self._compare_module(model, replicate_model)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_device_id(self):
-        self._init_pg()
         model = Net()
-        model_cuda = deepcopy(model).cuda()
+        model_cuda = deepcopy(model).to(device_type)
         model_cuda2 = deepcopy(model_cuda)
         replicate(model, device_id=torch.device("cpu"))
         # DDP instance is attached in first pre forward
@@ -233,20 +224,22 @@ class ReplicateTest(MultiProcessTestCase):
         # Should be None for CPU training
         self.assertEqual(None, replicate_ddp_weakref.device_ids)
 
-        replicate(model_cuda, device_id=torch.device(torch.cuda.current_device()))
+        replicate(
+            model_cuda, device_id=torch.device(torch.accelerator.current_device_index())
+        )
         # DDP instance is attached in first pre forward
         model_cuda(torch.randn(2, 2))
         replicate_ddp_weakref = replicate.state(model_cuda)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
         # Pass in int as device_id
-        replicate(model_cuda2, device_id=int(torch.cuda.current_device()))
+        replicate(model_cuda2, device_id=int(torch.accelerator.current_device_index()))
         # DDP instance is attached in first pre forward
         model_cuda2(torch.randn(2, 2))
         replicate_ddp_weakref = replicate.state(model_cuda2)._ddp_weakref()
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176155")
     def test_replicate_wrong_device_id_type(self):
-        self._init_pg()
         model = Net()
         with self.assertRaisesRegex(
             RuntimeError, "Expected device_id to be int or torch.device"
@@ -255,7 +248,9 @@ class ReplicateTest(MultiProcessTestCase):
 
 
 class ReplicateFullyShardInit(ReplicateTest):
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
     def test_replicate_fully_shard_init(self):
         class ToyModel(nn.Module):
             def __init__(self, dim: int):
@@ -272,15 +267,14 @@ class ReplicateFullyShardInit(ReplicateTest):
                 y = self.proj(y)
                 return y
 
-        self._init_pg()
-        torch.cuda.set_device(self.rank)
+        torch.accelerator.set_device_index(self.rank)
         dim = 3
         bz = 2
-        model = ToyModel(dim).cuda()
+        model = ToyModel(dim).to(device_type)
         for linear in model.linears:
             fully_shard(linear)
         fully_shard(model.linears)
-        replicate(model, device_id=torch.cuda.current_device())
+        replicate(model, device_id=torch.accelerator.current_device_index())
         for linear in model.linears:
             self.assertTrue(isinstance(linear.weight, DTensor))
         inp = torch.rand(bz, dim)

@@ -1,4 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
+#include <ATen/core/functional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
 #include <iostream>
 #include <utility>
@@ -36,18 +38,8 @@ TensorMetadata::TensorMetadata(
 void TensorMetadata::build_guard(const torch::dynamo::LocalState& local_state) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !is_symbolic_, "Not support symbolic shape now");
-  std::vector<std::optional<c10::SymInt>> sym_sizes;
-  std::vector<std::optional<c10::SymInt>> sym_strides;
-  std::transform(
-      sizes_.begin(),
-      sizes_.end(),
-      std::back_inserter(sym_sizes),
-      [](int64_t size) { return std::optional<c10::SymInt>(size); });
-  std::transform(
-      strides_.begin(),
-      strides_.end(),
-      std::back_inserter(sym_strides),
-      [](int64_t stride) { return std::optional<c10::SymInt>(stride); });
+  auto sym_sizes = c10::fmap<std::optional<c10::SymInt>>(sizes_);
+  auto sym_strides = c10::fmap<std::optional<c10::SymInt>>(strides_);
   tensor_check_ = torch::dynamo::TensorCheck(
       local_state,
       nullptr,
@@ -92,6 +84,15 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
   }
 }
 
+bool TensorMetadata::dynamic_check(const TensorMetadata& other) const {
+  // Match by dtype, device, and rank (number of dimensions) but skip
+  // exact sizes/strides so one compiled kernel serves multiple shapes.
+  return this->dtype_ == other.dtype_ && this->device_ == other.device_ &&
+      this->dispatch_key_set_ == other.dispatch_key_set_ &&
+      this->requires_grad_ == other.requires_grad_ &&
+      this->sizes_.size() == other.sizes_.size();
+}
+
 std::ostream& operator<<(
     std::ostream& stream,
     const TensorMetadata& tensor_metadata) {
@@ -100,12 +101,12 @@ std::ostream& operator<<(
   stream << "device_: " << tensor_metadata.device_ << '\n';
   stream << "sizes_: ";
   for (const auto& size : tensor_metadata.sizes_) {
-    stream << size << " ";
+    stream << size << ' ';
   }
   stream << '\n';
   stream << "strides_: ";
   for (const auto& stride : tensor_metadata.strides_) {
-    stream << stride << " ";
+    stream << stride << ' ';
   }
 
   stream << "requires_grad_: " << tensor_metadata.requires_grad_ << '\n';
@@ -119,19 +120,19 @@ std::ostream& operator<<(
 ParameterMetadata::ParameterMetadata(
     TensorMetadata tensor_metadata,
     uint64_t input_order)
-    : tag_(TENSOR), value_(tensor_metadata), order_(input_order) {}
+    : tag_(TENSOR), value_(std::move(tensor_metadata)), order_(input_order) {}
 
 ParameterMetadata::ParameterMetadata(
     const at::Tensor& tensor,
     uint64_t input_order)
-    : tag_(TENSOR), order_(input_order) {
-  value_ = TensorMetadata(tensor);
-}
+    : tag_(TENSOR), value_(TensorMetadata(tensor)), order_(input_order) {}
 
 ParameterMetadata::ParameterMetadata(
-    const std::vector<TensorMetadata>& tensor_metadata_list,
+    std::vector<TensorMetadata> tensor_metadata_list,
     uint64_t input_order)
-    : tag_(TENSOR_LIST), value_(tensor_metadata_list), order_(input_order) {}
+    : tag_(TENSOR_LIST),
+      value_(std::move(tensor_metadata_list)),
+      order_(input_order) {}
 
 ParameterMetadata::ParameterMetadata(
     const std::vector<at::Tensor>& tensor_list,
@@ -142,7 +143,7 @@ ParameterMetadata::ParameterMetadata(
   for (const auto& tensor : tensor_list) {
     tensor_metadata_list.emplace_back(tensor);
   }
-  value_ = tensor_metadata_list;
+  value_ = std::move(tensor_metadata_list);
 }
 
 ParameterMetadata::ParameterMetadata(
@@ -150,15 +151,18 @@ ParameterMetadata::ParameterMetadata(
     uint64_t input_order)
     : tag_(SCALAR), value_(scalar), order_(input_order) {}
 
-ParameterMetadata::ParameterMetadata(
-    const std::string& str,
-    uint64_t input_order)
-    : tag_(STRING), value_(str), order_(input_order) {}
+ParameterMetadata::ParameterMetadata(std::string str, uint64_t input_order)
+    : tag_(STRING), value_(std::move(str)), order_(input_order) {}
 
 ParameterMetadata::ParameterMetadata(
     const c10::Device& device,
     uint64_t input_order)
     : tag_(DEVICE), value_(device), order_(input_order) {}
+
+ParameterMetadata::ParameterMetadata(
+    std::vector<int64_t> int_list,
+    uint64_t input_order)
+    : tag_(INT_LIST), value_(std::move(int_list)), order_(input_order) {}
 
 bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
   // Same type
@@ -189,6 +193,9 @@ bool ParameterMetadata::operator==(const ParameterMetadata& other) const {
     case DEVICE:
       return std::get<c10::Device>(value_) ==
           std::get<c10::Device>(other.value_);
+    case INT_LIST:
+      return std::get<std::vector<int64_t>>(value_) ==
+          std::get<std::vector<int64_t>>(other.value_);
     default:
       return false;
   }
@@ -208,6 +215,48 @@ bool ParameterMetadata::equal_to(const c10::Scalar& scalar) const {
   }
 
   return false;
+}
+
+bool ParameterMetadata::dynamic_check(const ParameterMetadata& other) const {
+  if (tag_ != other.tag_ || order_ != other.order_) {
+    return false;
+  }
+
+  switch (tag_) {
+    case TENSOR: {
+      const auto& self_tm = std::get<TensorMetadata>(value_);
+      const auto& other_tm = std::get<TensorMetadata>(other.value_);
+      return self_tm.dynamic_check(other_tm);
+    }
+    case TENSOR_LIST: {
+      const auto& self_list = std::get<std::vector<TensorMetadata>>(value_);
+      const auto& other_list =
+          std::get<std::vector<TensorMetadata>>(other.value_);
+      if (self_list.size() != other_list.size()) {
+        return false;
+      }
+      for (const auto i : c10::irange(self_list.size())) {
+        if (!self_list[i].dynamic_check(other_list[i])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    // Non-tensor parameters use exact matching even in dynamic mode
+    case SCALAR:
+      return equal_to(std::get<c10::Scalar>(other.value_));
+    case STRING:
+      return std::get<std::string>(value_) ==
+          std::get<std::string>(other.value_);
+    case DEVICE:
+      return std::get<c10::Device>(value_) ==
+          std::get<c10::Device>(other.value_);
+    case INT_LIST:
+      return std::get<std::vector<int64_t>>(value_) ==
+          std::get<std::vector<int64_t>>(other.value_);
+    default:
+      return false;
+  }
 }
 
 } // namespace torch::inductor

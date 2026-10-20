@@ -29,6 +29,7 @@
 //
 
 #include <array>
+#include <bit>
 #include <tuple>
 #include <type_traits>
 
@@ -78,6 +79,14 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
+template <typename args_t, size_t... Is>
+constexpr size_t max_of_sizes(args_t, std::index_sequence<Is...>) {
+  size_t max_size = 0;
+  ((max_size = std::max(max_size, sizeof(std::tuple_element_t<Is, args_t>))),
+   ...);
+  return max_size;
+}
+
 #ifdef USE_ROCM
 template <int io_sizes>
 constexpr auto elems_per_thread(){
@@ -98,11 +107,31 @@ constexpr auto elems_per_thread(){
     return 8;
   }
 }
+
+// Rubin (SM 10.7) supports 1024 resident threads per SM. Target 128 bytes of
+// input per thread to keep roughly 128 KiB in flight per SM.
+template <size_t input_size>
+constexpr auto elems_per_thread_128b(size_t output_size) {
+  if constexpr (input_size == 0) {
+    // note: without inputs, we simply double the number of elements per thread
+    // for SM 10.7 as there are half the number of threads per SM compared
+    // to previous generations.
+    return output_size == 1 ? 32 : 16;
+  } else if constexpr (input_size >= 128) {
+    return 1;
+  } else {
+    constexpr auto rounded_input_size = std::bit_ceil(input_size);
+    return static_cast<int>(128 / rounded_input_size);
+  }
+}
 #endif
 
-template <int io_sizes>
-constexpr auto io_block_work_size() {
-  return num_threads() * elems_per_thread<io_sizes>();
+
+//thread work size of 8 regresses the perf of elementwise kernel on cuda
+//this doesn't change ROCm behavior as thread_work_size is already 4 on ROCm
+constexpr int elementwise_thread_work_size() {return 4;}
+constexpr int elementwise_block_work_size() {
+  return elementwise_thread_work_size() * num_threads();
 }
 
 #ifdef USE_ROCM
@@ -150,14 +179,87 @@ constexpr auto calc_io_size(){
 #endif
 }
 
-template <int vec_size, typename func_t, typename array_t>
+#ifndef USE_ROCM
+// To save on binary size of libtorch_cuda.so, we split the vectorized_elementwise_kernel
+// into three: one targeting 128 bytes per thread (and only vec_size=8), one for
+// vec_size=8, and one for vec_size=[2, 4]. vec_size=8 is only used on sm_90
+// and sm_10x, and the 128-byte-per-thread configuration is only used on sm_10x.
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(
+    int N,
+    func_t f,
+    array_t data) {
+  using traits = function_traits<func_t>;
+  static_assert(tws > 0, "Thread work size must be positive");
+  constexpr int bws = tws * num_threads();
+  int remaining = N - bws * blockIdx.x;
+
+  // The compiler generally preserves source order, so keep the hot path first
+  // to improve instruction cache use.
+  if (remaining >= bws) {
+    elementwise_kernel_helper(
+        f, memory::policies::vectorized<vec_size, array_t, tws>(data));
+  } else {
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    auto policy = memory::policies::unroll<
+        array_t,
+        decltype(input_calc),
+        decltype(output_calc),
+        memory::LoadWithoutCast,
+        memory::StoreWithoutCast,
+        tws>(data, remaining, input_calc, output_calc, loader, storer);
+    elementwise_kernel_helper(f, policy);
+  }
+}
+
+template <
+    int vec_size,
+    typename func_t,
+    typename array_t,
+    bool use_128b_tws = false>
 C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+  if constexpr (vec_size == 8 && use_128b_tws) {
+#if __CUDA_ARCH__ / 100 == 10
+    using output_t = typename function_traits<func_t>::result_type;
+    constexpr auto input_size = calc_io_size<func_t>() - sizeof(output_t);
+    constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(output_t));
+    vectorized_elementwise_kernel_impl<vec_size, tws_128b>(N, f, data);
+#else
+    CUDA_KERNEL_ASSERT(
+        false &&
+        "Fatal! vectorized_elementwise_kernel<8,...> with 128-byte-per-thread "
+        "work size supports only sm_10x. Please report an issue on GitHub.");
+#endif
+  } else if constexpr (vec_size == 8) {
+#if __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
+    constexpr auto io_size = calc_io_size<func_t>();
+    constexpr auto tws = elems_per_thread<io_size>();
+    vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
+#else
+    CUDA_KERNEL_ASSERT(
+      false && "Fatal! vectorized_elementwise_kernel<8,...> supports only "
+      "sm_90 and sm_10x. Please report an issue on GitHub.");
+#endif // __CUDA_ARCH__ / 100 == 9 || __CUDA_ARCH__ / 100 == 10
+  } else {
+    constexpr auto io_size = calc_io_size<func_t>();
+    constexpr auto tws = elems_per_thread<io_size>();
+    vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
+  }
+}
+
+#else // USE_ROCM
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-  int remaining = N - io_block_work_size<io_size>() * blockIdx.x;
+  constexpr int bws = tws * num_threads();
+  int remaining = N - bws * blockIdx.x;
 
-  if (remaining < io_block_work_size<io_size>()) { // if this block handles the reminder,
+  if (remaining < bws) { // if this block handles the reminder,
                                        // just do a naive unrolled loop
     auto input_calc = TrivialOffsetCalculator<traits::arity>();
     auto output_calc = TrivialOffsetCalculator<1>();
@@ -169,20 +271,29 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
         decltype(output_calc),
         memory::LoadWithoutCast,
         memory::StoreWithoutCast,
-        elems_per_thread<io_size>()>(
+        tws>(
         data, remaining, input_calc, output_calc, loader, storer);
     elementwise_kernel_helper(f, policy);
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
-#ifdef USE_ROCM
     constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
-#else
-    constexpr auto optimal_vec_size = vec_size;
-#endif
     elementwise_kernel_helper(
-        f, memory::policies::vectorized<optimal_vec_size, array_t, elems_per_thread<io_size>()>(data));
+        f, memory::policies::vectorized<optimal_vec_size, array_t, tws>(data));
   }
 }
+
+template <int vec_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+  constexpr auto io_size = calc_io_size<func_t>();
+  constexpr auto tws_942 = 16;
+  constexpr auto tws = elems_per_thread<io_size>();
+  if (__builtin_amdgcn_processor_is("gfx942"))
+    return vectorized_elementwise_kernel_impl<vec_size, tws_942>(N, f, data);
+
+  vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
+}
+#endif // USE_ROCM
 
 template <
     typename func_t,
@@ -217,22 +328,52 @@ static inline void launch_vectorized_kernel(
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-  int64_t grid = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
   auto stream = at::cuda::getCurrentCUDAStream();
 #ifdef USE_ROCM
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
+  c10::DeviceIndex curDevice = -1;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&curDevice));
+  // Similar check in vectorized_elementwise_kernel() as well. Both should be in sync.
+  int tws = at::detail::getCUDAHooks().isGPUArch({"gfx942"}, curDevice) ? 16 : elems_per_thread<io_size>();
 #else
   using cpp_type = typename function_traits<func_t>::result_type;
   const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
+  cudaDeviceProp* p = at::cuda::getDeviceProperties(stream.device().index());
+  // Empirical benchmarking set this threshold; retain the existing path for
+  // smaller workloads to avoid performance regressions
+  // (the larger thread work size decreases thread level parallelism,
+  // which is important for small footprints).
+  constexpr int64_t min_sm107_io_size = 16 * 1024 * 1024;
+  const bool use_sm107_optimizations =
+      p->major == 10 && p->minor == 7 && N * io_size >= min_sm107_io_size;
+  if (use_sm107_optimizations) {
+    using args_t = typename function_traits<func_t>::ArgsTuple;
+    constexpr auto max_input_size = at::native::max_of_sizes(
+        args_t{}, std::make_index_sequence<std::tuple_size_v<args_t>>{});
+    vec_size = 32 / static_cast<uint16_t>(std::max(sizeof(cpp_type), max_input_size));
+  }
   vec_size = std::min<uint16_t>(vec_size, max_vec_size);
-  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
-  // that causes some numerical mismatches with uint8 on sm80 and sm90.
-  // TODO: Revisit this after CUDA 12.8 update.
+  // due to excessive binary size the `vectorized_elementwise_kernel` of
+  // the size 8 is compiled for sm_90 and sm_10x only.
+  // TODO: Lift this limitation when CUDA 12.x support is fully dropped
+  if (p->major != 9 && p->major != 10) {
+    vec_size = std::min<uint16_t>(vec_size, 4);
+  }
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
 #endif
+  int tws = elems_per_thread<io_size>();
+  constexpr auto input_size = io_size - sizeof(cpp_type);
+  constexpr auto tws_128b = elems_per_thread_128b<input_size>(sizeof(cpp_type));
+  if (tws_128b >= 8 && use_sm107_optimizations && vec_size == 8) {
+    tws = tws_128b;
+  }
+#endif
+  int bws = tws * num_threads();
+  int64_t grid = (N + bws - 1) / bws;
   switch (vec_size) {
 #ifdef USE_ROCM
     case 16:
@@ -242,8 +383,18 @@ static inline void launch_vectorized_kernel(
       break;
 #endif
     case 8:
+#ifdef USE_ROCM
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
+#else
+      if (use_sm107_optimizations) {
+        vectorized_elementwise_kernel<8, func_t, array_t, tws_128b >= 8>
+            <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      } else {
+        vectorized_elementwise_kernel<8, func_t, array_t>
+            <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      }
+#endif
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case 4:
@@ -261,8 +412,9 @@ static inline void launch_vectorized_kernel(
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
-      unrolled_elementwise_kernel<func_t, array_t, elems_per_thread<io_size>()>
-          <<<grid, num_threads(), 0, stream>>>(
+      int64_t grid_unrolled = (N + elementwise_block_work_size() - 1) / elementwise_block_work_size();
+      unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
+          <<<grid_unrolled, num_threads(), 0, stream>>>(
               N, f, data, input_calc, output_calc, loader, storer);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
@@ -349,7 +501,6 @@ static inline void launch_vectorized_templated_kernel(
     loader_t l,
     storer_t s) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  using traits = function_traits<func_t>;
   int64_t grid = (N + vectorized_templated_config::block_work_size() - 1) /
       vectorized_templated_config::block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -423,9 +574,10 @@ static inline void launch_unrolled_kernel(
     loader_t l,
     storer_t s) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size() - 1) / block_work_size();
+
+  int64_t grid = (N + elementwise_block_work_size() - 1) / elementwise_block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel<func_t, array_t, thread_work_size()>
+  unrolled_elementwise_kernel<func_t, array_t, elementwise_thread_work_size()>
       <<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -457,6 +609,40 @@ static void launch_legacy_kernel(int64_t N, const func_t& f) {
   elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
+
+#ifdef USE_ROCM
+template <int nt, int vt, typename func_t>
+C10_LAUNCH_BOUNDS_2(nt, 4)
+__global__ void elementwise_kernel_manual_unroll(int N, func_t f) {
+  int tid = threadIdx.x;
+  constexpr int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
+  if ((idx + nt*(vt-1)) < N) {
+    f(idx, true);
+  } else {
+#pragma unroll
+    for (int i = 0; i < vt; i++) {
+      if (idx < N) {
+        f(idx, false);
+        idx += nt;
+      }
+    }
+  }
+}
+
+template <int nt, int vt, typename func_t>
+static void launch_legacy_kernel_manual_unroll(int64_t N, const func_t& f) {
+  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  if (N == 0) {
+    return;
+  }
+  dim3 block(nt);
+  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  elementwise_kernel_manual_unroll<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+#endif
 
 template <typename traits, typename func_t, typename index_t, size_t... INDEX>
 C10_HOST_DEVICE typename traits::result_type invoke_impl(
@@ -521,7 +707,6 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
@@ -536,12 +721,76 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
     return launch_vectorized_kernel(numel, f, data);
   }
   auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+#ifndef USE_ROCM
   constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 2 : 4;
   launch_legacy_kernel<128, unroll_factor>(numel, [=] GPU_LAMBDA(int idx) {
     auto offsets = offset_calc.get(idx);
     arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
     *out = invoke(f, &data[1], &offsets[1], 1);
   });
+#else
+  constexpr int unroll_factor = sizeof(arg0_t) >= 4 ? 4 : 8;
+  constexpr int grp_sz = 128;
+  launch_legacy_kernel_manual_unroll<grp_sz, unroll_factor>(numel, [=] GPU_LAMBDA(int idx, bool unrl) {
+    if (unrl) {
+      if constexpr (unroll_factor == 4) {
+        auto offsets0 = offset_calc.get(idx);
+        auto offsets1 = offset_calc.get(idx+grp_sz);
+        auto offsets2 = offset_calc.get(idx+grp_sz*2);
+        auto offsets3 = offset_calc.get(idx+grp_sz*3);
+        arg0_t* out0 = (arg0_t*)(data[0] + offsets0[0]);
+        arg0_t* out1 = (arg0_t*)(data[0] + offsets1[0]);
+        arg0_t* out2 = (arg0_t*)(data[0] + offsets2[0]);
+        arg0_t* out3 = (arg0_t*)(data[0] + offsets3[0]);
+        auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
+        auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
+        auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
+        auto tmp3 = invoke(f, &data[1], &offsets3[1], 1);
+        *out0 = tmp0;
+        *out1 = tmp1;
+        *out2 = tmp2;
+        *out3 = tmp3;
+      } else {
+        auto offsets0 = offset_calc.get(idx);
+        auto offsets1 = offset_calc.get(idx+grp_sz);
+        auto offsets2 = offset_calc.get(idx+grp_sz*2);
+        auto offsets3 = offset_calc.get(idx+grp_sz*3);
+        auto offsets4 = offset_calc.get(idx+grp_sz*4);
+        auto offsets5 = offset_calc.get(idx+grp_sz*5);
+        auto offsets6 = offset_calc.get(idx+grp_sz*6);
+        auto offsets7 = offset_calc.get(idx+grp_sz*7);
+        arg0_t* out0 = (arg0_t*)(data[0] + offsets0[0]);
+        arg0_t* out1 = (arg0_t*)(data[0] + offsets1[0]);
+        arg0_t* out2 = (arg0_t*)(data[0] + offsets2[0]);
+        arg0_t* out3 = (arg0_t*)(data[0] + offsets3[0]);
+        arg0_t* out4 = (arg0_t*)(data[0] + offsets4[0]);
+        arg0_t* out5 = (arg0_t*)(data[0] + offsets5[0]);
+        arg0_t* out6 = (arg0_t*)(data[0] + offsets6[0]);
+        arg0_t* out7 = (arg0_t*)(data[0] + offsets7[0]);
+        auto tmp0 = invoke(f, &data[1], &offsets0[1], 1);
+        auto tmp1 = invoke(f, &data[1], &offsets1[1], 1);
+        auto tmp2 = invoke(f, &data[1], &offsets2[1], 1);
+        auto tmp3 = invoke(f, &data[1], &offsets3[1], 1);
+        auto tmp4 = invoke(f, &data[1], &offsets4[1], 1);
+        auto tmp5 = invoke(f, &data[1], &offsets5[1], 1);
+        auto tmp6 = invoke(f, &data[1], &offsets6[1], 1);
+        auto tmp7 = invoke(f, &data[1], &offsets7[1], 1);
+        *out0 = tmp0;
+        *out1 = tmp1;
+        *out2 = tmp2;
+        *out3 = tmp3;
+        *out4 = tmp4;
+        *out5 = tmp5;
+        *out6 = tmp6;
+        *out7 = tmp7;
+      }
+    } else {
+      auto offsets = offset_calc.get(idx);
+      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+      *out = invoke(f, &data[1], &offsets[1], 1);
+    }
+  });
+#endif
 }
 
 #ifdef USE_ROCM
@@ -671,9 +920,13 @@ struct type_specialized_kernel_launcher {
       out_calc_t output_offset_calculator,
       loader_t loader,
       storer_t storer) {
-    if (ret_t == rt_binary_specializations[arg_index][0] &&
-        arg0_t == rt_binary_specializations[arg_index][1] &&
-        arg1_t == rt_binary_specializations[arg_index][2])
+    constexpr ScalarType sret_t = rt_binary_specializations[arg_index][0];
+    constexpr ScalarType sarg0_t = rt_binary_specializations[arg_index][1];
+    constexpr ScalarType sarg1_t = rt_binary_specializations[arg_index][2];
+    if (ret_t == sret_t && arg0_t == sarg0_t && arg1_t == sarg1_t) {
+      using cret_t = c10::impl::ScalarTypeToCPPTypeT<sret_t>;
+      using carg0_t = c10::impl::ScalarTypeToCPPTypeT<sarg0_t>;
+      using carg1_t = c10::impl::ScalarTypeToCPPTypeT<sarg1_t>;
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
@@ -681,12 +934,9 @@ struct type_specialized_kernel_launcher {
           out_calc_t,
           loader_t,
           storer_t,
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][0]>::t),
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][1]>::t),
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][2]>::t)>(
+          cret_t,
+          carg0_t,
+          carg1_t>(
           numel,
           f,
           data,
@@ -694,7 +944,71 @@ struct type_specialized_kernel_launcher {
           output_offset_calculator,
           loader,
           storer);
+    }
   }
+};
+
+template <int arg_index>
+struct type_specialized_broadcast_kernel_launcher {
+  template <
+      typename func_t,
+      typename array_t,
+      typename dtypes_t,
+      typename calc_t>
+  static void apply(
+      int64_t numel,
+      func_t f,
+      array_t data,
+      dtypes_t dtypes,
+      calc_t offset_calc) {
+        using traits = function_traits<func_t>;
+        using ret_t = typename traits::result_type;
+        using arg0_t = typename traits::template arg<0>::type;
+        using arg1_t = typename traits::template arg<1>::type;
+        if (dtypes[0] == rt_binary_specializations[arg_index][0] &&
+          dtypes[1] == rt_binary_specializations[arg_index][1] &&
+          dtypes[2] == rt_binary_specializations[arg_index][2]) {
+            using ret_cpp_t = c10::impl::ScalarTypeToCPPTypeT<rt_binary_specializations[arg_index][0]>;
+            using arg0_cpp_t = c10::impl::ScalarTypeToCPPTypeT<rt_binary_specializations[arg_index][1]>;
+            using arg1_cpp_t = c10::impl::ScalarTypeToCPPTypeT<rt_binary_specializations[arg_index][2]>;
+            constexpr int grp_sz = 128;
+            launch_legacy_kernel_manual_unroll<grp_sz, 4>(numel, [=] GPU_LAMBDA(int idx, bool unrl) {
+              if (unrl) {
+                auto offsets0 = offset_calc.get(idx);
+                auto offsets1 = offset_calc.get(idx + grp_sz);
+                auto offsets2 = offset_calc.get(idx + grp_sz * 2);
+                auto offsets3 = offset_calc.get(idx + grp_sz * 3);
+                void* out0 = data[0] + offsets0[0];
+                void* out1 = data[0] + offsets1[0];
+                void* out2 = data[0] + offsets2[0];
+                void* out3 = data[0] + offsets3[0];
+                auto u = c10::load<arg0_cpp_t>(data[1] + offsets0[1]);
+                auto v = c10::load<arg1_cpp_t>(data[2] + offsets0[2]);
+                ret_t result0 = f(c10::convert<arg0_t>(u), c10::convert<arg1_t>(v));
+                auto u1 = c10::load<arg0_cpp_t>(data[1] + offsets1[1]);
+                auto v1 = c10::load<arg1_cpp_t>(data[2]+ offsets1[2]);
+                ret_t result1 = f(c10::convert<arg0_t>(u1), c10::convert<arg1_t>(v1));
+                auto u2 = c10::load<arg0_cpp_t>(data[1] + offsets2[1]);
+                auto v2 = c10::load<arg1_cpp_t>(data[2] + offsets2[2]);
+                ret_t result2 = f(c10::convert<arg0_t>(u2), c10::convert<arg1_t>(v2));
+                auto u3 = c10::load<arg0_cpp_t>(data[1] + offsets3[1]);
+                auto v3 = c10::load<arg1_cpp_t>(data[2] + offsets3[2]);
+                ret_t result3 = f(c10::convert<arg0_t>(u3), c10::convert<arg1_t>(v3));
+                *(ret_cpp_t*)out0 = c10::convert<ret_cpp_t>(result0);
+                *(ret_cpp_t*)out1 = c10::convert<ret_cpp_t>(result1);
+                *(ret_cpp_t*)out2 = c10::convert<ret_cpp_t>(result2);
+                *(ret_cpp_t*)out3 = c10::convert<ret_cpp_t>(result3);
+              } else {
+                auto offsets = offset_calc.get(idx);
+                void* out = data[0] + offsets[0];
+                auto u = c10::load<arg0_cpp_t>(data[1] + offsets[1]);
+                auto v = c10::load<arg1_cpp_t>(data[2] + offsets[2]);
+                ret_t result = f(c10::convert<arg0_t>(u), c10::convert<arg1_t>(v));
+                *(ret_cpp_t*)out = c10::convert<ret_cpp_t>(result);
+              }
+            });
+        }
+      }
 };
 
 } // namespace
@@ -773,10 +1087,26 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
       dtypes[i] = iter.dtype(i);
       strides[i] = inner_strides[i];
     }
-    launch_legacy_kernel<512, 1>(numel, [=]GPU_LAMBDA(int idx) {
-      void* out = data[0] + strides[0] * idx;
-      arg0_t result = invoke(f, &data[1], &strides[1], &dtypes[1], idx);
-      c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+    constexpr int grp_sz = 128;
+    launch_legacy_kernel_manual_unroll<grp_sz, 4>(numel, [=] GPU_LAMBDA(int idx, bool unrl) {
+      if (unrl) {
+        void* out0 = data[0] + strides[0] * idx;
+        void* out1 = data[0] + strides[0] * (idx + grp_sz);
+        void* out2 = data[0] + strides[0] * (idx + grp_sz * 2);
+        void* out3 = data[0] + strides[0] * (idx + grp_sz * 3);
+        arg0_t result0 = invoke(f, &data[1], &strides[1], &dtypes[1], idx);
+        arg0_t result1 = invoke(f, &data[1], &strides[1], &dtypes[1], (idx + grp_sz));
+        arg0_t result2 = invoke(f, &data[1], &strides[1], &dtypes[1], (idx + grp_sz * 2));
+        arg0_t result3 = invoke(f, &data[1], &strides[1], &dtypes[1], (idx + grp_sz * 3));
+        c10::cast_and_store<arg0_t>(dtypes[0], out0, result0);
+        c10::cast_and_store<arg0_t>(dtypes[0], out1, result1);
+        c10::cast_and_store<arg0_t>(dtypes[0], out2, result2);
+        c10::cast_and_store<arg0_t>(dtypes[0], out3, result3);
+      } else {
+        void* out = data[0] + strides[0] * idx;
+        arg0_t result = invoke(f, &data[1], &strides[1], &dtypes[1], idx);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+      }
     });
 #else
     auto loader = memory::LoadWithCast<traits::arity>(iter);
@@ -798,12 +1128,67 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
       dtypes[i] = iter.dtype(i);
     }
     auto offset_calc = ::make_offset_calculator<traits::arity + 1>(iter);
+#ifdef USE_ROCM
+    if (check_binary_rt_types_for_specialization(iter)) {
+      // constexpr to reduce the amount of kernels generated for
+      // broadcast elementwise with mexed dtypes and limit which functors are actually
+      // applied to the load and store at compile time.
+      using func_tuple = typename traits::ArgsTuple;
+      if constexpr (
+        std::is_same_v<float, arg0_t> && traits::arity == 2 &&
+        check_binary_functor_types_for_specialization<
+          func_tuple,
+          float,
+          float,
+          traits::arity,
+          /*arg_num=*/0>::check()) {
+            memory::detail::static_unroll<
+              type_specialized_broadcast_kernel_launcher,
+              rt_binary_specializations.size()>::with_args(
+                numel,
+                f,
+                data,
+                dtypes,
+                offset_calc
+            );
+            return;
+      }
+    }
+
+    constexpr int grp_sz = 128;
+    launch_legacy_kernel_manual_unroll<grp_sz, 4>(numel, [=] GPU_LAMBDA(int idx, bool unrl) {
+      if (unrl) {
+        auto offsets0 = offset_calc.get(idx);
+        auto offsets1 = offset_calc.get(idx + grp_sz);
+        auto offsets2 = offset_calc.get(idx + grp_sz * 2);
+        auto offsets3 = offset_calc.get(idx + grp_sz * 3);
+        void* out0 = data[0] + offsets0[0];
+        void* out1 = data[0] + offsets1[0];
+        void* out2 = data[0] + offsets2[0];
+        void* out3 = data[0] + offsets3[0];
+        arg0_t result0 = invoke(f, &data[1], &offsets0[1], &dtypes[1], 1);
+        arg0_t result1 = invoke(f, &data[1], &offsets1[1], &dtypes[1], 1);
+        arg0_t result2 = invoke(f, &data[1], &offsets2[1], &dtypes[1], 1);
+        arg0_t result3 = invoke(f, &data[1], &offsets3[1], &dtypes[1], 1);
+        c10::cast_and_store<arg0_t>(dtypes[0], out0, result0);
+        c10::cast_and_store<arg0_t>(dtypes[0], out1, result1);
+        c10::cast_and_store<arg0_t>(dtypes[0], out2, result2);
+        c10::cast_and_store<arg0_t>(dtypes[0], out3, result3);
+      } else {
+        auto offsets = offset_calc.get(idx);
+        void* out = data[0] + offsets[0];
+        arg0_t result = invoke(f, &data[1], &offsets[1], &dtypes[1], 1);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+      }
+    });
+#else
     launch_legacy_kernel<128, 4>(numel, [=] GPU_LAMBDA(int idx) {
       auto offsets = offset_calc.get(idx);
       void* out = data[0] + offsets[0];
       arg0_t result = invoke(f, &data[1], &offsets[1], &dtypes[1], 1);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
     });
+#endif
   }
 }
 

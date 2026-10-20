@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -8,13 +9,13 @@ from torch import Tensor
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_flatten, tree_unflatten
 
 
-in_dims_t = Union[int, tuple]
-out_dims_t = Union[int, tuple[int, ...]]
+in_dims_t = int | tuple
+out_dims_t = int | tuple[int, ...]
 
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: list[Optional[int]],
+    flat_in_dims: list[int | None],
     flat_args: list,
 ) -> int:
     batch_sizes = [
@@ -30,7 +31,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Tensor | tuple[Tensor, ...]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -112,9 +113,9 @@ def _create_batched_inputs(
     return tree_unflatten(batched_inputs, args_spec), batch_size
 
 
-# Undos the batching (and any batch dimensions) associated with the `vmap_level`.
+# Undoes the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
+    batched_outputs: Tensor | tuple[Tensor, ...],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,
@@ -219,7 +220,7 @@ def _vmap(
     # The `allow_none_pass_through` argument is a temporary workaround may be removed.
     # Currently it enables us to wrap the call in `autograd.grad` to the autograd engine,
     # which may return None if any of the inputs are unused. See the issue discussing this:
-    # https://github.com/facebookresearch/functorch/issues/159.
+    # https://github.com/pytorch/functorch/issues/159.
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_tuple(out_dims, func)

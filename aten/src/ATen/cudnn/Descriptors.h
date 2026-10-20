@@ -38,6 +38,7 @@ inline int dataSize(cudnnDataType_t dataType)
   }
 }
 
+// NOTE [ cudnn fixSizeOneDimStride ]
 // The stride for a size-1 dimensions is not uniquely determined; in
 // fact, it can be anything you want, because the fact that the
 // tensor is size 1 at this dimension means that you will never actually

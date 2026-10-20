@@ -177,8 +177,14 @@ if __name__ == "__main__":
                 all_logs.append(f.read())
 
     # If its less than 200 something definitely went wrong.
-    assert len(all_logs) > 200
-    assert len(all_logs) == len(jobs)
+    if len(all_logs) <= 200:
+        raise AssertionError(
+            f"Expected more than 200 logs, got {len(all_logs)}. Something went wrong."
+        )
+    if len(all_logs) != len(jobs):
+        raise AssertionError(
+            f"Number of logs ({len(all_logs)}) does not match number of jobs ({len(jobs)})"
+        )
 
     to_be_closed = []
     for item in disabled_tests_json.items():

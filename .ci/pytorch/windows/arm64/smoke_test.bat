@@ -33,14 +33,14 @@ pushd tmp
 set VC_VERSION_LOWER=14
 set VC_VERSION_UPPER=36
 
-call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
+for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -find VC\Auxiliary\Build\vcvarsall.bat`) do call "%%i" arm64
 
 set install_root=%CD%
 set INCLUDE=%INCLUDE%;%install_root%\include;%install_root%\include\torch\csrc\api\include
 set LIB=%LIB%;%install_root%\lib
 set PATH=%PATH%;%install_root%\lib
 
-cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++17
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\simple-torch-test.cpp c10.lib torch_cpu.lib /EHsc /std:c++20
 if ERRORLEVEL 1 exit /b 1
 
 .\simple-torch-test.exe

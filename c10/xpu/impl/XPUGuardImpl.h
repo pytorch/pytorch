@@ -45,6 +45,31 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     c10::xpu::set_device(d.index());
   }
 
+  DeviceCapability getDeviceCapability(Device d) const override {
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool) |
+        (1ULL << kIndex_Float8_e5m2) | (1ULL << kIndex_Float8_e4m3fn) |
+        (1ULL << kIndex_Float8_e5m2fnuz) | (1ULL << kIndex_Float8_e4m3fnuz) |
+        (1ULL << kIndex_Float8_e8m0fnu) | (1ULL << kIndex_UInt16) |
+        (1ULL << kIndex_UInt32) | (1ULL << kIndex_UInt64);
+    // BFloat16 may be emulated. We always assume BFloat16 is available;
+    // users can call is_bf16_supported() to check for native hardware support.
+    cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
+    auto& device = c10::xpu::get_raw_device(d.index());
+    if (device.has(sycl::aspect::fp16)) {
+      cap.capability_data.capability_bits |= (1ULL << kIndex_Half);
+      cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexHalf);
+    }
+    if (device.has(sycl::aspect::fp64)) {
+      cap.capability_data.capability_bits |= (1ULL << kIndex_Double);
+      cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexDouble);
+    }
+    return cap;
+  }
+
   Stream getStream(Device d) const override {
     return getCurrentXPUStream(d.index()).unwrap();
   }
@@ -66,11 +91,42 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream.unwrap();
   }
 
+  void* getStreamNativeHandle(const Stream s) const override {
+    const XPUStream stream{s};
+    return reinterpret_cast<void*>(&(stream.queue()));
+  }
+
   DeviceIndex deviceCount() const noexcept override {
     return c10::xpu::device_count();
   }
 
   // Event-related functions
+#if SYCL_COMPILER_VERSION >= 20260200
+  void createEvent(sycl::event** xpu_event, const EventFlag flag) const {
+    namespace syclex = sycl::ext::oneapi::experimental;
+#ifdef _WIN32
+    TORCH_CHECK(
+        !(flag & EventFlag::INTERPROCESS),
+        "XPU IPC events are not supported on Windows.");
+#endif
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING) || !(flag & EventFlag::INTERPROCESS),
+        "Cannot create IPC event with timing enabled.");
+    *xpu_event = new sycl::event(syclex::make_event(
+        c10::xpu::get_device_context(),
+        syclex::properties{
+            syclex::enable_ipc{flag & EventFlag::INTERPROCESS},
+            syclex::enable_profiling {
+              flag & EventFlag::TIMING
+            }}));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(*xpu_event));
+    }
+  }
+#endif
+
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {
     if (!event)
@@ -101,22 +157,47 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
     const XPUStream xpu_stream{stream};
 
-    // Delete the event previously recorded.
-    if (xpu_event)
-      delete xpu_event;
-#if SYCL_COMPILER_VERSION >= 20250000
-    if (flag == EventFlag::BACKEND_DEFAULT) {
-      // Use the profiling tag to record the event to enable timing feature.
-      xpu_event =
-          new sycl::event(sycl::ext::oneapi::experimental::submit_profiling_tag(
-              xpu_stream.queue()));
-    } else {
-      xpu_event =
-          new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+    // Only IPC-enabled events are backed by a reusable sycl::event, which
+    // requires SYCL compiler 2026.2 or later.
+    bool reusable = flag & EventFlag::INTERPROCESS;
+
+#if SYCL_COMPILER_VERSION >= 20260200
+    if (reusable) {
+      auto& device = c10::xpu::get_raw_device(stream.device_index());
+      TORCH_CHECK(
+          device.has(sycl::aspect::ext_oneapi_ipc_event),
+          "Requires the ext_oneapi_ipc_event extension, "
+          "which is not supported on this device. ",
+          "Please upgrade to a newer driver.");
     }
 #else
-    xpu_event = new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+    TORCH_CHECK(
+        !reusable, "XPU IPC events require SYCL compiler 2026.2 or later.");
 #endif
+
+    if (reusable) {
+#if SYCL_COMPILER_VERSION >= 20260200
+      if (!xpu_event) {
+        createEvent(&xpu_event, flag);
+      }
+      sycl::ext::oneapi::experimental::enqueue_signal_event(
+          xpu_stream.queue(), *xpu_event);
+#endif
+    } else {
+      // Delete the event previously recorded.
+      if (xpu_event)
+        delete xpu_event;
+
+      if (flag & EventFlag::TIMING) {
+        // Use the profiling tag to record the event to enable timing feature.
+        xpu_event = new sycl::event(
+            sycl::ext::oneapi::experimental::submit_profiling_tag(
+                xpu_stream.queue()));
+      } else {
+        xpu_event =
+            new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+      }
+    }
     *event = reinterpret_cast<void*>(xpu_event);
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
@@ -157,11 +238,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       void* start_event,
       void* end_event,
       const DeviceIndex device_index) const override {
-#if SYCL_COMPILER_VERSION < 20250000
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
     TORCH_CHECK(
         start_event && end_event,
         "Both events must be recorded before calculating elapsed time.");
@@ -177,6 +253,58 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
   }
 
+  std::string getEventIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    TORCH_CHECK(
+        !(flag & EventFlag::TIMING),
+        "Cannot create IPC handle for event with timing enabled.");
+#if SYCL_COMPILER_VERSION >= 20260200
+    auto& device = c10::xpu::get_raw_device(device_index);
+    // IPC is only supported for reusable events.
+    bool reusable = device.has(sycl::aspect::ext_oneapi_ipc_event);
+    TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
+    sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
+    if (!xpu_event) {
+      createEvent(&xpu_event, flag);
+      *event = reinterpret_cast<void*>(xpu_event);
+    }
+    auto handle_data =
+        sycl::ext::oneapi::experimental::ipc::event::get(*xpu_event).data();
+    std::string handle_string(
+        reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
+    return handle_string;
+#else
+    TORCH_CHECK(false, "Event IPC requires SYCL compiler 2026.2 or later.");
+#endif
+  }
+
+  void reconstructEventFromIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const std::string& handle_string) const override {
+#if SYCL_COMPILER_VERSION >= 20260200
+#ifdef _WIN32
+    TORCH_CHECK(false, "XPU IPC events are not supported on Windows.");
+#endif
+    auto& device = c10::xpu::get_raw_device(device_index);
+    // IPC is only supported for reusable events.
+    bool reusable = device.has(sycl::aspect::ext_oneapi_ipc_event);
+    TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
+    const auto* data = reinterpret_cast<const std::byte*>(handle_string.data());
+    sycl::ext::oneapi::experimental::ipc::handle_data_t handle_data(
+        data, data + handle_string.size());
+
+    sycl::event* xpu_event =
+        new sycl::event(sycl::ext::oneapi::experimental::ipc::event::open(
+            handle_data, c10::xpu::get_device_context()));
+    *event = reinterpret_cast<void*>(xpu_event);
+#else
+    TORCH_CHECK(false, "Event IPC requires SYCL compiler 2026.2 or later.");
+#endif
+  }
+
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
@@ -186,6 +314,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void synchronizeStream(const Stream& stream) const override {
     const XPUStream xpu_stream{stream};
     xpu_stream.synchronize();
+  }
+
+  bool isStreamCapturing(const Stream& stream) const override {
+    const XPUStream xpu_stream{stream};
+    return xpu_stream.is_capturing();
   }
 
   void synchronizeEvent(void* event) const override {

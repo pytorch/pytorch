@@ -1,11 +1,16 @@
 # Owner(s): ["oncall: quantization"]
 
+import unittest
+
 import torch
 from torch.ao.quantization.experimental.linear import LinearAPoT
 from torch.nn.modules.linear import Linear
-import unittest
+from torch.testing._internal.common_utils import HardwareClassification
+
 
 class TestNonUniformObserver(unittest.TestCase):
+    hw_classification = HardwareClassification.CPU
+
     """
         Test linear_APoT_fn by comparing to uniform linear
         for 2d tensors with size (4,4) and k=1
@@ -14,7 +19,7 @@ class TestNonUniformObserver(unittest.TestCase):
         # weight: fp tensor
         weight = 1000 * torch.rand(4, 4)
 
-        # activtion: fp32 tensor with ~ integer values
+        # activation: fp32 tensor with ~ integer values
         activation = torch.randint(low=0, high=255, size=(4, 4), dtype=torch.float)
 
         # calculate result from calling linear forward method
@@ -41,7 +46,7 @@ class TestNonUniformObserver(unittest.TestCase):
         # weight: fp tensor
         weight = 1000 * torch.rand(5, 3)
 
-        # activtion: fp32 tensor with ~ integer values
+        # activation: fp32 tensor with ~ integer values
         # note: transpose of activation matrix will have dimension (3, 5)
         activation = torch.randint(low=0, high=255, size=(5, 3), dtype=torch.float)
 

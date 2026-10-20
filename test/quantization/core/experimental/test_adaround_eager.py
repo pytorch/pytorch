@@ -10,6 +10,7 @@ from torch.ao.quantization.experimental.adaround_optimization import (
 from torch.nn import functional as F
 from torch.quantization.observer import MinMaxObserver
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def forward_wrapper(fetcher):
@@ -21,6 +22,8 @@ def forward_wrapper(fetcher):
 
 
 class TestAdaround(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def feedforawrd_callback(
         self,
         model,
@@ -134,3 +137,10 @@ class TestAdaround(QuantizationTestCase):
             ada_loss = F.mse_loss(ada_out, float_out)
             fq_loss = F.mse_loss(fq_out, float_out)
             self.assertTrue(ada_loss.item() < fq_loss.item())
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

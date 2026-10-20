@@ -2,42 +2,49 @@
 
 import copy
 import random
+
 import torch
 from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-)
 
-PLACEMENTS = [
-    "rank:0/cuda:0",
-    "rank:1/cuda:1",
-    "rank:2/cuda:2",
-    "rank:3/cuda:3",
-]
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
+def _placement(rank, dt=None):
+    """Generate a placement string for the given rank.
+
+    CPU does not support device indices, so placements omit the index.
+    If dt is None, uses the module-level device type (current accelerator).
+    """
+    if dt is None:
+        dt = device_type
+    if dt == "cpu":
+        return f"rank:{rank}/cpu"
+    return f"rank:{rank}/{dt}:{rank}"
+
+
+PLACEMENTS = [_placement(i) for i in range(4)]
 
 DEFAULT_GPU_NUM = 4
 
 
-def _chunk_sharding_specs_list_for_test(sharding_dims, seed=0):
+def _chunk_sharding_specs_list_for_test(sharding_dims, seed=0, device_type=None):
     spec_list = []
+    placements = [_placement(i, device_type) for i in range(4)]
     for i in range(len(sharding_dims)):
-        random.Random(seed + i).shuffle(PLACEMENTS)
+        random.Random(seed + i).shuffle(placements)
         spec_list.append(
             ChunkShardingSpec(
                 dim=sharding_dims[i],
-                placements=copy.deepcopy(PLACEMENTS),
+                placements=copy.deepcopy(placements),
             )
         )
     return spec_list
 
+
 class MyShardedModel2(torch.nn.Module):
-    def __init__(
-        self,
-        spec=None,
-        group=None,
-        init_rrefs=True
-    ) -> None:
+    def __init__(self, spec=None, group=None, init_rrefs=True) -> None:
         super().__init__()
         if spec is not None:
             self.sharded_tensor2 = sharded_tensor.rand(
@@ -49,12 +56,7 @@ class MyShardedModel2(torch.nn.Module):
 
 
 class MyShardedModel1(torch.nn.Module):
-    def __init__(
-        self,
-        spec=None,
-        group=None,
-        init_rrefs=True
-    ) -> None:
+    def __init__(self, spec=None, group=None, init_rrefs=True) -> None:
         super().__init__()
         if spec is not None:
             self.sharded_tensor1 = sharded_tensor.rand(

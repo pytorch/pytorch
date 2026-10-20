@@ -1,4 +1,4 @@
-# Quick scipt to apply categorized items to the
+# Quick script to apply categorized items to the
 # base commitlist . Useful if you are refactoring any code
 # but want to keep the previous data on categories
 

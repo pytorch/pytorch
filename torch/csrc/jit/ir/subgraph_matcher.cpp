@@ -89,7 +89,7 @@ bool SubgraphMatcher::isOutput(const Value* v) {
  */
 bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // Check if we've already visited these values.
-  if (values_map_.count(v1)) {
+  if (values_map_.contains(v1)) {
     if (values_map_.at(v1) != v2) {
       GRAPH_DEBUG(
           "Values %",
@@ -218,11 +218,6 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
   return true;
 }
 
-static bool endsWith(const std::string& str, const std::string& suffix) {
-  return str.size() >= suffix.size() &&
-      0 == str.compare(str.size() - suffix.size(), suffix.size(), suffix);
-}
-
 /**
  * Compare two Nodes. N1 is from pattern, N2 is from the actual graph.
  *
@@ -236,7 +231,7 @@ static bool endsWith(const std::string& str, const std::string& suffix) {
  */
 bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
   // Check if we've already visited these nodes.
-  if (nodes_map_.count(n1)) {
+  if (nodes_map_.contains(n1)) {
     return nodes_map_.at(n1) == n2;
   }
 
@@ -269,11 +264,11 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
       auto t = n2->output()->type()->expect<ClassType>();
       auto real_typename = t->name()->qualifiedName();
       auto pattern_typename = n1->s(attr::name);
-      if (!endsWith(real_typename, pattern_typename)) {
+      if (!real_typename.ends_with(pattern_typename)) {
         GRAPH_DEBUG(
             "Nodes did not match because expected module type is different:\n");
-        GRAPH_DEBUG("  actualtype:    ", real_typename, "\n");
-        GRAPH_DEBUG("  expected type: ", pattern_typename, "\n");
+        GRAPH_DEBUG("  actualtype:    ", real_typename, '\n');
+        GRAPH_DEBUG("  expected type: ", pattern_typename, '\n');
         GRAPH_DEBUG("Nodes:", *n1, *n2);
         return false;
       }

@@ -103,14 +103,9 @@ inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
   return 4;
 }
 
-// NOTE: this could probably be simplified with C++17 fold expressions.
-template <typename...>
-struct BoxedSize : std::integral_constant<size_t, 0> {};
-template <class T, class... Args>
-struct BoxedSize<T, Args...>
-    : std::integral_constant<
-          size_t,
-          boxed_size_one<T>() + BoxedSize<Args...>::value> {};
+template <class... Args>
+struct BoxedSize
+    : std::integral_constant<size_t, (boxed_size_one<Args>() + ... + 0)> {};
 
 template <class... Args>
 static inline constexpr size_t boxed_size() {
@@ -131,7 +126,7 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
   new (dest++) IValue(options.pinned_memory());
 }
 
-inline void boxArgsToStack(IValue*&) {}
+inline void boxArgsToStack(IValue*& /*unused*/) {}
 
 template <typename T, typename... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
@@ -185,7 +180,7 @@ struct PopResult<std::tuple<Types...>> final {
   template <size_t... indices>
   static Result pop_to_tuple_impl(
       Stack& stack,
-      std::index_sequence<indices...>) {
+      std::index_sequence<indices...> /*unused*/) {
     return std::make_tuple((std::move(stack[indices]).template to<Types>())...);
   }
 };

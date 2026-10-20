@@ -12,10 +12,16 @@
 namespace torch::autograd {
 
 struct TORCH_API Error : public Node {
+  // The Error node should never actually be reached during backprop, so it
+  // doesn't need to increment the global sequence number counter. If it is to
+  // be executed, it should be executed asap and stop the execution, so we set
+  // sequence_nr to the max value.
   Error(std::string msg, edge_list&& next_edges)
-      : Node(std::move(next_edges)), msg(std::move(msg)) {}
+      : Node(/*sequence_nr=*/UINT64_MAX, std::move(next_edges)),
+        msg(std::move(msg)) {}
 
-  Error(std::string msg) : msg(std::move(msg)) {}
+  Error(std::string msg)
+      : Node(/*sequence_nr=*/UINT64_MAX), msg(std::move(msg)) {}
 
   variable_list apply(variable_list&& inputs) override;
   variable_list apply(variable_list&& inputs) const;
@@ -77,7 +83,7 @@ struct TORCH_API UndefinedGradBackward : public Node {
   void compiled_args(CompiledNodeArgs& args) const override {}
   variable_list apply_with_saved(
       const variable_list& inputs,
-      SwapSavedVariables& saved) override {
+      SwapSavedVariables& /*saved*/) override {
     return apply(variable_list(inputs));
   }
 };
@@ -93,7 +99,7 @@ struct TORCH_API GraphRoot : public Node {
     }
   }
 
-  variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& /*inputs*/) override {
     return outputs;
   }
 

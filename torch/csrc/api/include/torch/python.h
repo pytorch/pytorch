@@ -26,7 +26,7 @@ inline Device py_object_to_device(py::object object) {
   if (THPDevice_Check(obj)) {
     return reinterpret_cast<THPDevice*>(obj)->device;
   }
-  throw TypeError("Expected device");
+  TORCH_CHECK_TYPE(false, "Expected device");
 }
 
 inline Dtype py_object_to_dtype(py::object object) {
@@ -34,7 +34,7 @@ inline Dtype py_object_to_dtype(py::object object) {
   if (THPDtype_Check(obj)) {
     return reinterpret_cast<THPDtype*>(obj)->scalar_type;
   }
-  throw TypeError("Expected dtype");
+  TORCH_CHECK_TYPE(false, "Expected dtype");
 }
 
 template <typename ModuleType>
@@ -140,7 +140,7 @@ py::class_<ModuleType, Extra...> add_module_bindings(
         "_modules", [](ModuleType& module) { return module.named_children(); })
       .def("modules", [](ModuleType& module) { return module.modules(); })
       .def("named_modules",
-           [](ModuleType& module, const py::object& /* unused */, std::string prefix, bool remove_duplicate /* unused */) {
+           [](ModuleType& module, const py::object& /* unused */, std::string prefix, bool  /*remove_duplicate*/ /* unused */) {
             return module.named_modules(std::move(prefix));
           },
           py::arg("memo") = py::none(),

@@ -5,7 +5,7 @@ from itertools import product
 
 import torch
 from torch.jit._passes._property_propagation import apply_input_props_using_example
-from torch.testing._internal.common_utils import TEST_CUDA
+from torch.testing._internal.common_utils import raise_on_run_directly, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -13,13 +13,6 @@ try:
     from torchvision import models
 except ImportError:
     models = None
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestDeviceAnalysis(JitTestCase):
@@ -36,7 +29,8 @@ class TestDeviceAnalysis(JitTestCase):
     @staticmethod
     def node_output_device(graph):
         graph_out = list(graph.outputs())
-        assert len(graph_out) == 1
+        if len(graph_out) != 1:
+            raise AssertionError(f"Expected 1 graph output, got {len(graph_out)}")
         return graph_out[0].type().device()
 
     def prop_device_on_graph(self, graph, example_devices, in_shapes=None):
@@ -336,3 +330,7 @@ class TestDeviceAnalysis(JitTestCase):
             test_fn, [self.mkldnn, self.mkldnn, None, None], self.mkldnn
         )
         self.assert_device_equal(test_fn, [self.cpu, self.cuda, None, None], None)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

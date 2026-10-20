@@ -4,10 +4,12 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate
+from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    create_local_tensor_test_class,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     with_comms,
 )
 
@@ -16,15 +18,12 @@ ITER_TIME = 10
 LR = 0.001
 
 
-class DistOtherOpsTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 2
-        return 2
+class DistOtherOpsTest(DTensorContinuousTestBase):
+    world_size = 2
 
     @with_comms
     def test_slice(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
         input_list = torch.rand(ITER_TIME, 1024, 10)
@@ -58,25 +57,25 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 output_mse_abs <= 1e-6,
-                f"Too large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
             )
             self.assertTrue(
                 output_mse_rel <= 1e-6,
-                f"Too large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
     @with_comms
     def test_bernoulli(self):
         rank = dist.get_rank()
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
         input_list = torch.rand(ITER_TIME, 1024, 10)
@@ -121,24 +120,24 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 output_mse_abs <= 1e-6,
-                f"Too large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for output, expected less equal 1e-6, got {output_mse_abs}",
             )
             self.assertTrue(
                 output_mse_rel <= 1e-6,
-                f"Too large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for output, expected less equal 1e-6, got {output_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
     @with_comms
     def test_nll(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Replicate()]
 
         pred_list = torch.rand(ITER_TIME, 1024, 10)
@@ -172,21 +171,28 @@ class DistOtherOpsTest(DTensorTestBase):
 
             self.assertTrue(
                 loss_mse_abs <= 1e-6,
-                f"Too large absolute mse for loss, expected less equal 1e-6, got {loss_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for loss, expected less equal 1e-6, got {loss_mse_abs}",
             )
             self.assertTrue(
                 loss_mse_rel <= 1e-6,
-                f"Too large relative mse for loss, expected less equal 1e-6, got {loss_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for loss, expected less equal 1e-6, got {loss_mse_rel}",
             )
             self.assertTrue(
                 grad_mse_abs <= 1e-6,
-                f"Too large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
+                lambda msg: f"{msg}\nToo large absolute mse for gradient, expected less equal 1e-6, got {grad_mse_abs}",
             )
             self.assertTrue(
                 grad_mse_rel <= 1e-6,
-                f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
+                lambda msg: f"{msg}\nToo large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
+
+DistOtherOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistOtherOpsTest,
+    base_class=LocalDTensorContinuousTestBase,
+    # Send / recv ops are not supported
+    skipped_tests=["test_bernoulli"],
+)
 
 if __name__ == "__main__":
     run_tests()

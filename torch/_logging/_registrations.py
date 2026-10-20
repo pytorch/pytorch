@@ -1,4 +1,3 @@
-# flake8: noqa: B950
 from ._internal import register_artifact, register_log
 
 
@@ -14,6 +13,13 @@ DISTRIBUTED = [
 ]
 
 register_log(
+    "async_compile",
+    [
+        "torch._inductor.async_compile",
+        "torch._inductor.compile_worker.tracked_process_pool",
+    ],
+)
+register_log(
     "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
 )
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
@@ -21,6 +27,7 @@ register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])
 register_log("autograd", "torch.autograd")
 register_log("inductor", ["torch._inductor", "torch._inductor.cudagraph_trees"])
+register_log("flex_gemm", "torch._inductor.kernel.flex_gemm.debug")
 
 register_artifact(
     "cudagraphs",
@@ -40,6 +47,13 @@ register_log("pp", ["torch.distributed.pipelining"])
 register_log("fsdp", ["torch.distributed.fsdp", "torch.distributed._composable.fsdp"])
 register_log("dtensor", ["torch.distributed._tensor", "torch.distributed.tensor"])
 register_log("onnx", "torch.onnx")
+register_log("native_dsl", "torch._native")
+register_artifact(
+    "native_dsl_compile",
+    "Emits a log line and a tlparse record per torch._native DSL compile-cache call "
+    "(compiles and cache hits). Off by default: this fires on every op call.",
+    off_by_default=True,
+)
 register_log(
     "export",
     [
@@ -70,6 +84,10 @@ register_artifact(
     "Prints the dynamo traced graph (prior to AOTDispatch) in a table. If you prefer python code use `graph_code` instead. ",
 )
 register_artifact("graph_code", "Like `graph`, but gives you the Python code instead.")
+register_artifact(
+    "graph_code_verbose",
+    "Verbose FX pass logs, e.g. from tensorify_python_scalars and runtime_assert.",
+)
 register_artifact(
     "graph_sizes", "Prints the sizes of all FX nodes in the dynamo graph."
 )
@@ -150,6 +168,11 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "side_effects",
+    "Prints all side effects that Dynamo codegenerates, including mutations to variables, attributes, cells, and globals. Useful for debugging side effect handling",
+    visible=True,
+)
+register_artifact(
     "not_implemented",
     "Prints log messages whenever we return NotImplemented in a multi-dispatch, letting you trace through each object we attempted to dispatch to",
 )
@@ -172,6 +195,7 @@ register_artifact(
 )
 register_artifact("perf_hints", "", off_by_default=True)
 register_artifact("onnx_diagnostics", "", off_by_default=True)
+register_artifact("compute_dependencies", "", off_by_default=True)
 register_artifact(
     "fusion",
     "Detailed Inductor fusion decisions. More detailed than 'schedule'",
@@ -183,8 +207,30 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "loop_tiling",
+    "Logs related to loop ordering",
+    off_by_default=True,
+)
+
+register_artifact(
+    "auto_chunker",
+    "Logs related to the auto chunker",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
+    off_by_default=True,
+)
+register_artifact(
+    "overlap_scheduling",
+    "Detailed Inductor overlap scheduling pass information",
+    off_by_default=True,
+)
+register_artifact(
+    "partitioned_scatter",
+    "Inductor partitioned scatter pass decisions and memory accounting",
     off_by_default=True,
 )
 register_artifact(
@@ -208,8 +254,23 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "incremental",
+    "Incremental autotuning logs.",
+    off_by_default=True,
+)
+register_artifact(
+    "node_runtime_estimation",
+    "Node runtime estimation for compile-time optimization decisions.",
+    off_by_default=True,
+)
+register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
+    off_by_default=True,
+)
+register_artifact(
+    "autotuning_inputs",
+    "Per-kernel input tensor shapes/dtypes/strides logged during autotuning.",
     off_by_default=True,
 )
 register_artifact(
@@ -218,4 +279,24 @@ register_artifact(
     off_by_default=True,
 )
 
+register_artifact(
+    "inductor_metrics",
+    "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
+    off_by_default=True,
+)
+register_artifact(
+    "hierarchical_compile",
+    "Logs debug info for hierarchical compilation",
+    off_by_default=True,
+)
+register_artifact(
+    "annotation",
+    "Logs detailed steps of the creating annotation on graph nodes",
+    off_by_default=True,
+)
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact(
+    "caching",
+    "Detailed Inductor caching information.",
+    off_by_default=True,
+)

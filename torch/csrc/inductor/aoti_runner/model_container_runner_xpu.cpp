@@ -16,6 +16,19 @@ AOTIModelContainerRunnerXpu::AOTIModelContainerRunnerXpu(
           kernel_bin_dir,
           run_single_threaded) {}
 
+AOTIModelContainerRunnerXpu::AOTIModelContainerRunnerXpu(
+    const std::string& model_so_path,
+    size_t num_models,
+    const std::string& device_str,
+    const std::string& kernel_bin_dir,
+    std::unordered_map<std::string, at::Tensor>& constants)
+    : AOTIModelContainerRunner(
+          model_so_path,
+          num_models,
+          device_str,
+          kernel_bin_dir,
+          constants) {}
+
 AOTIModelContainerRunnerXpu::~AOTIModelContainerRunnerXpu() = default;
 
 std::vector<at::Tensor> AOTIModelContainerRunnerXpu::run_impl(

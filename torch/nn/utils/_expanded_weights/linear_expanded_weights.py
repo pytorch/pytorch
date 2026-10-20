@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -16,11 +15,17 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, _, __, *expanded_args_and_kwargs):
         if len(expanded_args_and_kwargs[0].shape) <= 1:
             raise RuntimeError(
                 "Input does not have a batch dimension. Expanded Weights expected input "
                 f"of at least rank 2, got of rank {len(expanded_args_and_kwargs[0].shape)}"
+            )
+        if len(expanded_args_and_kwargs[1].shape) != 2:
+            raise RuntimeError(
+                "Expanded Weights expected weight of rank 2, got of rank "
+                f"{len(expanded_args_and_kwargs[1].shape)}"
             )
         expanded_kwargs = {
             "bias": expanded_args_and_kwargs[2]
@@ -35,10 +40,11 @@ class LinearPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         input, weight = ctx.args
         bias = ctx.kwargs["bias"]
-        results: list[Optional[torch.Tensor]] = []
+        results: list[torch.Tensor | None] = []
         results.append(None)  # for kwarg_names
         results.append(None)  # for op reference
 

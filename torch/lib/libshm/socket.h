@@ -34,9 +34,18 @@ class Socket {
   }
 
   struct sockaddr_un prepare_address(const char* path) {
-    struct sockaddr_un address;
+    struct sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    strcpy(address.sun_path, path);
+    const size_t path_len = std::strlen(path);
+    TORCH_CHECK(
+        path_len < sizeof(address.sun_path),
+        "Unix socket path is ",
+        path_len,
+        " bytes, but the limit is ",
+        sizeof(address.sun_path) - 1,
+        ". Path: ",
+        path);
+    std::memcpy(address.sun_path, path, path_len + 1);
     return address;
   }
 
@@ -58,16 +67,13 @@ class Socket {
         SYSCHECK_ERR_RETURN_NEG1(
             step_received =
                 ::read(socket_fd, buffer, num_bytes - bytes_received));
-        if (step_received == 0)
-          throw std::runtime_error("Other end has closed the connection");
+        TORCH_CHECK(step_received != 0, "Other end has closed the connection");
         bytes_received += step_received;
         buffer += step_received;
       } else if (pfd.revents & (POLLERR | POLLHUP)) {
-        throw std::runtime_error(
-            "An error occurred while waiting for the data");
+        TORCH_CHECK(false, "An error occurred while waiting for the data");
       } else {
-        throw std::runtime_error(
-            "Shared memory manager connection has timed out");
+        TORCH_CHECK(false, "Shared memory manager connection has timed out");
       }
     }
   }
@@ -156,9 +162,9 @@ class ClientSocket : public Socket {
     char buffer[3] = {0, 0, 0};
     send(&info, sizeof(info));
     recv(buffer, 2);
-    if (strcmp(buffer, "OK") != 0)
-      throw std::runtime_error(
-          "Shared memory manager didn't respond with an OK");
+    TORCH_CHECK(
+        strcmp(buffer, "OK") == 0,
+        "Shared memory manager didn't respond with an OK");
   }
 
   void register_deallocation(AllocInfo& info) {

@@ -8,7 +8,6 @@
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
@@ -32,24 +31,24 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   }
 
   const at::Generator& getDefaultGenerator(
-      c10::DeviceIndex device_index) const override {
+      c10::DeviceIndex /*device_index*/) const override {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
   Generator getNewGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const override {
-    // TODO(FFFrog): Perserved for BC and will be removed in the future.
+    // TODO(FFFrog): Preserved for BC and will be removed in the future.
     if (at::GetGeneratorPrivate().has_value())
       return at::GetGeneratorForPrivateuse1(device_index);
 
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
-  at::Device getDeviceFromPtr(void* data) const override {
+  at::Device getDeviceFromPtr(void* /*data*/) const override {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
 
@@ -57,14 +56,14 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
   void init() const override {}
   virtual void resizePrivateUse1Bytes(
-      const c10::Storage& storage,
-      size_t newsize) const {
+      const c10::Storage& /*storage*/,
+      size_t /*newsize*/) const {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
@@ -85,5 +84,3 @@ TORCH_API const at::PrivateUse1HooksInterface& getPrivateUse1Hooks();
 } // namespace detail
 
 } // namespace at
-
-C10_DIAGNOSTIC_POP()

@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/byte_order.h>
 
+#include <bit>
 #include <cstring>
 #include <vector>
 
@@ -107,8 +108,11 @@ static uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
 namespace torch::utils {
 
 THPByteOrder THP_nativeByteOrder() {
-  uint32_t x = 1;
-  return *(uint8_t*)&x ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
+  using enum std::endian;
+  static_assert(
+      native == little || native == big,
+      "mixed-endian platforms are not supported");
+  return native == big ? THP_BIG_ENDIAN : THP_LITTLE_ENDIAN;
 }
 
 template <typename T, typename U>
@@ -172,7 +176,7 @@ template <>
 TORCH_API void THP_decodeBuffer<bool, bool>(
     bool* dst,
     const uint8_t* src,
-    bool,
+    bool /*unused*/,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
@@ -362,7 +366,7 @@ TORCH_API void THP_encodeBuffer<c10::complex<double>>(
 
 #define DEFINE_ENCODE(TYPE)                       \
   template TORCH_API void THP_encodeBuffer<TYPE>( \
-      uint8_t * dst, const TYPE* src, THPByteOrder order, size_t len);
+      uint8_t* dst, const TYPE* src, THPByteOrder order, size_t len);
 
 DEFINE_ENCODE(int16_t)
 DEFINE_ENCODE(int32_t)

@@ -1,12 +1,31 @@
 # Owner(s): ["module: dynamo"]
+from collections import deque
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.guards
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import config as dc
+from torch._dynamo.source import (
+    AttrSource,
+    CallFunctionNoArgsSource,
+    ConstantSource,
+    ConstDictKeySource,
+    DefaultsSource,
+    DictGetItemSource,
+    DictSubclassGetItemSource,
+    GetItemSource,
+    GlobalSource,
+    ListGetItemSource,
+    LocalSource,
+)
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
@@ -196,6 +215,407 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def _check_aliasing_guard_failure_with_unavailable_source(self, fn, data):
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure.reason)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # torch.compile does not expose guard_fail_fn.
+        compiled_fn = torch._dynamo.optimize(backend=cnt, guard_fail_fn=guard_fail_fn)(
+            fn
+        )
+
+        t1, t2 = torch.randn(4), torch.randn(4)
+        self.assertEqual(compiled_fn(t1, t2, data), fn(t1, t2, data))
+
+        t = torch.randn(4)
+        self.assertEqual(compiled_fn(t, t, None), fn(t, t, None))
+
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(failure_reasons), 1)
+        self.assertIn("Duplicate tensors found", failure_reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate",
+            failure_reasons[0],
+        )
+        return failure_reasons[0]
+
+    def test_aliasing_guard_failure_with_unavailable_list_tensor_source(self):
+        def fn(a, b, data):
+            x = a + b
+            if data is not None:
+                x = x + data[0] + data[1]
+            return x
+
+        reason = self._check_aliasing_guard_failure_with_unavailable_source(
+            fn, [torch.randn(4), torch.randn(4)]
+        )
+
+        source_name = "args[2]" if dc.debug_force_nested_calls else "data"
+        for source in ("[0]", "[1]"):
+            self.assertIn(f"{source_name}{source}", reason)
+
+    def test_aliasing_guard_failure_with_unavailable_dict_tensor_source(self):
+        def fn(a, b, data):
+            x = a + b
+            if data is not None:
+                x = x + next(iter(data.values()))
+            return x
+
+        reason = self._check_aliasing_guard_failure_with_unavailable_source(
+            fn, {object(): torch.randn(4)}
+        )
+        self.assertIn("dict.keys", reason)
+        self.assertIn("TypeError", reason)
+
+    def test_aliasing_guard_recompile_reason_with_unavailable_sources(self):
+        class MissingAttr:
+            pass
+
+        manager = torch._dynamo.guards.GuardManagerWrapper()
+        manager.global_scope = {"G": {}}
+        manager.no_tensor_aliasing_sources = [
+            LocalSource("duplicate_a"),
+            LocalSource("duplicate_b"),
+            GlobalSource("missing_global"),
+            AttrSource(LocalSource("missing_attr"), "value"),
+            GetItemSource(LocalSource("missing_index"), 0),
+            DictGetItemSource(LocalSource("missing_key"), "key"),
+            DefaultsSource(LocalSource("missing_defaults"), 0),
+            GetItemSource(LocalSource("not_subscriptable"), 0),
+            ListGetItemSource(LocalSource("not_list"), 0),
+            GetItemSource(LocalSource("missing_deque"), 0),
+        ]
+        duplicate = torch.randn(4)
+        scope = {
+            "L": {
+                "duplicate_a": duplicate,
+                "duplicate_b": duplicate,
+                "missing_attr": MissingAttr(),
+                "missing_index": [],
+                "missing_key": {},
+                "missing_defaults": lambda: None,
+                "not_subscriptable": None,
+                "not_list": None,
+                "missing_deque": deque(),
+            }
+        }
+
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+        )
+
+        self.assertEqual(len(reasons), 2)
+        self.assertIn("Duplicate tensors found", reasons[0])
+        self.assertIn("duplicate_a", reasons[0])
+        self.assertIn("duplicate_b", reasons[0])
+        self.assertIn(
+            "NO_TENSOR_ALIASING guard source(s) no longer evaluate", reasons[1]
+        )
+        for source, exception_type in (
+            ("missing_attr", "AttributeError"),
+            ("missing_global", "KeyError"),
+            ("missing_index", "IndexError"),
+            ("missing_key", "KeyError"),
+            ("missing_defaults", "TypeError"),
+            ("not_subscriptable", "TypeError"),
+            ("not_list", "TypeError"),
+            ("missing_deque", "IndexError"),
+        ):
+            self.assertIn(source, reasons[1])
+            self.assertIn(exception_type, reasons[1])
+
+        manager.no_tensor_aliasing_sources = [
+            ConstantSource("len(1)"),
+            LocalSource("duplicate_a"),
+        ]
+        with self.assertRaisesRegex(TypeError, "has no len"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+
+        manager.no_tensor_aliasing_sources = [
+            ConstantSource("1 / 0"),
+            LocalSource("duplicate_a"),
+        ]
+        with self.assertRaisesRegex(ZeroDivisionError, "division by zero"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, scope
+            )
+
+    def test_aliasing_guard_recompile_reason_with_mixed_source_errors(self):
+        class TypeErrorDescriptor:
+            @property
+            def tensor(self):
+                raise TypeError("descriptor failure")
+
+            def __call__(self):
+                raise TypeError("call failure")
+
+        class AttributeErrorDescriptor:
+            @property
+            def tensor(self):
+                raise AttributeError("attribute descriptor failure")
+
+        class KeyErrorContainer:
+            def __getitem__(self, index):
+                raise KeyError("custom getitem failure")
+
+        class AttributeErrorGetattr:
+            def __getattr__(self, name):
+                raise AttributeError("custom getattr failure")
+
+        class DefaultsAttributeError:
+            @property
+            def __defaults__(self):
+                raise AttributeError("defaults descriptor failure")
+
+        class DefaultsTypeError(list):
+            @property
+            def __defaults__(self):
+                raise TypeError("defaults descriptor type failure")
+
+        class MissingDict(dict):
+            def __missing__(self, key):
+                raise KeyError("custom missing failure")
+
+        class DictSubclass(dict):
+            def __init__(self, stored, returned):
+                super().__init__(key=stored)
+                self.returned = returned
+
+            def __getitem__(self, key):
+                return self.returned
+
+        class Holder:
+            def __init__(self, data):
+                self.data = data
+
+        class ChangingHolder:
+            def __init__(self, *values):
+                self.values = iter(values)
+
+            @property
+            def data(self):
+                return next(self.values)
+
+        class HashErrorKey:
+            fail = False
+
+            def __hash__(self):
+                if self.fail:
+                    raise TypeError("key hash failure")
+                return 0
+
+        class TypeErrorHolder:
+            @property
+            def data(self):
+                raise TypeError("index descriptor failure")
+
+        manager = torch._dynamo.guards.GuardManagerWrapper()
+        manager.global_scope = {}
+        other = torch.randn(4)
+        scope = {"L": {"items": [TypeErrorDescriptor()], "other": other}}
+
+        for getitem_source in (
+            GetItemSource(LocalSource("items"), 0),
+            ListGetItemSource(LocalSource("items"), 0),
+        ):
+            for source, error in (
+                (AttrSource(getitem_source, "tensor"), "descriptor failure"),
+                (CallFunctionNoArgsSource(getitem_source), "call failure"),
+            ):
+                with self.subTest(source=source.name):
+                    manager.no_tensor_aliasing_sources = [source, LocalSource("other")]
+                    with self.assertRaisesRegex(TypeError, error):
+                        torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                            manager, scope
+                        )
+
+        manager.no_tensor_aliasing_sources = [
+            AttrSource(ListGetItemSource(LocalSource("attribute_items"), 0), "tensor"),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(AttributeError, "attribute descriptor failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {
+                    "L": {
+                        "attribute_items": [AttributeErrorDescriptor()],
+                        "other": other,
+                    }
+                },
+            )
+
+        manager.no_tensor_aliasing_sources = [
+            GetItemSource(LocalSource("custom_items"), 0),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(KeyError, "custom getitem failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {"L": {"custom_items": KeyErrorContainer(), "other": other}},
+            )
+
+        manager.no_tensor_aliasing_sources = [
+            AttrSource(LocalSource("custom_attr"), "tensor"),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(AttributeError, "custom getattr failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {"L": {"custom_attr": AttributeErrorGetattr(), "other": other}},
+            )
+
+        manager.no_tensor_aliasing_sources = [
+            DefaultsSource(LocalSource("custom_defaults"), 0),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(AttributeError, "defaults descriptor failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {
+                    "L": {
+                        "custom_defaults": DefaultsAttributeError(),
+                        "other": other,
+                    }
+                },
+            )
+
+        manager.no_tensor_aliasing_sources = [
+            DefaultsSource(LocalSource("custom_defaults"), 0),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(TypeError, "defaults descriptor type failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {
+                    "L": {
+                        "custom_defaults": DefaultsTypeError(),
+                        "other": other,
+                    }
+                },
+            )
+
+        manager.no_tensor_aliasing_sources = [
+            DictGetItemSource(LocalSource("custom_mapping"), "missing"),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(KeyError, "custom missing failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {"L": {"custom_mapping": MissingDict(), "other": other}},
+            )
+
+        overridden = torch.randn(4)
+        manager.no_tensor_aliasing_sources = [
+            DictSubclassGetItemSource(LocalSource("mapping"), "key"),
+            LocalSource("overridden"),
+        ]
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {
+                    "L": {
+                        "mapping": DictSubclass(torch.randn(4), overridden),
+                        "overridden": overridden,
+                    }
+                },
+            )
+        )
+        self.assertIn("Duplicate tensors found", reasons[0])
+
+        key = object()
+        holder = ChangingHolder({key: torch.randn(4)}, {object(): torch.randn(4)})
+        dict_source = AttrSource(LocalSource("holder"), "data")
+        manager.no_tensor_aliasing_sources = [
+            DictGetItemSource(dict_source, ConstDictKeySource(dict_source, 0)),
+            LocalSource("other"),
+        ]
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, {"L": {"holder": holder, "other": torch.randn(4)}}
+            )
+        )
+        self.assertEqual(reasons, ["NO_TENSOR_ALIASING guard failed"])
+
+        hash_error_key = HashErrorKey()
+        mapping = {hash_error_key: torch.randn(4)}
+        hash_error_key.fail = True
+        mapping_source = LocalSource("mapping")
+        manager.no_tensor_aliasing_sources = [
+            DictGetItemSource(mapping_source, ConstDictKeySource(mapping_source, 0)),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(TypeError, "key hash failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {"L": {"mapping": mapping, "other": other}},
+            )
+
+        duplicate = torch.randn(4)
+        holder = Holder([duplicate, duplicate])
+        shared_source = AttrSource(LocalSource("holder"), "data")
+        manager.no_tensor_aliasing_sources = [
+            GetItemSource(shared_source, 0),
+            GetItemSource(shared_source, 1),
+        ]
+        reasons = (
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager, {"L": {"holder": holder}}
+            )
+        )
+        self.assertIn("Duplicate tensors found", reasons[0])
+
+        index_source = AttrSource(LocalSource("holder"), "data")
+        manager.no_tensor_aliasing_sources = [
+            DictGetItemSource(
+                LocalSource("mapping"), ConstDictKeySource(index_source, 0)
+            ),
+            LocalSource("other"),
+        ]
+        with self.assertRaisesRegex(TypeError, "index descriptor failure"):
+            torch._dynamo.guards.recompilation_reason_for_no_tensor_aliasing_guard(
+                manager,
+                {
+                    "L": {
+                        "mapping": {key: torch.randn(4)},
+                        "holder": TypeErrorHolder(),
+                        "other": other,
+                    }
+                },
+            )
+
+    def test_object_alias_relation_guards_without_lambda(self):
+        class Box:
+            pass
+
+        def foo(box_a, box_b, t):
+            entries = {box_a, box_b}
+            if len(entries) == 1:
+                return t + 1
+            return t - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor(0)
+
+        with dc.patch(use_lamba_guard_for_object_aliasing=False):
+            compiled = torch.compile(foo, backend=cnt, fullgraph=True)
+
+            shared = Box()
+            res_alias = compiled(shared, shared, x)
+            self.assertEqual(res_alias.item(), 1)
+
+            res_unique = compiled(Box(), Box(), x)
+            self.assertEqual(res_unique.item(), -1)
+            self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
 
     def test_aliasing_guard_failures_with_globals(self):
         g1 = torch.randn([3])
@@ -393,38 +813,51 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
-        counter = torch._dynamo.testing.CompileCounter()
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_mul_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        def f(x):
-            if x.size(0) < 10:
-                return x * 1
-            else:
-                return x + 10
+        def scaling_step(update, dummy_tensor, lr):
+            dummy_tensor.mul_(0.5 * lr)
 
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+            r, c = update.size(-2), update.size(-1)
+            scaling_factor = max(1, r / c) ** 0.5
+            update.mul_(scaling_factor * lr)
 
-        for i in [3, 2, 1, 0]:
-            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
+            return update
 
-        self.assertEqual(counter.frame_count, 2)  # not three or four!
+        compiled = torch.compile(scaling_step, backend=counter, fullgraph=True)
+        base_update = torch.randn(128, 128)
+        base_dummy = torch.randn(324, 64)
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
-        counter = torch._dynamo.testing.CompileCounter()
+        for i in range(8):
+            lr = 1e-4 * (i + 1)
+            self.assertEqual(
+                compiled(base_update.clone(), base_dummy.clone(), lr),
+                scaling_step(base_update.clone(), base_dummy.clone(), lr),
+            )
 
-        def f(x):
-            if x.size(0) < 2:
-                return x * 1
-            else:
-                return x + 10
+        self.assertLessEqual(counter.frame_count, 2)
 
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+    @torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True)
+    def test_tensorify_python_builtin_pow_does_not_recompile(self):
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
-        opt_f(torch.randn(1))
-        with self.assertRaises(torch._dynamo.exc.UserError):
-            opt_f(torch.randn(0))
+        def step_param(v_t, bc2):
+            eps = 1e-8
+            return v_t.sqrt().div_(bc2**0.5).add_(eps)
+
+        compiled = torch.compile(step_param, backend=counter, fullgraph=True)
+        base_v_t = torch.randn(64, 1280)
+
+        for step in range(1, 9):
+            bc2 = 1.0 - 0.999**step
+            self.assertEqual(
+                compiled(base_v_t.clone(), bc2),
+                step_param(base_v_t.clone(), bc2),
+            )
+
+        self.assertLessEqual(counter.frame_count, 2)
 
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)
@@ -473,6 +906,164 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn(x), opt_fn(x))
 
         self.assertEqual(counter.frame_count, 2)
+
+    def test_dunder_call_recompile(self):
+        class Foo:
+            def __call__(self, x):
+                return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x, foo):
+            return foo(x)
+
+        x = torch.ones(2)
+        foo1 = Foo()
+        foo2 = Foo()
+
+        # no recompilation
+        f(x, foo1)
+        f(x, foo2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # one recompilation
+        Foo.__call__ = lambda self, x: x + 2
+        f(x, foo1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_no_recompile_over_unused_objects(self):
+        # This is a regression test case that imitates
+        # https://github.com/city96/ComfyUI-GGUF/blob/47bec6147569a138dd30ad3e14f190a36a3be456/ops.py#L169-L182
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x, key, patches):
+            return x * x + 1
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def apply_patches(f, x, keys):
+            patches = []
+            for key, patch in keys:  # noqa: F402
+                patches.append(patch)
+            x = f(x, key, patches)
+            return x
+
+        # no recompilation
+        x = torch.rand(10)
+        apply_patches(f, x, [("a", 1), ("b", 2)])
+        self.assertEqual(counter.frame_count, 1)
+        apply_patches(f, x, [("c", 3), ("d", 4)])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_out_variant_does_not_overrecompile(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/135859.
+        # The out= variants of max/min/topk used to recompile on every new input
+        # shape because their out overloads (e.g. aten.max.dim_max) lacked a meta
+        # function, so dynamic shapes were not propagated to the out tensors.
+        # They should now recompile exactly once, like the functional variant.
+        def count_recompiles(fn):
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, dynamic=None)
+            for n in range(4, 10):
+                opt(torch.randn(n, 8))
+            return cnt.frame_count
+
+        def max_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.max(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def min_out(x):
+            values = x.new_empty(x.shape[0])
+            indices = x.new_empty(x.shape[0], dtype=torch.long)
+            torch.min(x, dim=1, out=(values, indices))
+            return values, indices
+
+        def topk_out(x):
+            values = x.new_empty((x.shape[0], 3))
+            indices = x.new_empty((x.shape[0], 3), dtype=torch.long)
+            torch.topk(x, 3, dim=1, out=(values, indices))
+            return values, indices
+
+        for out_fn in (max_out, min_out, topk_out):
+            torch._dynamo.reset()
+            self.assertEqual(count_recompiles(out_fn), 2)
+
+
+class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
+    # Float constant guards must be value-identity (bitwise), not IEEE eq:
+    # -0.0 == 0.0 so an EQUALS_MATCH guard built for 0.0 wrongly passed for
+    # -0.0 and reused a graph with 0.0 baked in, while nan != nan needs
+    # (and has) dedicated is-nan guards.
+
+    def test_neg_zero_recompiles_and_is_correct(self):
+        import math
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x * s, math.copysign(1.0, s)
+
+        x = torch.randn(4)
+        _, sign_pos = f(x, 0.0)
+        _, sign_neg = f(x, -0.0)
+        self.assertEqual(sign_pos, 1.0)
+        self.assertEqual(sign_neg, -1.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_nan_sign_recompiles_and_is_correct(self):
+        import math
+        import struct
+
+        def from_bits(bits):
+            return struct.unpack(">d", struct.pack(">Q", bits))[0]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x + 1, math.copysign(1.0, s)
+
+        # nan sign and payload are observable, so the nan guard must be
+        # bitwise: a graph specialized on a positive nan must not be reused
+        # for a negative nan.
+        x = torch.randn(4)
+        _, sign_pos = f(x, from_bits(0x7FF8000000000001))
+        _, sign_neg = f(x, from_bits(0xFFF8000000001234))
+        self.assertEqual(sign_pos, 1.0)
+        self.assertEqual(sign_neg, -1.0)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_nan_float_does_not_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, s: float):
+            return x * s
+
+        x = torch.randn(4)
+        f(x, float("nan"))
+        f(x, float("nan"))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_complex_nan_guard_checks_other_component(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=False)
+        def f(x, c: complex):
+            return x + c
+
+        # The COMPLEX_IS_NAN guard must include the non-nan component:
+        # complex(7, nan) must not reuse the graph specialized on
+        # complex(5, nan), but the same constant must not recompile.
+        x = torch.randn(4, dtype=torch.cfloat)
+        f(x, complex(5.0, float("nan")))
+        f(x, complex(7.0, float("nan")))
+        self.assertEqual(cnt.frame_count, 2)
+        f(x, complex(7.0, float("nan")))
+        self.assertEqual(cnt.frame_count, 2)
 
 
 if __name__ == "__main__":

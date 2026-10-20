@@ -3,15 +3,33 @@
 import copy
 import os
 import unittest
+from unittest import mock
 
 import torch
 from torch import nn
 from torch._dynamo.utils import counters, same
-from torch._inductor import metrics
+from torch._inductor import config, metrics
+from torch._inductor.fx_passes.reduced_atomic_contention import (
+    _accumulation_dtype,
+    _compute_num_partitions,
+    _evaluate_candidate,
+    _scan_candidates,
+    _widen_bytes,
+    ScatterCandidate,
+    ScatterPassContext,
+)
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import (
+    needs_fallback_due_to_atomic_add_limitations,
+    run_and_get_code,
+)
+from torch.testing._internal.common_utils import DeterministicGuard, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
+
+# set so that metrics appear
+torch._logging.set_logs(inductor_metrics=True)
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
@@ -28,7 +46,9 @@ class TestScatterOpt(TestCase):
     def do_acc_test(self, f, *args):
         expect = f(*args)
         actual = torch.compile(f)(*args)
-        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}\n")
+        self.assertTrue(
+            same(expect, actual, tol=1e-3), lambda msg: f"{msg}\n{expect=}\n{actual=}\n"
+        )
 
     def test_3d_tensor(self):
         L, M, N = 2, 1024, 2048
@@ -146,6 +166,40 @@ class TestScatterOpt(TestCase):
         over_estimate = M * torch.float.itemsize + M * N * torch.float.itemsize
         self.assertEqual(metrics.num_bytes_accessed, expected_num_bytes + over_estimate)
 
+    def test_dtype_preserved(self):
+        """
+        The full+scatter -> pointwise rewrite must preserve the const tensor's
+        dtype. torch.where with Python scalar branches promotes to the default
+        float dtype (float32), so for a low-precision const tensor (e.g. f16)
+        the rewrite previously produced a float32 result. This is exactly the
+        pattern emitted by nll_loss_backward / cross_entropy backward on f16
+        inputs.
+        """
+        M, N = 1024, 2048
+
+        for dtype in (torch.float16, torch.bfloat16):
+            metrics.reset()
+
+            def f(x):
+                y = torch.full([M, N], 3.14, dtype=dtype)
+                y.scatter_(1, x.unsqueeze(1), 2.718)
+                return y
+
+            x = torch.randint(0, N, (M,), dtype=torch.int64)
+            expect = f(x)
+            actual = torch.compile(f)(x)
+            self.assertEqual(expect.dtype, dtype)
+            self.assertEqual(
+                actual.dtype,
+                dtype,
+                lambda msg: f"{msg}\ndtype not preserved for {dtype}",
+            )
+            self.assertTrue(
+                same(expect, actual, tol=1e-2),
+                lambda msg: f"{msg}\n{expect=}\n{actual=}\n",
+            )
+            self.check_metric()
+
     def test_cross_entropy_loss(self):
         """
         Match full+scatter in CEL and replaces it with a pointwise.
@@ -177,9 +231,8 @@ class TestScatterOpt(TestCase):
         ref_grad = ref_model.weight.grad
         opt_f(opt_model, x, label)
         act_grad = opt_model.weight.grad
-        assert torch.allclose(
-            ref_grad, act_grad, atol=1e-3, rtol=1e-3
-        ), f"{ref_grad=}\n{act_grad=}"
+        if not torch.allclose(ref_grad, act_grad, atol=1e-3, rtol=1e-3):
+            raise AssertionError(f"{ref_grad=}\n{act_grad=}")
 
         self.check_metric()
 
@@ -188,12 +241,1265 @@ class TestScatterOpt(TestCase):
                 raise unittest.SkipTest(
                     "torch.xpu.reset_peak_memory_stats not implemented."
                 )
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.reset_peak_memory_stats()
             for _ in range(3):
                 opt_f(opt_model, x, label)
             ms = benchmarker.benchmark_gpu(lambda: opt_f(opt_model, x, label))
-            peak_mem = torch.cuda.max_memory_allocated() / 10**9
+            peak_mem = torch.accelerator.max_memory_allocated() / 10**9
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
+
+
+class TestPartitionedScatterOpt(TestCase):
+    """Tests for the partitioned scatter FX pass (reduced_atomic_contention.py)."""
+
+    def setUp(self):
+        super().setUp()
+        metrics.reset()
+        counters.clear()
+        torch._dynamo.reset()
+        self._saved_enabled = config.partitioned_scatter_enabled
+        self._saved_force = config.partitioned_scatter_force
+        config.partitioned_scatter_enabled = True
+
+    def tearDown(self):
+        config.partitioned_scatter_enabled = self._saved_enabled
+        config.partitioned_scatter_force = self._saved_force
+        super().tearDown()
+
+    def _check_accuracy(self, f, args, *, atol=1e-1, rtol=1e-2, exact=False):
+        """Run f eagerly and through Inductor, assert the results agree."""
+        with torch.no_grad():
+            expected = f(*args)
+            compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
+            actual = compiled_f(*args)
+
+        if isinstance(expected, (list, tuple)):
+            outputs = list(zip(expected, actual))
+        else:
+            outputs = [(expected, actual)]
+        for e, a in outputs:
+            if exact:
+                self.assertTrue(torch.equal(e, a), f"expected={e}\nactual={a}")
+            else:
+                self.assertTrue(
+                    torch.allclose(e.float(), a.float(), atol=atol, rtol=rtol),
+                    f"expected={e}\nactual={a}",
+                )
+
+    def _make_scatter_inputs(
+        self, N, output_shape, dtype=torch.float32, index_high=None, dim=0
+    ):
+        """
+        Create (out, idx, vals) for a 1-index scatter-add along `dim`.
+        index_high controls contention: smaller = more writes per slot.
+        """
+        if index_high is None:
+            index_high = output_shape[dim] // 2 or 1
+        idx = torch.randint(0, index_high, (N,), dtype=torch.int64)
+        val_shape = list(output_shape)
+        val_shape[dim] = N
+        if dtype in (torch.int32,):
+            vals = torch.randint(0, 4, val_shape, dtype=dtype)
+        else:
+            vals = torch.randn(val_shape, dtype=dtype)
+        out = torch.zeros(output_shape, dtype=dtype)
+        return out, idx, vals
+
+    def test_pr_reference_accuracy(self):
+        """Scaled-down PR benchmark: three scatter-adds with high contention (4 slots)."""
+        torch.manual_seed(42)
+        N, D, n_small = 10_000, 10, 51
+
+        def f(out0, out1, out2, idx0, idx1, idx2, vals):
+            out0 = out0.index_put([idx0], vals, accumulate=True)
+            out1 = out1.index_put([idx1], vals, accumulate=True)
+            out2 = out2.index_put([idx2], vals, accumulate=True)
+            return out0, out1, out2
+
+        vals = torch.randn(N, D, dtype=torch.float32)
+        out0 = torch.zeros(n_small, D, dtype=torch.float32)
+        out1 = torch.zeros(n_small, D, dtype=torch.float32)
+        out2 = torch.zeros(n_small, D, dtype=torch.float32)
+        idx0 = torch.randint(0, 4, (N,), dtype=torch.int64)
+        idx1 = torch.randint(0, 4, (N,), dtype=torch.int64)
+        idx2 = torch.randint(0, 4, (N,), dtype=torch.int64)
+
+        self._check_accuracy(
+            f, (out0, out1, out2, idx0, idx1, idx2, vals), atol=1.0, rtol=1e-2
+        )
+        self.assertGreaterEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
+
+    @skipIfXpu(msg="embedding_dense_backward is not decomposed on XPU")
+    def test_embedding_dense_backward(self):
+        """Reaches the pass as _unsafe_masked_index_put_accumulate, not index_put."""
+        torch.manual_seed(42)
+        N, num_weights, dim, padding_idx = 8192, 24, 16, 3
+
+        def f(grad, idx):
+            return torch.ops.aten.embedding_dense_backward(
+                grad, idx, num_weights, padding_idx, False
+            )
+
+        grad = torch.randn(N, dim)
+        idx = torch.randint(0, num_weights, (N,), dtype=torch.int64)
+        idx[::2] = 0  # contention on one row
+        idx[::7] = padding_idx  # rows the mask must drop
+
+        self._check_accuracy(f, (grad, idx))
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+    @skipIfXpu(msg="embedding_dense_backward is not decomposed on XPU")
+    def test_embedding_dense_backward_scale_grad_by_freq(self):
+        torch.manual_seed(42)
+        B, T, num_weights, dim, padding_idx = 64, 128, 24, 16, 3
+
+        def f(grad, idx):
+            return torch.ops.aten.embedding_dense_backward(
+                grad, idx, num_weights, padding_idx, True
+            )
+
+        grad = torch.randn(B, T, dim)
+        idx = torch.randint(0, num_weights, (B, T), dtype=torch.int64)
+        idx[::2] = 0
+        idx[::7] = padding_idx
+
+        self._check_accuracy(f, (grad, idx), atol=1e-2, rtol=1e-2)
+        # counts accumulate is int64 and falls back; the grad accumulate is rewritten.
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+    def test_masked_accumulate_index_shaped_mask(self):
+        """The embedding_dense_backward(scale_grad_by_freq=True) counts shape:
+        1-D output, so values and mask are both index-shaped."""
+        torch.manual_seed(3)
+        n, A, B = 8, 64, 128
+
+        def f(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [idx], vals
+            )
+
+        out = torch.zeros(n)
+        idx = torch.randint(0, n, (A, B), dtype=torch.int64)
+        mask = torch.ones(A, B, dtype=torch.bool)
+        idx[0, 0] = -5
+        mask[0, 0] = False
+        vals = torch.randn(A, B)
+
+        self._check_accuracy(f, (out, mask, idx, vals), atol=1e-3, rtol=1e-3)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+    def test_masked_accumulate_broadcast_mask(self):
+        """Direct callers may pass a mask that only broadcasts against values,
+        which the decomposition never produces."""
+        torch.manual_seed(3)
+        n, A, B, D = 8, 64, 128, 4
+
+        def f(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [idx], vals
+            )
+
+        out = torch.zeros(n, D)
+        idx = torch.randint(0, n, (A, B), dtype=torch.int64)
+        vals = torch.randn(A, B, D)
+        for mask_shape in ((A, 1, 1), (B, 1), (D,)):
+            counters.clear()
+            torch._dynamo.reset()
+            mask = torch.rand(mask_shape) > 0.3
+            self._check_accuracy(f, (out, mask, idx, vals), atol=1e-3, rtol=1e-3)
+            self.assertEqual(
+                counters["inductor"]["partitioned_scatter_applied"], 1, str(mask_shape)
+            )
+
+    def test_scatter_reduce_sum(self):
+        """The scatter_reduce family reaches the same atomic_add, with an
+        explicit dim and a values-shaped index."""
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+
+        def f(out, idx, vals):
+            return (
+                out.scatter_add(0, idx, vals),
+                out.scatter_reduce(0, idx, vals, reduce="sum"),
+                out.clone().scatter_(0, idx, vals, reduce="add"),
+                # Not an atomic_add, so it must be left alone.
+                out.scatter_reduce(0, idx, vals, reduce="amax"),
+            )
+
+        out = torch.zeros(n, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        vals = torch.randn(N, D, dtype=torch.float32)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
+
+    def test_scatter_reduce_include_self_false_not_matched(self):
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        vals = torch.randn(N, D)
+        out = torch.randn(n, D)
+
+        def run(include_self):
+            counters.clear()
+            torch._dynamo.reset()
+
+            def f(out, idx, vals):
+                return out.scatter_reduce(
+                    0, idx, vals, "sum", include_self=include_self
+                )
+
+            with torch.no_grad():
+                expected = f(out, idx, vals)
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out, idx, vals
+                )
+            return (
+                counters["inductor"]["partitioned_scatter_applied"],
+                expected,
+                actual,
+            )
+
+        applied, expected, actual = run(True)
+        self.assertEqual(applied, 1)
+        self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+        applied, expected, actual = run(False)
+        self.assertEqual(applied, 0)
+        self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+
+    def test_scatter_narrow_index_nonzero_dim(self):
+        torch.manual_seed(1)
+        n, D, N = 4, 8, 8192
+        idx = torch.randint(0, D, (1, N), dtype=torch.int64)
+        vals = torch.randn(1, N)
+        out = torch.zeros(n, D)
+
+        def f(out, idx, vals):
+            return out.scatter_add(1, idx, vals), out.scatter_add(-1, idx, vals)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 2)
+
+    def test_scatter_reduce_int32_index(self):
+        """An int32 index is legal and must be widened before the partition
+        offset is added. The offsets here are far too small to overflow, so the
+        widening is asserted on the iota that builds them."""
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+
+        def f(out, idx, vals):
+            return out.scatter_add(0, idx, vals)
+
+        out = torch.zeros(n, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int32)
+        vals = torch.randn(N, D, dtype=torch.float32)
+
+        iota_dtypes = []
+
+        def capture_iota(graph):
+            iota_dtypes.extend(
+                node.kwargs["dtype"]
+                for node in graph.find_nodes(
+                    op="call_function", target=torch.ops.prims.iota.default
+                )
+            )
+
+        with config.patch(post_grad_custom_post_pass=capture_iota):
+            self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+        self.assertEqual(iota_dtypes, [torch.int64])
+
+    @config.patch(partitioned_scatter_fp32_accumulation=True)
+    def test_index_add_low_precision(self):
+        """index_add reaches the pass directly where bf16 atomic add is not
+        native, and as index_put everywhere else."""
+        torch.manual_seed(42)
+        B, N, n, D = 2, 8192, 8, 4
+
+        def f(out, idx, vals):
+            return (
+                out.index_add(1, idx, vals),
+                out.clone().index_add_(1, idx, vals),
+                out.index_add(-2, idx, vals),
+            )
+
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        vals = torch.randn(B, N, D, dtype=torch.bfloat16)
+        out = torch.zeros(B, n, D, dtype=torch.bfloat16)
+
+        with torch.no_grad():
+            # bf16 eager stagnates once a slot outgrows the addend's ulp, so it is
+            # not a reference; compare against the same accumulation in fp32.
+            expected = f(out.float(), idx, vals.float())
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
+        for e, a in zip(expected, actual):
+            self.assertEqual(e, a.float(), atol=1e-1, rtol=1e-2)
+
+    def test_inplace_index_and_scatter_add_graph_inputs(self):
+        """Mutating a graph input is still covered: functionalization leaves the
+        functional overload the pass matches."""
+        torch.manual_seed(43)
+        B, N, n, D = 2, 8192, 8, 4
+
+        def f(index_out, scatter_out, idx, scatter_idx, vals):
+            index_out.index_add_(1, idx, vals)
+            scatter_out.scatter_add_(1, scatter_idx, vals)
+            return index_out, scatter_out
+
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        scatter_idx = idx.view(1, N, 1).expand(B, N, D)
+        vals = torch.randn(B, N, D)
+        outs = (torch.zeros(B, n, D), torch.zeros(B, n, D))
+
+        with torch.no_grad():
+            expected = f(*(out.clone() for out in outs), idx, scatter_idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                *(out.clone() for out in outs), idx, scatter_idx, vals
+            )
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 2)
+        for e, a in zip(expected, actual):
+            self.assertEqual(e, a, atol=1e-1, rtol=1e-2)
+
+    def test_index_add_alpha_not_matched(self):
+        """alpha scales the source, which the rewrite does not carry, so an
+        aten.index_add holding one must not be picked up. Asserted on the scan:
+        where the decomposition fires instead, alpha is folded into the source
+        and the index_put left behind is matched legitimately."""
+        N, n, D = 8192, 8, 4
+
+        graph = torch.fx.Graph()
+        out_node = graph.placeholder("out")
+        idx_node = graph.placeholder("idx")
+        vals_node = graph.placeholder("vals")
+        plain = graph.call_function(
+            torch.ops.aten.index_add.default, (out_node, 0, idx_node, vals_node)
+        )
+        scaled = graph.call_function(
+            torch.ops.aten.index_add.default,
+            (out_node, 0, idx_node, vals_node),
+            {"alpha": 2},
+        )
+
+        out_node.meta["val"] = torch.empty(n, D, dtype=torch.bfloat16, device="meta")
+        idx_node.meta["val"] = torch.empty(N, dtype=torch.int64, device="meta")
+        vals_node.meta["val"] = torch.empty(N, D, dtype=torch.bfloat16, device="meta")
+
+        ctx = ScatterPassContext()
+        _scan_candidates(graph, ctx)
+        self.assertIn(plain, ctx.candidates)
+        self.assertNotIn(scaled, ctx.candidates)
+
+    def test_atomic_fallback_checks_accumulation_dtype(self):
+        """Where bf16 atomics fall back (sm<90, XPU) aten.index_add is only ever
+        bf16, so the gate must look at the dtype the rewrite emits: fp32 partials
+        are native atomics, bf16 partials would fall back onto a P-times buffer."""
+        N, n, D = 8192, 8, 4
+
+        graph = torch.fx.Graph()
+        out_node = graph.placeholder("out")
+        idx_node = graph.placeholder("idx")
+        vals_node = graph.placeholder("vals")
+        index_add = graph.call_function(
+            torch.ops.aten.index_add.default, (out_node, 0, idx_node, vals_node)
+        )
+        out_node.meta["val"] = torch.empty(n, D, dtype=torch.bfloat16, device="meta")
+        idx_node.meta["val"] = torch.empty(N, dtype=torch.int64, device="meta")
+        vals_node.meta["val"] = torch.empty(N, D, dtype=torch.bfloat16, device="meta")
+
+        def bf16_atomics_fall_back(dtype):
+            return dtype in (torch.bfloat16, torch.int64, torch.bool)
+
+        with mock.patch(
+            "torch._inductor.utils.needs_fallback_due_to_atomic_add_limitations",
+            bf16_atomics_fall_back,
+        ):
+            for fp32_acc in (True, False):
+                ctx = ScatterPassContext()
+                with config.patch(partitioned_scatter_fp32_accumulation=fp32_acc):
+                    candidate = _evaluate_candidate(index_add, True, ctx)
+                if fp32_acc:
+                    self.assertIsNotNone(candidate)
+                    self.assertEqual(candidate.acc_dtype, torch.float32)
+                else:
+                    self.assertIsNone(candidate)
+                    self.assertEqual(ctx.skip_reasons["atomic_fallback"], 1)
+
+    def test_partials_widened_only_when_flag_is_set(self):
+        """The flag decides the partial buffers' dtype and nothing else, so
+        either way the result must agree with the unpartitioned bf16 scatter."""
+        torch.manual_seed(42)
+        N, n, D = 8192, 64, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        idx = torch.randint(0, n, (N,), dtype=torch.int64)
+        vals = torch.randn(N, D, dtype=torch.bfloat16)
+        out = torch.zeros(n, D, dtype=torch.bfloat16)
+        bf16_falls_back = needs_fallback_due_to_atomic_add_limitations(torch.bfloat16)
+
+        for fp32_acc in (True, False):
+            counters.clear()
+            torch._dynamo.reset()
+            with (
+                config.patch(partitioned_scatter_fp32_accumulation=fp32_acc),
+                torch.no_grad(),
+            ):
+                expected = f(out, idx, vals)
+                compiled = torch.compile(f, backend="inductor", fullgraph=True)
+                actual, code = run_and_get_code(compiled, out, idx, vals)
+
+            self.assertEqual(expected, actual, atol=5e-1, rtol=1e-2)
+            if bf16_falls_back and not fp32_acc:
+                # bf16 partials would hit the same fallback, so the pass skips.
+                self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+                self.assertEqual(
+                    counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"],
+                    1,
+                )
+                continue
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+            allocations = [
+                ln for ln in "\n".join(code).splitlines() if "= empty_strided" in ln
+            ]
+            self.assertTrue(allocations)
+            widened = [ln for ln in allocations if "torch.float32" in ln]
+            self.assertEqual(bool(widened), fp32_acc, f"{fp32_acc=} {allocations=}")
+
+    def test_accumulation_dtype_follows_config(self):
+        """Only float dtypes narrower than fp32 are promoted, and only when the
+        config flag is set."""
+        narrow = (torch.bfloat16, torch.float16)
+        unchanged = (torch.float32, torch.float64, torch.int32, torch.int64)
+
+        with config.patch(partitioned_scatter_fp32_accumulation=True):
+            for dtype in narrow:
+                self.assertEqual(_accumulation_dtype(dtype), torch.float32, str(dtype))
+            for dtype in unchanged:
+                self.assertEqual(_accumulation_dtype(dtype), dtype, str(dtype))
+
+        with config.patch(partitioned_scatter_fp32_accumulation=False):
+            for dtype in narrow + unchanged:
+                self.assertEqual(_accumulation_dtype(dtype), dtype, str(dtype))
+
+    def test_fp32_accumulation_reduces_bf16_error(self):
+        """fp32 partials fix the bf16 stagnation without widening the output."""
+        torch.manual_seed(42)
+        N, n, D = 200_000, 64, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        # All writes hit row 0 and same-sign values never cancel, so partials stall.
+        idx = torch.zeros(N, dtype=torch.int64)
+        vals = torch.randn(N, D).abs()
+        out = torch.zeros(n, D)
+
+        with torch.no_grad():
+            reference = f(out.double(), idx, vals.double())
+
+        def rel_error(fp32_acc):
+            counters.clear()
+            torch._dynamo.reset()
+            with (
+                config.patch(partitioned_scatter_fp32_accumulation=fp32_acc),
+                torch.no_grad(),
+            ):
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out.bfloat16(), idx, vals.bfloat16()
+                )
+            self.assertEqual(actual.dtype, torch.bfloat16)
+            return ((actual.double() - reference).norm() / reference.norm()).item()
+
+        promoted = rel_error(True)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+        self.assertLess(promoted, 1e-2)
+
+        native = rel_error(False)
+        if needs_fallback_due_to_atomic_add_limitations(torch.bfloat16):
+            # Without native bf16 atomics there are no bf16 partials to compare.
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertEqual(
+                counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 1
+            )
+            return
+
+        # What promotion buys depends on whether the backend accumulates bf16
+        # natively: 6.2e-1 against 2.1e-3 on MI308X, nothing where the partials
+        # are already computed wider. It must never cost accuracy.
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+        self.assertLessEqual(promoted, native)
+
+    def test_accuracy_int32_exact(self):
+        """Integer scatter-add must be bit-for-bit identical to eager (addition is associative)."""
+        torch.manual_seed(4)
+        N = 8192
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out, idx, vals = self._make_scatter_inputs(N, (8,), torch.int32, index_high=8)
+        self._check_accuracy(f, (out, idx, vals), exact=True)
+
+    def test_accuracy_inplace_index_put(self):
+        """index_put_ (in-place) is also matched and produces correct output."""
+        torch.manual_seed(7)
+        N, n, D = 8192, 8, 4
+
+        def f(out, idx, vals):
+            out.index_put_([idx], vals, accumulate=True)
+            return out
+
+        out = torch.zeros(n, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        vals = torch.randn(N, D, dtype=torch.float32)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
+
+    def test_unsorted_graph_from_earlier_pass(self):
+        """post_grad only sorts the graph after this pass runs, so an earlier pass
+        can leave a node positioned after one of its users. Both stages of this pass
+        read the graph in list order, so it has to sort before it looks."""
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+        desorted = False
+
+        def desort(graph):
+            """Stand in for an earlier post_grad pass: clone a node just before its
+            last user and redirect every use to the clone, leaving the first user
+            reading a definition that now comes later in the list."""
+            nonlocal desorted
+            nodes = list(graph.nodes)
+            position = {node: i for i, node in enumerate(nodes)}
+            for node in nodes:
+                if node.op != "call_function" or "val" not in node.meta:
+                    continue
+                users = sorted(
+                    (u for u in node.users if u.op == "call_function"),
+                    key=position.__getitem__,
+                )
+                if len(users) < 2 or position[users[-1]] - position[users[0]] < 2:
+                    continue
+                with graph.inserting_before(users[-1]):
+                    clone = graph.call_function(node.target, node.args, node.kwargs)
+                clone.meta.update(node.meta)
+                node.replace_all_uses_with(
+                    clone, delete_user_cb=lambda u: u is not clone
+                )
+                desorted = True
+                return
+
+        def f(out, idx, vals, x):
+            # y has two users far enough apart for desort to have something to move.
+            y = x.permute(1, 0)
+            return (
+                out.index_put([idx], vals, accumulate=True),
+                (y * 2).sum(),
+                torch.relu(y).sum(),
+            )
+
+        out = torch.zeros(n, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        vals = torch.randn(N, D, dtype=torch.float32)
+        x = torch.randn(16, 32, dtype=torch.float32)
+
+        with config.patch(post_grad_custom_pre_pass=desort):
+            self._check_accuracy(f, (out, idx, vals, x), atol=1.0, rtol=1e-2)
+
+        self.assertTrue(
+            desorted,
+            "desort found no node to move; the test no longer exercises the sort",
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+    def test_broadcast_values_multidim_index(self):
+        """A multi-dimensional index makes the replacement flatten values against
+        the index shape. index_put only requires values to broadcast, so operands
+        that are merely broadcastable have to be skipped, not reshaped."""
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+
+        # Fully materialized values: the flatten is valid, so the pass applies.
+        self._check_accuracy(
+            f, (out, idx, torch.randn(B, T, D, dtype=torch.float32)), atol=1.0
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        for vals in (
+            torch.randn(B, 1, D, dtype=torch.float32),
+            torch.randn(D, dtype=torch.float32),
+        ):
+            counters.clear()
+            torch._dynamo.reset()
+            self._check_accuracy(f, (out, idx, vals), atol=1.0)
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertGreater(
+                counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+                0,
+                "broadcast values must be rejected by a gate, not reshaped",
+            )
+
+    def test_broadcast_values_multidim_dynamic_index(self):
+        """A symbolic index shape must not install a guard in the shape gate."""
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+        vals = torch.randn(B, T, D, dtype=torch.float32)
+        torch._dynamo.mark_dynamic(idx, 0)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+            0,
+        )
+
+        counters.clear()
+        torch._dynamo.reset()
+
+        def f_matching_symbol(out, idx, seed):
+            vals = seed.expand(idx.shape[0], idx.shape[1], -1)
+            return out.index_put([idx], vals, accumulate=True)
+
+        seed = torch.randn(1, 1, D, dtype=torch.float32)
+        self._check_accuracy(f_matching_symbol, (out, idx, seed), atol=1.0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_applied"],
+            0,
+            "equal symbolic index/value dimensions should remain optimizable",
+        )
+
+    def test_broadcast_values_multidim_nonzero_scatter_dim(self):
+        """Only values without an explicit input prefix can use the leading flatten."""
+        torch.manual_seed(42)
+        config.partitioned_scatter_force = True
+
+        def f(out, idx, vals):
+            return torch.ops.aten.index_put.default(
+                out, [None, idx], vals, accumulate=True
+            )
+
+        out = torch.zeros(3, 8, 4, dtype=torch.float32)
+        idx = torch.randint(0, 4, (8, 8), dtype=torch.int64)
+
+        # The input prefix is implicit, so flattening [8, 8] to [64] remains
+        # broadcastable while preserving the replacement's trailing dimension.
+        vals = torch.randn(8, 8, 4, dtype=torch.float32)
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        counters.clear()
+        torch._dynamo.reset()
+
+        # An explicit input prefix is valid for index_put but the replacement
+        # would flatten it into the wrong axis order, so it must be rejected.
+        vals = torch.randn(3, 8, 8, 4, dtype=torch.float32)
+        self._check_accuracy(f, (out, idx, vals), atol=1.0)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+            0,
+        )
+
+    def test_masked_accumulate_broadcast_values(self):
+        """Same broadcast-operand gate as index_put, reading values from args[3].
+
+        A multi-dim index flattens values against the index shape. Broadcast
+        values, and values that carry an explicit input prefix when scatter_dim
+        is nonzero, have to be skipped rather than reshaped.
+        """
+        torch.manual_seed(42)
+        rows, D, B, T = 512, 4, 16, 512
+
+        def f(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [idx], vals
+            )
+
+        out = torch.zeros(rows, D, dtype=torch.float32)
+        idx = torch.randint(0, 4, (B, T), dtype=torch.int64)
+        # Last-dim mask broadcasts against every values shape below, and never
+        # has more dims than values, so a skip is broadcast_operand.
+        mask = torch.ones(D, dtype=torch.bool)
+
+        self._check_accuracy(
+            f,
+            (out, mask, idx, torch.randn(B, T, D, dtype=torch.float32)),
+            atol=1.0,
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        for vals in (
+            torch.randn(B, 1, D, dtype=torch.float32),
+            torch.randn(D, dtype=torch.float32),
+        ):
+            counters.clear()
+            torch._dynamo.reset()
+            self._check_accuracy(f, (out, mask, idx, vals), atol=1.0)
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertGreater(
+                counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+                0,
+                "broadcast values must be rejected by a gate, not reshaped",
+            )
+
+        counters.clear()
+        torch._dynamo.reset()
+        config.partitioned_scatter_force = True
+
+        def f_dim1(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [None, idx], vals
+            )
+
+        out = torch.zeros(3, 8, 4, dtype=torch.float32)
+        idx = torch.randint(0, 4, (8, 8), dtype=torch.int64)
+        mask = torch.ones(4, dtype=torch.bool)
+        self._check_accuracy(
+            f_dim1,
+            (out, mask, idx, torch.randn(8, 8, 4, dtype=torch.float32)),
+            atol=1.0,
+        )
+        self.assertGreater(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+        for vals in (
+            torch.randn(4, dtype=torch.float32),
+            torch.randn(3, 8, 8, 4, dtype=torch.float32),
+        ):
+            counters.clear()
+            torch._dynamo.reset()
+            self._check_accuracy(f_dim1, (out, mask, idx, vals), atol=1.0)
+            self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+            self.assertGreater(
+                counters["inductor"]["partitioned_scatter_skipped_broadcast_operand"],
+                0,
+            )
+
+    def test_skip_accumulate_false(self):
+        """index_put with accumulate=False doesn't match the registered patterns."""
+        n = 256
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=False)
+
+        torch.manual_seed(10)
+        out = torch.zeros(n, dtype=torch.float32)
+        idx = torch.randperm(n, dtype=torch.int64)
+        vals = torch.randn(n, dtype=torch.float32)
+
+        self._check_accuracy(f, (out, idx, vals), exact=True)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+    def test_pass_disabled(self):
+        """When partitioned_scatter_enabled=False the pass is a no-op."""
+        config.partitioned_scatter_enabled = False
+
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(n, dtype=torch.float32)
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+        vals = torch.randn(N, dtype=torch.float32)
+
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+        self.assertTrue(same(expected, actual, tol=1e-3))
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+
+    def test_force_mode_bypasses_heuristic_gates(self):
+        """
+        partitioned_scatter_force=True bypasses the min_index_size and
+        min_contention_ratio gates while still enforcing correctness constraints.
+        """
+
+        def f(out_a, idx_a, vals_a, out_b, idx_b, vals_b):
+            out_a = out_a.index_put([idx_a], vals_a, accumulate=True)
+            out_b = out_b.index_put([idx_b], vals_b, accumulate=True)
+            return out_a, out_b
+
+        torch.manual_seed(15)
+        # Op A: index_size=100 < min_index_size → normally skipped by gate 6
+        out_a = torch.zeros(10, dtype=torch.float32)
+        idx_a = torch.randint(0, 5, (100,), dtype=torch.int64)
+        vals_a = torch.randn(100, dtype=torch.float32)
+
+        # Op B: contention_ratio=0.25 < min_contention_ratio → normally skipped by gate 7
+        out_b = torch.zeros(16384, dtype=torch.float32)
+        idx_b = torch.randint(0, 16384, (4096,), dtype=torch.int64)
+        vals_b = torch.randn(4096, dtype=torch.float32)
+
+        args = (out_a, idx_a, vals_a, out_b, idx_b, vals_b)
+
+        with torch.no_grad():
+            expected = f(*args)
+            torch.compile(f, backend="inductor", fullgraph=True)(*args)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_index_too_small"]
+            + counters["inductor"]["partitioned_scatter_skipped_low_contention"],
+            0,
+        )
+
+        counters.clear()
+        torch._dynamo.reset()
+        saved_force = config.partitioned_scatter_force
+        try:
+            config.partitioned_scatter_force = True
+            with torch.no_grad():
+                forced = torch.compile(f, backend="inductor", fullgraph=True)(*args)
+        finally:
+            config.partitioned_scatter_force = saved_force
+
+        self.assertEqual(
+            counters["inductor"]["partitioned_scatter_applied"],
+            2,
+            "force mode must apply to both ops regardless of heuristic gates",
+        )
+        for e, a in zip(expected, forced):
+            self.assertTrue(
+                torch.allclose(e, a, atol=1e-1, rtol=1e-2),
+                f"force mode output mismatch: expected={e[:5]} actual={a[:5]}",
+            )
+
+    def test_skip_cpu_device(self):
+        """CPU scatters are never rewritten, even with force enabled."""
+        torch.manual_seed(21)
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(n, dtype=torch.float32, device="cpu")
+        idx = torch.randint(0, 4, (N,), dtype=torch.int64, device="cpu")
+        vals = torch.randn(N, dtype=torch.float32, device="cpu")
+
+        config.partitioned_scatter_force = True
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_cpu_device"],
+            0,
+            "CPU scatter should be skipped by the device gate",
+        )
+        self.assertTrue(torch.allclose(expected, actual, atol=1e-1, rtol=1e-2))
+
+    def test_skip_atomic_fallback(self):
+        torch.manual_seed(21)
+        N, n, D = 8192, 8, 4
+
+        def f(out, idx, vals):
+            return out.scatter_add(0, idx, vals)
+
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        vals = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        out = torch.zeros(n, D, dtype=torch.int64)
+
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 0
+        )
+        self.assertEqual(expected, actual)
+
+        counters.clear()
+        torch._dynamo.reset()
+        out = torch.zeros(n, D)
+        vals = torch.randn(N, D)
+        with DeterministicGuard(True), torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 0
+        )
+        self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+
+    def test_compute_num_partitions_tight_budget(self):
+        """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
+        # P=4: overhead = 1M * 4 * 3 = 12 MB ≤ 20 MB
+        # P=8: overhead = 1M * 4 * 7 = 28 MB > 20 MB
+        result = _compute_num_partitions(20_000_000, 1_000_000, 4, min_p=2, max_p=128)
+        self.assertEqual(result, 4)
+
+    def test_widen_bytes_charged_outside_expanded_buffer(self):
+        """fp32 partials also cost a widened copy of the values and the width the
+        peak's own output copy cannot credit. Neither scales with num_partitions."""
+        node = torch.fx.Graph().placeholder("x")
+
+        def candidate(dtype, acc_dtype):
+            return ScatterCandidate(
+                output_node=node,
+                index_node=node,
+                scatter_dim=0,
+                output_size=1_000_000,
+                index_size=4_000_000,
+                scatter_dim_size=1_000_000,
+                values_numel=4_000_000,
+                contention_ratio=4.0,
+                writes_per_slot=4.0,
+                dtype=dtype,
+                acc_dtype=acc_dtype,
+            )
+
+        same = candidate(torch.float32, torch.float32)
+        wider = candidate(torch.bfloat16, torch.float32)
+
+        self.assertEqual(_widen_bytes(same), 0)
+        # 4M values at fp32, plus the 2 bytes/element a bf16 output cannot cover.
+        self.assertEqual(_widen_bytes(wider), 18_000_000)
+
+    @config.patch(
+        partitioned_scatter_min_index_size=1,
+        partitioned_scatter_min_contention_ratio=0.0,
+    )
+    def test_scatter_widening_uses_full_source_size(self):
+        """scatter permits src to be larger than index, and the rewrite widens
+        all of it, so the charge cannot be derived from the index."""
+        graph = torch.fx.Graph()
+        input_node = graph.placeholder("input")
+        index_node = graph.placeholder("index")
+        values_node = graph.placeholder("values")
+        output_node = graph.call_function(
+            torch.ops.aten.scatter_add.default,
+            (input_node, 0, index_node, values_node),
+        )
+
+        input_node.meta["val"] = torch.empty(4, 4, dtype=torch.bfloat16, device="meta")
+        index_node.meta["val"] = torch.empty(2, 4, dtype=torch.int64, device="meta")
+        values_node.meta["val"] = torch.empty(
+            100, 4, dtype=torch.bfloat16, device="meta"
+        )
+
+        candidate = _evaluate_candidate(
+            output_node, force=False, ctx=ScatterPassContext()
+        )
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.values_numel, values_node.meta["val"].numel())
+
+    def test_compute_num_partitions_traffic_cap(self):
+        """P <= writes_per_slot caps each buffer phase at the scatter's own
+        traffic; min_p wins below that floor."""
+        available = 10**12  # effectively unlimited
+
+        # writes_per_slot=256 → cap=256, min(256, max_p=128) = 128
+        result = _compute_num_partitions(
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=256
+        )
+        self.assertEqual(result, 128)
+
+        # writes_per_slot=64 → cap=64
+        result = _compute_num_partitions(
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=64
+        )
+        self.assertEqual(result, 64)
+
+        # writes_per_slot=4 → cap=4
+        result = _compute_num_partitions(
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=4
+        )
+        self.assertEqual(result, 4)
+
+        # writes_per_slot=0.5 → cap=max(2, 1)=2
+        result = _compute_num_partitions(
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=0.5
+        )
+        self.assertEqual(result, 2)
+
+        # scatter index [1024, 1] into [16, 64] writes 1024 elements, not a full row.
+        result = _compute_num_partitions(
+            available, 16 * 64, 4, min_p=2, max_p=128, writes_per_slot=1024 / (16 * 64)
+        )
+        self.assertEqual(result, 2)
+
+    def test_skip_low_contention_ratio_multidim(self):
+        """
+        Contention gate uses index_size / scatter_dim_size, not index_size / output_numel.
+
+        For [vocab=4096, dim=64] with N=50000 indices:
+          wrong: 50000 / (4096*64) = 0.19 → skip
+          right: 50000 / 4096 = 12.2 → apply
+        """
+        vocab, dim, N = 4096, 64, 50_000
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        out = torch.zeros(vocab, dim, dtype=torch.float32)
+        idx = torch.randint(0, vocab, (N,), dtype=torch.int64)
+        vals = torch.randn(N, dim, dtype=torch.float32)
+
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out.clone(), idx, vals
+            )
+
+        self.assertTrue(
+            torch.allclose(expected, actual, atol=1e-1, rtol=1e-2),
+            f"multidim scatter mismatch: {expected[:3]} vs {actual[:3]}",
+        )
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_applied"],
+            0,
+            "pass skipped for [vocab, dim] output — contention gate likely still uses "
+            "output_numel instead of scatter_dim_size",
+        )
+
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
+    @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
+    @config.patch(partitioned_scatter_min_contention_ratio=1.0)
+    def test_memory_aware_partition_count(self):
+        """
+        Verify that live tensor memory constrains num_partitions.
+
+        The contention gate is pinned low so this exercises the memory budget
+        in isolation (this graph's ratio is 11M/10M = 1.1).
+
+        Graph: out(40 MB) + idx(88 MB) + vals(44 MB) + persistent(400 MB) inputs.
+        The budget is sized off the peak at the index_put *allocation* point, where
+        all four inputs plus the 40 MB output are live (612 MB) — idx/vals are only
+        freed once the node completes. Headroom is derived from those sizes rather
+        than hardcoded so it tracks any change to them.
+
+        Sub-test 1: headroom fits P-1 extra output buffers → P=4 applied.
+        Sub-test 2: floor = total_gpu → no headroom → pass skips.
+        """
+        torch.manual_seed(12)
+        N = 11_000_000
+        output_size = 10_000_000
+        persist_n = 100_000_000
+
+        def f(out, idx, vals, persistent):
+            scattered = out.index_put([idx], vals, accumulate=True)
+            return scattered + persistent.sum()
+
+        out = torch.zeros(output_size, dtype=torch.float32, device=GPU_TYPE)
+        idx = torch.randint(0, output_size, (N,), dtype=torch.int64, device=GPU_TYPE)
+        vals = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
+        persistent = torch.randn(persist_n, dtype=torch.float32, device=GPU_TYPE)
+
+        with torch.no_grad():
+            expected = f(out, idx, vals, persistent)
+
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
+
+        out_bytes = output_size * 4
+        baseline_peak = out_bytes + N * 8 + N * 4 + persist_n * 4 + out_bytes
+        target_p = 4
+        headroom = baseline_peak + (target_p - 1) * out_bytes
+
+        saved_floor = config.partitioned_scatter_non_model_floor_bytes
+        try:
+            config.partitioned_scatter_non_model_floor_bytes = total_gpu - headroom
+            with torch.no_grad():
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out, idx, vals, persistent
+                )
+        finally:
+            config.partitioned_scatter_non_model_floor_bytes = saved_floor
+
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_applied"],
+            0,
+            f"real memory pressure: pass should apply (headroom {headroom} bytes "
+            f"leaves {(target_p - 1) * out_bytes} bytes for P={target_p})",
+        )
+        self.assertTrue(
+            torch.allclose(expected, actual, atol=1e-2, rtol=1e-2),
+            f"real memory pressure: output mismatch "
+            f"expected[:5]={expected[:5]}\nactual[:5]={actual[:5]}",
+        )
+
+        counters.clear()
+        torch._dynamo.reset()
+
+        saved_floor = config.partitioned_scatter_non_model_floor_bytes
+        try:
+            config.partitioned_scatter_non_model_floor_bytes = total_gpu
+            with torch.no_grad():
+                actual_skipped = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out, idx, vals, persistent
+                )
+        finally:
+            config.partitioned_scatter_non_model_floor_bytes = saved_floor
+
+        self.assertEqual(
+            counters["inductor"]["partitioned_scatter_applied"],
+            0,
+            "floor=total_gpu: no headroom, pass must skip",
+        )
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_memory_budget"],
+            0,
+        )
+        self.assertTrue(
+            torch.allclose(expected, actual_skipped, atol=1e-2, rtol=1e-2),
+            "floor=total_gpu: output should still be correct (pass gracefully skips)",
+        )
+
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
+    @unittest.skipUnless(HAS_GPU, "requires GPU for CUDA-aware memory tracking")
+    @config.patch(partitioned_scatter_min_contention_ratio=1.0)
+    def test_memory_budget_shared_across_scatters(self):
+        """
+        Several scatters in one graph must share the budget, not each claim it.
+
+        The memory profile describes the untransformed graph, so a candidate
+        evaluated after an earlier rewrite has to be charged for that scatter's
+        expanded buffer — otherwise N scatters each commit the full budget.
+
+        Three 20 MB scatters here share room for one extra buffer, so exactly
+        one may be rewritten.
+        """
+        torch.manual_seed(13)
+        S = 5_000_000
+        N = 20_000_000
+
+        def f(out0, out1, out2, idx, vals):
+            a = out0.index_put([idx], vals, accumulate=True)
+            b = out1.index_put([idx], vals, accumulate=True)
+            c = out2.index_put([idx], vals, accumulate=True)
+            return a, b, c
+
+        outs = [torch.zeros(S, dtype=torch.float32, device=GPU_TYPE) for _ in range(3)]
+        idx = torch.randint(0, S, (N,), dtype=torch.int64, device=GPU_TYPE)
+        vals = torch.randn(N, dtype=torch.float32, device=GPU_TYPE)
+        args = (*outs, idx, vals)
+
+        with torch.no_grad():
+            expected = f(*args)
+
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
+
+        # Each out dies right after its own scatter, so the peak at every
+        # index_put is the three inputs plus that node's 20 MB output.
+        out_bytes = S * 4
+        baseline_peak = 3 * out_bytes + N * 8 + N * 4 + out_bytes
+        # Room for a single P=2 buffer: one scatter fits, the other two must not.
+        headroom = baseline_peak + out_bytes
+
+        saved_floor = config.partitioned_scatter_non_model_floor_bytes
+        try:
+            config.partitioned_scatter_non_model_floor_bytes = total_gpu - headroom
+            with torch.no_grad():
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(*args)
+        finally:
+            config.partitioned_scatter_non_model_floor_bytes = saved_floor
+
+        applied = counters["inductor"]["partitioned_scatter_applied"]
+        self.assertEqual(
+            applied,
+            1,
+            f"budget fits one expanded buffer but {applied} scatters were "
+            f"rewritten: the per-invocation budget is not shared",
+        )
+        for i, (e, a) in enumerate(zip(expected, actual)):
+            self.assertTrue(
+                torch.allclose(e, a, atol=1e-2, rtol=1e-2),
+                f"output {i} mismatch: expected[:5]={e[:5]}\nactual[:5]={a[:5]}",
+            )
+
+    @unittest.skipUnless(HAS_GPU, "requires GPU")
+    def test_perf_atomic_contention(self):
+        """
+        Reproduce the PR benchmark: three index_put(accumulate=True) ops with
+        moderate contention (8 slots). CI on ROCm MI300X delivers ≈1.8×, so the
+        1.5× floor catches regressions with enough slack for hardware variance.
+        """
+        torch.manual_seed(42)
+        N, D, n = 1_000_000, 100, 501
+        MIN_SPEEDUP = 1.5
+
+        def scatter_fn(out0, out1, out2, idx, vals):
+            out0 = out0.index_put([idx], vals, accumulate=True)
+            out1 = out1.index_put([idx], vals, accumulate=True)
+            out2 = out2.index_put([idx], vals, accumulate=True)
+            return out0, out1, out2
+
+        vals = torch.randn(N, D, dtype=torch.float32, device=GPU_TYPE)
+        out0 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
+        out1 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
+        out2 = torch.zeros(n, D, dtype=torch.float32, device=GPU_TYPE)
+        idx = torch.randint(0, 8, (N,), dtype=torch.int64, device=GPU_TYPE)
+        inputs = (out0, out1, out2, idx, vals)
+
+        config.partitioned_scatter_enabled = False
+        torch._dynamo.reset()
+        baseline_fn = torch.compile(scatter_fn, backend="inductor", fullgraph=True)
+        with torch.no_grad():
+            for _ in range(3):
+                baseline_fn(*inputs)
+        baseline_ms = benchmarker.benchmark_gpu(lambda: baseline_fn(*inputs))
+
+        config.partitioned_scatter_enabled = True
+        torch._dynamo.reset()
+        counters.clear()
+        partitioned_fn = torch.compile(scatter_fn, backend="inductor", fullgraph=True)
+        with torch.no_grad():
+            for _ in range(3):
+                partitioned_fn(*inputs)
+        partitioned_ms = benchmarker.benchmark_gpu(lambda: partitioned_fn(*inputs))
+
+        speedup = baseline_ms / partitioned_ms
+        n_applied = counters["inductor"]["partitioned_scatter_applied"]
+
+        print(
+            f"\nbaseline={baseline_ms:.3f} ms  "
+            f"partitioned={partitioned_ms:.3f} ms  "
+            f"speedup={speedup:.2f}×  applied={n_applied}"
+        )
+
+        self.assertGreater(
+            n_applied,
+            0,
+            "pass did not apply to any op — check gates/config",
+        )
+        self.assertGreater(
+            speedup,
+            MIN_SPEEDUP,
+            f"expected ≥{MIN_SPEEDUP:.1f}× speedup (moderate contention, 8 slots), "
+            f"got {speedup:.2f}×  "
+            f"(baseline={baseline_ms:.3f} ms, partitioned={partitioned_ms:.3f} ms)",
+        )
+
+        config.partitioned_scatter_enabled = True
 
 
 if HAS_GPU:

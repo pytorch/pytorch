@@ -66,6 +66,7 @@ def quantization_pertensor_hook(
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
+    # pyrefly: ignore [missing-attribute]
     world_size = group_to_use.size()
 
     tensor = bucket.buffer()
@@ -84,24 +85,27 @@ def quantization_pertensor_hook(
     ).get_future()
 
     def quantize_and_allgather(fut):
-        # Store scale and zeros across all workers.
-        all_ranks_s_and_z = fut.wait()[0]
+        fut.wait()
         # All workers quantize their own ``GradBucket`` tensors.
         quantized_tensor = _quantize_per_tensor_backend(
             tensor, all_ranks_s_and_z[rank][0], all_ranks_s_and_z[rank][1]
         )
         # Allgather quantized tensors.
+        all_ranks_quantized_tensor = _get_allgather_out_list(
+            quantized_tensor, world_size
+        )
         fut = dist.all_gather(
-            _get_allgather_out_list(quantized_tensor, world_size),
+            all_ranks_quantized_tensor,
             quantized_tensor,
             group=group_to_use,
             async_op=True,
         ).get_future()
 
-        return fut.wait()
+        fut.wait()
+        return all_ranks_quantized_tensor
 
     def dequantize_and_aggregate(fut):
-        all_ranks_quantized_tensor = fut.wait()[0]
+        all_ranks_quantized_tensor = fut.wait()
 
         aggregated_dequantized_tensor = torch.zeros_like(
             all_ranks_quantized_tensor[0], device=tensor.device, dtype=torch.float32
@@ -147,6 +151,7 @@ def quantization_perchannel_hook(
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
+    # pyrefly: ignore [missing-attribute]
     world_size = group_to_use.size()
 
     tensor = bucket.buffer()
@@ -177,26 +182,29 @@ def quantization_perchannel_hook(
     ).get_future()
 
     def quantize_and_allgather(fut):
-        # Store scale and zeros across all workers.
-        all_ranks_s_and_z = fut.wait()[0]
+        fut.wait()
         # All workers quantize their corresponding ``GradBucket`` tensors.
         quantized_tensor = _quantize_per_channel_backend(
             tensor_in_channels,
-            all_ranks_s_and_z[rank, 0, :],
-            all_ranks_s_and_z[rank, 1, :],
+            all_ranks_s_and_z[rank][0],
+            all_ranks_s_and_z[rank][1],
         )
         # Allgather quantized tensors.
+        all_ranks_quantized_tensor = _get_allgather_out_list(
+            quantized_tensor, world_size
+        )
         fut = dist.all_gather(
-            _get_allgather_out_list(quantized_tensor, world_size),
+            all_ranks_quantized_tensor,
             quantized_tensor,
             group=group_to_use,
             async_op=True,
         ).get_future()
 
-        return fut.wait()
+        fut.wait()
+        return all_ranks_quantized_tensor
 
     def dequantize_and_aggregate(fut):
-        all_ranks_quantized_tensor = fut.wait()[0]
+        all_ranks_quantized_tensor = fut.wait()
 
         aggregated_dequantized_tensor = torch.zeros_like(
             all_ranks_quantized_tensor[0], device=tensor.device, dtype=torch.float32

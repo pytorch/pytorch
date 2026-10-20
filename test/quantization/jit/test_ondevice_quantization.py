@@ -18,7 +18,7 @@ from torch.testing._internal.common_quantization import (
     LinearAddModel,
 )
 from torch.testing._internal.common_utils import TestCase
-from torch.utils import bundled_inputs as bundled_inputs
+from torch.utils import bundled_inputs
 
 
 class myMod(torch.nn.Module):
@@ -99,22 +99,21 @@ class OnDevicePTQUtils:
         ):
             raise ValueError("Quantized weight must be produced.")
         fp_weight = weight.inputsAt(0).node()
-        assert (
-            fp_weight.kind() == "prim::GetAttr"
-        ), "Weight must be an attribute of the module."
+        if fp_weight.kind() != "prim::GetAttr":
+            raise AssertionError("Weight must be an attribute of the module.")
         fp_weight_name = fp_weight.s("name")
         return fp_weight_name
 
     @staticmethod
     def is_per_channel_quantized_packed_param(node):
-        assert (
-            node.kind() == "quantized::linear_prepack"
-        ), "Node must corresponds to linear_prepack."
+        if node.kind() != "quantized::linear_prepack":
+            raise AssertionError("Node must corresponds to linear_prepack.")
         weight = node.inputsAt(0).node()
-        assert (
+        if not (
             weight.kind() != "aten::quantize_per_tensor"
             or weight.kind() != "aten::quantize_per_channel"
-        )
+        ):
+            raise AssertionError(f"Unexpected weight kind: {weight.kind()}")
         return weight.kind() != "aten::quantize_per_tensor"
 
 
@@ -528,3 +527,10 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
     def test_device_side_api(self):
         model = MyConvLinearModule()
         self._check_device_side_api(model)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import Optional, Union
 
 import torch
 from torch import Size, Tensor
@@ -60,9 +59,15 @@ class LocalResponseNorm(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.local_response_norm(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self):
+        """
+        Return the extra representation of the module.
+        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
@@ -82,13 +87,19 @@ class CrossMapLRN2d(Module):
         self.k = k
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return _cross_map_lrn2d.apply(input, self.size, self.alpha, self.beta, self.k)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
-_shape_t = Union[int, list[int], Size]
+_shape_t = int | list[int] | Size
 
 
 class LayerNorm(Module):
@@ -107,7 +118,7 @@ class LayerNorm(Module):
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -131,9 +142,9 @@ class LayerNorm(Module):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            and zeros (for biases). Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
-            :attr:`elementwise_affine` is ``True``). Default: ``True``.
+            :attr:`elementwise_affine` is ``True``). Default: ``True``
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -220,8 +231,8 @@ class LayerNorm(Module):
 
     def extra_repr(self) -> str:
         return (
-            "{normalized_shape}, eps={eps}, "
-            "elementwise_affine={elementwise_affine}".format(**self.__dict__)
+            "{normalized_shape}, eps={eps}, elementwise_affine={elementwise_affine}, "
+            "bias={use_bias}".format(**self.__dict__, use_bias=self.bias is not None)
         )
 
 
@@ -237,11 +248,11 @@ class GroupNorm(Module):
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
     :attr:`num_groups`. The mean and standard-deviation are calculated
-    separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
+    separately over each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -252,7 +263,9 @@ class GroupNorm(Module):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         affine: a boolean value that when set to ``True``, this module
             has learnable per-channel affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            and zeros (for biases). Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
@@ -285,11 +298,15 @@ class GroupNorm(Module):
         affine: bool = True,
         device=None,
         dtype=None,
+        *,
+        bias: bool = True,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if num_channels % num_groups != 0:
-            raise ValueError("num_channels must be divisible by num_groups")
+            raise ValueError(
+                f"num_channels ({num_channels}) must be divisible by num_groups ({num_groups})"
+            )
 
         self.num_groups = num_groups
         self.num_channels = num_channels
@@ -297,7 +314,10 @@ class GroupNorm(Module):
         self.affine = affine
         if self.affine:
             self.weight = Parameter(torch.empty(num_channels, **factory_kwargs))
-            self.bias = Parameter(torch.empty(num_channels, **factory_kwargs))
+            if bias:
+                self.bias = Parameter(torch.empty(num_channels, **factory_kwargs))
+            else:
+                self.register_parameter("bias", None)
         else:
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)
@@ -307,14 +327,16 @@ class GroupNorm(Module):
     def reset_parameters(self) -> None:
         if self.affine:
             init.ones_(self.weight)
-            init.zeros_(self.bias)
+            if self.bias is not None:
+                init.zeros_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
-            **self.__dict__
+        return (
+            "{num_groups}, {num_channels}, eps={eps}, affine={affine}, "
+            "bias={use_bias}".format(**self.__dict__, use_bias=self.bias is not None)
         )
 
 
@@ -343,7 +365,10 @@ class RMSNorm(Module):
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
-        eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
+        eps (float, optional): a value added to the denominator for numerical stability.
+            If not specified, uses the machine epsilon of the computation (opmath) type:
+            fp16/bf16 and fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64
+            inputs use ``torch.finfo(torch.float64).eps``. Default: ``None``
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
@@ -358,15 +383,16 @@ class RMSNorm(Module):
         >>> rms_norm(input)
 
     """
+
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
-    eps: Optional[float]
+    eps: float | None
     elementwise_affine: bool
 
     def __init__(
         self,
         normalized_shape: _shape_t,
-        eps: Optional[float] = None,
+        eps: float | None = None,
         elementwise_affine: bool = True,
         device=None,
         dtype=None,
@@ -396,13 +422,13 @@ class RMSNorm(Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Runs forward pass.
+        Runs the forward pass.
         """
         return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
 
     def extra_repr(self) -> str:
         """
-        Extra information about the module.
+        Return the extra representation of the module.
         """
         return (
             "{normalized_shape}, eps={eps}, "

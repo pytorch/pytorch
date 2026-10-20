@@ -4,32 +4,35 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch._dynamo.exc import BackendCompilerFailed, ShortenTraceback
 
 
 if TYPE_CHECKING:
     import types
+    from collections.abc import Mapping, Sequence
 
     from torch.cuda import _CudaDeviceProperties
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
-    def _record_missing_op(target: Any) -> None:
+    def _record_missing_op(target: object) -> None:
         with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
             fd.write(str(target) + "\n")
 
 else:
 
-    def _record_missing_op(target: Any) -> None:  # type: ignore[misc]
+    def _record_missing_op(target: object) -> None:  # type: ignore[misc]
         pass
 
 
 class OperatorIssue(RuntimeError):
     @staticmethod
-    def operator_str(target: Any, args: list[Any], kwargs: dict[str, Any]) -> str:
+    def operator_str(
+        target: object, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> str:
         lines = [f"target: {target}"] + [
             f"args[{i}]: {arg}" for i, arg in enumerate(args)
         ]
@@ -39,13 +42,17 @@ class OperatorIssue(RuntimeError):
 
 
 class MissingOperatorWithoutDecomp(OperatorIssue):
-    def __init__(self, target: Any, args: list[Any], kwargs: dict[str, Any]) -> None:
+    def __init__(
+        self, target: object, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> None:
         _record_missing_op(target)
         super().__init__(f"missing lowering\n{self.operator_str(target, args, kwargs)}")
 
 
 class MissingOperatorWithDecomp(OperatorIssue):
-    def __init__(self, target: Any, args: list[Any], kwargs: dict[str, Any]) -> None:
+    def __init__(
+        self, target: object, args: Sequence[object], kwargs: Mapping[str, object]
+    ) -> None:
         _record_missing_op(target)
         super().__init__(
             f"missing decomposition\n{self.operator_str(target, args, kwargs)}"
@@ -62,11 +69,17 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 class LoweringException(OperatorIssue):
     def __init__(
-        self, exc: Exception, target: Any, args: list[Any], kwargs: dict[str, Any]
+        self,
+        exc: Exception,
+        target: object,
+        args: Sequence[object],
+        kwargs: Mapping[str, object],
+        stack_trace: str | None = None,
     ) -> None:
-        super().__init__(
-            f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
-        )
+        msg = f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
+        if stack_trace:
+            msg += f"{msg}\nFound from : \n {stack_trace}"
+        super().__init__(msg)
 
 
 class SubgraphLoweringException(RuntimeError):
@@ -74,12 +87,17 @@ class SubgraphLoweringException(RuntimeError):
 
 
 class InvalidCxxCompiler(RuntimeError):
-    def __init__(self) -> None:
+    def __init__(self, compiler: str | None = None) -> None:
         from . import config
 
-        super().__init__(
-            f"No working C++ compiler found in {config.__name__}.cpp.cxx: {config.cpp.cxx}"
-        )
+        if compiler is None:
+            msg = (
+                f"No working C++ compiler found in {config.__name__}.cpp.cxx: "
+                f"{config.cpp.cxx}"
+            )
+        else:
+            msg = f"Compiler: {compiler} is not found."
+        super().__init__(msg)
 
 
 class CppWrapperCodegenError(RuntimeError):
@@ -91,6 +109,9 @@ class CppCompileError(RuntimeError):
     def __init__(self, cmd: list[str], output: str) -> None:
         if isinstance(output, bytes):
             output = output.decode("utf-8")
+
+        self.cmd = cmd
+        self.output = output
 
         super().__init__(
             textwrap.dedent(
@@ -108,13 +129,20 @@ class CppCompileError(RuntimeError):
             .format(cmd=" ".join(cmd), output=output)
         )
 
+    def __reduce__(self) -> tuple[type, tuple[list[str], str]]:
+        return (self.__class__, (self.cmd, self.output))
+
 
 class CUDACompileError(CppCompileError):
     pass
 
 
+class XPUCompileError(CppCompileError):
+    pass
+
+
 class TritonMissing(ShortenTraceback):
-    def __init__(self, first_useful_frame: Optional[types.FrameType]) -> None:
+    def __init__(self, first_useful_frame: types.FrameType | None) -> None:
         super().__init__(
             "Cannot find a working triton installation. "
             "Either the package is not installed or it is too old. "
@@ -126,8 +154,9 @@ class TritonMissing(ShortenTraceback):
 class GPUTooOldForTriton(ShortenTraceback):
     def __init__(
         self,
+        # pyrefly: ignore [not-a-type]
         device_props: _CudaDeviceProperties,
-        first_useful_frame: Optional[types.FrameType],
+        first_useful_frame: types.FrameType | None,
     ) -> None:
         super().__init__(
             f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, "
@@ -143,7 +172,7 @@ class InductorError(BackendCompilerFailed):
     def __init__(
         self,
         inner_exception: Exception,
-        first_useful_frame: Optional[types.FrameType],
+        first_useful_frame: types.FrameType | None,
     ) -> None:
         self.inner_exception = inner_exception
         ShortenTraceback.__init__(

@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/macros/Export.h>
+#include <c10/util/intrusive_ptr.h>
 
 // A little explanation about why this file exists at all.  We have
 // a few methods on Tensor class which require access to reified access to
@@ -41,7 +42,7 @@ struct TORCH_API VariableHooksInterface {
   virtual ~VariableHooksInterface() = default;
   virtual TensorBase tensor_data(const TensorBase&) const = 0;
   virtual TensorBase variable_data(const TensorBase&) const = 0;
-  virtual const std::shared_ptr<torch::autograd::Node>& grad_fn(
+  virtual const c10::intrusive_ptr<torch::autograd::Node>& grad_fn(
       const TensorBase&) const = 0;
   virtual unsigned _register_hook(
       const TensorBase&,
@@ -68,6 +69,8 @@ struct TORCH_API VariableHooksInterface {
       const c10::OperatorHandle& op,
       c10::DispatchKeySet dispatch_keys,
       torch::jit::Stack* stack) const = 0;
+  virtual std::optional<c10::ScalarType> grad_dtype(const TensorBase&) const = 0;
+  virtual void set_grad_dtype(const TensorBase&, const std::optional<c10::ScalarType>&) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);

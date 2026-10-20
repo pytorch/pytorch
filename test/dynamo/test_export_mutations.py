@@ -4,10 +4,12 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
 
 
 class MutationExportTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def check_failure_on_export(self, mod, *args):
         with self.assertRaises(AssertionError):
             torch._dynamo.export(mod)(*args)
@@ -29,7 +31,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
                 self.a = self.a.to(torch.float64)
                 return x.sum() + self.a.sum()
 
-        self.check_failure_on_export(Foo(), torch.randn(3, 2))
+        self.check_same_with_export(Foo(), torch.randn(3, 2))
 
     def test_module_attribute_mutation_violation_negative_1(self):
         # Mutating attribute with a Tensor type inside __init__ but

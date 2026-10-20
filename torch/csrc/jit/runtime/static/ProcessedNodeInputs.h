@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include <memory>
 
@@ -31,6 +32,7 @@ class ProcessedNodeInputs {
   }
 
   uint16_t operator[](uint16_t idx) const {
+    // NOLINTNEXTLINE(*const-cast*)
     return (*const_cast<ProcessedNodeInputs*>(this))[idx];
   }
 

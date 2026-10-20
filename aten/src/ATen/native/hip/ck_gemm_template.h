@@ -11,10 +11,9 @@
 #include <numeric>
 
 #include <ATen/ATen.h>
-#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #include <ATen/native/hip/ck_gemm.h>
 #include <ATen/native/hip/ck_types.h>
-
+#include <c10/util/Exception.h>
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
 #include <ck/tensor_operation/gpu/device/tensor_layout.hpp>
@@ -225,15 +224,10 @@ void gemm_impl(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
      c_element_op);
 
 
- if(!gemm.IsSupportedArgument(argument))
- {
-        throw std::runtime_error(
-            "wrong! device_gemm with the specified compilation parameters does "
-            "not support this GEMM problem");
- }
+ TORCH_CHECK(gemm.IsSupportedArgument(argument), "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
 
 
- auto stream = at::cuda::getCurrentHIPStream().stream();
+ auto stream = at::cuda::getCurrentCUDAStream().stream();
  invoker.Run(argument, StreamConfig{stream, false});
 }
 
@@ -384,14 +378,11 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
  {
         printf("error shape = %ld %ld %ld TRANSA=%d TRANSB=%d \n",
                         n, m, k,TRANSA, TRANSB);
-
-        throw std::runtime_error(
-            "wrong! device_gemm with the specified compilation parameters does "
-            "not support this GEMM problem");
+        TORCH_CHECK(false, "wrong! device_gemm with the specified compilation parameters does not support this GEMM problem");
  }
 
 
- auto stream = at::cuda::getCurrentHIPStream().stream();
+ auto stream = at::cuda::getCurrentCUDAStream().stream();
 #if 1
  invoker.Run(argument, StreamConfig{stream, false});
 #else
@@ -406,8 +397,8 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   float gb_per_sec = num_btype / 1.E6 / ave_time;
 
   std::cout << "Perf: " << std::setw(10) << ave_time << " ms, " << tflops << " TFlops, "
-                          << gb_per_sec << " GB/s, " << N <<" " <<M<<" " << k <<" "
-                          << "stride: "<<StrideA <<" "<<StrideB <<" "<<StrideC <<" "
+                          << gb_per_sec << " GB/s, " << N << ' ' << M << ' ' << k << ' '
+                          << "stride: " << StrideA << ' ' << StrideB << ' ' << StrideC << ' '
                           <<  gemm.GetTypeString()
                           << std::endl;
 #endif

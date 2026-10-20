@@ -48,10 +48,10 @@ at::Tensor& embedding_lookup_fallback_impl(
     const int64_t output_size,
     bool include_last_offset,
     bool pruned) {
-  auto* output_data = output.data_ptr<float>();
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
-  int32_t* compressed_indices_mapping_data = nullptr;
+  auto* output_data = output.mutable_data_ptr<float>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
+  const int32_t* compressed_indices_mapping_data = nullptr;
   const auto weight_sizes = weight.sizes();
   const int64_t N = weight_sizes[0];
   const int64_t weight_size = weight_sizes[1];
@@ -70,9 +70,9 @@ at::Tensor& embedding_lookup_fallback_impl(
   }
 
   int64_t current = 0;
-  float* per_sample_weights_data = nullptr;
+  const float* per_sample_weights_data = nullptr;
   if (per_sample_weights_.has_value()) {
-    per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
+    per_sample_weights_data = per_sample_weights_.value().const_data_ptr<float>();
   }
   for (const auto m : c10::irange(output_size)) {
     memset(output_data, 0, block_size * sizeof(float));
@@ -89,7 +89,7 @@ at::Tensor& embedding_lookup_fallback_impl(
         int64_t uncompressed_idx = indices_data[current];
         int compressed_index_size = compressed_indices_mapping.value().numel();
         compressed_indices_mapping_data =
-            compressed_indices_mapping.value().data_ptr<int32_t>();
+            compressed_indices_mapping.value().const_data_ptr<int32_t>();
         TORCH_CHECK(
             uncompressed_idx >= 0 && uncompressed_idx < compressed_index_size,
             "Invalid indices data for Sparse Op.")
@@ -191,7 +191,7 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 #ifdef __aarch64__
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -219,7 +219,7 @@ static inline void embedding_neon_kernel(
   output4 = vmlaq_f32(output4, w_4, scale);
 }
 
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -288,9 +288,9 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     const int64_t block_size,
     const int64_t output_size,
     bool include_last_offset) {
-  auto* output_data = output.data_ptr<float>();
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
+  auto* output_data = output.mutable_data_ptr<float>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
   const auto weight_sizes = weight.sizes();
   const int64_t weight_size = weight_sizes[1];
   const int index_size = indices.numel();
@@ -323,7 +323,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
 
     int i = 0;
     while (i + 15 < lengths_data[m]) {
-      uint8_t* wei_ptr[16];
+      const uint8_t* wei_ptr[16];
       float bias = 0.0f;
       float scale[16];
       float32x4_t scale_vec[16];
@@ -384,7 +384,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 7 < lengths_data[m]) {
-      uint8_t* wei_ptr[8];
+      const uint8_t* wei_ptr[8];
       float bias = 0.0f;
       float scale[8];
       float32x4_t scale_vec[8];
@@ -445,7 +445,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 3 < lengths_data[m]) {
-      uint8_t* wei_ptr[4];
+      const uint8_t* wei_ptr[4];
       float bias = 0.0f;
       float scale[4];
       float32x4_t scale_vec[4];
@@ -506,7 +506,7 @@ at::Tensor& embedding_lookup_byte_neon_impl(
     }
 
     while (i + 1 < lengths_data[m]) {
-      uint8_t* wei_ptr[2];
+      const uint8_t* wei_ptr[2];
       float bias = 0.0f;
       float scale[2];
       float32x4_t scale_vec[2];
@@ -641,16 +641,16 @@ at::Tensor& embedding_bag_nbit_impl(
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
 
-  auto offsets_data = offsets.data_ptr<OffsetType>();
+  const OffsetType* offsets_data = offsets.const_data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights op.
-  int32_t* compressed_indices_mapping_data = nullptr;
+  const int32_t* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
   bool fallback_to_no_sparse = false;
   if (pruned_weights) {
     compressed_index_size = compressed_indices_mapping.value().numel();
     compressed_indices_mapping_data =
-        compressed_indices_mapping.value().data_ptr<int32_t>();
+        compressed_indices_mapping.value().const_data_ptr<int32_t>();
 
     // if compressed_indices_mapping is [0], it is a indicator that
     // we should fallback to non sparse embedding look up kernel.
@@ -700,9 +700,9 @@ at::Tensor& embedding_bag_nbit_impl(
     at::native::resize_(output, shape, std::nullopt);
   }
 #ifdef USE_FBGEMM
-  const auto indices_data = indices.data_ptr<IndexType>();
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  auto* output_data = output.data_ptr<float>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const int64_t N = weight_sizes[0];
 
   const int64_t block_size = D;
@@ -710,7 +710,11 @@ at::Tensor& embedding_bag_nbit_impl(
   constexpr int prefetch_distance = 16;
   if (!pruned_weights || fallback_to_no_sparse) {
     // Generate the fbgemm kernel
-    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBit<IndexType, OffsetType>(
+    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBitWithStrides<
+        IndexType,
+        OffsetType,
+        /*OutType=*/float,
+        /*THREAD_LOCAL=*/true>(
         /*bit rate=*/bit_width,
         /*block size=*/block_size,
         /*has weights=*/per_sample_weights_.has_value(),
@@ -728,7 +732,7 @@ at::Tensor& embedding_bag_nbit_impl(
         /*offsets=*/offsets_data,
         /*weights=*/
         per_sample_weights_.has_value()
-            ? per_sample_weights_.value().data_ptr<float>()
+            ? per_sample_weights_.value().const_data_ptr<float>()
             : nullptr,
         /*output=*/output_data);
 
@@ -737,8 +741,17 @@ at::Tensor& embedding_bag_nbit_impl(
           output_size, index_size, N, offsets_data, indices_data);
     }
   } else {
+    // OSS builds can pin an FBGEMM that predates the THREAD_LOCAL parameter on
+    // this path, in which case the globally cached kernel is used.
+#ifdef FBGEMM_HAS_SPMDM_NBIT_ROWWISE_SPARSE_THREAD_LOCAL
+    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<
+        IndexType,
+        OffsetType,
+        /*THREAD_LOCAL=*/true>(
+#else
     auto kernel =
         fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<IndexType, OffsetType>(
+#endif
             /*bit rate=*/bit_width,
             /*block_size=*/block_size,
             /*has weights=*/per_sample_weights_.has_value(),
@@ -755,7 +768,7 @@ at::Tensor& embedding_bag_nbit_impl(
         /*offsets=*/offsets_data,
         /*weights=*/
         per_sample_weights_.has_value()
-            ? per_sample_weights_.value().data_ptr<float>()
+            ? per_sample_weights_.value().const_data_ptr<float>()
             : nullptr,
         /*output=*/output_data,
         /*compressed_indices_table=*/compressed_indices_mapping_data);
@@ -812,16 +825,16 @@ at::Tensor& embedding_bag_byte_impl(
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
-  auto offsets_data = offsets.data_ptr<OffsetType>();
+  const OffsetType* offsets_data = offsets.const_data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights.
-  int32_t* compressed_indices_mapping_data = nullptr;
+  const int32_t* compressed_indices_mapping_data = nullptr;
   int compressed_index_size = 0;
   bool fallback_to_no_sparse = false;
   if (pruned_weights) {
     compressed_index_size = compressed_indices_mapping.value().numel();
     compressed_indices_mapping_data =
-        compressed_indices_mapping.value().data_ptr<int32_t>();
+        compressed_indices_mapping.value().const_data_ptr<int32_t>();
 
     // if compressed_indices_mapping is [0], it is a indicator that
     // we should fallback to non sparse embedding look up kernel.
@@ -870,20 +883,44 @@ at::Tensor& embedding_bag_byte_impl(
   }
 #ifdef USE_FBGEMM
   const int64_t N = weight_sizes[0];
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
-  auto* output_data = output.data_ptr<float>();
+  const auto weight_data = weight.const_data_ptr<uint8_t>();
+  const auto indices_data = indices.const_data_ptr<IndexType>();
+  auto* output_data = output.mutable_data_ptr<float>();
   const int index_size = indices.numel();
 
+  // Each template instantiation keeps one entry per thread to bound state and
+  // optimize stable shapes; alternating keys regenerate. Unkeyed
+  // normalize_by_lengths, prefetch, is_weight_positional, use_offsets, and
+  // process-wide dispatch overrides must remain fixed after first use.
   if (!pruned_weights || fallback_to_no_sparse) {
-    auto kernel_i8 =
-        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*TRHEAD_LOCAL=*/true>(
-            /*block_size=*/D,
-            /*has_weight=*/per_sample_weights_.has_value(),
-            /*normalize_by_lengths=*/false,
-            /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-            /*is_weight_positional=*/false,
-            /*use_offsets=*/true);
+    using KernelType = typename fbgemm::EmbeddingSpMDMKernelSignature<
+        uint8_t,
+        IndexType,
+        OffsetType,
+        /*OutType=*/float>::Type;
+    struct KernelCache {
+      int64_t D = 0;
+      bool has_weight = false;
+      bool valid = false;
+      KernelType kernel;
+    };
+    static thread_local KernelCache kernel_cache;
+    const bool has_weight = per_sample_weights_.has_value();
+    if (!kernel_cache.valid || kernel_cache.D != D ||
+        kernel_cache.has_weight != has_weight) {
+      kernel_cache.kernel =
+          fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*THREAD_LOCAL=*/true>(
+              /*block_size=*/D,
+              /*has_weight=*/has_weight,
+              /*normalize_by_lengths=*/false,
+              /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+              /*is_weight_positional=*/false,
+              /*use_offsets=*/true);
+      kernel_cache.D = D;
+      kernel_cache.has_weight = has_weight;
+      kernel_cache.valid = true;
+    }
+    const auto& kernel_i8 = kernel_cache.kernel;
 
     at::parallel_for(
         0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
@@ -912,14 +949,34 @@ at::Tensor& embedding_bag_byte_impl(
         });
   } else {
     // pruned weights
-    auto kernel_i8_sparse = fbgemm::
-        GenerateEmbeddingSpMDMRowWiseSparse<uint8_t, IndexType, OffsetType>(
-            /*block_size=*/D,
-            /*has_weight=*/per_sample_weights_.has_value(),
-            /*normalize_by_lengths=*/false,
-            /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-            /*is_weight_positional=*/false,
-            /*use_offsets=*/true);
+    using KernelType =
+        typename fbgemm::EmbeddingSpMDMRowWiseSparseKernelSignature<
+            uint8_t,
+            IndexType,
+            OffsetType>::Type;
+    struct KernelCache {
+      int64_t D = 0;
+      bool has_weight = false;
+      bool valid = false;
+      KernelType kernel;
+    };
+    static thread_local KernelCache kernel_cache;
+    const bool has_weight = per_sample_weights_.has_value();
+    if (!kernel_cache.valid || kernel_cache.D != D ||
+        kernel_cache.has_weight != has_weight) {
+      kernel_cache.kernel = fbgemm::
+          GenerateEmbeddingSpMDMRowWiseSparse<uint8_t, IndexType, OffsetType>(
+              /*block_size=*/D,
+              /*has_weight=*/has_weight,
+              /*normalize_by_lengths=*/false,
+              /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+              /*is_weight_positional=*/false,
+              /*use_offsets=*/true);
+      kernel_cache.D = D;
+      kernel_cache.has_weight = has_weight;
+      kernel_cache.valid = true;
+    }
+    const auto& kernel_i8_sparse = kernel_cache.kernel;
 
     auto success = kernel_i8_sparse(
         /*output_size=*/output_size,
@@ -930,7 +987,7 @@ at::Tensor& embedding_bag_byte_impl(
         /*offsets=*/offsets_data,
         /*weights=*/
         per_sample_weights_.has_value()
-            ? per_sample_weights_.value().data_ptr<float>()
+            ? per_sample_weights_.value().const_data_ptr<float>()
             : nullptr,
         /*output=*/output_data,
         /*compressed_indices_table=*/compressed_indices_mapping_data);

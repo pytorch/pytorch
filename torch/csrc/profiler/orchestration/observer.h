@@ -38,6 +38,7 @@ enum class C10_API_ENUM ProfilerState {
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
   KINETO_PRIVATEUSE1_FALLBACK, // use PrivateUse1 events
+  KINETO_PRIVATEUSE1, // use Kineto with registered IActivityProfiler
   KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
@@ -53,8 +54,6 @@ enum class C10_API_ENUM ActiveProfilerType {
 
 struct TORCH_API ExperimentalConfig {
   ExperimentalConfig(
-      std::vector<std::string> profiler_metrics = {},
-      bool profiler_measure_per_kernel = false,
       bool verbose = false,
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
@@ -62,11 +61,12 @@ struct TORCH_API ExperimentalConfig {
       bool disable_external_correlation = false,
       bool profile_all_threads = false,
       bool capture_overload_names = false,
-      bool adjust_timestamps = false);
-  explicit operator bool() const;
+      bool record_python_gc_info = false,
+      bool expose_kineto_event_metadata = false,
+      std::string custom_profiler_config = "",
+      bool adjust_timestamps = false,
+      bool trace_only = false);
 
-  std::vector<std::string> profiler_metrics;
-  bool profiler_measure_per_kernel;
   bool verbose;
   /*
    * List of performance events to be profiled.
@@ -80,9 +80,10 @@ struct TORCH_API ExperimentalConfig {
    */
   bool enable_cuda_sync_events;
   /*
-   * Controls whether or not timestamp adjustment for ProfilerStep and parent
-   * Python events occurs after profiling. This occurs at an O(n) cost and
-   * affects only the start of profiler step events.
+   * Deprecated no-op. Used to align ProfilerStep annotations with their parent
+   * Python event; removed because the alignment made downstream tools
+   * misreport step durations. Retained so the Python layer can detect it and
+   * warn, and so the constructor's argument order stays stable.
    */
   bool adjust_profiler_step;
   /*
@@ -102,6 +103,22 @@ struct TORCH_API ExperimentalConfig {
   bool capture_overload_names;
 
   /*
+   * Controls whether or not python gc info is recorded. This is used to
+   * determine if gc collect is slowing down your profile.
+   */
+  bool record_python_gc_info;
+
+  /* controls whether KinetoEvent metadata is exposed to FunctionEvent
+   * in the PyTorch Profiler as a JSON string */
+  bool expose_kineto_event_metadata;
+
+  /*
+   * A custom_profiler_config option is introduced to allow custom backends
+   * to apply custom configurations as needed.
+   */
+  std::string custom_profiler_config;
+
+  /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
    * of their parent CPU events.
@@ -112,6 +129,11 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  // When true, __exit__ skips TransferEvents, build_tree, and
+  // materializeOpEvents. Only export_chrome_trace / save() will work;
+  // accessing events() raises an error.
+  bool trace_only;
 };
 
 struct TORCH_API ProfilerConfig {
@@ -154,11 +176,8 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
-  static ProfilerStateBase* get(bool global);
-  static ProfilerStateBase* get() {
-    auto* out = get(/*global=*/true);
-    return out ? out : get(/*global=*/false);
-  }
+  static std::shared_ptr<ProfilerStateBase> getGlobal();
+  static ProfilerStateBase* getTLS();
 
   static void push(std::shared_ptr<ProfilerStateBase>&& state);
 

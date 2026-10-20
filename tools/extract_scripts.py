@@ -42,7 +42,7 @@ def extract(step: Step) -> Script | None:
             "bash": f"#!/usr/bin/env bash\nset -eo pipefail\n{run}",
             "sh": f"#!/usr/bin/env sh\nset -e\n{run}",
         }.get(shell, run)
-        return {"extension": extension, "script": script}
+        return {"extension": extension, "script": script}  # type: ignore[typeddict-item]
     elif is_gh_script and gh_script is not None:
         return {"extension": ".js", "script": gh_script}
     else:
@@ -69,7 +69,7 @@ def main() -> None:
             if "steps" not in job:
                 continue
             steps = job["steps"]
-            index_chars = len(str(len(steps) - 1))
+            index_chars = len(str(len(steps)))
             for i, step in enumerate(steps, start=1):
                 extracted = extract(step)
                 if extracted:

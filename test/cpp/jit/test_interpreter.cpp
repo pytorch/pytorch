@@ -1,6 +1,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <filesystem>
+
 #include <ATen/Parallel.h>
 #include <c10/core/DeviceType.h>
 #include <test/cpp/jit/test_utils.h>
@@ -198,9 +200,8 @@ TEST(InterpreterTest, runAsyncBasicTest) {
   demo = DemoModule()
   torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
-  std::string filePath(__FILE__);
-  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
-  testModelFile.append("test_interpreter_async.pt");
+  auto testModelFile =
+      resolveTestDataFile(__FILE__, "test_interpreter_async.pt");
   auto model = load(testModelFile);
   auto graph = model.get_method("forward").graph();
   Code function(graph, "");
@@ -249,7 +250,7 @@ graph(%0 : Tensor,
   try {
     FLAGS_torch_jit_enable_rethrow_caught_exception = false;
     interp.run(stack);
-  } catch (std::runtime_error& e) {
+  } catch (c10::Error& e) {
     exception_handled = true;
     std::string exception_msg = e.what();
     EXPECT_THAT(

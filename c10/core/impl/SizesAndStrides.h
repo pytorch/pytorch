@@ -50,6 +50,24 @@ class C10_API SizesAndStrides {
     }
   }
 
+  bool operator==(const SizesAndStrides& other) const {
+    if (size_ != other.size_) {
+      return false;
+    }
+    return !(
+        isInline()
+            ? std::memcmp(
+                  inlineStorage_, other.inlineStorage_, sizeof(inlineStorage_))
+            : std::memcmp(
+                  outOfLineStorage_,
+                  other.outOfLineStorage_,
+                  storageBytes(size_)));
+  }
+
+  bool operator!=(const SizesAndStrides& other) const {
+    return !(*this == other);
+  }
+
   SizesAndStrides& operator=(const SizesAndStrides& rhs) {
     if (this == &rhs) {
       return *this;
@@ -110,7 +128,7 @@ class C10_API SizesAndStrides {
     return *this;
   }
 
-  size_t size() const noexcept {
+  [[nodiscard]] size_t size() const noexcept {
     return size_;
   }
 
@@ -267,7 +285,7 @@ class C10_API SizesAndStrides {
   void resizeSlowPath(size_t newSize, size_t oldSize);
 
  private:
-  bool isInline() const noexcept {
+  [[nodiscard]] bool isInline() const noexcept {
     return size_ <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE;
   }
 

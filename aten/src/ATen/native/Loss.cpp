@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorOperators.h>
@@ -61,7 +62,7 @@
 constexpr float EPSILON = 1e-12;
 
 namespace {
-  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+  inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
     if (reduction == at::Reduction::Mean) {
       return unreduced.mean();
     } else if (reduction == at::Reduction::Sum) {
@@ -76,25 +77,47 @@ namespace at::meta {
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
-  // TODO: Reduce this extra TensorIterator construction for Reduction::Mean & Sum.
-  // We do another TensorIterator construction in the IMPL for the two cases.
-  build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
+    build_borrowing_binary_op(maybe_get_output(), input, target);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+  // declare_static_shape skips broadcasting, so check the input shapes here.
+  infer_size(input.sizes(), target.sizes());
+  build(TensorIteratorConfig()
+      .add_output(maybe_get_output())
+      .add_const_input(input)
+      .add_const_input(target)
+      .allow_cpu_scalars(true)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .resize_outputs(false)
+      .declare_static_shape({}));
   maybe_get_output().resize_({});
 }
 
 TORCH_META_FUNC(mse_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction) {
-  build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
+    build_borrowing_binary_op(maybe_get_output(), input, target);
     return;
   }
 
   TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+  // declare_static_shape skips broadcasting, so check the input shapes here.
+  infer_size(input.sizes(), target.sizes());
+  build(TensorIteratorConfig()
+      .add_output(maybe_get_output())
+      .add_const_input(input)
+      .add_const_input(target)
+      .allow_cpu_scalars(true)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .resize_outputs(false)
+      .declare_static_shape({}));
   maybe_get_output().resize_({});
 }
 
@@ -127,6 +150,9 @@ TORCH_IMPL_FUNC(smooth_l1_loss_out)
 
 TORCH_IMPL_FUNC(mse_loss_out)
 (const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& result) {
+  TORCH_CHECK(input.device() == target.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      input.device(), " and ", target.device(), "!");
   if (reduction != Reduction::None) {
     Tensor loss;
     auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
@@ -468,6 +494,9 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
     .add_const_input(input)
     .add_const_input(target)
     .add_const_input(grad_output)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
     .build();
   huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
@@ -486,6 +515,9 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
     .add_const_input(input)
     .add_const_input(target)
     .add_const_input(grad_output)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;

@@ -4,11 +4,11 @@ from copy import deepcopy
 
 import torch
 import torch.distributed.checkpoint as dcp
-from torch.distributed._tensor import init_device_mesh
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -16,8 +16,9 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
     MLPModule,
+    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -37,7 +38,9 @@ class UnevenShardedModel(torch.nn.Module):
         return self.net3(self.net2(self.relu(self.net1(x))))
 
 
-class TestTpCheckpoint(DTensorTestBase):
+class TestTpCheckpoint(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
@@ -47,7 +50,7 @@ class TestTpCheckpoint(DTensorTestBase):
         tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
 
         # create model and move it to GPU with id rank
-        model = MLPModule(self.device_type).cuda(self.rank)
+        model = MLPModule(self.device_type).to(self.rank)
         # Parallelize the module based on the given Parallel Style.
         parallelize_plan = {
             "net1": ColwiseParallel(),
@@ -65,7 +68,7 @@ class TestTpCheckpoint(DTensorTestBase):
 
         # Update the parameters so model.state_dict() will be different from original_state_dict.
         torch.manual_seed(0)
-        inp = torch.rand(20, 10).cuda(self.rank)
+        inp = torch.rand(20, 10).to(self.rank)
         output = model(inp)
         output.sum().backward()
         optimizer.step()
@@ -94,7 +97,7 @@ class TestTpCheckpoint(DTensorTestBase):
         tp_mesh = init_device_mesh(self.device_type, mesh_shpe)
 
         # create model and move it to GPU with id rank
-        model = UnevenShardedModel(self.device_type).cuda(self.rank)
+        model = UnevenShardedModel(self.device_type).to(self.rank)
         # Parallelize the module based on the given Parallel Style.
         parallelize_plan = {
             "net1": ColwiseParallel(),

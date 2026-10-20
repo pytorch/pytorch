@@ -43,9 +43,9 @@ struct TORCH_API LayerNormFuncOptions {
   /// input shape from an expected input.
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
 
-  TORCH_ARG(Tensor, weight) = {};
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = {};
+  TORCH_ARG(Tensor, bias);
 
   /// a value added to the denominator for numerical stability. ``Default:
   /// 1e-5``.
@@ -177,9 +177,9 @@ struct TORCH_API GroupNormFuncOptions {
   /// number of groups to separate the channels into
   TORCH_ARG(int64_t, num_groups);
 
-  TORCH_ARG(Tensor, weight) = {};
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = {};
+  TORCH_ARG(Tensor, bias);
 
   /// a value added to the denominator for numerical stability. Default: 1e-5
   TORCH_ARG(double, eps) = 1e-5;

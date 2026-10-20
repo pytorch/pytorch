@@ -1,18 +1,18 @@
-# mypy: allow-untyped-defs
 import contextlib
-from typing import Optional
+from collections.abc import Generator, Sequence
 
 import torch
 from torch.utils._content_store import ContentStoreReader
 
 
-LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
+LOAD_TENSOR_READER: ContentStoreReader | None = None
 
 
 @contextlib.contextmanager
-def load_tensor_reader(loc):
+def load_tensor_reader(loc: str) -> Generator[None, None, None]:
     global LOAD_TENSOR_READER
-    assert LOAD_TENSOR_READER is None
+    if LOAD_TENSOR_READER is not None:
+        raise AssertionError("LOAD_TENSOR_READER is already set")
     # load_tensor is an "op", and we will play merry hell on
     # Inductor's memory planning if we return a tensor that
     # aliases another tensor that we previously returned from
@@ -26,14 +26,20 @@ def load_tensor_reader(loc):
         LOAD_TENSOR_READER = None
 
 
-def register_debug_prims():
+def register_debug_prims() -> None:
     torch.library.define(
         "debugprims::load_tensor",
         "(str name, int[] size, int[] stride, *, ScalarType dtype, Device device) -> Tensor",
     )
 
     @torch.library.impl("debugprims::load_tensor", "BackendSelect")
-    def load_tensor_factory(name, size, stride, dtype, device):
+    def load_tensor_factory(
+        name: str,
+        size: Sequence[int],
+        stride: Sequence[int],
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
         if LOAD_TENSOR_READER is None:
             from torch._dynamo.testing import rand_strided
 
@@ -43,12 +49,15 @@ def register_debug_prims():
 
             # device argument here takes care of coercion
             r = LOAD_TENSOR_READER.read_tensor(name, device=device)
-            assert list(r.size()) == size, f"{r.size()} != {size}"
-            assert list(r.stride()) == stride, f"{r.stride()} != {stride}"
-            assert r.device == device, f"{r.device} != {device}"
+            if list(r.size()) != size:
+                raise AssertionError(f"{r.size()} != {size}")
+            if list(r.stride()) != stride:
+                raise AssertionError(f"{r.stride()} != {stride}")
+            if r.device != device:
+                raise AssertionError(f"{r.device} != {device}")
 
             # Unlike the other properties, we will do coercions for dtype
             # mismatch
             if r.dtype != dtype:
-                r = clone_input(r, dtype=dtype)
+                r = clone_input(r, dtype=dtype)  # type: ignore[no-untyped-call]
             return r

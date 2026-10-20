@@ -19,12 +19,13 @@
 #include <mutex>
 #include <sstream>
 #include <stack>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
@@ -48,6 +49,7 @@ constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
+constexpr auto kETIsAsynchronizedOp = "is_asynchronized_op";
 #endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
@@ -108,29 +110,30 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
-  std::map<size_t, std::stack<ID>> opStack{};
+  std::unordered_map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> objectId{};
+
+  std::unordered_map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::recursive_mutex gMutex{};
+  std::recursive_mutex gMutex;
   // Stream to write output JSON.
-  std::ofstream out{};
+  std::ofstream out;
 
   // Full path to the output file.
-  std::string fileName{};
+  std::string fileName;
 
-  std::string resourceDir{};
+  std::string resourceDir;
 
   // RecordFunction callback handle for this observer.
   CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
 
   // Process ID.
   int32_t pid{-1};
-  std::string recordTime{};
+  std::string recordTime;
 
   ExecutionTraceObserver() = default;
 
@@ -157,7 +160,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   bool record_integral_tensor_range{false};
 
-  std::unordered_set<std::string> nodeListForSavingIntegerTensor{};
+  std::unordered_set<std::string> nodeListForSavingIntegerTensor;
 
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
@@ -168,9 +171,9 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // RecordFunction callback in sync with the state.
   RunState state_{RunState::uninitialized};
 
-  // All tensors and operators have an unique id assigned. Increment id for each
+  // All tensors and operators have a unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
@@ -195,7 +198,7 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
   std::vector<std::string> inputShapes;
   std::vector<std::string> inputStrides;
   std::vector<std::string> inputValues;
-  std::map<int, std::pair<long, long>> tensor_index_min_max_map;
+  std::map<int, std::pair<int64_t, int64_t>> tensor_index_min_max_map;
 
   std::string get_string_for_tensor_range() {
     if (tensor_index_min_max_map.empty()) {
@@ -214,7 +217,7 @@ struct FunctionCallContext : public ObserverContext { // NOLINT
       }
       i++;
     }
-    result += "}";
+    result += '}';
     return result;
   }
 };
@@ -224,7 +227,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   std::ofstream stream;
   stream.open(name, std::ofstream::out | std::ofstream::trunc);
   if (!stream) {
-    LOG(ERROR) << "Failed to open '" << name << "'";
+    LOG(ERROR) << "Failed to open '" << name << '\'';
   } else {
     VLOG(1) << "PyTorch Execution Trace: writing to " << name;
   }
@@ -269,7 +272,7 @@ static void writeJsonNode(
     const std::string& kernelBackend = "",
     const std::string& kernelFile = "",
     const std::string& tensor_range = "",
-    const std::string& additiona_attrs = "") {
+    const std::string& additional_attrs = "") {
   if (!out.is_open() || out.fail() || out.bad()) {
     return;
   }
@@ -304,7 +307,7 @@ static void writeJsonNode(
         kernelBackend,
         kernelFile,
         tensor_range,
-        additiona_attrs);
+        additional_attrs);
   } catch (const std::exception& e) {
     LOG(ERROR) << "Failed to write json node to execution trace: " << e.what();
   }
@@ -313,7 +316,7 @@ static void writeJsonNode(
 static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
-  return oss.str();
+  return std::move(oss).str();
 }
 
 static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
@@ -379,13 +382,10 @@ static ExecutionTraceObserver::ID getObjectID(
     const void* t) {
   const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
 
-  auto iter = ob.objectId.find(t);
-  if (iter == ob.objectId.end()) {
-    ExecutionTraceObserver::ID objectId = ob.getNewID();
-    ob.objectId[t] = objectId;
-    return objectId;
+  auto [iter, inserted] = ob.objectId.try_emplace(t);
+  if (inserted) {
+    iter->second = ob.getNewID();
   }
-
   return iter->second;
 }
 
@@ -411,7 +411,7 @@ convertIValue(
     const std::string& functionName,
     ExecutionTraceObserver::ID opId,
     int& tensorIndex,
-    std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
+    std::map<int, std::pair<int64_t, int64_t>>& tensor_index_min_max_map,
     bool isInput,
     const c10::IValue& val,
     const bool baseType = true,
@@ -455,8 +455,7 @@ convertIValue(
           tensor.numel() != 0) {
         enableRecordFunction(false);
 
-        if (ob.nodeListForSavingIntegerTensor.find(functionName) !=
-                ob.nodeListForSavingIntegerTensor.end() &&
+        if (ob.nodeListForSavingIntegerTensor.contains(functionName) &&
             !ob.resourceDir.empty()) {
           std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
               std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
@@ -466,9 +465,9 @@ convertIValue(
         }
 
         if (ob.record_integral_tensor_range) {
-          long min = tensor.min().item().toLong();
-          long max = tensor.max().item().toLong();
-          tensor_index_min_max_map[tensorIndex] = std::make_pair(min, max);
+          auto [min_t, max_t] = tensor.aminmax();
+          tensor_index_min_max_map[tensorIndex] =
+              std::make_pair(min_t.item<int64_t>(), max_t.item<int64_t>());
         }
 
         enableRecordFunction(true);
@@ -484,7 +483,10 @@ convertIValue(
         itemsize,
         device_str);
     return std::make_tuple(
-        tensor_shape, tensor_stride, tensor_type, tensor_value);
+        std::move(tensor_shape),
+        std::move(tensor_stride),
+        std::move(tensor_type),
+        std::move(tensor_value));
   } else if (val.isTuple()) {
     const auto& val_tuple = val.toTupleRef().elements();
     size_t tuple_size = val_tuple.size();
@@ -492,6 +494,10 @@ convertIValue(
     std::vector<std::string> stride_array;
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
+    shape_array.reserve(tuple_size);
+    stride_array.reserve(tuple_size);
+    type_array.reserve(tuple_size);
+    value_array.reserve(tuple_size);
     for (const auto j : c10::irange(tuple_size)) {
       auto tuple = convertIValue(
           ob,
@@ -503,17 +509,17 @@ convertIValue(
           val_tuple[j],
           false,
           maxArrayLen);
-      shape_array.push_back(std::get<0>(tuple));
-      stride_array.push_back(std::get<1>(tuple));
-      type_array.push_back(std::get<2>(tuple));
-      value_array.push_back(std::get<3>(tuple));
+      shape_array.push_back(std::move(std::get<0>(tuple)));
+      stride_array.push_back(std::move(std::get<1>(tuple)));
+      type_array.push_back(std::move(std::get<2>(tuple)));
+      value_array.push_back(std::move(std::get<3>(tuple)));
     }
     type = type + vectorToString(type_array);
     std::string tensor_type = baseType ? fmt::format("\"{}\"", type) : type;
     return std::make_tuple(
         vectorToString(shape_array),
         vectorToString(stride_array),
-        tensor_type,
+        std::move(tensor_type),
         vectorToString(value_array));
   } else if (val.isList()) {
     const auto& val_list = val.toList();
@@ -522,6 +528,11 @@ convertIValue(
     std::vector<std::string> stride_array;
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
+    const size_t effective_list_size = std::min(list_size, maxArrayLen + 1);
+    shape_array.reserve(effective_list_size);
+    stride_array.reserve(effective_list_size);
+    type_array.reserve(effective_list_size);
+    value_array.reserve(effective_list_size);
     for (const auto j : c10::irange(list_size)) {
       auto tuple = convertIValue(
           ob,
@@ -533,10 +544,10 @@ convertIValue(
           val_list.get(j),
           false,
           maxArrayLen);
-      shape_array.push_back(std::get<0>(tuple));
-      stride_array.push_back(std::get<1>(tuple));
-      type_array.push_back(std::get<2>(tuple));
-      value_array.push_back(std::get<3>(tuple));
+      shape_array.push_back(std::move(std::get<0>(tuple)));
+      stride_array.push_back(std::move(std::get<1>(tuple)));
+      type_array.push_back(std::move(std::get<2>(tuple)));
+      value_array.push_back(std::move(std::get<3>(tuple)));
       if (j >= maxArrayLen) {
         LOG(WARNING) << "list size=" << val_list.size()
                      << " exceeded maxArrayLen=" << maxArrayLen;
@@ -548,7 +559,7 @@ convertIValue(
     return std::make_tuple(
         vectorToString(shape_array),
         vectorToString(stride_array),
-        tensor_type,
+        std::move(tensor_type),
         vectorToString(value_array));
   } else {
     std::string tensor_shape = "[]";
@@ -557,7 +568,10 @@ convertIValue(
     std::string tensor_value = getScalarValue(val);
 
     return std::make_tuple(
-        tensor_shape, tensor_stride, tensor_type, tensor_value);
+        std::move(tensor_shape),
+        std::move(tensor_stride),
+        std::move(tensor_type),
+        std::move(tensor_value));
   }
 }
 
@@ -566,14 +580,14 @@ static void appendValueInfo(
     const std::string& functionName,
     ExecutionTraceObserver::ID opId,
     int& tensorIndex,
-    std::map<int, std::pair<long, long>>& tensor_index_min_max_map,
+    std::map<int, std::pair<int64_t, int64_t>>& tensor_index_min_max_map,
     bool isInput,
     const c10::IValue& val,
     std::vector<std::string>& shapes,
     std::vector<std::string>& strides,
     std::vector<std::string>& types,
     std::vector<std::string>& values) {
-  auto tuple = convertIValue(
+  auto [tensor_shape, tensor_stride, tensor_type, tensor_value] = convertIValue(
       ob,
       functionName,
       opId,
@@ -582,10 +596,10 @@ static void appendValueInfo(
       isInput,
       val,
       true);
-  shapes.push_back(std::get<0>(tuple));
-  strides.push_back(std::get<1>(tuple));
-  types.push_back(std::get<2>(tuple));
-  values.push_back(std::get<3>(tuple));
+  shapes.push_back(std::move(tensor_shape));
+  strides.push_back(std::move(tensor_stride));
+  types.push_back(std::move(tensor_type));
+  values.push_back(std::move(tensor_value));
 }
 
 static void handleKernelBackendInfo(
@@ -593,13 +607,14 @@ static void handleKernelBackendInfo(
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
   const auto& kwinputs = fn.kwinputs();
-  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
-    fc.kernelBackend = kwinputs.at("kernel_backend").toStringRef();
+  if (auto it = kwinputs.find("kernel_backend"); it != kwinputs.end()) {
+    fc.kernelBackend = it->second.toStringRef();
     if (fc.kernelBackend == "triton") {
-      fc.kernelFile = kwinputs.at("kernel_file").toStringRef();
+      auto kernel_file_it = kwinputs.find("kernel_file");
       TORCH_INTERNAL_ASSERT(
-          kwinputs.find("kernel_file") != kwinputs.end(),
+          kernel_file_it != kwinputs.end(),
           "kernel file is missing in triton kernel");
+      fc.kernelFile = kernel_file_it->second.toStringRef();
       // Remove the path of the file name
       if (fc.kernelFile.find_last_of('/') != std::string::npos) {
         fc.kernelFile =
@@ -618,7 +633,7 @@ static void handleKernelBackendInfo(
   }
 }
 
-// Additional attributes for commounication collectives
+// Additional attributes for communication collectives
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
@@ -666,6 +681,8 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
 
+  addAttr(kIsAsynchronizedOp, kETIsAsynchronizedOp, "string");
+
 #endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
@@ -699,7 +716,7 @@ static void recordOperatorStart(
                 RecordScope::USER_SCOPE),
             tid,
             0); // fw_tid
-        ob.out << ",";
+        ob.out << ',';
       }
     }
 
@@ -789,7 +806,7 @@ static std::string json_str_escape(const std::string& str) {
       ostream << ch;
     }
   }
-  return ostream.str();
+  return std::move(ostream).str();
 }
 
 static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
@@ -841,7 +858,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
-      const std::string additiona_attrs =
+      const std::string additional_attrs =
           fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
       {
         const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
@@ -872,8 +889,8 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             fc.kernelBackend,
             fc.kernelFile,
             fc.get_string_for_tensor_range(),
-            additiona_attrs);
-        ob->out << ",";
+            additional_attrs);
+        ob->out << ',';
       }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
@@ -888,53 +905,53 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
   // Check if the observer is already initialized.
   if (ObserverManager::get() == nullptr) {
     ObserverManager::push(std::make_shared<ExecutionTraceObserver>());
-    auto& ob = *ObserverManager::get();
-    ob.pid = processId();
+    auto ob = ObserverManager::get();
+    ob->pid = processId();
     // Set output
-    ob.fileName = output_file_path;
-    if (!initExecutionTraceStart(ob)) {
+    ob->fileName = output_file_path;
+    if (!initExecutionTraceStart(*ob)) {
       return false;
     }
 
     // check if the environment variable is set to force recording integer
     // tensors
-    auto env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
-    if (env_variable != nullptr) {
-      ob.record_integral_tensor_range = true;
+    auto env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
+    if (env_variable.has_value()) {
+      ob->record_integral_tensor_range = true;
     }
 
     // check if the environment variable is set to force recording integer
     // tensors
-    env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
-    if (env_variable != nullptr) {
-      std::istringstream stream(env_variable);
+    env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
+    if (env_variable.has_value()) {
+      std::istringstream stream(env_variable.value());
       std::string token;
       while (std::getline(stream, token, ',')) {
-        ob.nodeListForSavingIntegerTensor.insert(token);
+        ob->nodeListForSavingIntegerTensor.insert(token);
       }
     }
 
-    std::size_t ext_pos = ob.fileName.rfind(".json");
+    std::size_t ext_pos = ob->fileName.rfind(".json");
     if (ext_pos != std::string::npos) {
-      ob.resourceDir = ob.fileName;
+      ob->resourceDir = ob->fileName;
       // 5 is the length of ".json"
-      ob.resourceDir.replace(ext_pos, 5, "_resources/");
-      VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
-              << "\n";
+      ob->resourceDir.replace(ext_pos, 5, "_resources/");
+      VLOG(1) << "Execution trace resource directory: " << ob->resourceDir
+              << '\n';
     } else {
       LOG(WARNING)
           << "Execution trace output file does not end with \".json\".";
     }
 
-    ob.cbHandle = addGlobalCallback(
+    ob->cbHandle = addGlobalCallback(
         RecordFunctionCallback(&onFunctionEnter, &onFunctionExit)
             .needsInputs(true)
             .needsOutputs(true)
             .needsIds(true));
     // Default to disabled.
-    ob.setState(ExecutionTraceObserver::RunState::disabled);
+    ob->setState(ExecutionTraceObserver::RunState::disabled);
 
     VLOG(1) << "PyTorch Execution Trace: added observer, output="
             << output_file_path;
@@ -970,21 +987,21 @@ void removeExecutionTraceObserver() {
 
 void enableExecutionTraceObserver() {
   LOG(WARNING) << "Enabling Execution Trace Observer";
-  auto& ob = *ObserverManager::get();
+  auto ob = ObserverManager::get();
   // Make sure we are not already enabled.
-  if (ob.getState() == ExecutionTraceObserver::RunState::enabled) {
+  if (ob->getState() == ExecutionTraceObserver::RunState::enabled) {
     LOG(WARNING)
         << "Trying to enable Execution Trace Observer when it's already enabled.";
   } else {
-    ob.setState(ExecutionTraceObserver::RunState::enabled);
+    ob->setState(ExecutionTraceObserver::RunState::enabled);
   }
 }
 
 void disableExecutionTraceObserver() {
   LOG(WARNING) << "Disabling Execution Trace Observer";
-  auto& ob = *ObserverManager::get();
-  if (ob.getState() != ExecutionTraceObserver::RunState::disabled) {
-    ob.setState(ExecutionTraceObserver::RunState::disabled);
+  auto ob = ObserverManager::get();
+  if (ob->getState() != ExecutionTraceObserver::RunState::disabled) {
+    ob->setState(ExecutionTraceObserver::RunState::disabled);
   } else {
     LOG(WARNING)
         << "Trying to disable Execution Trace Observer when it's already disabled.";

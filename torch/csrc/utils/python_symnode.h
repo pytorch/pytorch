@@ -12,6 +12,7 @@ namespace torch {
 TORCH_PYTHON_API py::handle get_symint_class();
 TORCH_PYTHON_API py::handle get_symfloat_class();
 TORCH_PYTHON_API py::handle get_symbool_class();
+TORCH_PYTHON_API py::handle get_dynint_class();
 
 // NB: These functions must not be called too early, otherwise torch not setup.
 // Alternate design is to have torch "register" the object to us
@@ -23,6 +24,9 @@ inline bool is_symfloat(py::handle obj) {
 }
 inline bool is_symbool(py::handle obj) {
   return py::isinstance(obj, get_symbool_class());
+}
+inline bool is_dynint(py::handle obj) {
+  return py::isinstance(obj, get_dynint_class());
 }
 
 namespace impl {
@@ -105,6 +109,13 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("has_hint")().is(py::handle(Py_True));
   }
 
+  std::optional<int64_t> guarding_hint() override {
+    py::gil_scoped_acquire acquire;
+    const auto r = getPyObj().attr("hint");
+    return r.is_none() ? std::nullopt
+                       : std::optional<int64_t>(r.cast<int64_t>());
+  }
+
   int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
@@ -125,11 +136,6 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("expect_true")(file, line).cast<bool>();
   }
 
-  bool expect_size(const char* file, int64_t line) override {
-    py::gil_scoped_acquire acquire;
-    return getPyObj().attr("expect_size")(file, line).cast<bool>();
-  }
-
   bool guard_size_oblivious(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_size_oblivious")(file, line).cast<bool>();
@@ -138,6 +144,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   bool guard_or_false(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_or_false")(file, line).cast<bool>();
+  }
+
+  bool statically_known_true(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("statically_known_true")(file, line).cast<bool>();
   }
 
   bool guard_or_true(const char* file, int64_t line) override {

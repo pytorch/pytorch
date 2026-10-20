@@ -7,7 +7,7 @@ import re
 import subprocess
 from datetime import datetime
 from socket import gethostname
-from typing import Any, Optional
+from typing import Any
 
 from torch._strobelight.cli_function_profiler import StrobelightCLIFunctionProfiler
 
@@ -87,15 +87,15 @@ class StrobelightCompileTimeProfiler:
     enabled: bool = False
 
     # A regex that can be used to filter out what frames to profile. ex: "1/.*"
-    frame_id_filter: Optional[str] = os.environ.get("COMPILE_STROBELIGHT_FRAME_FILTER")
+    frame_id_filter: str | None = os.environ.get("COMPILE_STROBELIGHT_FRAME_FILTER")
 
     # A unique identifier that is used as the run_user_name in the strobelight profile to
     # associate all compile time profiles together.
-    identifier: Optional[str] = None
+    identifier: str | None = None
 
-    current_phase: Optional[str] = None
+    current_phase: str | None = None
 
-    profiler: Optional[Any] = None
+    profiler: Any | None = None
 
     max_stack_length: int = int(
         os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 500)
@@ -127,7 +127,7 @@ class StrobelightCompileTimeProfiler:
 
             if not shutil.which("strobeclient"):
                 logger.info(
-                    "strobeclient not found, cant enable compile time strobelight profiling, seems"
+                    "strobeclient not found, can't enable compile time strobelight profiling, seems"
                     "like you are not on a FB machine."
                 )
                 return

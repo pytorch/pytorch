@@ -49,7 +49,7 @@ __global__ void cuda_always_succeed_assertion_kernel(
  */
 void cuda_device_assertions_from_2_processes() {
   const auto n1 = fork();
-  if (n1 == 0) {
+  if (n1 != 0) {
     // This is the parent process, that will call an assertion failure.
     // This should execute before the child process.
     // We are achieving this by putting the child process to sleep.
@@ -62,6 +62,11 @@ void cuda_device_assertions_from_2_processes() {
         1);
     try {
       c10::cuda::device_synchronize();
+      // The catch below is for c10::Error and asserts on the device-assertion
+      // text. A TORCH_CHECK here would be caught by it, so the failure would be
+      // reported as a substring mismatch on this sentinel rather than as the
+      // device assertion never firing.
+      // @allow-raw-throw: must not be catchable as c10::Error
       throw std::runtime_error("Test didn't fail, but should have.");
     } catch (const c10::Error& err) {
       const auto err_str = std::string(err.what());
@@ -86,11 +91,9 @@ void cuda_device_assertions_from_2_processes() {
         1);
     try {
       c10::cuda::device_synchronize();
-    } catch (const c10::Error& err) {
+    } catch (const c10::Error&) {
       ASSERT_TRUE(false); // This kernel should not have failed, but did.
     }
-    // End the child process
-    exit(0);
   }
 }
 

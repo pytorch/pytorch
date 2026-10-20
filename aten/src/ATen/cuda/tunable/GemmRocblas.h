@@ -8,6 +8,8 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/util/StringUtil.h>
 #include <fmt/printf.h>
+#include <algorithm>
+#include <cstdint>
 
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
@@ -137,17 +139,18 @@ static rocblas_operation _rocblasOpFromChar(char op) {
 template <typename T>
 class RocblasGemmOp : public Callable<GemmParams<T>> {
   public:
-    RocblasGemmOp(int solution) : solution_{solution} {}
+    RocblasGemmOp(int32_t solution) : solution_{solution} {}
 
     TuningStatus Call(const GemmParams<T>* params) override {
       auto input_output_type = RocBlasDataTypeFor<T>();
-      if (at::globalContext().allowTF32CuBLAS() && input_output_type == rocblas_datatype_f32_r)
+      if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32 && input_output_type == rocblas_datatype_f32_r)
         return FAIL;  // no support for TF32 in rocBLAS
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
       auto h_b = DoCastForHalfOrBfloat16(params->beta);
+      auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
       auto status = rocblas_gemm_ex(
-          (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(),
+          (rocblas_handle)(cublasHandle_t)handle,
           _rocblasOpFromChar(params->transa),
           _rocblasOpFromChar(params->transb),
           params->m, params->n, params->k,
@@ -168,13 +171,16 @@ class RocblasGemmOp : public Callable<GemmParams<T>> {
     }
 
   private:
-    int solution_;
+    int32_t solution_;
 };
 
 template <typename T>
 auto GetRocBlasGemmTypeStringAndOps() {
-  rocblas_handle handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
-  int solution_size;
+  // getCurrentCUDABlasHandle() would create a public handle, with its own
+  // workspace, for each stream this runs on.
+  auto scoped_handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+  rocblas_handle handle = (rocblas_handle)(cublasHandle_t)scoped_handle;
+  rocblas_int solution_size;
   auto input_output_type = RocBlasDataTypeFor<T>();
   auto compute_type = RocBlasComputeTypeFor<T>();
   // Get the number of available solutions
@@ -185,7 +191,8 @@ auto GetRocBlasGemmTypeStringAndOps() {
                                                             rocblas_gemm_flags_none,
                                                             nullptr,
                                                             &solution_size));
-  std::vector<int> solutions(solution_size);
+  const auto solution_capacity = static_cast<size_t>(solution_size);
+  std::vector<rocblas_int> solutions(solution_capacity);
   // Get the list of available solutions
   TORCH_ROCBLAS_CHECK(rocblas_gemm_ex_get_solutions_by_type(handle,
                                                             input_output_type,
@@ -194,10 +201,14 @@ auto GetRocBlasGemmTypeStringAndOps() {
                                                             rocblas_gemm_flags_none,
                                                             solutions.data(),
                                                             &solution_size));
+  // See rocblas/internal/rocblas-beta.h: the list_size parameter
+  // (solution_size here) is updated to the number of solution indices filled.
+  solutions.resize(std::min(static_cast<size_t>(solution_size), solution_capacity));
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
   for (size_t i = 0; i < solutions.size(); ++i) {
-    auto callable = std::make_unique<RocblasGemmOp<T>>(solutions[i]);
-    ret.emplace_back(std::make_pair(fmt::sprintf("Gemm_Rocblas_%d", solutions[i]), std::move(callable)));
+    auto solution = static_cast<int32_t>(solutions[i]);
+    auto callable = std::make_unique<RocblasGemmOp<T>>(solution);
+    ret.emplace_back(std::make_pair(fmt::sprintf("Gemm_Rocblas_%d", solution), std::move(callable)));
   }
   return ret;
 }
@@ -205,17 +216,18 @@ auto GetRocBlasGemmTypeStringAndOps() {
 template <typename T>
 class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>> {
   public:
-    RocblasGemmStridedBatchedOp(int solution) : solution_{solution} {}
+    RocblasGemmStridedBatchedOp(int32_t solution) : solution_{solution} {}
 
     TuningStatus Call(const GemmStridedBatchedParams<T>* params) override {
       auto input_output_type = RocBlasDataTypeFor<T>();
-      if (at::globalContext().allowTF32CuBLAS() && input_output_type == rocblas_datatype_f32_r)
+      if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32 && input_output_type == rocblas_datatype_f32_r)
         return FAIL;  // no support for TF32 in rocBLAS
       auto compute_type = RocBlasComputeTypeFor<T>();
       auto h_a = DoCastForHalfOrBfloat16(params->alpha);
       auto h_b = DoCastForHalfOrBfloat16(params->beta);
+      auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
       auto status = rocblas_gemm_strided_batched_ex(
-          (rocblas_handle)at::cuda::getCurrentCUDABlasHandle(),
+          (rocblas_handle)(cublasHandle_t)handle,
           _rocblasOpFromChar(params->transa),
           _rocblasOpFromChar(params->transb),
           params->m, params->n, params->k,
@@ -237,13 +249,16 @@ class RocblasGemmStridedBatchedOp : public Callable<GemmStridedBatchedParams<T>>
     }
 
   private:
-    int solution_;
+    int32_t solution_;
 };
 
 template <typename T>
 auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
-  rocblas_handle handle = (rocblas_handle)at::cuda::getCurrentCUDABlasHandle();
-  int solution_size;
+  // getCurrentCUDABlasHandle() would create a public handle, with its own
+  // workspace, for each stream this runs on.
+  auto scoped_handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+  rocblas_handle handle = (rocblas_handle)(cublasHandle_t)scoped_handle;
+  rocblas_int solution_size;
   auto input_output_type = RocBlasDataTypeFor<T>();
   auto compute_type = RocBlasComputeTypeFor<T>();
   // Get the number of available solutions
@@ -254,7 +269,8 @@ auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
                                                             rocblas_gemm_flags_none,
                                                             nullptr,
                                                             &solution_size));
-  std::vector<int> solutions(solution_size);
+  const auto solution_capacity = static_cast<size_t>(solution_size);
+  std::vector<rocblas_int> solutions(solution_capacity);
   // Get the list of available solutions
   TORCH_ROCBLAS_CHECK(rocblas_gemm_ex_get_solutions_by_type(handle,
                                                             input_output_type,
@@ -263,13 +279,17 @@ auto GetRocBlasGemmStridedBatchedTypeStringAndOps() {
                                                             rocblas_gemm_flags_none,
                                                             solutions.data(),
                                                             &solution_size));
+  // See rocblas/internal/rocblas-beta.h: the list_size parameter
+  // (solution_size here) is updated to the number of solution indices filled.
+  solutions.resize(std::min(static_cast<size_t>(solution_size), solution_capacity));
   // Sort the solutions in ascending order to make the solution vector deterministic across runs
   std::sort(solutions.begin(), solutions.end());
 
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmStridedBatchedParams<T>>>>> ret;
   for (size_t i = 0; i < solutions.size(); ++i) {
-    auto callable = std::make_unique<RocblasGemmStridedBatchedOp<T>>(solutions[i]);
-    ret.emplace_back(std::make_pair(c10::str("Gemm_Rocblas_", solutions[i]), std::move(callable)));
+    auto solution = static_cast<int32_t>(solutions[i]);
+    auto callable = std::make_unique<RocblasGemmStridedBatchedOp<T>>(solution);
+    ret.emplace_back(std::make_pair(c10::str("Gemm_Rocblas_", solution), std::move(callable)));
   }
   return ret;
 }

@@ -5,7 +5,7 @@ import os
 import shutil
 import tempfile
 import types
-from typing import Any, Optional, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._export
@@ -15,10 +15,15 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
+from torch.export.pt2_archive import PT2ArchiveReader, PT2ArchiveWriter
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
 from torch.utils import _pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._C._aoti import AOTIModelContainerRunner
 
 
 class WrapperModule(torch.nn.Module):
@@ -31,6 +36,53 @@ class WrapperModule(torch.nn.Module):
 
 
 class AOTIRunnerUtil:
+    @staticmethod
+    def _load_abicompat_package(package_path, *args, **kwargs):
+        with PT2ArchiveReader(package_path) as reader:
+            names = reader.get_file_names()
+            abicompat_names = [name for name in names if name.endswith("_abicompat.so")]
+            if len(abicompat_names) != 1:
+                raise AssertionError(
+                    f"Expected one ABI-compatible DSO, found {len(abicompat_names)}"
+                )
+            abicompat_name = abicompat_names[0]
+            legacy_name = abicompat_name.removesuffix("_abicompat.so") + ".so"
+            if legacy_name not in names:
+                raise AssertionError(f"ABI-compatible DSO has no peer {legacy_name}")
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                abicompat_package_path = os.path.join(temp_dir, "model.pt2")
+                with PT2ArchiveWriter(abicompat_package_path) as writer:
+                    for name in names:
+                        if name == legacy_name:
+                            continue
+                        output_name = legacy_name if name == abicompat_name else name
+                        writer.write_bytes(output_name, reader.read_bytes(name))
+
+                return torch._inductor.aoti_load_package(
+                    abicompat_package_path, *args, **kwargs
+                )
+
+    @staticmethod
+    def load_package(package_path, *args, **kwargs):
+        """Load an AOTI package, honoring AOTI_TEST_USE_ABICOMPAT_DSO.
+
+        Tests that load packages directly instead of via run/run_multiple must
+        use this so the local-build target exercises the ABI-compatible DSO
+        rather than the legacy libstdc++ DSO, which cannot dlopen on hosts
+        with an older platform libstdc++.
+        """
+        if os.environ.get("AOTI_TEST_USE_ABICOMPAT_DSO") == "1":
+            return AOTIRunnerUtil._load_abicompat_package(package_path, *args, **kwargs)
+        return torch._inductor.aoti_load_package(package_path, *args, **kwargs)
+
+    @staticmethod
+    def _run_abicompat_package(package_path, list_example_inputs, rng_state=None):
+        optimized = AOTIRunnerUtil._load_abicompat_package(package_path)
+        if rng_state is not None:
+            torch.set_rng_state(rng_state)
+        return [optimized(*inputs) for inputs in list_example_inputs]
+
     @staticmethod
     def legacy_compile(
         model,
@@ -48,15 +100,16 @@ class AOTIRunnerUtil:
             )
             gm = ep.module()
         else:
-            gm = torch.export._trace._export_to_torch_ir(
-                model,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes,
-                disable_constraint_solver=disable_constraint_solver,
-                # Disabling this flag, because instead we can rely on the mapping
-                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
-                restore_fqn=False,
-            )
+            with torch._export.config.patch(use_new_tracer_experimental=True):
+                gm = torch.export._trace._export_to_torch_ir(
+                    model,
+                    example_inputs,
+                    dynamic_shapes=dynamic_shapes,
+                    disable_constraint_solver=disable_constraint_solver,
+                    # Disabling this flag, because instead we can rely on the mapping
+                    # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                    restore_fqn=False,
+                )
 
         if IS_FBCODE:
             from deeplearning.aot_inductor.extern_node_thrift_serializer import (
@@ -73,7 +126,7 @@ class AOTIRunnerUtil:
         return so_path
 
     @staticmethod
-    def legacy_load_runner(device, so_path):
+    def legacy_load_runner(device, so_path: str) -> "AOTIModelContainerRunner":
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
@@ -94,12 +147,16 @@ class AOTIRunnerUtil:
                     temp_so_path, device == "cpu"
                 )
         else:
-            if device == "cpu":
-                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-            elif device == "xpu":
-                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
-            else:
-                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+            runner_cls_name = f"AOTIModelContainerRunner{device.capitalize()}"
+            runner_cls = getattr(torch._C._aoti, runner_cls_name, None)
+            if runner_cls is None:
+                raise RuntimeError(
+                    f"Unsupported device '{device}': expected {runner_cls_name} "
+                    f"in torch._C._aoti"
+                )
+            if device in ("cpu", "mps"):
+                return runner_cls(so_path, 1)
+            return runner_cls(so_path, 1, device)
 
     @staticmethod
     def legacy_load(device, so_path):
@@ -141,19 +198,26 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def compile(
-        model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        model: torch.nn.Module | types.FunctionType,
+        example_inputs: tuple[torch.Tensor, ...],
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         if not isinstance(model, torch.nn.Module):
             # This should really be the default behavior of torch.export.export
             model = WrapperModule(model)
 
-        with torch.no_grad():
+        with (
+            torch.no_grad(),
+            torch._export.config.patch(use_new_tracer_experimental=True),
+        ):
             # strict=False needs extra migration work
             ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+                model,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=True,
+                prefer_deferred_runtime_asserts_over_guards=True,
             )
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs
@@ -162,10 +226,10 @@ class AOTIRunnerUtil:
 
     @staticmethod
     def run(
-        model: Union[torch.nn.Module, types.FunctionType],
-        example_inputs: list[torch.Tensor],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        model: torch.nn.Module | types.FunctionType,
+        example_inputs: tuple[torch.Tensor, ...],
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -173,15 +237,53 @@ class AOTIRunnerUtil:
             inductor_configs=inductor_configs,
             dynamic_shapes=dynamic_shapes,
         )
+        if os.environ.get("AOTI_TEST_USE_ABICOMPAT_DSO") == "1":
+            return AOTIRunnerUtil._run_abicompat_package(
+                package_path, [example_inputs]
+            )[0]
+
         optimized = torch._inductor.aoti_load_package(package_path)
-        return optimized(*example_inputs)
+        with PT2ArchiveReader(package_path) as reader:
+            names = reader.get_file_names()
+            abicompat_names = [name for name in names if name.endswith("_abicompat.so")]
+            if not abicompat_names:
+                device = optimized.get_metadata().get("AOTI_DEVICE_KEY")
+                if (
+                    IS_FBCODE
+                    and device == "cpu"
+                    and any(name.endswith(".wrapper.so") for name in names)
+                ):
+                    raise AssertionError(
+                        "CPU AOTI package is missing its ABI-compatible DSO"
+                    )
+                return optimized(*example_inputs)
+
+            if len(abicompat_names) != 1:
+                raise AssertionError(
+                    f"Expected one ABI-compatible DSO, found {len(abicompat_names)}"
+                )
+            abicompat_name = abicompat_names[0]
+            legacy_name = abicompat_name.removesuffix("_abicompat.so") + ".so"
+            if legacy_name not in names:
+                raise AssertionError(f"ABI-compatible DSO has no peer {legacy_name}")
+
+            abicompat_inputs = copy.deepcopy(example_inputs)
+            rng_state = torch.get_rng_state()
+            legacy_result = optimized(*example_inputs)
+            abicompat_result = AOTIRunnerUtil._run_abicompat_package(
+                package_path, [abicompat_inputs], rng_state
+            )[0]
+
+        if not same(legacy_result, abicompat_result):
+            raise AssertionError("libstdc++ and libc++ AOTI results differ")
+        return legacy_result
 
     @staticmethod
     def run_multiple(
-        model: Union[torch.nn.Module, types.FunctionType],
-        list_example_inputs: list[list[torch.Tensor]],
-        inductor_configs: Optional[dict[str, Any]] = None,
-        dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+        model: torch.nn.Module | types.FunctionType,
+        list_example_inputs: list[tuple[torch.Tensor, ...]],
+        inductor_configs: dict[str, Any] | None = None,
+        dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     ):
         package_path = AOTIRunnerUtil.compile(
             model,
@@ -189,6 +291,11 @@ class AOTIRunnerUtil:
             inductor_configs=inductor_configs,
             dynamic_shapes=dynamic_shapes,
         )
+        if os.environ.get("AOTI_TEST_USE_ABICOMPAT_DSO") == "1":
+            return AOTIRunnerUtil._run_abicompat_package(
+                package_path, list_example_inputs
+            )
+
         optimized = torch._inductor.aoti_load_package(package_path)
         list_output_tensors = []
         for example_inputs in list_example_inputs:
@@ -204,18 +311,22 @@ def check_model(
     dynamic_shapes=None,
     atol=None,
     rtol=None,
+    move_model_to_device=True,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         torch.manual_seed(0)
-        if not isinstance(model, types.FunctionType):
+        if not isinstance(model, types.FunctionType) and move_model_to_device:
             model = model.to(self.device)
 
-        # For non mixed device inputs with default "cpu",set the device manully.
+        # For non mixed device inputs with default "cpu",set the device manually.
         if all(
             t.device.type == "cpu"
             for t in example_inputs
@@ -248,11 +359,14 @@ def check_model_with_multiple_inputs(
     options=None,
     dynamic_shapes=None,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -275,11 +389,14 @@ def code_check_count(
     target_str: str,
     target_count: int,
 ):
-    with torch.no_grad(), config.patch(
-        {
-            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
+    with (
+        torch.no_grad(),
+        config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ),
     ):
         package_path = torch._export.aot_compile(model, example_inputs)
 
@@ -290,3 +407,7 @@ def code_check_count(
             target_count,
             exactly=True,
         ).run(src_code)
+
+
+if __name__ == "__main__":
+    run_tests()

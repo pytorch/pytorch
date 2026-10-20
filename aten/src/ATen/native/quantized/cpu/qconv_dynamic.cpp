@@ -31,7 +31,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
 
   float x_min, x_max;
   fbgemm::FindMinMax(
-      /*m=*/input.data_ptr<float>(),
+      /*m=*/input.const_data_ptr<float>(),
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());

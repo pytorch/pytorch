@@ -52,6 +52,11 @@ def warmup_forward(f, *args, profiling_count=3):
 class JitLlgaTestCase(JitTestCase):
 
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         # PyTorch has divergent op support for AMP in JIT & eager modes
         # so we disable AMP for JIT & leverage eager-mode AMP.
         # Ref: https://github.com/pytorch/pytorch/issues/75956
@@ -104,7 +109,8 @@ class JitLlgaTestCase(JitTestCase):
 
     def checkPatterns(self, graph, patterns):
         fusion_groups = self.findFusionGroups(graph)
-        assert len(fusion_groups) == len(patterns), "length of subgraphs not equal to length of given patterns"
+        if len(fusion_groups) != len(patterns):
+            raise AssertionError("length of subgraphs not equal to length of given patterns")
 
         for i in range(len(fusion_groups)):
             for pattern in patterns[i]:
@@ -507,13 +513,12 @@ class TestFusionPattern(JitLlgaTestCase):
                 x = torch.clamp(x, max=2)
                 return x
 
-        for inplace in [False, True]:  # noqa: F841
-            for memory_format in [torch.contiguous_format, torch.channels_last]:
-                x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
-                m = M()
-                _, graph = self.checkTrace(m, [x], dtype)
-                self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
-                self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
+            m = M()
+            _, graph = self.checkTrace(m, [x], dtype)
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
+            self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
 
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
@@ -854,4 +859,5 @@ instantiate_device_type_tests(TestFusionPattern, globals())
 instantiate_device_type_tests(TestOp, globals())
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

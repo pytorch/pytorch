@@ -1,10 +1,12 @@
 # Owner(s): ["module: fx"]
 
-import unittest
-
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class MyModuleBase(torch.nn.Module):
@@ -83,6 +85,8 @@ class MyModuleParamNElement(MyModuleBase):
 
 
 class TestConstParamShapeInControlFlow(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def verify_mm_relu_mods(self, mm_only_mod, relu_mod):
         """
         Verify one module only does a mm op while the other
@@ -120,11 +124,15 @@ class TestConstParamShapeInControlFlow(TestCase):
         graph1_node_targets = [n.target for n in traced_graph.nodes]
         graph2_node_targets = [n.target for n in traced_graph2.nodes]
 
-        # the second graph has an exta relu function call node
-        assert torch.mm in graph1_node_targets and torch.mm in graph2_node_targets
-        assert (
+        # the second graph has an extra relu function call node
+        if not (torch.mm in graph1_node_targets and torch.mm in graph2_node_targets):
+            raise AssertionError("Expected torch.mm in both graph node targets")
+        if not (
             torch.relu not in graph1_node_targets and torch.relu in graph2_node_targets
-        )
+        ):
+            raise AssertionError(
+                "Expected torch.relu not in graph1 but in graph2 node targets"
+            )
 
     def test_param_shape_const(self):
         mymod = MyModuleParamShape(in_channels=5)
@@ -158,4 +166,4 @@ class TestConstParamShapeInControlFlow(TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    raise_on_run_directly("test/test_fx.py")

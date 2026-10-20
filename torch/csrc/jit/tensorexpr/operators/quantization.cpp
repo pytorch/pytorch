@@ -139,8 +139,8 @@ Tensor computeQuantizePerTensor(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const std::optional<ScalarType>&,
-    at::Device) {
+    const std::optional<ScalarType>& /*unused*/,
+    at::Device /*unused*/) {
   std::vector<VarPtr> vars;
   std::vector<ExprHandle> indices;
   for (const auto& os : outputShape) {
@@ -158,7 +158,7 @@ Tensor computeQuantizePerTensor(
     } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
       return Dtype(ScalarType::QUInt8);
     }
-    throw malformed_input("Expected quantized dtype");
+    TORCH_CHECK(false, "MALFORMED INPUT: Expected quantized dtype");
   }(std::get<int64_t>(inputs[3]));
 
   ExprHandle e =
@@ -180,7 +180,7 @@ Tensor computeQuantizedAdd(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   const BufHandle& QA = std::get<BufHandle>(inputs[0]);
   const BufHandle& QB = std::get<BufHandle>(inputs[1]);
   auto qa_scale = ExprHandle(QA.node()->qscale());
@@ -223,7 +223,7 @@ Tensor computeQuantizePerTensorExternalCall(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   const BufHandle& x = std::get<BufHandle>(inputs[0]);
   const auto qscale = std::get<double>(inputs[1]);
   const auto qzero = std::get<int64_t>(inputs[2]);
@@ -235,7 +235,7 @@ Tensor computeQuantizePerTensorExternalCall(
     } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
       return Dtype(ScalarType::QUInt8);
     }
-    throw malformed_input("Expected quantized dtype");
+    TORCH_CHECK(false, "MALFORMED INPUT: Expected quantized dtype");
   }(qdtype);
   auto ResultBuf = [&]() {
     if (isChannelsLast(x)) {
@@ -255,7 +255,7 @@ Tensor computeDequantizeExternalCall(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -280,7 +280,7 @@ Tensor computeQuantizedConv2dPrepack(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -634,7 +634,7 @@ Tensor computeDequantize(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -666,7 +666,7 @@ Tensor computeUpsampleNearest2d(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   const auto& A = std::get<BufHandle>(inputs[0]);
   const auto& output_height = outputShape[2];
   const auto& output_width = outputShape[3];
@@ -713,7 +713,7 @@ Tensor computeUpsampleNearest2dExternalCall(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -772,7 +772,7 @@ Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
-    at::Device) {
+    at::Device /*unused*/) {
   const BufHandle& qx = std::get<BufHandle>(inputs[0]);
 
   const auto out_qdtype = immQDType(qx);

@@ -13,6 +13,7 @@
 #include <ATen/ops/_foreach_asin_native.h>
 #include <ATen/ops/_foreach_atan_native.h>
 #include <ATen/ops/_foreach_ceil_native.h>
+#include <ATen/ops/_foreach_clone_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_erf_native.h>
@@ -40,22 +41,23 @@
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_strided_native.h>
 #endif
 
 namespace at::native {
 
 template <typename scalar_t, template <class> class Op>
 std::vector<Tensor> foreach_unary_op(TensorList tensors) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
+  auto tensor_lists =
+      c10::make_nested<Tensor>(tensors.vec(), std::move(vec_res));
 
   using opmath_t = typename at::opmath_type<scalar_t>;
   multi_tensor_apply<2>(
@@ -67,13 +69,12 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
           /* res_arg_index */ 1>(),
       Op<opmath_t>());
 
-  return tensor_lists[1];
+  return std::move(tensor_lists[1]);
 }
 
 template <typename scalar_t, template <class> class Op>
 void foreach_unary_op_(TensorList tensors) {
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
   using opmath_t = typename at::opmath_type<scalar_t>;
   multi_tensor_apply<1>(
       tensor_lists,
@@ -347,7 +348,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     return at::native::foreach_tensor_neg_slow(tensors);
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       tensors[0].scalar_type() != kBool,
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
@@ -361,7 +362,7 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
     return at::native::foreach_tensor_neg_slow_(tensors);
   }
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       tensors[0].scalar_type() != kBool,
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
@@ -411,8 +412,7 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
     return at::native::foreach_tensor_zero_slow_(tensors);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
@@ -429,6 +429,50 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
                 /* r_args_depth */ 1,
                 /* res_arg_index */ 0>());
       });
+}
+
+std::vector<Tensor> foreach_tensor_clone_cuda(
+    TensorList self,
+    std::optional<MemoryFormat> memory_format) {
+  check_foreach_api_restrictions(self);
+  if (!_check_tensors_share_device_and_dtype({self})) {
+    return at::native::foreach_tensor_clone_slow(self, memory_format);
+  }
+
+  std::vector<Tensor> ret{};
+  ret.reserve(self.size());
+
+  auto realized_memory_format = memory_format.value_or(MemoryFormat::Preserve);
+  for (const auto& s : self) {
+    // This logic modified from at::native::clone.
+    if (realized_memory_format == MemoryFormat::Preserve) {
+      if (s.is_non_overlapping_and_dense()) {
+        // Copy all strides, this is marginally faster than calling empty_like
+        auto options = s.options();
+        ret.emplace_back(at::native::empty_strided_cuda(
+            s.sizes(),
+            s.strides(),
+            c10::optTypeMetaToScalarType(options.dtype_opt()),
+            options.layout_opt(),
+            options.device_opt(),
+            options.pinned_memory_opt()));
+      } else {
+        ret.emplace_back(at::native::empty_like(s));
+      }
+    } else {
+      auto options = s.options();
+      ret.emplace_back(at::native::empty_like(
+          s,
+          c10::optTypeMetaToScalarType(options.dtype_opt()),
+          options.layout_opt(),
+          options.device_opt(),
+          options.pinned_memory_opt(),
+          realized_memory_format));
+    }
+  }
+
+  at::native::foreach_tensor_copy_list_kernel_cuda_(ret, self);
+  return ret;
 }
 
 } // namespace at::native

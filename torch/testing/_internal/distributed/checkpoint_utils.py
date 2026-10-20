@@ -3,15 +3,19 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import io
+import json
+import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, cast, IO, Optional
+from typing import Any, cast, IO
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
 
+import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint._extension import (
     ExtensionRegistry,
@@ -62,7 +66,7 @@ class Rot13Example(StreamTransformExtension):
             def writeable(self) -> bool:
                 return True
 
-            def write(self, b: Buffer) -> Optional[int]:
+            def write(self, b: Buffer) -> int | None:
                 # Don't mutate the input
                 chunk = bytearray(b)
                 Rot13Example._rot13bytes(chunk, len(chunk))
@@ -81,7 +85,7 @@ class Rot13Example(StreamTransformExtension):
             def readable(self) -> bool:
                 return True
 
-            def readinto(self, b: Buffer) -> Optional[int]:
+            def readinto(self, b: Buffer) -> int | None:
                 if hasattr(self.input, "readinto"):
                     count = self.input.readinto(b)
                 else:
@@ -113,6 +117,34 @@ class Rot13Example(StreamTransformExtension):
         return cast(IO[bytes], Reader(input))
 
 
+def random_compressed_tensors_mxfp4(
+    rows: int, cols: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Random compressed-tensors MXFP4 weight_packed, weight_scale, and their values."""
+    fp4_values = torch.tensor(
+        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+        + [-0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0]
+    )
+    # Two values per byte, low nibble first; one E8M0 scale per 32 values.
+    packed = torch.randint(0, 256, (rows, cols // 2), dtype=torch.uint8)
+    scale = torch.randint(120, 135, (rows, cols // 32), dtype=torch.uint8)
+    codes = torch.stack([packed & 0x0F, packed >> 4], dim=-1).reshape(rows, cols)
+    exponents = scale.repeat_interleave(32, dim=1).to(torch.float32) - 127
+    return packed, scale, fp4_values[codes.long()] * torch.pow(2.0, exponents)
+
+
+def save_hf_checkpoint(path: str, files: dict[str, dict[str, torch.Tensor]]) -> None:
+    """Write safetensors files and a model.safetensors.index.json mapping them."""
+    from safetensors.torch import save_file
+
+    weight_map = {}
+    for file_name, tensors in files.items():
+        save_file(tensors, os.path.join(path, file_name))
+        weight_map.update(dict.fromkeys(tensors, file_name))
+    with open(os.path.join(path, "model.safetensors.index.json"), "w") as f:
+        json.dump({"weight_map": weight_map}, f)
+
+
 def get_test_extension_registry() -> ExtensionRegistry:
     registry = ExtensionRegistry()
     registry.register(Rot13Example)
@@ -120,12 +152,13 @@ def get_test_extension_registry() -> ExtensionRegistry:
 
 
 def with_temp_dir(
-    func: Optional[Callable] = None,
-) -> Optional[Callable]:
+    func: Callable | None = None,
+) -> Callable | None:
     """
     Wrapper to initialize temp directory for distributed checkpoint.
     """
-    assert func is not None
+    if func is None:
+        raise AssertionError("Expected func to not be None")
 
     @wraps(func)
     def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
@@ -151,9 +184,47 @@ def with_temp_dir(
         try:
             func(self, *args, **kwargs)
         finally:
-            if dist.is_initialized() and dist.get_rank() == 0:
+            # Every rank reads the directory rank 0 created, so rank 0 must not
+            # remove it until the others are done. This has to run on the failure
+            # path too, or a rank whose body raised leaves its peers blocked here
+            # until the process group times out.
+            if dist.is_initialized():
+                dist.barrier()
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
-            else:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    return wrapper
+
+
+def with_checkpoint_logging(
+    func: Callable | None = None,
+    logger_name: str = "torch.distributed.checkpoint",
+    level: int = logging.INFO,
+) -> Callable | None:
+    """
+    Wrapper to configure checkpoint logging for distributed tests.
+
+    Args:
+        func: The test function to wrap
+        logger_name: Name of the logger to configure (default: 'torch.distributed.checkpoint')
+        level: Logging level to set (default: logging.INFO)
+    """
+    if func is None:
+        raise AssertionError("Expected func to not be None")
+
+    @wraps(func)
+    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
+        # Get the logger and store original level
+        target_logger = logging.getLogger(logger_name)
+        original_level = target_logger.level
+
+        # Set the desired logging level
+        target_logger.setLevel(level)
+
+        try:
+            func(self, *args, **kwargs)
+        finally:
+            # Restore original logging level
+            target_logger.setLevel(original_level)
 
     return wrapper

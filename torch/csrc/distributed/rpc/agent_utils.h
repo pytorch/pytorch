@@ -24,7 +24,7 @@ TORCH_API std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     const worker_id_t selfId,
     const std::string& selfName);
 
-// Remove name frmo Store, used in dynamic RPC groups.
+// Remove name from Store, used in dynamic RPC groups.
 // NOTE: This needs to be called with the Dynamic RPC group
 // membership management token held.
 TORCH_API void removeCurrentName(

@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/Tensor.h>
 
 #include <ATen/Dispatch.h>
@@ -14,6 +15,8 @@
 #else
 #include <ATen/ops/empty.h>
 #endif
+
+#include <numeric>
 
 namespace at::native {
 namespace {
@@ -96,7 +99,7 @@ multinomial_with_replacement_apply(
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+        int64_t mid_pointer = std::midpoint(left_pointer, right_pointer);
         scalar_t cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
@@ -192,7 +195,7 @@ multinomial_with_replacement_apply(
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+        int64_t mid_pointer = std::midpoint(left_pointer, right_pointer);
         float cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
@@ -210,7 +213,7 @@ multinomial_with_replacement_apply(
   }
 }
 
-static void multinomial_with_replacement_kernel_impl(
+void multinomial_with_replacement_kernel_impl(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,

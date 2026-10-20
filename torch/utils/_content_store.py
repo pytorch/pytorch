@@ -4,7 +4,7 @@
 # don't expect CPU/CUDA to address to the same hash, don't expect it to be
 # portable across devices) that is NOT cryptographically secure.  In return,
 # we are able to hash 40G of tensor data on GPU in less than a second,
-# compared to running SHA-1 in CPU which would a minute or so.  The primary
+# compared to running SHA-1 in CPU which would take a minute or so.  The primary
 # use case is for efficiently snapshotting intermediate tensor data for
 # offline debugging, but it's been put in this module in case you think of
 # another use case for it.  The hash function could be replaced with a
@@ -34,7 +34,6 @@ import hashlib
 import os.path
 import struct
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch._prims as prims
@@ -90,7 +89,7 @@ def hash_storage_kernel(x):
 
 
 # Returns a hex digest of the data in the storage.  Guaranteed to be
-# SHA-1 if stable_hash=True, otherwise it will consistent for a single
+# SHA-1 if stable_hash=True, otherwise it will be consistent for a single
 # process run but not necessarily across processes.
 def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
     import torch._dynamo
@@ -174,7 +173,7 @@ class ContentStoreWriter:
             t.dtype,
             h,
             t.storage_offset(),
-            tuple(t.shape),
+            t.shape,
             t.stride(),
             torch._utils.get_tensor_metadata(t),
         )
@@ -193,9 +192,9 @@ class ContentStoreWriter:
 class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
-        self.storage_cache: Optional[
-            dict[Optional[torch.device], dict[str, StorageWeakRef]]
-        ] = None
+        self.storage_cache: (
+            dict[torch.device | None, dict[str, StorageWeakRef]] | None
+        ) = None
         if cache:
             self.storage_cache = defaultdict(dict)
 
@@ -207,7 +206,7 @@ class ContentStoreReader:
             if self.storage_cache is not None
             else None
         )
-        s: Optional[torch.UntypedStorage]
+        s: torch.UntypedStorage | None
         if ws is not None:
             s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
             if s is not None:
@@ -217,7 +216,10 @@ class ContentStoreReader:
             weights_only=True,
             map_location=device,
         )._untyped_storage
-        assert s is not None
+        if s is None:
+            raise AssertionError(
+                f"expected storage for hash {h} in {os.path.join(self.loc, 'storages')}, got None"
+            )
         if self.storage_cache is not None:
             self.storage_cache[device][h] = StorageWeakRef(s)
         return s

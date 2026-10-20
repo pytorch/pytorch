@@ -77,7 +77,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   for (const auto thread_id : c10::irange(config.num_calling_threads)) {
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
-      // performs required warmeup iterations before we start measuring
+      // performs required warmup iterations before we start measuring
       c10::GradMode::set_enabled(tls_grad_enabled);
       c10::impl::_force_tls_local_dispatch_key_set(tls_key_set);
       for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -155,7 +155,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
                             .count() /
       1000.0 / 1000.0;
   // We use config.num_iters instead of num_attempted_iters as it is
-  // repsesatative of the real work done. Last attempted iteration on each
+  // representative of the real work done. Last attempted iteration on each
   // calling threads doesn't represent the real work (i.e. running the model)
   stats.latency_avg_ms =
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)

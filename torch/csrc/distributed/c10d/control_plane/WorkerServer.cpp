@@ -1,24 +1,29 @@
-#include <sstream>
 #include <unordered_map>
 
-#include <ATen/core/interned_strings.h>
+#include <c10/util/Exception.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
-#include <caffe2/utils/threadpool/WorkersPool.h>
+#include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
-
-// NS: TODO: Use `std::filesystem` regardless of OS when it's possible
-// to use it without leaking symbols on PRECXX11 ABI Linux OSes
-// See https://github.com/pytorch/pytorch/issues/133437 for more details
-#ifdef _WIN32
-#include <filesystem>
-#else
-#include <sys/stat.h>
-#endif
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 namespace c10d::control_plane {
 
 namespace {
+// c10::Error::what() always carries a symbolized C++ backtrace, which is
+// expensive to build and does not belong in an HTTP error body by default.
+// Select the accessor the same way torch/csrc/Exceptions.h does at the Python
+// boundary, so TORCH_SHOW_CPP_STACKTRACES still gets you the frames on what is
+// after all a debug endpoint.
+std::string errorMessage(const std::exception& e) {
+  const auto* torchError = dynamic_cast<const c10::Error*>(&e);
+  if (torchError && !torch::get_cpp_stacktraces_enabled()) {
+    return torchError->what_without_backtrace();
+  }
+  return e.what();
+}
+
 class RequestImpl : public Request {
  public:
   RequestImpl(const httplib::Request& req) : req_(req) {}
@@ -54,41 +59,6 @@ class ResponseImpl : public Response {
   httplib::Response& res_;
 };
 
-std::string jsonStrEscape(const std::string& str) {
-  std::ostringstream ostream;
-  for (char ch : str) {
-    if (ch == '"') {
-      ostream << "\\\"";
-    } else if (ch == '\\') {
-      ostream << "\\\\";
-    } else if (ch == '\b') {
-      ostream << "\\b";
-    } else if (ch == '\f') {
-      ostream << "\\f";
-    } else if (ch == '\n') {
-      ostream << "\\n";
-    } else if (ch == '\r') {
-      ostream << "\\r";
-    } else if (ch == '\t') {
-      ostream << "\\t";
-    } else if (ch <= '\x1f') {
-      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-              << static_cast<int>(ch);
-    } else {
-      ostream << ch;
-    }
-  }
-  return ostream.str();
-}
-
-bool file_exists(const std::string& path) {
-#ifdef _WIN32
-  return std::filesystem::exists(path);
-#else
-  struct stat rc {};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
@@ -96,28 +66,15 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
       "/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         res.set_content(
-            R"BODY(<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-)BODY",
+            "<h1>torch.distributed.WorkerServer</h1>\n"
+            "<a href=\"/handler/\">Handler names</a>\n",
             "text/html");
       });
   server_.Get(
       "/handler/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
-        std::ostringstream body;
-        body << "[";
-        bool first = true;
-        for (const auto& name : getHandlerNames()) {
-          if (!first) {
-            body << ",";
-          }
-          first = false;
-
-          body << "\"" << jsonStrEscape(name) << "\"";
-        }
-        body << "]";
-
-        res.set_content(body.str(), "application/json");
+        res.set_content(
+            nlohmann::json(getHandlerNames()).dump(), "application/json");
       });
   server_.Post(
       "/handler/:handler",
@@ -129,7 +86,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
         } catch (const std::exception& e) {
           res.status = 404;
           res.set_content(
-              fmt::format("Handler {} not found: {}", handler_name, e.what()),
+              fmt::format(
+                  "Handler {} not found: {}", handler_name, errorMessage(e)),
               "text/plain");
           return;
         }
@@ -141,7 +99,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
         } catch (const std::exception& e) {
           res.status = 500;
           res.set_content(
-              fmt::format("Handler {} failed: {}", handler_name, e.what()),
+              fmt::format(
+                  "Handler {} failed: {}", handler_name, errorMessage(e)),
               "text/plain");
           return;
         } catch (...) {
@@ -162,30 +121,32 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   if (port == -1) {
     // using unix sockets
     server_.set_address_family(AF_UNIX);
-
-    if (file_exists(hostOrFile)) {
-      throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
-    }
+    TORCH_CHECK(
+        !c10::filesystem::exists(hostOrFile),
+        fmt::format("{} already exists", hostOrFile));
 
     C10D_WARNING("Server listening to UNIX {}", hostOrFile);
-    if (!server_.bind_to_port(hostOrFile, 80)) {
-      throw std::runtime_error(fmt::format("Error binding to {}", hostOrFile));
-    }
+    TORCH_CHECK(
+        server_.bind_to_port(hostOrFile, 80),
+        fmt::format("Error binding to {}", hostOrFile));
+  } else if (port == 0) {
+    C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
+    port_ = server_.bind_to_any_port(hostOrFile);
+    TORCH_CHECK(
+        port_ >= 0, fmt::format("Error binding to {}:{}", hostOrFile, port));
   } else {
     C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
-    if (!server_.bind_to_port(hostOrFile, port)) {
-      throw std::runtime_error(
-          fmt::format("Error binding to {}:{}", hostOrFile, port));
-    }
+    TORCH_CHECK(
+        server_.bind_to_port(hostOrFile, port),
+        fmt::format("Error binding to {}:{}", hostOrFile, port));
+    port_ = port;
   }
 
   serverThread_ = std::thread([this]() {
     c10::setThreadName("pt_workerserver");
 
     try {
-      if (!server_.listen_after_bind()) {
-        throw std::runtime_error("failed to listen");
-      }
+      TORCH_CHECK(server_.listen_after_bind(), "failed to listen");
     } catch (std::exception& e) {
       C10D_ERROR("Error while running server: {}", e.what());
       throw;

@@ -1,3 +1,6 @@
+# /// script
+# dependencies = ["boto3==1.35.42"]
+# ///
 import json
 import os
 import sys
@@ -19,9 +22,9 @@ from tools.stats.import_test_stats import (
 )
 from tools.stats.upload_metrics import emit_metric
 from tools.testing.discover_tests import TESTS
-from tools.testing.target_determination.determinator import (
+from tools.testing.target_determination.determinator import get_test_prioritizations
+from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics,
-    get_test_prioritizations,
     TestPrioritizations,
 )
 

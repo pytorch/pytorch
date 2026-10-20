@@ -21,7 +21,8 @@ class ScribeUploader:
         self.category = category
 
     def format_message(self, field_dict):
-        assert "time" in field_dict, "Missing required Scribe field 'time'"
+        if "time" not in field_dict:
+            raise AssertionError("Missing required Scribe field 'time'")
         message = defaultdict(dict)
         for field, value in field_dict.items():
             if field in self.schema["normal"]:
@@ -48,7 +49,7 @@ class ScribeUploader:
         access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
         if not access_token:
             raise ValueError("Can't find access token from environment variable")
-        url = "https://graph.facebook.com/scribe_logs"
+        url = "https://graph.facebook.com/scribe_logs"  # @lint-ignore
         r = requests.post(
             url,
             data={

@@ -3,7 +3,7 @@
 
 namespace at {
 
-// Re-declaring 'DimVector' type and size inside 'at' namespace.
+// Redeclaring 'DimVector' type and size inside 'at' namespace.
 // This is done to avoid modifying every use into their 'c10'
 // equivalent.
 

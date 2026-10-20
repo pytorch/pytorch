@@ -71,7 +71,7 @@ inline VkFormat to_vkformat(const ScalarType t) {
 
 /*
  * Given a `VkFormat`, return the `ScalarType` that best represents the data
- * type of invidivual elements in an image texture of the `VkFormat`. Note that
+ * type of individual elements in an image texture of the `VkFormat`. Note that
  * this mapping is different from the `to_vkformat()` function, since different
  * `ScalarType`s may use the same `VkFormat`.
  */

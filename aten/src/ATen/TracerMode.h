@@ -27,7 +27,7 @@
 //    ops (ops being called by other ops). After the intermediate op call
 //    finishes it's set back to the original `TracingState` object.
 //
-//    The `TracingState` obect in TLS can also be read/written via its Python
+//    The `TracingState` object in TLS can also be read/written via its Python
 //    binding in `python_tracer.cpp`, and `get/setTracingState()` C++ APIs,
 //    which are also exposed as `TORCH_API`.
 //

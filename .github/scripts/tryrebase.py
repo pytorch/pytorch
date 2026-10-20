@@ -8,11 +8,24 @@ import sys
 from collections.abc import Generator
 from typing import Any
 
-from github_utils import gh_post_pr_comment as gh_post_comment
+from github_utils import (
+    gh_fetch_json_list,
+    gh_post_pr_comment as gh_post_comment,
+    GITHUB_API_URL,
+)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from native_stack import (
+    branch_update_comments,
+    build_native_stack_rebase,
+    get_native_stack,
+    NativeStack,
+    NativeStackError,
+    push_branches,
+)
 from trymerge import GitHubPR
 
 
+VIABLE_STRICT_BRANCH = "viable/strict"
 SAME_SHA_ERROR = (
     "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n"
     + "This usually happens because the PR has already been merged.  Please rebase locally and push.\n```"
@@ -55,11 +68,25 @@ def rebase_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
 ) -> bool:
     branch = f"pull/{pr.pr_num}/head"
-    remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
+    head_repo = pr.info["headRepository"]
+    if head_repo is None:
+        raise RuntimeError(
+            f"Can't determine the head repository of PR #{pr.pr_num}; its org likely "
+            "forbids access via mergebot's token (classic PAT), so the rebased branch "
+            "can't be pushed back. Please rebase locally and push."
+        )
+    remote_url = f"https://github.com/{head_repo['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
     repo.fetch(branch, branch)
-    repo._run_git("rebase", onto_branch, branch)
+    # Rebase only the PR's own commits. The 2-arg `git rebase <onto_branch>
+    # <branch>` form replays all of onto_branch..branch, which grafts in trunk
+    # commits when the PR has merged its base in and onto_branch (e.g.
+    # viable/strict) lags that base. Anchoring on the fork point from the PR's
+    # base branch excludes anything already on the base. See #187374.
+    base_branch = f"refs/remotes/{repo.remote}/{pr.base_ref()}"
+    fork_point = repo.get_merge_base(base_branch, branch)
+    repo._run_git("rebase", "--onto", onto_branch, fork_point, branch)
 
     if repo.rev_parse(branch) == repo.rev_parse(onto_branch):
         raise Exception(SAME_SHA_ERROR)  # noqa: TRY002
@@ -82,6 +109,38 @@ def rebase_onto(
             dry_run=dry_run,
         )
         return True
+
+
+def rebase_native_stack_onto(
+    pr: GitHubPR,
+    repo: GitRepo,
+    stack: NativeStack,
+    onto_branch: str,
+    dry_run: bool = False,
+) -> bool:
+    """Merge `onto_branch` into the branches of `pr`'s GitHub-native stack up to `pr`
+    (see build_native_stack_rebase) and fast-forward them. A stacked PR's branch is
+    never force-pushed, as the PR above it is based on its commits. A stack that
+    already has `onto_branch` counts as rebased, so that `merge -r` still merges it:
+    a stack cut from a newer main already has viable/strict."""
+    default_branch = pr.default_branch()
+    onto = onto_branch.removeprefix(f"refs/remotes/{repo.remote}/")
+    if onto not in (default_branch, VIABLE_STRICT_BRANCH):
+        raise NativeStackError(
+            f"PR #{pr.pr_num} is in a stack, so it can only be rebased onto "
+            f"{default_branch} or {VIABLE_STRICT_BRANCH}, not {onto}"
+        )
+    updates = build_native_stack_rebase(
+        repo, pr.org, pr.project, stack, pr.pr_num, default_branch, onto
+    )
+    if not updates:
+        post_already_uptodate(pr, repo, onto_branch, dry_run)
+        return True
+    push_branches(repo, updates, dry_run)
+    comments = branch_update_comments(stack, updates, onto_branch, pr.pr_num, "rebased")
+    for number, msg in comments:
+        gh_post_comment(pr.org, pr.project, number, msg, dry_run=dry_run)
+    return True
 
 
 def rebase_ghstack_onto(
@@ -132,17 +191,17 @@ def rebase_ghstack_onto(
         # The contents of a successful push result should look like:
         # Summary of changes (ghstack 0.6.0)
 
-        #  - Updated https://github.com/clee2000/random-testing/pull/2
-        #  - Updated https://github.com/clee2000/random-testing/pull/1
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/2
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/1
 
         # Facebook employees can import your changes by running
         # (on a Facebook machine):
 
-        #     ghimport -s https://github.com/clee2000/random-testing/pull/2
+        #     ghimport -s https://github.com/clee2000/random-testing-public/pull/2
 
         # If you want to work on this diff stack on another machine:
 
-        #     ghstack checkout https://github.com/clee2000/random-testing/pull/2
+        #     ghstack checkout https://github.com/clee2000/random-testing-public/pull/2
         org, project = repo.gh_owner_and_name()
         for line in push_result.splitlines():
             if "Updated" in line:
@@ -233,7 +292,31 @@ def main() -> None:
             with git_config_guard(repo):
                 rc = rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
         else:
-            rc = rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            stack = None
+            # Forks are never stacked, and neither is a PR on the default branch
+            # that no PR is based on. Only the other PRs read the stack, and a
+            # failed read refuses the rebase: force-pushing a stack's bottom PR
+            # would break the PRs above it.
+            if not pr.is_cross_repo() and (
+                pr.base_ref() != pr.default_branch()
+                or gh_fetch_json_list(
+                    f"{GITHUB_API_URL}/repos/{org}/{project}/pulls",
+                    {"base": pr.head_ref(), "state": "all", "per_page": 1},
+                )
+            ):
+                try:
+                    stack = get_native_stack(org, project, pr.pr_num)
+                except Exception as e:
+                    raise NativeStackError(
+                        f"Could not read the stack of PR #{pr.pr_num}, so it was not "
+                        f"rebased: {e}"
+                    ) from e
+            if stack is None:
+                rc = rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            else:
+                rc = rebase_native_stack_onto(
+                    pr, repo, stack, onto_branch, dry_run=args.dry_run
+                )
         sys.exit(0 if rc else 1)
 
     except Exception as e:

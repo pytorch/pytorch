@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng"]
 name: upload
 
 on:
@@ -35,6 +36,10 @@ on:
         required: false
         type: string
         description: Docker image to use
+      DOCKER_IMAGE_TAG_PREFIX:
+        required: false
+        type: string
+        description: Docker image tag to use
       LIBTORCH_CONFIG:
         required: false
         type: string
@@ -47,21 +52,24 @@ on:
         required: false
         type: string
         description: Desired python version
-      use_split_build:
-        description: |
-          [Experimental] Build a libtorch only wheel and build pytorch such that
-          are built from the libtorch wheel.
-        required: false
-        type: boolean
-        default: false
     secrets:
       github-token:
         required: true
         description: Github Token
+      R2_ACCOUNT_ID:
+        required: false
+        description: Cloudflare R2 account ID for nightly uploads
+      R2_ACCESS_KEY_ID:
+        required: false
+        description: Cloudflare R2 access key ID for nightly uploads
+      R2_SECRET_ACCESS_KEY:
+        required: false
+        description: Cloudflare R2 secret access key for nightly uploads
 
 jobs:
   upload:
     runs-on: ubuntu-22.04
+    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/nightly') && 'nightly-wheel-upload' || '' }}
     container:
       image: continuumio/miniconda3:4.12.0
     env:
@@ -82,33 +90,37 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          submodules: "false"
+          fetch-depth: "1"
+          sparse-checkout: |
+            .ci/pytorch/binary_upload.sh
 
       - name: Configure AWS credentials(PyTorch account) for nightly
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
         if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
           aws-region: us-east-1
 
       - name: Download Build Artifacts
         id: download-artifacts
-        # NB: When the previous build job is skipped, there won't be any artifacts and
-        # this step will fail. Binary build jobs can only be skipped on CI, not nightly
-        continue-on-error: true
-        uses: actions/download-artifact@v4.1.7
+        # A skipped build job on a ciflow run legitimately leaves no artifact, so
+        # tolerate that. On nightly/release-tag pushes the artifact always exists,
+        # and swallowing its absence makes "Upload binaries" a silent no-op.
+        continue-on-error: ${{ !(github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')))) }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
@@ -134,6 +146,10 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           BUILD_NAME: ${{ inputs.build_name }}
+          R2_UPLOAD: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/nightly') && 'true' || '' }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
             set -ex
-            bash .circleci/scripts/binary_upload.sh
+            bash .ci/pytorch/binary_upload.sh

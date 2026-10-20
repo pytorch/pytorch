@@ -1,8 +1,9 @@
 
-#include <c10/xpu/XPUFunctions.h>
 
-#include <ATen/ATen.h>
-#include <ATen/record_function.h>
+#include <ATen/Context.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
 
 #include <Attr.h>
 #include <Utils.h>
@@ -20,6 +21,10 @@ sycl::event matmul(
     bool m2_trans,
     Attr attr,
     const std::vector<sycl::event>& deps) {
+  // m2_trans means mat2 is transposed from the nn.Linear perspective.
+  // m2_trans==true means mat2 is [k, n] layout.
+  // m2_trans==false means mat2 is [n, k] layout, aka, the default layout in
+  // nn.Linear.
   int64_t dims = result.dim();
   TORCH_CHECK(
       dims == 2 || dims == 3,
@@ -194,7 +199,12 @@ sycl::event matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    bool allow_tf32 = at::globalContext().allowTF32OneDNN();
+    if (allow_tf32) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+    } else {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    }
   }
 
   // STEP3: create primitive
@@ -214,8 +224,8 @@ sycl::event matmul(
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
+  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.const_data_ptr());
+  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.const_data_ptr());
   auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
@@ -241,7 +251,7 @@ sycl::event matmul(
   args.insert({DNNL_ARG_WEIGHTS, m2_m});
   args.insert({DNNL_ARG_DST, dst_m});
   if (with_bias) {
-    auto bias_m = make_onednn_memory(bias_md, engine, b.data_ptr());
+    auto bias_m = make_onednn_memory(bias_md, engine, b.const_data_ptr());
     args.insert({DNNL_ARG_BIAS, bias_m});
   }
 

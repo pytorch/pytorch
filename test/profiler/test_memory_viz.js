@@ -1,0 +1,2238 @@
+// Test cases for process_alloc_data in torch/utils/viz/MemoryViz.js
+// Run: node test/profiler/test_memory_viz.js
+
+'use strict';
+
+// Polyfill for Node < 18
+if (!Array.prototype.findLastIndex) {
+  Array.prototype.findLastIndex = function(pred) {
+    for (let i = this.length - 1; i >= 0; i--) {
+      if (pred(this[i], i, this)) return i;
+    }
+    return -1;
+  };
+}
+if (!Array.prototype.at) {
+  Array.prototype.at = function(n) {
+    return n < 0 ? this[this.length + n] : this[n];
+  };
+}
+
+// ============================================================
+// Load process_alloc_data from the actual MemoryViz.js source
+// ============================================================
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+// Load process_alloc_data.js (ESM file) in Node.js CommonJS context.
+// Strip the `export` line since Node CommonJS doesn't support ESM syntax.
+const modPath = path.resolve(__dirname, '../../torch/utils/viz/process_alloc_data.js');
+let src = fs.readFileSync(modPath, 'utf-8');
+src = src.replace(/^export\s*\{[^}]*\};?\s*$/gm, '');
+const wrapper = `(function() { ${src}\nreturn { process_alloc_data, isPrivatePoolId, formatSize, formatAddr, elideRepeats }; })()`;
+const { process_alloc_data, isPrivatePoolId, formatSize, formatAddr, elideRepeats } = vm.runInThisContext(wrapper, { filename: modPath });
+
+// ============================================================
+// Test helpers
+// ============================================================
+
+function makeSnapshot({ traces = [], segments = [], categories = [] }) {
+  return {
+    device_traces: [traces],
+    segments,
+    categories,
+  };
+}
+
+let passed = 0;
+let failed = 0;
+
+function assert(condition, msg) {
+  if (!condition) {
+    failed++;
+    console.error(`  FAIL: ${msg}`);
+    console.trace();
+  } else {
+    passed++;
+  }
+}
+
+function assertEqual(actual, expected, msg) {
+  if (actual !== expected) {
+    failed++;
+    console.error(`  FAIL: ${msg} — expected ${expected}, got ${actual}`);
+  } else {
+    passed++;
+  }
+}
+
+function assertContains(str, substr, msg) {
+  if (!str.includes(substr)) {
+    failed++;
+    console.error(`  FAIL: ${msg} — "${substr}" not found in "${str.slice(0, 200)}..."`);
+  } else {
+    passed++;
+  }
+}
+
+// ============================================================
+// Tests
+// ============================================================
+
+function test_basic_alloc_free() {
+  console.log('test_basic_alloc_free');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 1000, size: 100, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 1000, size: 100, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  assertEqual(result.max_size, 100, 'peak should be 100');
+}
+
+function test_free_completed_is_matched() {
+  console.log('test_free_completed_is_matched');
+  // Only free_completed is matched (not free_requested). Verify alloc+free_completed works.
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 1000, size: 200, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 1000, size: 200, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  assertEqual(result.max_size, 200, 'alloc+free_completed peak should be 200');
+}
+
+function test_pool_free_without_alloc_no_inflation() {
+  console.log('test_pool_free_without_alloc_no_inflation');
+  // Simulate: a private pool block was allocated BEFORE trace recording,
+  // then freed during recording. The trace only has free_completed.
+  // With include_private_inactive=true, the block should be pre-loaded into
+  // pool state and then freed — NOT treated as a new allocation.
+  const poolId = [1, 42];
+  const snapshot = makeSnapshot({
+    traces: [
+      // No alloc — it happened before recording started or got replaced in ring buffer
+      // Only the free_completed event is matched (free_requested is ignored).
+      { action: 'free_completed', addr: 0x788c2000000, size: 94371840, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x788c2000000, size: 256, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x788c0000000, total_size: 83886080, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // The free_completed creates an element in initially_allocated + actions.
+  // Pre-loaded into pool: pool.active=90M, envelope=max(90M, 80M reserved)=90M.
+  // Then freed (pool.active=0), then small alloc (pool.active=256).
+  // Peak should be 94371840 (max of active and reserved), NOT double-counted.
+  assertEqual(result.max_size, 94371840,
+    'pool free-without-alloc peak should be max(active, reserved)');
+
+  assertEqual(result.elements_length, 2, 'should have 2 elements');
+
+  assert(result.max_at_time.length > 0, 'max_at_time should not be empty');
+  assertEqual(Math.max(...result.max_at_time), 94371840,
+    'max_at_time peak should be max(active, reserved)');
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
+  assertEqual(envelopes[0].elem, 'pool:1,42,s0', 'envelope key matches pool id and stream');
+
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, 'should have 2 pool stripes');
+  assertEqual(stripes[0].size, 94371840, 'first stripe: pre-loaded block (freed later)');
+  assertEqual(stripes[1].size, 256, 'second stripe: small alloc after free');
+}
+
+function test_pool_alloc_then_free_normal() {
+  console.log('test_pool_alloc_then_free_normal');
+  // Normal case: alloc + free both in trace, private pool, include_private_inactive=true
+  const poolId = [1, 7];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 2000, size: 500, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 2000, size: 500, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 8192, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // Envelope = segment reserved (8192), which is the pool's GPU footprint
+  assertEqual(result.max_size, 8192, 'pool envelope should be segment reserved (8192)');
+}
+
+function test_multiple_pool_frees_without_alloc() {
+  console.log('test_multiple_pool_frees_without_alloc');
+  // Multiple blocks freed from the same pool without matching allocs.
+  // This is the FSDP scenario with many free_storage calls.
+  const poolId = [1, 99];
+  const snapshot = makeSnapshot({
+    traces: [
+      // Each block has one free_completed (free_requested is ignored by the JS code)
+      { action: 'free_completed', addr: 1000, size: 500, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 2000, size: 500, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 3000, size: 500, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 16384, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // 3 blocks of 500 each were initially allocated. Pool envelope = 16384 (segment reserved).
+  // Then all 3 are freed. Peak should be 16384 (segment reserved, the initial state).
+  // BUG would give 32768+ (double-counted).
+  assert(result.max_size <= 16384,
+    `multiple pool frees should not inflate: got ${result.max_size}, expected <= 16384`);
+}
+
+function test_non_pool_free_without_alloc() {
+  console.log('test_non_pool_free_without_alloc');
+  // Non-pool block freed without matching alloc (ring buffer wrap).
+  // Should appear then disappear.
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'free_completed', addr: 8000, size: 300, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 16384, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+
+  for (const detail of [0, 15000]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 300, 'peak includes the initially allocated block');
+    assertEqual(Math.max(...result.max_at_time), 300, 'minimap includes the initial peak');
+  }
+}
+
+function test_peak_independent_of_detail() {
+  console.log('test_peak_independent_of_detail');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+  });
+
+  for (const detail of [0, 1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 3072, `detail ${detail}: peak includes summarized allocations`);
+    assertEqual(result.max_size, Math.max(...result.max_at_time), 'plot and minimap peaks agree');
+  }
+}
+
+function test_global_summary_coordinates() {
+  console.log('test_global_summary_coordinates');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1200, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1a00, size: 256, frames: [], stream: 0 },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 1, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.offsets.length, summary.timesteps.length, 'summary coordinates align');
+  assertEqual(summary.size.length, summary.timesteps.length, 'summary sizes align');
+  assertEqual(summary.offsets.join(','), '0,2048,2048,2048', 'summary stays above the drawn allocation');
+  assertEqual(summary.size.join(','), '512,512,768,768', 'summary includes both small allocations');
+  assertEqual(summary.timesteps.at(-1), result.max_at_time.length, 'summary reaches the end of the trace');
+}
+
+function test_summarized_only_allocation() {
+  console.log('test_summarized_only_allocation');
+  const snapshot = makeSnapshot({
+    traces: [{ action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 0, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.timesteps.join(','), '0,1', 'summarized allocation has nonzero width');
+  assertEqual(summary.offsets.join(','), '0,0', 'summary starts at the bottom');
+  assertEqual(summary.size.join(','), '512,512', 'summary retains its size to the end');
+}
+
+function test_annotations_do_not_accumulate_on_rerender() {
+  console.log('test_annotations_do_not_accumulate_on_rerender');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0,
+        pool_id: [1, 1], annotations: ['existing'] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'first allocation' },
+      { action: 'free_completed', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1000, size: 1024, frames: [], stream: 0, pool_id: [1, 1] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'free_completed', addr: 0x3000, size: 256, frames: [], stream: 0 },
+    ],
+  });
+  const original = JSON.stringify(snapshot);
+
+  for (const include_private of [false, true, false]) {
+    const result = process_alloc_data(snapshot, 0, false, 15000, include_private);
+    const first = result.context_for_id(0);
+    const second = result.context_for_id(1);
+    assertContains(first, 'Annotations:\n  existing\n  first allocation', 'existing annotations are preserved');
+    assertEqual((first.match(/first allocation/g) || []).length, 1, 'annotation is added once per render');
+    assertEqual((second.match(/second allocation/g) || []).length, 2, 'distinct identical annotations are preserved');
+    assert(!second.includes('first allocation'), 'annotations do not follow reused addresses');
+    assertEqual(JSON.stringify(snapshot), original, 'processing leaves the input snapshot unchanged');
+  }
+}
+
+function test_mixed_pool_and_nonpool() {
+  console.log('test_mixed_pool_and_nonpool');
+  // Mix of pool and non-pool allocations
+  const poolId = [1, 5];
+  const snapshot = makeSnapshot({
+    traces: [
+      // Non-pool alloc+free (addr within default pool segment)
+      { action: 'alloc', addr: 100, size: 200, frames: [], stream: 0 },
+      // Pool alloc+free (addr within private pool segment)
+      { action: 'alloc', addr: 5000, size: 400, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 100, size: 200, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 5000, size: 400, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0], stream: 0, blocks: [] },
+      { device: 0, address: 4096, total_size: 8192, segment_pool_id: poolId, stream: 0, blocks: [] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // Peak: 200 (non-pool) + 8192 (pool envelope = segment reserved) = 8392
+  assertEqual(result.max_size, 8392, 'mixed pool+nonpool peak: 200 + 8192 segment reserved');
+}
+
+function test_include_private_inactive_false_ignores_pools() {
+  console.log('test_include_private_inactive_false_ignores_pools');
+  // When include_private_inactive=false, pool blocks should be treated as regular
+  const poolId = [1, 10];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 5000, size: 800, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 5000, size: 800, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 4096, total_size: 8192, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  // Without pool logic, it's just a regular alloc+free. Peak = 800.
+  assertEqual(result.max_size, 800, 'with include_private_inactive=false, peak = 800');
+}
+
+// ============================================================
+// formatSize tests
+// ============================================================
+
+function test_formatSize_bytes() {
+  console.log('test_formatSize_bytes');
+  assertEqual(formatSize(0), '0.0B (0 bytes)', 'zero bytes');
+  assertEqual(formatSize(512), '512.0B (512 bytes)', '512 bytes');
+  assertEqual(formatSize(1), '1.0B (1 bytes)', '1 byte');
+}
+
+function test_formatSize_kib() {
+  console.log('test_formatSize_kib');
+  // 1024 bytes = 1.0 KiB
+  assertEqual(formatSize(1024), '1.0KiB (1024 bytes)', '1 KiB');
+  // 1536 = 1.5 * 1024
+  assertEqual(formatSize(1536), '1.5KiB (1536 bytes)', '1.5 KiB');
+}
+
+function test_formatSize_mib_gib() {
+  console.log('test_formatSize_mib_gib');
+  const mib = 1024 * 1024;
+  assertEqual(formatSize(mib), '1.0MiB (1048576 bytes)', '1 MiB');
+  const gib = 1024 * 1024 * 1024;
+  assertEqual(formatSize(gib), '1.0GiB (1073741824 bytes)', '1 GiB');
+}
+
+function test_formatSize_no_bytes() {
+  console.log('test_formatSize_no_bytes');
+  assertEqual(formatSize(1024, false), '1.0KiB', 'showBytes=false omits raw count');
+  assertEqual(formatSize(512, false), '512.0B', 'showBytes=false for small values');
+}
+
+// ============================================================
+// formatAddr tests
+// ============================================================
+
+function test_formatAddr_block_event() {
+  console.log('test_formatAddr_block_event');
+  const event = { action: 'alloc', addr: 0x7f4c00000, version: 3 };
+  assertEqual(formatAddr(event), "b'7f4c00000_3", 'block alloc address');
+}
+
+function test_formatAddr_segment_event() {
+  console.log('test_formatAddr_segment_event');
+  const event = { action: 'segment_alloc', addr: 0xabc, version: 0 };
+  assertEqual(formatAddr(event), "s'abc_0", 'segment alloc address');
+}
+
+function test_formatAddr_free_event() {
+  console.log('test_formatAddr_free_event');
+  const event = { action: 'free_completed', addr: 0xff, version: 5 };
+  assertEqual(formatAddr(event), "b'ff_5", 'free_completed is a block event');
+}
+
+// ============================================================
+// elideRepeats tests
+// ============================================================
+
+function test_elideRepeats_no_repeats() {
+  console.log('test_elideRepeats_no_repeats');
+  const result = elideRepeats(['a', 'b', 'c']);
+  assertEqual(result.join(','), 'a,b,c', 'no repeats passes through');
+}
+
+function test_elideRepeats_two_consecutive() {
+  console.log('test_elideRepeats_two_consecutive');
+  // Two consecutive duplicates are kept as-is (not collapsed)
+  const result = elideRepeats(['a', 'a', 'b']);
+  assertEqual(result.join(','), 'a,a,b', 'two consecutive kept verbatim');
+}
+
+function test_elideRepeats_three_or_more() {
+  console.log('test_elideRepeats_three_or_more');
+  // Three+ consecutive duplicates collapse to [frame, "<repeats N times>"]
+  const result = elideRepeats(['x', 'x', 'x', 'x']);
+  assertEqual(result.length, 2, 'collapsed to 2 entries');
+  assertEqual(result[0], 'x', 'first entry is the frame');
+  assertEqual(result[1], '<repeats 3 times>', 'second entry is repeat count');
+}
+
+function test_elideRepeats_mixed() {
+  console.log('test_elideRepeats_mixed');
+  // Realistic: a stack trace with a recursive section in the middle
+  const result = elideRepeats(['top', 'recurse', 'recurse', 'recurse', 'recurse', 'recurse', 'bottom']);
+  assertEqual(result.join(','), 'top,recurse,<repeats 4 times>,bottom', 'mixed with recursion');
+}
+
+function test_elideRepeats_empty() {
+  console.log('test_elideRepeats_empty');
+  const result = elideRepeats([]);
+  assertEqual(result.length, 0, 'empty input gives empty output');
+}
+
+// ============================================================
+// context_for_id tests
+// ============================================================
+
+function test_context_for_id_with_pool() {
+  console.log('test_context_for_id_with_pool');
+  // Alloc with a known private pool, stack frames, and stream
+  const poolId = [2, 7];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0xabc000, size: 2048, version: 5,
+        frames: [{ filename: 'model.py', line: 42, name: 'forward' }],
+        stream: 3, timestamp: true, time_us: 1700000000000000 },
+    ],
+    segments: [{
+      device: 0, address: 0xa00000, total_size: 0x200000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  const ctx = result.context_for_id(0);
+
+  // Address should be formatted as hex with version
+  assertContains(ctx, "abc000", 'context includes hex address');
+  assertContains(ctx, '_5', 'context includes version');
+  // Size should be formatted
+  assertContains(ctx, '2.0KiB', 'context includes formatted size');
+  assertContains(ctx, '2048 bytes', 'context includes raw byte count');
+  // Pool ID resolved from segment
+  assertContains(ctx, 'pool_id (2, 7)', 'context includes resolved pool_id');
+  // Stream
+  assertContains(ctx, 'stream 3', 'context includes stream');
+  // Stack frame
+  assertContains(ctx, 'model.py:42:forward', 'context includes stack frame');
+}
+
+function test_context_for_id_unknown_pool() {
+  console.log('test_context_for_id_unknown_pool');
+  // Alloc at address outside any segment → pool_id unknown
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0xff0000, size: 512, version: 0,
+        frames: [{ filename: 'train.py', line: 10, name: 'step' }],
+        stream: 0, timestamp: null },
+    ],
+    segments: [{
+      device: 0, address: 0x100000, total_size: 0x100000, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  const ctx = result.context_for_id(0);
+
+  assertContains(ctx, 'pool_id unknown', 'addr outside segments gives unknown pool');
+  assertContains(ctx, 'ff0000', 'context includes hex address');
+  assertContains(ctx, '512.0B', 'context includes size');
+}
+
+function test_context_for_id_free_without_alloc() {
+  console.log('test_context_for_id_free_without_alloc');
+  // free_completed without matching alloc → "alloc not recorded" message
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'free_completed', addr: 0xdead00, size: 4096, version: 2,
+        frames: [{ filename: 'fsdp.py', line: 750, name: 'free_storage' }],
+        stream: 0, timestamp: null },
+    ],
+    segments: [{
+      device: 0, address: 0xd00000, total_size: 0x100000, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  const ctx = result.context_for_id(0);
+
+  assertContains(ctx, 'alloc not recorded', 'free-without-alloc shows warning');
+  assertContains(ctx, 'dead00', 'context includes hex address');
+  assertContains(ctx, '4.0KiB', 'context includes size');
+  assertContains(ctx, 'fsdp.py:750:free_storage', 'context shows free stack trace');
+}
+
+// ============================================================
+// Post-PR#177717 tests: trace events carry pool_id directly
+// ============================================================
+
+function test_post177717_pool_id_from_trace_event() {
+  console.log('test_post177717_pool_id_from_trace_event');
+  // After PR#177717, trace events include pool_id. The code should
+  // use it directly instead of falling back to find_pool_id from segments.
+  // Here the addr is OUTSIDE any segment, but pool_id is on the event itself.
+  const poolId = [3, 15];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0xff0000, size: 1024, frames: [], stream: 0,
+        pool_id: poolId },
+      { action: 'free_completed', addr: 0xff0000, size: 1024, frames: [], stream: 0,
+        pool_id: poolId },
+    ],
+    // No segment covers 0xff0000 — pool_id comes from the trace event
+    segments: [],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  assertEqual(result.max_size, 1024, 'pool alloc/free with event-level pool_id');
+
+  const ctx = result.context_for_id(0);
+  assertContains(ctx, 'pool_id (3, 15)', 'pool_id resolved from trace event, not segment');
+}
+
+function test_post177717_pool_free_without_alloc_no_segment() {
+  console.log('test_post177717_pool_free_without_alloc_no_segment');
+  // Post-177717: free_completed has pool_id on the event.
+  // The segment was unmapped (not in segments list), but pool_id is still known.
+  const poolId = [1, 42];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'free_completed', addr: 0xdead00, size: 2048, frames: [], stream: 0,
+        pool_id: poolId },
+    ],
+    // Segment was unmapped — not present. Pool resolved from event.
+    segments: [],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // Should be pre-loaded into pool and then freed, not inflated
+  assert(result.max_size <= 2048,
+    `post-177717 pool free-without-alloc should not inflate: got ${result.max_size}`);
+
+  const ctx = result.context_for_id(0);
+  assertContains(ctx, 'pool_id (1, 42)', 'pool_id from event even without segment');
+  assertContains(ctx, 'alloc not recorded', 'still shows alloc not recorded');
+}
+
+function test_post177717_mixed_events_with_and_without_pool_id() {
+  console.log('test_post177717_mixed_events_with_and_without_pool_id');
+  // Some events have pool_id (post-177717), others don't (pre-177717
+  // or default pool). Verify both paths work together.
+  const poolId = [2, 8];
+  const snapshot = makeSnapshot({
+    traces: [
+      // Default pool alloc -- no pool_id on event, resolved via segment
+      { action: 'alloc', addr: 100, size: 300, frames: [], stream: 0 },
+      // Private pool alloc -- pool_id on the event
+      { action: 'alloc', addr: 0xf000, size: 500, frames: [], stream: 0,
+        pool_id: poolId },
+      { action: 'free_completed', addr: 100, size: 300, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xf000, size: 500, frames: [], stream: 0,
+        pool_id: poolId },
+    ],
+    segments: [
+      // Only covers addr=100 (default pool). addr=0xf000 has no segment.
+      { device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0],
+        stream: 0, blocks: [] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // Peak: 300 (non-pool) + 500 (pool envelope) = 800
+  assertEqual(result.max_size, 800, 'mixed pre/post-177717 events peak');
+
+  const ctx0 = result.context_for_id(0);
+  assertContains(ctx0, 'pool_id (0, 0)', 'default pool resolved from segment');
+
+  const ctx1 = result.context_for_id(1);
+  assertContains(ctx1, 'pool_id (2, 8)', 'private pool from event-level pool_id');
+}
+
+function test_reused_address_keeps_historical_pool_id() {
+  console.log('test_reused_address_keeps_historical_pool_id');
+  const defaultPoolId = [0, 0];
+  const privatePoolId = [1, 7];
+  const addr = 0x1000;
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr, size: 800, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'alloc', addr, size: 400, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'free_completed', addr, size: 400, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'segment_unmap', addr, size: 800, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'segment_map', addr, size: 800, frames: [], stream: 0,
+        pool_id: privatePoolId },
+      { action: 'alloc', addr, size: 400, frames: [], stream: 0,
+        pool_id: privatePoolId },
+      { action: 'free_completed', addr, size: 400, frames: [], stream: 0,
+        pool_id: privatePoolId },
+    ],
+    segments: [{
+      device: 0, address: addr, total_size: 800,
+      segment_pool_id: privatePoolId, stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  assertContains(result.context_for_id(0), 'pool_id (0, 0)',
+    'warmup allocation keeps its recorded default pool');
+  assertContains(result.context_for_id(1), 'pool_id (1, 7)',
+    'capture allocation keeps its recorded private pool');
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have one private pool envelope');
+  assertEqual(envelopes[0].elem, 'pool:1,7,s0', 'envelope uses the private pool');
+  assert(Math.min(...envelopes[0].timesteps) > 0,
+    'private pool envelope starts after the warmup allocation');
+}
+
+// ============================================================
+// Pool grouping by (pool_id, stream) tests
+// ============================================================
+
+function test_pool_grouped_by_stream() {
+  console.log('test_pool_grouped_by_stream');
+  // Same pool_id but different streams should produce separate envelopes.
+  const poolId = [1, 5];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 1000, size: 500, frames: [], stream: 1 },
+      { action: 'alloc', addr: 2000, size: 300, frames: [], stream: 2 },
+      { action: 'free_completed', addr: 1000, size: 500, frames: [], stream: 1 },
+      { action: 'free_completed', addr: 2000, size: 300, frames: [], stream: 2 },
+    ],
+    segments: [
+      { device: 0, address: 0, total_size: 4096, segment_pool_id: poolId,
+        stream: 0, blocks: [] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 2, 'should have 2 pool envelopes (one per stream)');
+
+  const keys = envelopes.map(e => e.elem).sort();
+  assertEqual(keys[0], 'pool:1,5,s1', 'first envelope key includes stream 1');
+  assertEqual(keys[1], 'pool:1,5,s2', 'second envelope key includes stream 2');
+}
+
+// ============================================================
+// Initially Added Blocks Tests
+// ============================================================
+
+function test_default_pool_ghost_block() {
+  console.log('test_segment_snapshot_no_trace');
+  const poolId = [0, 0];
+  const snapshot = makeSnapshot({
+    traces: [],
+    segments: [{
+      device: 0, address: 4096, total_size: 8192, segment_pool_id: poolId,
+      stream: 0, blocks: [
+        { address: 5000, size: 1000, requested_size: 1000, state: 'active_allocated',
+          frames: [], version: 0 },
+      ],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+  assertEqual(result.elements_length, 1,
+    'snapshot-only block should not be added (include_private_inactive=false)');
+
+}
+
+function test_segment_snapshot_with_trace_history() {
+  console.log('test_segment_snapshot_with_trace_history');
+  const poolId = [1, 42];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 5000, size: 1000, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 5000, size: 1000, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 4096, total_size: 8192, segment_pool_id: poolId,
+      stream: 0, blocks: [
+        { address: 5000, size: 1000, requested_size: 1000, state: 'inactive',
+          frames: [], version: 0 },
+      ],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  assertEqual(result.elements_length, 1,
+    'only trace element present, snapshot block not duplicated');
+}
+
+function test_segment_snapshot_no_trace() {
+  console.log('test_segment_snapshot_no_trace');
+  const poolId = [1, 42];
+  const snapshot = makeSnapshot({
+    traces: [],
+    segments: [{
+      device: 0, address: 4096, total_size: 8192, segment_pool_id: poolId,
+      stream: 0, blocks: [
+        { address: 5000, size: 1000, requested_size: 1000, state: 'inactive',
+          frames: [], version: 0 },
+      ],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  assertEqual(result.elements_length, 0,
+    'snapshot-only block should not be added (include_private_inactive=true)');
+
+  const result2 = process_alloc_data(snapshot, 0, false, 15000, false);
+  assertEqual(result2.elements_length, 0,
+    'snapshot-only block should not be added (include_private_inactive=false)');
+}
+
+function test_ghost_blocks() {
+  console.log('test_ghost_blocks');
+  // Snapshot produced by (agent_space/test_ring_buffer_overflow.py):
+  //   pre_record = torch.empty(1024 * 1024, device="cuda", dtype=torch.uint8)  # 1 MiB
+  //   torch.cuda.memory._record_memory_history(max_entries=10)
+  //   early = torch.empty(2 * 1024 * 1024, device="cuda", dtype=torch.uint8)   # 2 MiB
+  //   for _ in range(15):  # overflow the 10-entry ring buffer
+  //     t = torch.empty(4 * 1024 * 1024, device="cuda", dtype=torch.uint8)     # 4 MiB
+  //     del t
+  //   snap = torch.cuda.memory._snapshot()
+  //
+  // pre_record: allocated before recording → no trace event at all
+  // early: alloc event evicted from ring buffer by churn → no trace event
+  // Both are active_allocated in segment snapshot but invisible in trace.
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'free_completed', addr: 0x6a00000, size: 4194304, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x6a00000, size: 4194304, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x6a00000, size: 4194304, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x6a00000, size: 4194304, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x6a00000, size: 4194304, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x1e00000, total_size: 2097152, segment_pool_id: [0, 0],
+        stream: 0, blocks: [
+          { address: 0x1e00000, size: 1048576, requested_size: 1048576,
+            state: 'active_allocated', frames: [] },
+          { address: 0x1f00000, size: 1048576, requested_size: 1048576,
+            state: 'inactive', frames: [] },
+        ]},
+      { device: 0, address: 0x6800000, total_size: 20971520, segment_pool_id: [0, 0],
+        stream: 0, blocks: [
+          { address: 0x6800000, size: 2097152, requested_size: 2097152,
+            state: 'active_allocated', frames: [
+              { filename: 'test.py', line: 10, name: 'early_alloc' },
+            ]},
+          { address: 0x6a00000, size: 18874368, requested_size: 18874368,
+            state: 'inactive', frames: [] },
+        ]},
+    ],
+  });
+
+  // Ghost blocks (active_allocated not in trace) show on both tabs.
+  for (const include_private of [false, true]) {
+    const label = `include_private_inactive=${include_private}`;
+    const result = process_alloc_data(snapshot, 0, false, 15000, include_private);
+
+    // Trace creates 2 elements from alloc events + 1 from unmatched free.
+    // 2 active_allocated blocks from snapshot not in trace.
+    assertEqual(result.elements_length, 5,
+      `${label}: 3 trace elements + 2 snapshot blocks`);
+
+    const aot = result.allocations_over_time;
+    const ghosts = aot.filter(d => d.ghost === true);
+    assertEqual(ghosts.length, 2, `${label}: should have 2 ghost block entries`);
+
+    // Ghost block sizes match segment snapshot blocks
+    const ghost_sizes = ghosts.map(g => g.size).sort();
+    assertEqual(ghost_sizes[0], 1048576, `${label}: ghost block 1 MiB (pre_record)`);
+    assertEqual(ghost_sizes[1], 2097152, `${label}: ghost block 2 MiB (ring buffer overflow)`);
+
+    // context_for_id shows ghost explanation
+    const ghost_elem_ids = ghosts.map(g => g.elem);
+    for (const id of ghost_elem_ids) {
+      const ctx = result.context_for_id(id);
+      assertContains(ctx, '[Ghost block]', `${label}: context contains ghost label`);
+      assertContains(ctx, 'segment snapshot', `${label}: context explains source`);
+    }
+  }
+}
+
+function test_ghost_blocks_not_created_for_traced_addrs() {
+  console.log('test_ghost_blocks_not_created_for_traced_addrs');
+  // A block in the segment snapshot whose address DID appear in trace events
+  // should NOT be a ghost block.
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 1000, size: 512, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0],
+      stream: 0, blocks: [
+        { address: 1000, size: 512, requested_size: 512,
+          state: 'active_allocated', frames: [] },
+      ],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const aot = result.allocations_over_time;
+  const ghosts = aot.filter(d => d.ghost === true);
+  assertEqual(ghosts.length, 0, 'no ghost blocks when addr is in trace');
+  assertEqual(result.elements_length, 1, 'only the trace element');
+}
+
+function test_ghost_blocks_default_pool_collected() {
+  console.log('test_ghost_blocks_default_pool_collected');
+  // Ghost blocks from default pool [0,0] should be collected
+  // from the segment snapshot when they have no trace events.
+  const snapshot = makeSnapshot({
+    traces: [],
+    segments: [{
+      device: 0, address: 0x1000, total_size: 8192, segment_pool_id: [0, 0],
+      stream: 0, blocks: [
+        { address: 0x1000, size: 2048, requested_size: 2048,
+          state: 'active_allocated', frames: [] },
+        { address: 0x1800, size: 1024, requested_size: 1024,
+          state: 'active_allocated', frames: [] },
+      ],
+    }],
+  });
+
+  // Shows on both tabs
+  for (const include_private of [false, true]) {
+    const label = `include_private_inactive=${include_private}`;
+    const result = process_alloc_data(snapshot, 0, false, 15000, include_private);
+    const ghosts = result.allocations_over_time.filter(d => d.ghost === true);
+    assertEqual(ghosts.length, 2, `${label}: 2 ghost blocks from default pool`);
+    const sizes = ghosts.map(g => g.size).sort();
+    assertEqual(sizes[0], 1024, `${label}: ghost 1024 bytes`);
+    assertEqual(sizes[1], 2048, `${label}: ghost 2048 bytes`);
+  }
+}
+
+function test_ghost_blocks_not_in_segment_mode() {
+  console.log('test_ghost_blocks_not_in_segment_mode');
+  // Ghost blocks should not be created in segment-level views
+  const snapshot = makeSnapshot({
+    traces: [],
+    segments: [{
+      device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0],
+      stream: 0, blocks: [
+        { address: 100, size: 512, requested_size: 512,
+          state: 'active_allocated', frames: [] },
+      ],
+    }],
+  });
+
+  const result_seg = process_alloc_data(snapshot, 0, true, 15000, false);
+  const ghosts_seg = result_seg.allocations_over_time.filter(d => d.ghost === true);
+  assertEqual(ghosts_seg.length, 0, 'no ghost blocks in segment_alloc mode');
+
+  // Even with include_private_inactive=true, segment modes should not create ghosts
+  const result_seg2 = process_alloc_data(snapshot, 0, true, 15000, true);
+  const ghosts_seg2 = result_seg2.allocations_over_time.filter(d => d.ghost === true);
+  assertEqual(ghosts_seg2.length, 0, 'no ghost blocks in segment_alloc mode (private pool tab)');
+}
+
+function test_ghost_blocks_private_pool() {
+  console.log('test_ghost_blocks_private_pool');
+  // Snapshot produced by (agent_space/test_ghost_blocks_private_pool.py):
+  //   pool = torch.cuda.MemPool()
+  //   with torch.cuda.use_mem_pool(pool):
+  //     pre_record_pool = torch.empty(1 MiB)     # ghost in private pool (0,1)
+  //   pre_record_default = torch.empty(2 MiB)     # ghost in default pool (0,0)
+  //   torch.cuda.memory._record_memory_history(max_entries=20)
+  //   with torch.cuda.use_mem_pool(pool):
+  //     traced_pool = torch.empty(3 MiB)          # traced in private pool (0,1)
+  //   traced_default = torch.empty(4 MiB)          # traced in default pool (0,0)
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0xe600000, size: 3145728, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x6a00000, size: 4194304, frames: [], stream: 0 },
+    ],
+    segments: [
+      // Private pool segment with ghost block
+      { device: 0, address: 0x1e00000, total_size: 2097152, segment_pool_id: [0, 1],
+        stream: 0, blocks: [
+          { address: 0x1e00000, size: 1048576, requested_size: 1048576,
+            state: 'active_allocated', frames: [] },
+        ]},
+      // Default pool segment with ghost block + traced block
+      { device: 0, address: 0x6800000, total_size: 20971520, segment_pool_id: [0, 0],
+        stream: 0, blocks: [
+          { address: 0x6800000, size: 2097152, requested_size: 2097152,
+            state: 'active_allocated', frames: [] },
+          { address: 0x6a00000, size: 4194304, requested_size: 4194304,
+            state: 'active_allocated', frames: [] },
+        ]},
+      // Private pool segment with traced block
+      { device: 0, address: 0xe600000, total_size: 20971520, segment_pool_id: [0, 1],
+        stream: 0, blocks: [
+          { address: 0xe600000, size: 3145728, requested_size: 3145728,
+            state: 'active_allocated', frames: [] },
+        ]},
+    ],
+  });
+
+  // With include_private_inactive=true, ghost blocks from BOTH pools are
+  // collected. Private pool ghosts go inside their pool envelope; default
+  // pool ghosts are rendered at the global bottom of the stacked area.
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+
+  const aot = result.allocations_over_time;
+  const ghosts = aot.filter(d => d.ghost === true);
+  assertEqual(ghosts.length, 2, '2 ghost blocks (one from each pool)');
+
+  // Default pool ghost (2 MiB): at global bottom, spans full timeline
+  const default_ghost = ghosts.find(g => g.size === 2097152);
+  assert(default_ghost !== undefined, 'default pool ghost (2 MiB) exists');
+  assertEqual(default_ghost.offsets[0], 0, 'default ghost at offset 0');
+  assertEqual(default_ghost.timesteps[0], 0, 'default ghost starts at timestep 0');
+  assertEqual(default_ghost.timesteps.length, 2, 'default ghost has 2 timesteps');
+  assert(default_ghost.timesteps[1] > 0, 'default ghost ends after timestep 0');
+
+  // Private pool ghost (1 MiB): inside the pool (0,1) envelope
+  const pool_ghost = ghosts.find(g => g.size === 1048576);
+  assert(pool_ghost !== undefined, 'private pool ghost (1 MiB) exists');
+  assertEqual(pool_ghost.timesteps[0], 0, 'pool ghost starts at timestep 0');
+  assert(pool_ghost.timesteps.at(-1) > 0, 'pool ghost ends after timestep 0');
+
+  // Both ghosts should end at the same final timestep
+  assertEqual(default_ghost.timesteps[1], pool_ghost.timesteps.at(-1),
+    'both ghosts end at the same final timestep');
+
+  // Pool envelope only for (0,1) — default pool ghosts are at global bottom.
+  // Both pool segments use stream 0, so there should be exactly 1 envelope
+  // (not split by stream, and not "snull" from annotate_snapshot eliding streams).
+  const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, '1 pool envelope');
+  assertContains(envelopes[0].elem, '0,1,s0', 'envelope for pool (0,1)');
+
+  // Envelope initial size at timestep 0 = total pool reserved from snapshot
+  // (ghost segment 2 MiB + traced segment ~20 MiB = ~22 MiB)
+  const pool_reserved = 2097152 + 20971520;  // sum of pool (0,1) segment total_sizes
+  const env = envelopes[0];
+  assertEqual(env.timesteps[0], 0, 'envelope starts at timestep 0');
+  assertEqual(env.size[0], pool_reserved, 'envelope initial size = total pool reserved');
+
+  // Ghost stripe should fit within the envelope
+  const env_offset = env.offsets[0];
+  const ghost_offset = pool_ghost.offsets[0];
+  assert(ghost_offset >= env_offset, 'ghost stripe offset >= envelope offset');
+  assert(ghost_offset + 1048576 <= env_offset + env.size[0],
+    'ghost stripe fits within envelope at timestep 0');
+
+  // Pool envelope max = total pool reserved (same as initial since no segment events)
+  const env_max_size = Array.isArray(env.size)
+    ? Math.max(...env.size)
+    : env.size;
+  assertEqual(env_max_size, pool_reserved, 'pool envelope max = total pool reserved');
+
+  // With include_private_inactive=false, ghosts still exist but no pool envelope
+  const result_false = process_alloc_data(snapshot, 0, false, 15000, false);
+  const ghosts_false = result_false.allocations_over_time.filter(d => d.ghost === true);
+  assertEqual(ghosts_false.length, 2, '2 ghost blocks on regular tab too');
+  const envs_false = result_false.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envs_false.length, 0, 'no pool envelopes when include_private_inactive=false');
+}
+
+function test_initial_pool_summary_follows_envelope() {
+  console.log('test_initial_pool_summary_follows_envelope');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0, pool_id: [0, 0] },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x10000, total_size: 8192, segment_pool_id: [1, 1],
+        stream: 0, blocks: [
+          { address: 0x10000, requested_size: 1024, state: 'active_allocated', frames: [] },
+          { address: 0x10400, requested_size: 256, state: 'active_allocated', frames: [] },
+        ] },
+      { device: 0, address: 0x20000, total_size: 4096, segment_pool_id: [1, 2],
+        stream: 0, blocks: [
+          { address: 0x20000, requested_size: 512, state: 'active_allocated', frames: [] },
+        ] },
+    ],
+  });
+
+  for (const detail of [1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, true);
+    const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s0');
+    const drawn = detail === 1 ? 0 : 1024;
+    const summary = result.allocations_over_time.find(
+      d => d.opacity === 0.3 && d.size[0] === 1280 - drawn);
+    assertEqual(envelope.offsets[0], 4096, 'lower pool reservation moves the upper envelope');
+    assertEqual(summary.offsets[0], envelope.offsets[0] + drawn, 'summary follows its own envelope');
+    assert(summary.offsets[0] + summary.size[0] <= envelope.offsets[0] + envelope.size[0],
+      'summary remains inside the pool reservation');
+  }
+}
+
+function test_ghost_stripe_offset_with_multiple_pools() {
+  console.log('test_ghost_stripe_offset_with_multiple_pools');
+  // When multiple private pools have initially_allocated blocks, pool envelopes
+  // are stacked. A ghost stripe must have its offset within its own envelope,
+  // not at the offset from when the stripe was first created (before other
+  // pools shifted it upward).
+  const snapshot = makeSnapshot({
+    traces: [
+      // Traced alloc in default pool so actions is non-empty
+      { action: 'alloc', addr: 0x100, size: 100, frames: [], stream: 0 },
+    ],
+    segments: [
+      // Default pool segment for the traced alloc
+      { device: 0, address: 0, total_size: 4096, segment_pool_id: [0, 0],
+        stream: 0, blocks: [] },
+      // Pool (0,3) segment 1: one ghost block.
+      // Added to initially_allocated first among private pools.
+      { device: 0, address: 0x4000, total_size: 4096, segment_pool_id: [0, 3],
+        stream: 0, blocks: [
+          { address: 0x4000, size: 3000, requested_size: 3000,
+            state: 'active_allocated', frames: [] },
+        ]},
+      // Pool (0,2): ghost block. Added to initially_allocated second.
+      { device: 0, address: 0x10000, total_size: 8192, segment_pool_id: [0, 2],
+        stream: 0, blocks: [
+          { address: 0x10000, size: 2000, requested_size: 2000,
+            state: 'active_allocated', frames: [] },
+        ]},
+      // Pool (0,3) segment 2: another ghost block.
+      // Added to initially_allocated LAST. After reverse(), processed FIRST.
+      // This creates pool (0,3) at offset 0. Then pool (0,2) is processed
+      // (stripe at offset 1000). Then pool (0,3) segment 1's ghost block
+      // grows pool (0,3) from 1000 to 4000, shifting pool (0,2)'s envelope
+      // up by 3000 but (without fix) not its stripe.
+      { device: 0, address: 0x5000, total_size: 4096, segment_pool_id: [0, 3],
+        stream: 0, blocks: [
+          { address: 0x5000, size: 1000, requested_size: 1000,
+            state: 'active_allocated', frames: [] },
+        ]},
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const aot = result.allocations_over_time;
+
+  const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 2, '2 pool envelopes');
+
+  // Find the pool (0,2) envelope and its ghost stripe
+  const env02 = envelopes.find(e => e.elem.includes('0,2'));
+  assert(env02 !== undefined, 'pool (0,2) envelope exists');
+
+  const ghosts = aot.filter(d => d.ghost === true);
+  assertEqual(ghosts.length, 3, '3 ghost blocks (2 in pool 0,3 + 1 in pool 0,2)');
+  // The ghost for pool (0,2) is the 2000-byte one
+  const ghost02 = ghosts.find(g => g.size === 2000);
+  assert(ghost02 !== undefined, 'pool (0,2) ghost exists');
+
+  // Ghost stripe offset must be within the envelope range
+  const env_offset = env02.offsets[0];
+  const env_size = env02.size[0];
+  const ghost_offset = ghost02.offsets[0];
+  assertEqual(ghost_offset, env_offset,
+    `ghost offset should equal envelope offset (single block in pool)`);
+  assert(ghost_offset + 2000 <= env_offset + env_size,
+    `ghost fits within envelope: ${ghost_offset}+2000 <= ${env_offset}+${env_size}`);
+}
+
+// ============================================================
+// Full snapshot integration test
+// ============================================================
+
+function test_full_snapshot_private_pools() {
+  console.log('test_full_snapshot_private_pools');
+  // 512 KiB allocs so they're visible relative to the 2 MiB envelope
+  const S = 524288;
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_alloc', addr: 0x7f08cde00000, size: 2097152, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'segment_alloc', addr: 0x7f08d2800000, size: 2097152, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'free_requested', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'free_requested', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2880000, size: S, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde80000, size: S, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x7f08cde00000, total_size: 2097152,
+        segment_pool_id: [0, 0], stream: 0, blocks: [] },
+      { device: 0, address: 0x7f08d2800000, total_size: 2097152,
+        segment_pool_id: [0, 1], stream: 0, blocks: [] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+
+  assertEqual(result.elements_length, 6, 'should have 6 elements');
+  assertEqual(result.max_size, 2 * S + 2097152, 'peak = 2 default pool blocks + 2M envelope');
+
+  // Timeline (envelope = 2M from segment reserved, never shrinks):
+  //   alloc 512K in default pool       → 512K
+  //   alloc 512K in private pool       → 512K + 2M envelope = 2.5M
+  //   free 512K from default pool      → 2M (envelope stays)
+  //   free 512K stripe in pool         → 2M (stripe gone, envelope stays)
+  //   alloc 512K in default pool       → 2M + 512K = 2.5M
+  //   alloc 512K stripe in pool        → 2.5M (within envelope)
+  //   alloc 512K stripe in pool        → 2.5M (within envelope)
+  //   alloc 512K in default pool       → 2M + 2*512K = 3M
+  const expected_max_at_time = [
+    S, S+2097152, S+2097152, S+2097152, S+2097152, S+2097152,
+    S+2097152, S+2097152, S+2097152,
+    2097152, S+2097152, S+2097152, S+2097152, 2*S+2097152,
+  ];
+  assertEqual(result.max_at_time.length, expected_max_at_time.length,
+    'max_at_time length');
+  for (let i = 0; i < expected_max_at_time.length; i++) {
+    assertEqual(result.max_at_time[i], expected_max_at_time[i],
+      `max_at_time[${i}]`);
+  }
+
+  const aot = result.allocations_over_time;
+
+  const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
+  assertEqual(envelopes[0].elem, 'pool:0,1,s0', 'envelope key matches pool (0,1)');
+
+  // Envelope size is driven by segment reserved (2 MiB), not just active allocs
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  assertEqual(env_max, 2097152, 'envelope = segment reserved (2 MiB)');
+
+  const stripes = aot.filter(d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 3, 'should have 3 pool stripes (elements 1, 3, 4)');
+
+  const non_pool = aot.filter(d => typeof d.elem === 'number' && d.opacity === undefined);
+  assertEqual(non_pool.length, 3, 'should have 3 non-pool elements (0, 2, 5)');
+
+  const ctx0 = result.context_for_id(0);
+  assertContains(ctx0, '7f08cde00000', 'element 0 addr');
+  assertContains(ctx0, 'pool_id (0, 0)', 'element 0 pool');
+
+  const ctx1 = result.context_for_id(1);
+  assertContains(ctx1, '7f08d2800000', 'element 1 addr');
+  assertContains(ctx1, 'pool_id (0, 1)', 'element 1 pool');
+}
+
+function test_full_snapshot_no_private_pools() {
+  console.log('test_full_snapshot_no_private_pools');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_alloc', addr: 0x7f08cde00000, size: 2097152, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
+      { action: 'segment_alloc', addr: 0x7f08d2800000, size: 2097152, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
+      { action: 'free_requested', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
+      { action: 'free_requested', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00000, size: 1024, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800000, size: 1024, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08d2800400, size: 1024, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x7f08cde00400, size: 1024, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x7f08cde00000, total_size: 2097152,
+        segment_pool_id: [0, 0], stream: 0, blocks: [] },
+      { device: 0, address: 0x7f08d2800000, total_size: 2097152,
+        segment_pool_id: [0, 1], stream: 0, blocks: [] },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, false);
+
+  assertEqual(result.elements_length, 6, 'should have 6 elements');
+  assertEqual(result.max_size, 4096, 'peak memory should be 4096');
+
+  const expected_max_at_time = [
+    1024, 2048, 2048, 2048, 2048, 2048,
+    1024, 1024, 2048, 3072, 4096,
+  ];
+  assertEqual(result.max_at_time.length, expected_max_at_time.length,
+    'max_at_time length');
+  for (let i = 0; i < expected_max_at_time.length; i++) {
+    assertEqual(result.max_at_time[i], expected_max_at_time[i],
+      `max_at_time[${i}]`);
+  }
+
+  const aot = result.allocations_over_time;
+  const envelopes = aot.filter(d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 0, 'no pool envelopes');
+
+  const stripes = aot.filter(d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 0, 'no pool stripes');
+
+  const regular = aot.filter(d => typeof d.elem === 'number');
+  assertEqual(regular.length, 6, 'all 6 elements are regular');
+
+  const ctx0 = result.context_for_id(0);
+  assertContains(ctx0, '7f08cde00000', 'element 0 addr');
+  assertContains(ctx0, 'Total memory used after allocation: 1.0KiB', 'element 0 total');
+  assertContains(ctx0, 'pool_id (0, 0)', 'element 0 pool');
+}
+
+// ============================================================
+// Pool envelope reserved-memory tests
+// ============================================================
+
+function test_envelope_grows_on_segment_map() {
+  console.log('test_envelope_grows_on_segment_map');
+  // When a private pool alloc triggers segment_map (fragmentation), the envelope
+  // should grow to the reserved size, not just the active allocation size.
+  // Scenario: alloc 500, free 500, alloc 400 triggers segment_map of 400
+  // (can't reuse fragmented free blocks). Reserved = 500 + 400 = 900.
+  const poolId = [1, 10];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x1000, size: 500, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1000, size: 500, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1000, size: 500, frames: [], stream: 0 },
+      { action: 'segment_map', addr: 0x1200, size: 400, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1200, size: 400, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x1000, total_size: 900, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  // Envelope should be 900 (reserved), not 500 (peak active)
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 pool envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  assertEqual(env_max, 900, 'envelope should be 900 (reserved), not 500 (peak active)');
+
+  // Stripes inside the envelope should reflect individual block sizes (500, 400),
+  // not grow to the envelope size.
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, 'should have 2 pool stripes');
+  const stripe_sizes = stripes.map(s => s.size).sort();
+  assertEqual(stripe_sizes[0], 400, 'stripe for second alloc = 400');
+  assertEqual(stripe_sizes[1], 500, 'stripe for first alloc = 500');
+}
+
+function test_envelope_from_initial_reserved() {
+  console.log('test_envelope_from_initial_reserved');
+  // Segment reserved is 2000 but only 300 is actively allocated.
+  // No segment events in trace — initial reserved = snapshot reserved.
+  // Envelope should be 2000 (reserved), not 300 (active).
+  const poolId = [1, 20];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x2000, size: 300, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x2000, total_size: 2000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  assertEqual(env_max, 2000, 'envelope should be 2000 (segment reserved)');
+}
+
+function test_envelope_segment_map_no_double_count() {
+  console.log('test_envelope_segment_map_no_double_count');
+  // Segment_map events in trace + snapshot reserved should not double-count.
+  // Trace has segment_map of 600. Snapshot total = 600. So initial reserved = 0.
+  // Envelope grows to 600 from the segment_map event.
+  const poolId = [1, 30];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x3000, size: 600, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x3000, size: 600, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x3000, total_size: 600, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  // Should be 600, not 1200 (double-counted)
+  assertEqual(env_max, 600, 'envelope should be 600 (no double count)');
+}
+
+function test_envelope_active_exceeds_reserved() {
+  console.log('test_envelope_active_exceeds_reserved');
+  // Edge case: active > reserved (e.g., segment events lost from ring buffer).
+  // Envelope should use max(active, reserved).
+  // Scenario: segment_map of 500 in trace, snapshot total = 800.
+  // initial reserved = 800 - 500 = 300. After segment_map, reserved = 800.
+  // Then alloc of 800 → active=800 = reserved=800 → envelope=800.
+  // Now a second alloc of 200 with no segment event → active=1000 > reserved=800.
+  // Envelope should grow to 1000 (active exceeds reserved).
+  const poolId = [1, 40];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 0x4000, size: 500, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x4000, size: 800, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x4400, size: 200, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x4000, total_size: 1000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have 1 envelope');
+  const env_max = Array.isArray(envelopes[0].size)
+    ? Math.max(...envelopes[0].size) : envelopes[0].size;
+  // active=1000 > reserved at time of second alloc (800), envelope = 1000
+  assertEqual(env_max, 1000, 'envelope should be 1000 (active exceeds earlier reserved)');
+}
+
+function test_envelope_default_pool_unaffected() {
+  console.log('test_envelope_default_pool_unaffected');
+  // Default pool (0,0) should NOT get envelope treatment regardless of segment events.
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr: 100, size: 5000, frames: [], stream: 0 },
+      { action: 'alloc', addr: 100, size: 200, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 100, size: 200, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0, total_size: 5000, segment_pool_id: [0, 0],
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 0, 'default pool should not have envelope');
+  assertEqual(result.max_size, 200, 'default pool peak = active only');
+}
+
+// ============================================================
+// Per-pool summarization tests
+// ============================================================
+
+function test_per_pool_summarization() {
+  console.log('test_per_pool_summarization');
+  // 10 allocs in default pool (sizes 100..1000), 10 allocs in private pool
+  // (sizes 200..2000). Limit to 5 entries per pool.
+  // Expect: 5 drawn + 5 summarized per pool.
+  const poolId = [1, 50];
+  const traces = [];
+  // Default pool: 10 allocs at 0x1000..0x1900, sizes 100,200,...,1000
+  for (let i = 0; i < 10; i++) {
+    traces.push({ action: 'alloc', addr: 0x1000 + i * 0x100, size: (i + 1) * 100,
+                  frames: [], stream: 0 });
+  }
+  // Private pool: 10 allocs at 0x5000..0x5900, sizes 200,400,...,2000
+  for (let i = 0; i < 10; i++) {
+    traces.push({ action: 'alloc', addr: 0x5000 + i * 0x100, size: (i + 1) * 200,
+                  frames: [], stream: 0 });
+  }
+
+  const snapshot = makeSnapshot({
+    traces,
+    segments: [
+      { device: 0, address: 0x1000, total_size: 0x1000, segment_pool_id: [0, 0],
+        stream: 0, blocks: [] },
+      { device: 0, address: 0x5000, total_size: 0x1000, segment_pool_id: poolId,
+        stream: 0, blocks: [] },
+    ],
+  });
+
+  // Global top 5: the 5 largest across all pools.
+  // Private pool sizes: 200,400,...,2000. Default pool sizes: 100,200,...,1000.
+  // Top 5 globally = 2000,1800,1600,1400,1200 (all from private pool).
+  // Default pool: all 10 go to global summarized band.
+  // Private pool: top 5 drawn, bottom 5 (200+400+600+800+1000=3000) in per-pool summary.
+  const result = process_alloc_data(snapshot, 0, false, 5, true);
+
+  const non_pool = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === undefined);
+  assertEqual(non_pool.length, 0, 'default pool: 0 drawn (all smaller than top 5)');
+
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 5, 'private pool: 5 drawn stripes');
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, '1 pool envelope');
+
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+  const ps_max = Math.max(...pool_summaries[0].size);
+  assertEqual(ps_max, 3000, 'per-pool summarized max = 3000');
+
+  // Global summarized band has ALL default pool allocs (100+200+...+1000=5500)
+  const global_summary = result.allocations_over_time.find(
+    d => d.elem === 'summarized' && d.opacity === undefined);
+  assert(global_summary !== undefined, 'global summarized band exists');
+  const gs_max = Math.max(...global_summary.size);
+  assertEqual(gs_max, 5500, 'global summarized max = 5500 (all default pool allocs)');
+
+  assertEqual(result.elements_length, 20, 'elements_length = 20 (total elements)');
+}
+
+function test_per_pool_summarization_with_frees() {
+  console.log('test_per_pool_summarization_with_frees');
+  // 6 allocs in private pool, limit to 3. Then free 2 drawn and 2 non-drawn.
+  // Verify summarized stripe shrinks on non-drawn frees.
+  const poolId = [1, 60];
+  const snapshot = makeSnapshot({
+    traces: [
+      // 6 allocs: sizes 100,200,300,400,500,600
+      // Top 3 drawn: 400,500,600. Summarized: 100,200,300.
+      { action: 'alloc', addr: 0x8100, size: 100, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8200, size: 200, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8300, size: 300, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8400, size: 400, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8500, size: 500, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x8600, size: 600, frames: [], stream: 0 },
+      // Free a drawn element (600)
+      { action: 'free_completed', addr: 0x8600, size: 600, frames: [], stream: 0 },
+      // Free a non-drawn element (100) — summarized should shrink
+      { action: 'free_completed', addr: 0x8100, size: 100, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0x8000, total_size: 0x1000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 3, true);
+
+  // After all events: drawn active = 400+500 = 900, summarized active = 200+300 = 500
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  // 3 drawn stripes created (400, 500, 600), 600 was freed (closed out)
+  assertEqual(stripes.length, 3, '3 pool stripes created (one freed)');
+
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+
+  // Summarized stripe should show the shrink: peak was 600 (100+200+300),
+  // then 100 was freed → final = 500 (200+300)
+  const ps = pool_summaries[0];
+  const ps_max = Math.max(...ps.size);
+  assertEqual(ps_max, 600, 'per-pool summarized peak = 600 (before non-drawn free)');
+  const ps_final = ps.size.at(-1);
+  assertEqual(ps_final, 500, 'per-pool summarized final = 500 (after non-drawn free)');
+}
+
+function test_per_pool_summarization_initially_allocated() {
+  console.log('test_per_pool_summarization_initially_allocated');
+  // 4 free_completed events in a private pool (no matching allocs).
+  // Limit to 2. The 2 largest should be drawn stripes, the 2 smallest
+  // should be in the per-pool summarized stripe.
+  const poolId = [1, 70];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'free_completed', addr: 0xa100, size: 100, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xa200, size: 200, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xa300, size: 300, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0xa400, size: 400, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0xa000, total_size: 0x1000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 2, true);
+
+  // Top 2 by size: 300, 400 → drawn stripes (pre-loaded then freed)
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, '2 drawn stripes (largest initially_allocated)');
+  const stripe_sizes = stripes.map(s => s.size).sort((a, b) => a - b);
+  assertEqual(stripe_sizes[0], 300, 'drawn stripe 300');
+  assertEqual(stripe_sizes[1], 400, 'drawn stripe 400');
+
+  // Summarized: 100 + 200 = 300 initially, then freed to 0
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+  const ps_max = Math.max(...pool_summaries[0].size);
+  assertEqual(ps_max, 300, 'per-pool summarized peak = 300 (100+200)');
+  assertEqual(pool_summaries[0].size.at(-1), 0,
+    'per-pool summarized final = 0 (all freed)');
+}
+
+function test_per_pool_summarization_interleaved() {
+  console.log('test_per_pool_summarization_interleaved');
+  // Drawn and non-drawn allocs interleaved: drawn stripes must not overlap
+  // with the summarized region. Alloc order: 1800 (drawn), 200 (non-drawn),
+  // 1600 (drawn), 100 (non-drawn).
+  const poolId = [1, 80];
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0xc000, size: 1800, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0xc800, size: 200, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0xd000, size: 1600, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0xd800, size: 100, frames: [], stream: 0 },
+    ],
+    segments: [{
+      device: 0, address: 0xc000, total_size: 0x2000, segment_pool_id: poolId,
+      stream: 0, blocks: [],
+    }],
+  });
+
+  // max_entries=2: drawn = 1800, 1600. Non-drawn = 200, 100.
+  const result = process_alloc_data(snapshot, 0, false, 2, true);
+
+  const stripes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'number' && d.opacity === 0.5);
+  assertEqual(stripes.length, 2, '2 drawn stripes');
+
+  const pool_summaries = result.allocations_over_time.filter(
+    d => d.elem === 'summarized' && d.opacity === 0.3);
+  assertEqual(pool_summaries.length, 1, '1 per-pool summarized stripe');
+
+  // Summarized sits on top of drawn stripes (like global summarized band).
+  // Drawn stripes start at envelope base, summarized is above them.
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  const env_base = envelopes[0].offsets.at(-1);
+  const sum_final = pool_summaries[0].size.at(-1);
+  assertEqual(sum_final, 300, 'summarized final = 300 (200+100)');
+
+  // Drawn stripes should start at envelope base
+  for (const stripe of stripes) {
+    const final_offset = stripe.offsets.at(-1);
+    assert(final_offset >= env_base,
+      `stripe offset ${final_offset} must be >= env_base(${env_base})`);
+  }
+
+  // Summarized stripe offset should be at envelope_base + drawn_active
+  const sum_offset = pool_summaries[0].offsets.at(-1);
+  const drawn_tops = stripes.map(s => s.offsets.at(-1) + s.size);
+  const max_drawn_top = Math.max(...drawn_tops);
+  assert(sum_offset >= max_drawn_top - 1,
+    `summarized offset ${sum_offset} should be at or above top of drawn stripes ${max_drawn_top}`);
+}
+
+// ============================================================
+// Segment timeline: range lifetimes, event geometry and provenance
+// ============================================================
+
+function segmentEvent(action, addr, size, name, extra = {}) {
+  return { action, addr, size, stream: 0, version: 0,
+    frames: name ? [{ filename: 'segments.py', line: 10, name }] : [], ...extra };
+}
+
+function finalSegment(address, total_size, is_expandable = true, extra = {}) {
+  return { device: 0, address, total_size, is_expandable, stream: 0,
+    segment_pool_id: [0, 0], blocks: [], ...extra };
+}
+
+// MemoryPlot joins these vertices with straight lines. Sample each plateau,
+// checking the actual polygons as well as the minimap capacity series.
+function assertSegmentGeometry(result, expected, label) {
+  assertEqual(result.max_at_time.join(','), expected.join(','), label + ': capacity');
+  assertEqual(result.max_size, Math.max(...expected), label + ': peak');
+  assertEqual(result.final_size, expected.at(-1), label + ': final capacity');
+  for (const p of result.allocations_over_time) {
+    assert(p.timesteps.every(t => Number.isInteger(t) && t >= 0 && t <= expected.length),
+      label + ': polygon vertices use segment-event coordinates');
+  }
+  for (let t = 0; t < expected.length; t++) {
+    const x = t + 0.5;
+    const spans = [];
+    for (const p of result.allocations_over_time) {
+      if (x < p.timesteps[0] || x >= p.timesteps.at(-1)) continue;
+      const i = p.timesteps.findLastIndex(v => v <= x);
+      const fraction = (x - p.timesteps[i]) / (p.timesteps[i + 1] - p.timesteps[i]);
+      const lerp = values => values[i] + fraction * (values[i + 1] - values[i]);
+      const bottom = lerp(p.offsets);
+      const height = Array.isArray(p.size) ? lerp(p.size) : p.size;
+      if (height > 0) spans.push([bottom, bottom + height]);
+    }
+    spans.sort((a, b) => a[0] - b[0]);
+    let top = 0;
+    for (const [bottom, end] of spans) {
+      assertEqual(bottom, top, label + ': contiguous stack at x=' + x);
+      top = end;
+    }
+    assertEqual(top, expected[t], label + ': polygon capacity at x=' + x);
+  }
+}
+
+function segmentResults(snapshot, expected, label) {
+  const results = [0, 1, 15000].map(detail => {
+    const result = process_alloc_data(snapshot, 0, true, detail, false);
+    assert(!result.history_error, label + ': coherent history at detail ' + detail);
+    assertSegmentGeometry(result, expected, label + '/detail=' + detail);
+    return result;
+  });
+  return results.at(-1);
+}
+
+function segmentContexts(result) {
+  return Array.from({ length: result.elements_length }, (_, i) => result.context_for_id(i));
+}
+
+function test_expandable_repro_geometry() {
+  console.log('test_expandable_repro_geometry');
+  const MiB = 1024 * 1024;
+  const base = 0x320000000;
+  const side = 0x7a0000000;
+  const snapshot = makeSnapshot({
+    traces: [
+      segmentEvent('segment_map', base, 40 * MiB, 'initial_growth'),
+      segmentEvent('alloc', base, 1, 'tensor_alloc'), // Not a segment timestep.
+      segmentEvent('segment_map', base + 40 * MiB, 120 * MiB, 'second_growth'),
+      segmentEvent('segment_map', base + 160 * MiB, 260 * MiB, 'third_growth'),
+      segmentEvent('segment_unmap', base + 40 * MiB, 380 * MiB, 'release'),
+      segmentEvent('segment_map', base + 40 * MiB, 200 * MiB, 'remap'),
+      segmentEvent('segment_map', side, 140 * MiB, 'unexpected_side_stream_allocation',
+        { stream: 7 }),
+    ],
+    segments: [finalSegment(base, 240 * MiB),
+      finalSegment(side, 140 * MiB, true, { stream: 7 })],
+  });
+  const expected = [0, 40, 160, 420, 40, 240, 380].map(n => n * MiB);
+  const result = segmentResults(snapshot, expected, 'CUDA repro/coalesced unmap');
+  assert(!result.max_at_time.includes(300 * MiB), 'coalesced unmap has no artificial 300 MiB step');
+  const sideContext = segmentContexts(result).find(c => c.includes('unexpected_side_stream_allocation'));
+  assert(sideContext !== undefined, 'side-stream creation stack remains searchable');
+  assertContains(sideContext || '', 'stream 7', 'side-stream creation metadata');
+  assertContains(sideContext || '', 'mapped range', 'physical mapping is labeled as a mapped range');
+}
+
+function test_segment_partial_unmap_and_remap() {
+  console.log('test_segment_partial_unmap_and_remap');
+  for (const [offset, size] of [[0, 40], [30, 40]]) {
+    const address = offset === 0 ? 1000 : (1n << 60n) + 1000n;
+    const removedAddress = typeof address === 'bigint' ? address + BigInt(offset) : address + offset;
+    const snapshot = makeSnapshot({
+      traces: [
+        segmentEvent('segment_map', address, 100, 'original_creator'),
+        segmentEvent('segment_unmap', removedAddress, size, 'unmap_stack'),
+        segmentEvent('segment_map', removedAddress, size, 'new_creator'),
+      ],
+      segments: [finalSegment(address, 100)],
+    });
+    const result = segmentResults(snapshot, [0, 100, 100 - size, 100], 'partial ' + offset);
+    const surviving = result.allocations_over_time.filter(p => typeof p.elem === 'number'
+      && p.timesteps[0] === 1 && p.timesteps.at(-1) === 4);
+    assertEqual(surviving.length, offset === 0 ? 1 : 2, 'surviving pieces keep original birth');
+    for (const p of surviving) {
+      const ctx = result.context_for_id(p.elem);
+      assertContains(ctx, 'original_creator', 'partial unmap preserves original creation stack');
+      assert(!ctx.includes('unmap_stack'), 'release stack is never the creation stack');
+    }
+    const contexts = segmentContexts(result);
+    assert(contexts.some(c => c.includes('new_creator')), 'remap has a fresh creator');
+  }
+}
+
+function test_segment_retained_history_and_mixed_types() {
+  console.log('test_segment_retained_history_and_mixed_types');
+  const cases = [
+    { label: 'all ended', traces: [
+      segmentEvent('segment_map', 1000, 100, 'creator'),
+      segmentEvent('segment_unmap', 1000, 100, 'release')],
+      segments: [], totals: [0, 100, 0] },
+    { label: 'ordinary ended', traces: [
+      segmentEvent('segment_alloc', 1000, 100, 'creator'),
+      segmentEvent('segment_free', 1000, 100, 'release')],
+      segments: [], totals: [0, 100, 0] },
+    { label: 'legacy snapshot type unknown', traces: [
+      segmentEvent('segment_map', 1000, 100, 'creator')],
+      segments: [{ device: 0, address: 1000, total_size: 100, stream: 0,
+        segment_pool_id: [0, 0], blocks: [] }],
+      totals: [0, 100] },
+    { label: 'initial range later freed', traces: [
+      segmentEvent('segment_unmap', 1000, 100, 'release_only')],
+      segments: [], totals: [100, 0] },
+    { label: 'mixed streams and pools', traces: [
+      segmentEvent('segment_map', 1000, 20, 'private_map', { stream: 1, pool_id: [1, 4] }),
+      segmentEvent('segment_alloc', 2000, 40, 'ordinary', { stream: 2, segment_pool_id: [2, 5] }),
+      segmentEvent('segment_map', 3000, 60, 'default_map', { stream: 3 }),
+      segmentEvent('segment_unmap', 1000, 20, 'release', { stream: 1, pool_id: [1, 4] })],
+      segments: [finalSegment(2000, 40, false, { stream: 2, segment_pool_id: [2, 5] }),
+        finalSegment(3000, 60, true, { stream: 3 })], totals: [0, 20, 60, 120, 100] },
+  ];
+  for (const c of cases) {
+    const result = segmentResults(makeSnapshot(c), c.totals, c.label);
+    if (c.label === 'initial range later freed') {
+      const ctx = result.context_for_id(0);
+      assertContains(ctx, 'outside the retained history', 'initial range has unknown creation');
+      assert(!ctx.includes('release_only'), 'initial range does not borrow unmap frames');
+    }
+    if (c.label === 'mixed streams and pools') {
+      const contexts = segmentContexts(result);
+      assert(contexts.some(ctx => ctx.includes('pool_id (1, 4)') && ctx.includes('stream 1')),
+        'event pool_id survives after range is unmapped');
+      assert(contexts.some(ctx => ctx.includes('pool_id (2, 5)') && ctx.includes('stream 2')),
+        'legacy segment_pool_id and ordinary stream survive');
+    }
+  }
+}
+
+function test_segment_address_reuse_and_bigint() {
+  console.log('test_segment_address_reuse_and_bigint');
+  for (const oldPool of [undefined, [1, 4]]) {
+    for (const address of [1000, (1n << 60n) + 1000n]) {
+      const oldIdentity = oldPool ? { pool_id: oldPool } : {};
+      const snapshot = makeSnapshot({
+        traces: [
+          segmentEvent('segment_map', address, 100, 'old_creator', oldIdentity),
+          segmentEvent('segment_unmap', address, 100, 'release', oldIdentity),
+          segmentEvent('segment_map', address, 100, 'new_creator', { pool_id: [2, 5] }),
+        ],
+        segments: [finalSegment(BigInt(address), 100, true, { segment_pool_id: [2, 5] })],
+      });
+      const result = segmentResults(snapshot, [0, 100, 0, 100], 'address reuse ' + address);
+      const contexts = segmentContexts(result);
+      const oldContext = contexts.find(c => c.includes('old_creator')) || '';
+      assertContains(oldContext, oldPool ? 'pool_id (1, 4)' : 'pool_id unknown',
+        'older lifetime keeps its own pool identity');
+      assert(!oldContext.includes('pool_id (2, 5)'), 'older lifetime never inherits final reused pool');
+      assert(contexts.some(c => c.includes('new_creator') && c.includes('pool_id (2, 5)')),
+        'new lifetime uses new recorded pool and creator');
+    }
+  }
+}
+
+function test_segment_missing_creation_frames() {
+  console.log('test_segment_missing_creation_frames');
+  for (const traces of [[], [segmentEvent('segment_map', 1000, 100)]]) {
+    const snapshot = makeSnapshot({ traces, segments: [finalSegment(1000, 100)] });
+    const result = segmentResults(snapshot, traces.length ? [0, 100] : [100], 'missing frames');
+    const ctx = result.context_for_id(0);
+    assertContains(ctx, traces.length ? 'stack unavailable' : 'outside the retained history',
+      'missing provenance is labeled honestly');
+    assert(!ctx.includes('undefined') && !ctx.includes('Invalid Date'),
+      'missing timestamp and frames do not leak invalid values');
+  }
+}
+
+function test_segment_category_and_recorded_context() {
+  console.log('test_segment_category_and_recorded_context');
+  const snapshot = makeSnapshot({
+    categories: ['unknown', 'activation'],
+    traces: [segmentEvent('segment_alloc', 1000, 100, 'creator', {
+      category: 'activation', compile_context: 'compiled_region',
+      user_metadata: { phase: 'training_phase' }, annotations: ['annotation_text'],
+      forward_frames: ['forward.py:25:model_forward\n'],
+    })],
+    segments: [finalSegment(1000, 100, false)],
+  });
+  const result = segmentResults(snapshot, [0, 100], 'ordinary category and context');
+  assertEqual(result.allocations_over_time.find(p => p.elem === 0).color, 1,
+    'ordinary segment keeps its category color');
+  const ctx = result.context_for_id(0);
+  for (const text of ['Compile context: compiled_region', 'User Metadata:', 'training_phase',
+    'Annotations:', 'annotation_text', 'Forward Pass Stack Trace', 'forward.py:25:model_forward']) {
+    assertContains(ctx, text, 'recorded segment context retains ' + text);
+  }
+}
+
+function test_segment_history_contradictions() {
+  console.log('test_segment_history_contradictions');
+  const cases = [
+    { label: 'overlapping maps', traces: [
+      segmentEvent('segment_map', 1000, 100),
+      segmentEvent('segment_map', 1050, 50)], segments: [finalSegment(1000, 100)] },
+    { label: 'unmap crosses a gap', traces: [
+      segmentEvent('segment_map', 1000, 40),
+      segmentEvent('segment_unmap', 1010, 40)], segments: [] },
+    ...[
+      ['pool mismatch', { pool_id: [1, 4] }, { pool_id: [2, 5] }],
+      ['stream mismatch', { stream: 1 }, { stream: 2 }],
+    ].map(([label, before, after]) => ({ label, traces: [
+      segmentEvent('segment_map', 1000, 100, null, before),
+      segmentEvent('segment_unmap', 1000, 100, null, after)], segments: [] })),
+    ...[
+      ['adjacent pools with unmap metadata omitted', { pool_id: [1, 4] }, { pool_id: [2, 5] }],
+      ['adjacent streams with unmap metadata omitted', { stream: 1 }, { stream: 2 }],
+    ].map(([label, before, after]) => ({ label, traces: [
+      segmentEvent('segment_map', 1000, 50, null, before),
+      segmentEvent('segment_map', 1050, 50, null, after),
+      { action: 'segment_unmap', addr: 1000, size: 100, frames: [] }], segments: [] })),
+    ...[
+      ['NaN address', NaN, 100], ['unsafe Number address', Number.MAX_SAFE_INTEGER + 1, 100],
+      ['zero size', 1000, 0],
+    ].map(([label, address, size]) => ({ label,
+      traces: [segmentEvent('segment_map', address, size)], segments: [finalSegment(2000, 100)] })),
+    { label: 'segment type mismatch', traces: [
+      segmentEvent('segment_map', 1000, 100),
+      segmentEvent('segment_free', 1000, 100)], segments: [] },
+    { label: 'partial ordinary free', traces: [
+      segmentEvent('segment_alloc', 1000, 100),
+      segmentEvent('segment_free', 1000, 40)], segments: [finalSegment(1040, 60, false)] },
+  ];
+  for (const c of cases) {
+    const snapshot = makeSnapshot(c);
+    const total = c.segments.reduce((sum, s) => sum + s.total_size, 0);
+    for (const detail of [0, 1, 15000]) {
+      const result = process_alloc_data(snapshot, 0, true, detail, false);
+      assert(Boolean(result.history_error), c.label + ': history contradiction is surfaced');
+      assertSegmentGeometry(result, [total], c.label + ': final snapshot fallback');
+      if (total > 0) {
+        const ctx = result.context_for_id(0);
+        assertContains(ctx, 'recorded history cannot be reconciled', 'fallback explains unavailable provenance');
+        assert(!ctx.includes('Creation event outside the retained history'),
+          'fallback does not mislabel a retained creation event as absent');
+      }
+    }
+  }
+}
+
+function groupedSegments(snapshot, detail = 15000, stream = null) {
+  return process_alloc_data(snapshot, 0, true, detail, false, {grouped: true, stream});
+}
+
+function segmentBands(result) {
+  return result.allocations_over_time.filter(p => typeof p.elem === 'number');
+}
+
+function test_grouped_growth_detail_and_streams() {
+  console.log('test_grouped_growth_detail_and_streams');
+  const snapshot = makeSnapshot({traces: [
+    segmentEvent('segment_map', 1000, 20, 'first_map'),
+    segmentEvent('segment_map', 1020, 20, 'second_map'),
+    segmentEvent('segment_map', 1040, 20, 'third_map'),
+    segmentEvent('segment_map', 2000, 50, 'side_map', {stream: 7}),
+  ], segments: [finalSegment(1000, 60), finalSegment(2000, 50, true, {stream: 7})]});
+  const full = groupedSegments(snapshot);
+  assert(full.grouped_segments && full.has_expandable, 'expandable groups are explicitly enabled');
+  assertEqual(segmentBands(full).length, 2, 'three contiguous maps become one band');
+  assertEqual(full.streams.join(','), '0,7', 'stream choices come from the full history');
+  for (const detail of [0, 1, 15000]) {
+    const result = groupedSegments(snapshot, detail);
+    assertSegmentGeometry(result, [0, 20, 40, 60, 110], 'group detail=' + detail);
+    for (const p of segmentBands(result)) {
+      assertEqual(p.color, segmentBands(full).find(other => other.elem === p.elem).color,
+        'group colors are stable through detail changes');
+    }
+  }
+  const detailed = segmentBands(groupedSegments(snapshot, 1));
+  assertEqual(detailed.length, 1, 'detail selects a whole group');
+  assertEqual(full.segment_events_for_id(detailed[0].elem).length, 3,
+    'detail ranks group peak rather than the largest constituent map');
+  for (const [stream, expected] of [['0', [0, 20, 40, 60, 60]], ['7', [0, 0, 0, 0, 50]],
+    ['unknown', [0, 0, 0, 0, 0]]]) {
+    const filtered = groupedSegments(snapshot, 15000, stream);
+    assertSegmentGeometry(filtered, expected, 'stream=' + stream);
+    assertEqual(filtered.streams.join(','), full.streams.join(','), 'filter retains full stream choices');
+    for (const p of segmentBands(filtered)) {
+      const original = segmentBands(full).find(other => other.elem === p.elem);
+      assertEqual(p.color, original.color, 'group color survives stream isolation');
+      assertEqual(p.timesteps[0], original.timesteps[0], 'isolation retains event coordinates');
+    }
+  }
+  const group = segmentBands(full).find(p => p.stream === '0');
+  const events = full.segment_events_for_id(group.elem);
+  assertEqual(events.map(e => e.timestep).join(','), '1,2,3', 'map event selector keeps every growth');
+  assertEqual(events.map(e => e.before).join(','), '0,20,40', 'group event capacities before');
+  assertEqual(events.map(e => e.after).join(','), '20,40,60', 'group event capacities after');
+  events.forEach((event, i) => {
+    assertContains(event.context, ['first_map', 'second_map', 'third_map'][i], 'actual map creator');
+    if (i > 0) assert(!event.context.includes('first_map'), 'later maps never borrow first creator');
+  });
+  assert(!full.context_for_id(group.elem).includes('first_map'), 'group summary does not impersonate a creator');
+  assertContains(full.search_context_for_id(group.elem), 'third_map', 'search covers later creators');
+  assertContains(full.search_context_for_id(group.elem), 's\'410_0', 'search covers constituent addresses');
+}
+
+function test_grouped_holes_and_lifetime_loss() {
+  console.log('test_grouped_holes_and_lifetime_loss');
+  for (const address of [1000, (1n << 60n) + 1000n]) {
+    const middle = BigInt(address) + 30n;
+    const snapshot = makeSnapshot({traces: [
+      segmentEvent('segment_map', address, 100, 'original_creator'),
+      segmentEvent('segment_unmap', middle, 40, 'release_creator'),
+      segmentEvent('segment_map', middle, 40, 'remap_creator'),
+      segmentEvent('segment_unmap', address, 100, 'full_release'),
+      segmentEvent('segment_map', address, 100, 'new_lifetime'),
+    ], segments: [finalSegment(address, 100)]});
+    const result = groupedSegments(snapshot);
+    assertSegmentGeometry(result, [0, 100, 60, 100, 0, 100], 'hole and full unmap ' + address);
+    assertEqual(segmentBands(result).length, 2, 'full continuity loss creates a new group');
+    const old = segmentBands(result).find(p => p.timesteps[0] === 1);
+    const fresh = segmentBands(result).find(p => p.timesteps[0] === 5);
+    assert(old.color !== fresh.color, 'address reuse gets a new color identity');
+    const events = result.segment_events_for_id(old.elem);
+    assertEqual(events.length, 4, 'split pieces do not duplicate recorded map/unmap events');
+    assertEqual(events.map(e => e.after).join(','), '100,60,100,0', 'height counts mapped bytes across holes');
+    assertEqual(events[0].size, 100, 'original event keeps its complete map size');
+    assertContains(events[0].context, 'original_creator', 'old map provenance retained');
+    assertContains(events[1].context, 'Release stack', 'unmap provenance is a release stack');
+    assertContains(events[2].context, 'remap_creator', 'remap event has fresh provenance');
+    assert(!events[2].context.includes('original_creator'), 'remap does not borrow survivor provenance');
+    assert(!result.search_context_for_id(old.elem).includes('new_lifetime'), 'old search excludes reused lifetime');
+  }
+  const touching = makeSnapshot({traces: [segmentEvent('segment_map', 1000, 10),
+    segmentEvent('segment_unmap', 1000, 10), segmentEvent('segment_map', 1010, 10)],
+    segments: [finalSegment(1010, 10)]});
+  assertEqual(segmentBands(groupedSegments(touching)).length, 2,
+    'historically touching maps without overlapping lifetimes remain separate');
+}
+
+function test_grouped_metadata_conflicts() {
+  console.log('test_grouped_metadata_conflicts');
+  const unknown = {stream: null, pool_id: null, segment_pool_id: null};
+  for (const [left, right] of [[{stream: 1}, {stream: 2}],
+    [{pool_id: [0, 0]}, {pool_id: [2, 5]}]]) {
+    for (const reverse of [false, true]) {
+      const maps = [segmentEvent('segment_map', 1000, 10, 'left', left),
+        segmentEvent('segment_map', 1020, 10, 'right', right)];
+      if (reverse) maps.reverse();
+      maps.push(segmentEvent('segment_map', 1010, 10, 'ambiguous_bridge', unknown));
+      const segments = [finalSegment(1000, 10, true, {...left, segment_pool_id: left.pool_id}),
+        finalSegment(1010, 10, true, unknown),
+        finalSegment(1020, 10, true, {...right, segment_pool_id: right.pool_id})];
+      const result = groupedSegments(makeSnapshot({traces: maps, segments}));
+      assert(!result.history_error, 'metadata ambiguity is distinct from invalid history');
+      assertEqual(segmentBands(result).length, 3, 'unknown bridge cannot merge conflicting groups');
+      assertSegmentGeometry(result, [0, 10, 20, 30], 'unknown bridge order=' + reverse);
+    }
+    const snapshot = makeSnapshot({traces: [segmentEvent('segment_map', 1000, 10, 'old_known', left),
+      segmentEvent('segment_map', 1010, 10, 'unknown_survivor', unknown),
+      segmentEvent('segment_unmap', 1000, 10, 'release_known', left),
+      segmentEvent('segment_map', 1000, 10, 'new_conflict', right)],
+      segments: [finalSegment(1000, 10, true, {...right, segment_pool_id: right.pool_id}),
+        finalSegment(1010, 10, true, unknown)]});
+    const result = groupedSegments(snapshot);
+    assertSegmentGeometry(result, [0, 10, 20, 10, 20], 'surviving unknown metadata');
+    assertEqual(segmentBands(result).length, 2, 'unmapped known member leaves group constraint intact');
+    const old = segmentBands(result).find(p => p.timesteps[0] === 1);
+    assert(!result.search_context_for_id(old.elem).includes('new_conflict'),
+      'continuing unknown sibling does not acquire conflicting metadata');
+  }
+  const separated = makeSnapshot({segments: [finalSegment(1000, 10), finalSegment(1020, 10)]});
+  assertEqual(segmentBands(groupedSegments(separated)).length, 2, 'same stream/pool alone cannot group');
+  const retained = makeSnapshot({traces: [segmentEvent('segment_unmap', 1010, 10, 'release_only')],
+    segments: [finalSegment(1000, 10), finalSegment(1020, 10)]});
+  const result = groupedSegments(retained);
+  assertSegmentGeometry(result, [30, 20], 'retained interior unmap');
+  assertEqual(segmentBands(result).length, 1, 'retained bridge evidence reconstructs continuing group');
+  const initial = result.segment_events_for_id(segmentBands(result)[0].elem).filter(e => e.timestep === 0);
+  assert(initial.every(e => e.context.includes('outside the retained history')),
+    'initial observations honestly lack recorded creation');
+  assert(initial.every(e => !e.context.includes('release_only')), 'initial observation never borrows release stack');
+}
+
+function test_grouped_legacy_and_categories() {
+  console.log('test_grouped_legacy_and_categories');
+  const ordinary = makeSnapshot({traces: [segmentEvent('segment_alloc', 1000, 10, 'ordinary_one'),
+    segmentEvent('segment_alloc', 2000, 20, 'ordinary_two'), segmentEvent('segment_free', 1000, 10)],
+    segments: [finalSegment(2000, 20, false)]});
+  const legacy = process_alloc_data(ordinary, 0, true, 15000);
+  const enabled = groupedSegments(ordinary);
+  assert(!enabled.grouped_segments && !enabled.has_expandable, 'ordinary-only stays on published layout');
+  assertEqual(JSON.stringify(enabled.allocations_over_time), JSON.stringify(legacy.allocations_over_time),
+    'ordinary polygons are identical with grouping requested');
+  assertEqual(segmentContexts(enabled).join('\n'), segmentContexts(legacy).join('\n'),
+    'ordinary provenance is unchanged');
+  assertEqual(JSON.stringify(segmentBands(enabled)), JSON.stringify([
+    {elem: 0, timesteps: [1, 3], offsets: [0, 0], size: 10, color: 0},
+    {elem: 1, timesteps: [2, 3, 3, 4], offsets: [10, 10, 0, 0], size: 20, color: 1},
+  ]), 'ordinary geometry matches published golden data');
+  const categories = makeSnapshot({categories: ['unknown', 'activation', 'parameter'], traces: [
+    segmentEvent('segment_map', 1000, 10, 'activation_map', {category: 'activation'}),
+    segmentEvent('segment_map', 1010, 10, 'parameter_map', {category: 'parameter'}),
+  ], segments: [finalSegment(1000, 20)]});
+  const maps = process_alloc_data(categories, 0, true, 15000, false, {grouped: false});
+  assertEqual(segmentBands(maps).map(p => p.color).join(','), '1,2', 'ungrouped category colors preserved');
+  assertEqual(segmentBands(groupedSegments(categories)).length, 1, 'explicit grouped view uses group identity');
+  const isolated = process_alloc_data(categories, 0, true, 15000, false, {grouped: false, stream: '0'});
+  assertSegmentGeometry(isolated, [0, 10, 20], 'ungrouped stream coordinates');
+  const unknown = groupedSegments(makeSnapshot({segments: [finalSegment(1000, 10, true, {stream: null})]}),
+    15000, 'unknown');
+  assertEqual(unknown.streams.join(','), 'unknown', 'missing stream has explicit unknown choice');
+  assertSegmentGeometry(unknown, [10], 'unknown stream capacity');
+}
+
+function test_grouped_alternating_geometry_bound() {
+  console.log('test_grouped_alternating_geometry_bound');
+  const count = 400;
+  const traces = [];
+  for (let i = 0; i < count; ++i) {
+    traces.push(segmentEvent('segment_map', 1000 + i, 1, 'a'));
+    traces.push(segmentEvent('segment_map', 10000 + i, 1, 'b', {stream: 7}));
+  }
+  const result = groupedSegments(makeSnapshot({traces, segments: [finalSegment(1000, count),
+    finalSegment(10000, count, true, {stream: 7})]}));
+  assertEqual(segmentBands(result).length, 2, 'alternating growth directly aggregates into two bands');
+  assertEqual(result.max_at_time.join(','), Array.from({length: 2 * count + 1}, (_, i) => i).join(','),
+    'alternating map capacities remain exact');
+  const vertices = segmentBands(result).reduce((sum, p) => sum + p.timesteps.length, 0);
+  assert(vertices <= 6 * traces.length, 'two-group polygon geometry is linear in map events');
+
+  const ordinary_count = 50;
+  const mixed_traces = [segmentEvent('segment_map', 1000, 1, 'a'),
+    segmentEvent('segment_map', 10000, 1, 'b', {stream: 7})];
+  const ordinary_segments = [];
+  for (let i = 0; i < ordinary_count; ++i) {
+    mixed_traces.push(segmentEvent('segment_alloc', 20000 + i * 10, 1, 'ordinary'));
+    ordinary_segments.push(finalSegment(20000 + i * 10, 1, false));
+  }
+  mixed_traces.push(...traces.slice(2));
+  const mixed = groupedSegments(makeSnapshot({traces: mixed_traces,
+    segments: [...ordinary_segments, finalSegment(1000, count),
+      finalSegment(10000, count, true, {stream: 7})]}));
+  assertEqual(segmentBands(mixed).length, ordinary_count + 2, 'mixed view preserves ordinary lifetimes');
+  const mixed_vertices = segmentBands(mixed).reduce((sum, p) => sum + p.timesteps.length, 0);
+  assert(mixed_vertices <= 6 * mixed_traces.length,
+    'expandable growth does not repeatedly shift all ordinary bands');
+  const ordinary_bands = segmentBands(mixed).filter(p =>
+    mixed.context_for_id(p.elem).includes('cached segment'));
+  assert(ordinary_bands.every(p => p.timesteps.length === 2),
+    'ordinary bands keep fixed offsets through expandable growth');
+  const isolated = groupedSegments(makeSnapshot({traces: mixed_traces,
+    segments: [...ordinary_segments, finalSegment(1000, count),
+      finalSegment(10000, count, true, {stream: 7})]}), 15000, '7');
+  assertEqual(isolated.elements_length, 1, 'filtered detail count uses included groups');
+  assertEqual(segmentBands(isolated)[0].color,
+    segmentBands(mixed).find(p => p.stream === '7').color, 'mixed stack order retains stable IDs/colors');
+}
+
+// ============================================================
+// unpickleData tests
+// ============================================================
+
+// Load unpickleData from MemoryViz.js
+const memvizPath = path.resolve(__dirname, '../../torch/utils/viz/MemoryViz.js');
+let memvizSrc = fs.readFileSync(memvizPath, 'utf-8');
+const funcStart = memvizSrc.indexOf('function unpickleData(buffer)');
+const funcEnd = memvizSrc.indexOf('\nfunction ', funcStart + 1);
+const unpickleDataSrc = memvizSrc.slice(funcStart, funcEnd);
+const { unpickleData } = vm.runInThisContext(
+  `(function() { ${unpickleDataSrc}\nreturn { unpickleData }; })()`,
+  { filename: memvizPath });
+
+function makePickle(proto_version, opcodes) {
+  const bytes = [0x80, proto_version, ...opcodes, '.'.charCodeAt(0)];
+  return new Uint8Array(bytes).buffer;
+}
+
+function test_unpickle_protocol5_accepted() {
+  console.log('test_unpickle_protocol5_accepted');
+  // Protocol 5 pickle containing EMPTY_DICT + STOP
+  const buf = makePickle(5, ['}'.charCodeAt(0)]);
+  const result = unpickleData(buf);
+  assert(typeof result === 'object' && result !== null, 'protocol 5 dict parsed');
+  assertEqual(Object.keys(result).length, 0, 'empty dict');
+}
+
+function test_unpickle_protocol4_still_works() {
+  console.log('test_unpickle_protocol4_still_works');
+  const buf = makePickle(4, ['}'.charCodeAt(0)]);
+  const result = unpickleData(buf);
+  assert(typeof result === 'object' && result !== null, 'protocol 4 still works');
+}
+
+function test_unpickle_protocol6_rejected() {
+  console.log('test_unpickle_protocol6_rejected');
+  const buf = makePickle(6, ['}'.charCodeAt(0)]);
+  let threw = false;
+  try {
+    unpickleData(buf);
+  } catch (e) {
+    threw = true;
+    assertContains(e.message, 'Unhandled version 6', 'error message mentions version 6');
+  }
+  assert(threw, 'protocol 6 should throw');
+}
+
+function test_unpickle_bytearray8() {
+  console.log('test_unpickle_bytearray8');
+  // Build a protocol 5 pickle with BYTEARRAY8 opcode
+  // BYTEARRAY8 = 0x96, followed by 8-byte LE length, then raw bytes
+  const data = [0xDE, 0xAD, 0xBE, 0xEF];
+  const len_bytes = [data.length, 0, 0, 0, 0, 0, 0, 0]; // 4 as uint64 LE
+  const opcodes = [0x96, ...len_bytes, ...data];
+  const buf = makePickle(5, opcodes);
+  const result = unpickleData(buf);
+  assert(result instanceof Uint8Array, 'BYTEARRAY8 produces Uint8Array');
+  assertEqual(result.length, 4, 'bytearray length is 4');
+  assertEqual(result[0], 0xDE, 'first byte');
+  assertEqual(result[3], 0xEF, 'last byte');
+}
+
+function test_unpickle_protocol5_dict_with_values() {
+  console.log('test_unpickle_protocol5_dict_with_values');
+  // Build a protocol 5 pickle for {"a": 42}:
+  // PROTO 5, EMPTY_DICT, SHORT_BINUNICODE "a", BININT1 42, SETITEM, STOP
+  const key = [0x8C, 1, 'a'.charCodeAt(0)]; // SHORT_BINUNICODE len=1 "a"
+  const val = ['K'.charCodeAt(0), 42];       // BININT1 42
+  const setitem = ['s'.charCodeAt(0)];       // SETITEM
+  const opcodes = ['}'.charCodeAt(0), ...key, ...val, ...setitem];
+  const buf = makePickle(5, opcodes);
+  const result = unpickleData(buf);
+  assertEqual(result.a, 42, 'dict value parsed correctly');
+}
+
+// ============================================================
+// Run all tests
+// ============================================================
+
+test_basic_alloc_free();
+test_free_completed_is_matched();
+test_pool_free_without_alloc_no_inflation();
+test_pool_alloc_then_free_normal();
+test_multiple_pool_frees_without_alloc();
+test_non_pool_free_without_alloc();
+test_peak_independent_of_detail();
+test_global_summary_coordinates();
+test_summarized_only_allocation();
+test_annotations_do_not_accumulate_on_rerender();
+test_mixed_pool_and_nonpool();
+test_include_private_inactive_false_ignores_pools();
+test_formatSize_bytes();
+test_formatSize_kib();
+test_formatSize_mib_gib();
+test_formatSize_no_bytes();
+test_formatAddr_block_event();
+test_formatAddr_segment_event();
+test_formatAddr_free_event();
+test_elideRepeats_no_repeats();
+test_elideRepeats_two_consecutive();
+test_elideRepeats_three_or_more();
+test_elideRepeats_mixed();
+test_elideRepeats_empty();
+test_context_for_id_with_pool();
+test_context_for_id_unknown_pool();
+test_context_for_id_free_without_alloc();
+test_post177717_pool_id_from_trace_event();
+test_post177717_pool_free_without_alloc_no_segment();
+test_post177717_mixed_events_with_and_without_pool_id();
+test_reused_address_keeps_historical_pool_id();
+test_pool_grouped_by_stream();
+test_segment_snapshot_with_trace_history();
+test_segment_snapshot_no_trace();
+test_default_pool_ghost_block();
+test_ghost_blocks();
+test_ghost_blocks_not_created_for_traced_addrs();
+test_ghost_blocks_default_pool_collected();
+test_ghost_blocks_not_in_segment_mode();
+test_ghost_blocks_private_pool();
+test_initial_pool_summary_follows_envelope();
+test_ghost_stripe_offset_with_multiple_pools();
+test_full_snapshot_private_pools();
+test_full_snapshot_no_private_pools();
+test_envelope_grows_on_segment_map();
+test_envelope_from_initial_reserved();
+test_envelope_segment_map_no_double_count();
+test_envelope_active_exceeds_reserved();
+test_envelope_default_pool_unaffected();
+test_per_pool_summarization();
+test_per_pool_summarization_with_frees();
+test_per_pool_summarization_initially_allocated();
+test_per_pool_summarization_interleaved();
+test_expandable_repro_geometry();
+test_segment_partial_unmap_and_remap();
+test_segment_retained_history_and_mixed_types();
+test_segment_address_reuse_and_bigint();
+test_segment_missing_creation_frames();
+test_segment_category_and_recorded_context();
+test_segment_history_contradictions();
+test_grouped_growth_detail_and_streams();
+test_grouped_holes_and_lifetime_loss();
+test_grouped_metadata_conflicts();
+test_grouped_legacy_and_categories();
+test_grouped_alternating_geometry_bound();
+test_unpickle_protocol5_accepted();
+test_unpickle_protocol4_still_works();
+test_unpickle_protocol6_rejected();
+test_unpickle_bytearray8();
+test_unpickle_protocol5_dict_with_values();
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed > 0 ? 1 : 0);

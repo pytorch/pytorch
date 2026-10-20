@@ -9,11 +9,14 @@ import onnxscript
 from onnxscript.onnx_types import FLOAT
 
 import torch
-from torch.onnx._internal import jit_utils
+from torch.onnx._internal.torchscript_exporter import jit_utils
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
+    hw_classification = HardwareClassification.GENERIC
+
     # opset version is
     # 1. local function is supported after opset 15
     # 2. onnx-script requires users to determine opset in local function

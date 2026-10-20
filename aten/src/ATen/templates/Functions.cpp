@@ -58,13 +58,13 @@ Tensor TensorMaker::make_tensor() {
   return tensor;
  }
 
- std::size_t TensorMaker::computeStorageSize() const noexcept {
+ std::size_t TensorMaker::computeStorageSize() const {
    std::size_t itemsize = opts_.dtype().itemsize();
 
    if (strides_) {
      auto storage_size = detail::computeStorageNbytes(sizes_, *strides_, itemsize);
      if (storage_offset_) {
-       storage_size += storage_offset_.value();
+       storage_size += storage_offset_.value() * itemsize;
      }
      return storage_size;
    }
@@ -75,7 +75,7 @@ Tensor TensorMaker::make_tensor() {
    }
    auto storage_size = size * itemsize;
    if (storage_offset_) {
-     storage_size += storage_offset_.value();
+     storage_size += storage_offset_.value() * itemsize;
    }
    return storage_size;
  }

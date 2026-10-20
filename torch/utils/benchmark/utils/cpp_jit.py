@@ -5,7 +5,7 @@ import re
 import shutil
 import textwrap
 import threading
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType, TimeitModuleType
@@ -29,12 +29,13 @@ SOURCE_ROOT = os.path.split(os.path.abspath(__file__))[0]
 #   ````
 # `setup` and `stmt` do not change, so we can reuse the executable from the
 # first pass through the loop.
-_BUILD_ROOT: Optional[str] = None
+_BUILD_ROOT: str | None = None
 
 def _get_build_root() -> str:
     global _BUILD_ROOT
     if _BUILD_ROOT is None:
         _BUILD_ROOT = _make_temp_dir(prefix="benchmark_utils_jit_build")
+        # pyrefly: ignore [missing-argument]
         atexit.register(shutil.rmtree, _BUILD_ROOT)
     return _BUILD_ROOT
 
@@ -63,7 +64,7 @@ def _get_build_root() -> str:
 #   analysis and the shims no longer justify their maintenance and code
 #   complexity costs) back testing paths will be removed.
 
-CXX_FLAGS: Optional[list[str]]
+CXX_FLAGS: list[str] | None
 if hasattr(torch.__config__, "_cxx_flags"):
     try:
         CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
@@ -88,7 +89,7 @@ if CONDA_PREFIX is not None:
     EXTRA_INCLUDE_PATHS.append(os.path.join(CONDA_PREFIX, "include"))
 
 
-COMPAT_CALLGRIND_BINDINGS: Optional[CallgrindModuleType] = None
+COMPAT_CALLGRIND_BINDINGS: CallgrindModuleType | None = None
 def get_compat_bindings() -> CallgrindModuleType:
     with LOCK:
         global COMPAT_CALLGRIND_BINDINGS
@@ -158,7 +159,8 @@ def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> Time
         src: str = f.read()
 
     module = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=False)
-    assert isinstance(module, TimeitModuleType)
+    if not isinstance(module, TimeitModuleType):
+        raise AssertionError("compiled module is not a TimeitModuleType")
     return module
 
 
@@ -168,5 +170,6 @@ def compile_callgrind_template(*, stmt: str, setup: str, global_setup: str) -> s
         src: str = f.read()
 
     target = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=True)
-    assert isinstance(target, str)
+    if not isinstance(target, str):
+        raise AssertionError("compiled target path is not a string")
     return target

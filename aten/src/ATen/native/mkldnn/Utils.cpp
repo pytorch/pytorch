@@ -19,6 +19,7 @@ std::vector<int64_t> pool_output_sizes(
   output_size[1] = input_size[1];
 
   for (const auto i : c10::irange(2, input_size.size())) {
+    TORCH_CHECK_VALUE(stride[i -2] > 0, "Strides must be positive!");
     output_size[i] = pooling_output_shape_pad_lr<int64_t>(
       input_size[i],
       kernel_size[i - 2],
@@ -141,8 +142,8 @@ static AttrFunction attr_func_hardsigmoid =
       return attr;
     };
 
-const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
-  static const std::map<std::string_view, AttrFunction> fusion_attr_map{
+const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
+  static const std::unordered_map<std::string_view, AttrFunction> fusion_attr_map{
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
@@ -156,15 +157,15 @@ const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map() {
   return fusion_attr_map;
 }
 
-const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
-  static const std::map<std::string_view, ideep::algorithm> fusion_attr_map{
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
+  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
       {"relu", {ideep::algorithm::eltwise_relu}},
   };
   return fusion_attr_map;
 }
 
-const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
-  static const std::map<std::string_view, ideep::algorithm> fusion_attr_map{
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
+  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
       {"add", {ideep::algorithm::binary_add}},
       {"sub", {ideep::algorithm::binary_sub}},
       {"mul", {ideep::algorithm::binary_mul}},

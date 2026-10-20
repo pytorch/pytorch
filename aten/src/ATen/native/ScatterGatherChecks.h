@@ -19,8 +19,8 @@ inline void scatter_gather_dtype_check(
 ) {
   if (index.numel() != 0) {
     TORCH_CHECK(
-      index.scalar_type() == at::ScalarType::Long,
-      method_name, "(): Expected dtype int64 for index"
+      index.scalar_type() == at::ScalarType::Long || index.scalar_type() == at::ScalarType::Int,
+      method_name, "(): Expected dtype int32/int64 for index"
     );
   }
 

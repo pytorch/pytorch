@@ -19,15 +19,22 @@ from contextlib import closing, redirect_stderr, redirect_stdout
 from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
+import torch
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.elastic.utils.distributed import get_free_port
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocmVersionInRange,
+    skipIfXpu,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -65,11 +72,14 @@ class MockException(Exception):
 
 
 class ElasticLaunchTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp()
 
         # remove any lingering environment variables
-        for env in os.environ.keys():
+        for env in os.environ.keys():  # noqa: SIM118
             if env.startswith("PET_"):
                 del os.environ[env]
 
@@ -251,9 +261,10 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @patch("torch.cuda.is_available", return_value=False)
+    @patch("torch.accelerator.is_available", return_value=False)
     def test_nproc_launch_auto_configurations(self, _mock1):
-        self._test_nproc_launch_configuration("auto", os.cpu_count())
+        expected = torch._utils.cpu_count()
+        self._test_nproc_launch_configuration("auto", expected)
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
@@ -273,9 +284,28 @@ class ElasticLaunchTest(TestCase):
     )
     @patch("torch.cuda.is_available", return_value=True)
     @patch("torch.cuda.device_count", return_value=3)
-    def test_nproc_gpu_launch_configurations(self, _mock1, _mock2):
+    @patch("torch.accelerator.is_available", return_value=True)
+    @patch("torch.accelerator.device_count", return_value=3)
+    @patch("torch.accelerator.current_accelerator", return_value=MagicMock(type="gpu"))
+    def test_nproc_gpu_launch_configurations(
+        self, _mock1, _mock2, _mock3, _mock4, _mock5
+    ):
         self._test_nproc_launch_configuration("auto", 3)
         self._test_nproc_launch_configuration("gpu", 3)
+
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
+    @patch("torch.xpu.is_available", return_value=True)
+    @patch("torch.xpu.device_count", return_value=3)
+    @patch("torch.accelerator.is_available", return_value=True)
+    @patch("torch.accelerator.device_count", return_value=3)
+    @patch("torch.accelerator.current_accelerator", return_value=MagicMock(type="xpu"))
+    def test_nproc_xpu_launch_configurations(
+        self, _mock1, _mock2, _mock3, _mock4, _mock5
+    ):
+        self._test_nproc_launch_configuration("auto", 3)
+        self._test_nproc_launch_configuration("xpu", 3)
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
@@ -658,6 +688,114 @@ class ElasticLaunchTest(TestCase):
         for i in range(nproc_per_node):
             self.assertTrue(f"[rank{i}]: creating " in captured_out.getvalue())
 
+
+class ElasticLaunchVirtualRankTest(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
+    # ElasticLaunchVirtualRankTest uses instantiate_device_type_tests(only_for=("cuda", "xpu")),
+    # but this test launches `torchrun --nproc-per-node=2` which needs 2 GPUs.
+    # That process spawning happens via torchrun, not MultiProcessTestCase, so
+    # the conftest heuristic (see test/conftest.py) can't detect it; mark it
+    # multigpu explicitly.
+    @pytest.mark.multigpu
+    @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
+    @skipIfXpu(
+        msg="--virtual-local-rank does not set ZE_AFFINITY_MASK, so XPU workers are not isolated: https://github.com/intel/torch-xpu-ops/issues/5613"
+    )
+    def test_virtual_local_rank(self, device):
+        """
+        Test that virtual-local-rank ensures consistent device IDs across ranks.
+        Without it, ranks may compile to different devices, leading to different code.
+        """
+        run_id = str(uuid.uuid4().int)
+        nnodes = 1
+        nproc_per_node = 2
+
+        # Helper function to run and capture output
+        def run_test(use_virtual_local_rank):
+            args = [
+                f"--nnodes={nnodes}",
+                f"--nproc-per-node={nproc_per_node}",
+                f"--rdzv-id={run_id}",
+                "--monitor-interval=1",
+                "--start-method=spawn",
+                "--redirect=3",
+                "--tee=3",
+            ]
+            if use_virtual_local_rank:
+                args.append("--virtual-local-rank")
+
+            args.append(path("script_deviceid.py"))
+
+            captured_out = io.StringIO()
+            captured_err = io.StringIO()
+            with redirect_stdout(captured_out), redirect_stderr(captured_err):
+                launch.main(args)
+
+            return captured_out.getvalue()
+
+        def split_ranks(output):
+            default0 = []
+            default1 = []
+            for line in output.splitlines():
+                # Check for accelerator device references (cuda: or xpu:)
+                if not any(dev in line for dev in ("cuda:", "xpu:")):
+                    continue
+                if line.startswith("[default0]:"):
+                    default0.append(line[11:])
+                elif line.startswith("[default1]:"):
+                    default1.append(line[11:])
+            return default0, default1
+
+        # First, run WITHOUT virtual-local-rank - outputs should differ
+        output = run_test(use_virtual_local_rank=False)
+        rank0, rank1 = split_ranks(output)
+
+        # Verify we actually captured compiled code from both ranks
+        self.assertGreater(
+            len(rank0), 0, "Expected to capture compiled code from rank 0"
+        )
+        self.assertGreater(
+            len(rank1), 0, "Expected to capture compiled code from rank 1"
+        )
+
+        # Without virtual-local-rank, the ranks should have DIFFERENT compiled code
+        # because they see different device IDs (cuda:0 vs cuda:1)
+        self.assertNotEqual(
+            rank0,
+            rank1,
+            "Expected different compiled code without --virtual-local-rank",
+        )
+
+        # Now run WITH virtual-local-rank - outputs should be identical
+        output = run_test(use_virtual_local_rank=True)
+        rank0, rank1 = split_ranks(output)
+
+        # Verify we actually captured compiled code from both ranks
+        self.assertGreater(
+            len(rank0),
+            0,
+            "Expected to capture compiled code from rank 0 with --virtual-local-rank",
+        )
+        self.assertGreater(
+            len(rank1),
+            0,
+            "Expected to capture compiled code from rank 1 with --virtual-local-rank",
+        )
+
+        # With virtual-local-rank, both ranks should have IDENTICAL compiled code
+        # because they both see cuda:0 during compilation
+        self.assertEqual(
+            rank0, rank1, "Expected identical compiled code with --virtual-local-rank"
+        )
+
+
+instantiate_device_type_tests(
+    ElasticLaunchVirtualRankTest, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

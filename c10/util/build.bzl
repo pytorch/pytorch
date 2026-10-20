@@ -1,31 +1,15 @@
 def define_targets(rules):
     rules.cc_library(
-        name = "TypeCast",
-        srcs = ["TypeCast.cpp"],
-        hdrs = ["TypeCast.h"],
-        linkstatic = True,
-        local_defines = ["C10_BUILD_MAIN_LIB"],
-        visibility = ["//visibility:public"],
-        deps = [
-            ":base",
-            "//c10/core:ScalarType",
-            "//c10/macros",
-        ],
-    )
-
-    rules.cc_library(
         name = "base",
         srcs = rules.glob(
             ["*.cpp"],
             exclude = [
-                "TypeCast.cpp",
                 "typeid.cpp",
             ],
         ),
         hdrs = rules.glob(
             ["*.h"],
             exclude = [
-                "TypeCast.h",
                 "typeid.h",
             ],
         ),
@@ -34,8 +18,10 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":bit_cast",
+            "//torch/headeronly:torch_headeronly",
             "//c10/macros",
             "@fmt",
+            "@moodycamel//:moodycamel",
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
@@ -56,6 +42,9 @@ def define_targets(rules):
         name = "bit_cast",
         hdrs = ["bit_cast.h"],
         visibility = ["//:__subpackages__"],
+        deps = [
+            "//c10/macros",
+        ],
     )
 
     rules.cc_library(
@@ -89,6 +78,9 @@ def define_targets(rules):
                 "ssize.h",
             ],
         ),
+        deps = [
+            "//torch/headeronly:torch_headeronly",
+        ],
         visibility = ["//visibility:public"],
     )
 

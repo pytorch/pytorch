@@ -4,6 +4,8 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <c10/util/FileSystem.h>
+#include <torch/csrc/inductor/aoti_torch/generated_enum_converters.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
@@ -15,14 +17,12 @@ at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
 bool has_key(
     const std::unordered_map<std::string, c10::IValue>& map,
     const std::string& key) {
-  return map.find(key) != map.end();
+  return map.contains(key);
 }
 
-#ifdef _WIN32
-const std::string k_separator = "\\";
-#else
-const std::string k_separator = "/";
-#endif
+using torch::aot_inductor::convertSerializedLayout;
+using torch::aot_inductor::convertSerializedMemoryFormat;
+using torch::aot_inductor::convertSerializedScalarType;
 
 } // namespace
 
@@ -129,8 +129,10 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       break;
     }
     case c10::TypeKind::NumberType: {
-      if (serialized_arg_type == "as_int") {
-        // Only int Scalar is treated as dynamic arg for now
+      if (serialized_arg_type == "as_int" ||
+          serialized_arg_type == "as_sym_int") {
+        // An int (or symbolic int, from a dynamic shape) Scalar is treated as a
+        // dynamic arg, mirroring the SymIntType case above.
         dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       } else if (serialized_arg_type == "as_float") {
         stack.at(index) = serialized_arg_val.get<double>();
@@ -169,7 +171,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::ScalarType>();
+      stack.at(index) =
+          convertSerializedScalarType(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::MemoryFormatType: {
@@ -181,7 +184,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::MemoryFormat>();
+      stack.at(index) =
+          convertSerializedMemoryFormat(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::LayoutType: {
@@ -193,7 +197,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::Layout>();
+      stack.at(index) = convertSerializedLayout(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::DeviceObjType: {
@@ -209,9 +213,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       std::string device_string = serialized_arg_val["type"].get<std::string>();
       if (serialized_arg_val.contains("index") &&
           serialized_arg_val["index"].is_number()) {
-        auto index = serialized_arg_val["index"].get<int>();
-        device_string += ":" + std::to_string(index);
-        device_->set_index(static_cast<int8_t>(index));
+        device_string +=
+            ":" + std::to_string(serialized_arg_val["index"].get<int>());
       }
 
       c10::Device device(device_string);
@@ -271,11 +274,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             index,
             " but got ",
             serialized_arg_type);
-        std::vector<double> ret;
-        for (const auto& arg : serialized_arg_val) {
-          ret.push_back(arg.get<double>());
-        }
-        stack.at(index) = std::move(ret);
+        stack.at(index) = serialized_arg_val.get<std::vector<double>>();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofBools())) {
         TORCH_CHECK(
             serialized_arg_type == "as_bools",
@@ -285,27 +284,15 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             index,
             " but got ",
             serialized_arg_type);
-        std::vector<bool> ret;
-        for (const auto& arg : serialized_arg_val) {
-          ret.push_back(arg.get<bool>());
-        }
-        stack.at(index) = std::move(ret);
+        stack.at(index) = serialized_arg_val.get<std::vector<bool>>();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofNumbers())) {
         if (serialized_arg_type == "as_ints") {
           dynamic_args.emplace_back(
               index, DynamicArgType::ListIntType, serialized_arg_val.size());
         } else if (serialized_arg_type == "as_floats") {
-          std::vector<double> ret;
-          for (const auto& arg : serialized_arg_val) {
-            ret.push_back(arg);
-          }
-          stack.at(index) = std::move(ret);
+          stack.at(index) = serialized_arg_val.get<std::vector<double>>();
         } else if (serialized_arg_type == "as_bools") {
-          std::vector<bool> ret;
-          for (const auto& arg : serialized_arg_val) {
-            ret.push_back(arg);
-          }
-          stack.at(index) = std::move(ret);
+          stack.at(index) = serialized_arg_val.get<std::vector<bool>>();
         } else {
           TORCH_CHECK(
               false,
@@ -320,6 +307,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
                      at::ListType::ofOptionalTensors())) {
         if (serialized_arg_type == "as_optional_tensors") {
           std::vector<std::string> list_item_types;
+          list_item_types.reserve(serialized_arg_val.size());
           for (const auto& arg : serialized_arg_val) {
             list_item_types.push_back(arg.begin().key());
           }
@@ -327,7 +315,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
               index,
               DynamicArgType::ListOptionalTensorType,
               serialized_arg_val.size(),
-              list_item_types);
+              std::move(list_item_types));
         } else if (serialized_arg_type == "as_tensors") {
           dynamic_args.emplace_back(
               index, DynamicArgType::ListTensorType, serialized_arg_val.size());
@@ -350,11 +338,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             index,
             " but got ",
             serialized_arg_type);
-        std::vector<std::string> ret;
-        for (const auto& arg : serialized_arg_val) {
-          ret.push_back(arg.get<std::string>());
-        }
-        stack.at(index) = std::move(ret);
+        stack.at(index) = serialized_arg_val.get<std::vector<std::string>>();
       } else {
         TORCH_CHECK(
             false,
@@ -398,6 +382,32 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       }
       break;
     }
+    case c10::TypeKind::AnyType: {
+      // For Any type, dispatch based on the serialized type
+      if (serialized_arg_type == "as_string") {
+        stack.at(index) = serialized_arg_val.get<std::string>();
+      } else if (serialized_arg_type == "as_int") {
+        dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
+      } else if (serialized_arg_type == "as_float") {
+        stack.at(index) = serialized_arg_val.get<double>();
+      } else if (serialized_arg_type == "as_bool") {
+        stack.at(index) = serialized_arg_val.get<bool>();
+      } else if (serialized_arg_type == "as_tensor") {
+        dynamic_args.emplace_back(index, DynamicArgType::TensorType, 1);
+      } else if (serialized_arg_type == "as_none") {
+        stack.at(index) = c10::IValue{};
+      } else {
+        TORCH_CHECK(
+            false,
+            "Unsupported serialized type ",
+            serialized_arg_type,
+            " for Any type argument ",
+            index,
+            " in extern kernel ",
+            op_kernel->target_);
+      }
+      break;
+    }
     // TODO: handle the other input types
     default:
       TORCH_CHECK(
@@ -423,7 +433,7 @@ void OSSProxyExecutor::get_input_info_from_serialized(
     const auto& arg = named_argument["arg"];
     const auto& name = named_argument["name"].get<std::string>();
 
-    std::string custom_obj_name = "";
+    std::string custom_obj_name;
     if (arg.contains("as_custom_obj")) {
       custom_obj_name = arg["as_custom_obj"]["name"].get<std::string>();
     }
@@ -445,10 +455,9 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   // If an argument is not filled and has a default value, we should
   // also prefill the default value.
   for (size_t index = 0; index < schema_args.size(); index++) {
-    if (!filled[index] && schema_args[index].default_value()) {
-      // @lint-ignore CLANGTIDY bugprone-unchecked-optional-access
-      auto default_value = *schema_args[index].default_value();
-      op_kernel.stack_.at(index) = default_value;
+    auto default_value = schema_args[index].default_value();
+    if (!filled[index] && default_value.has_value()) {
+      op_kernel.stack_.at(index) = std::move(default_value.value());
     }
   }
 }
@@ -519,6 +528,34 @@ void OSSProxyExecutor::get_output_info_from_serialized(
         }
         break;
       }
+      case c10::TypeKind::OptionalType: {
+        auto inner_type =
+            schema_return_type->castRaw<at::OptionalType>()->getElementType();
+        if (inner_type->kind() == c10::TypeKind::TensorType) {
+          TORCH_CHECK(serialized_output_type == "as_optional_tensor");
+          if (serialized_output_val.begin().key() == "as_none") {
+            outputs.emplace_back(output_index, DynamicArgType::NoneType, 1);
+          } else if (serialized_output_val.begin().key() == "as_tensor") {
+            outputs.emplace_back(output_index, DynamicArgType::TensorType, 1);
+          } else {
+            TORCH_CHECK(
+                false,
+                "Only as_none or as_tensor is supported for as_optional_tensor");
+          }
+        }
+        break;
+      }
+      case c10::TypeKind::IntType: {
+        TORCH_CHECK(
+            serialized_output_type == "as_int",
+            "Expected extern kernel ",
+            serialized_node["target"],
+            " to have serialized output type as_int, ",
+            " but got ",
+            serialized_output_type);
+        outputs.emplace_back(output_index, DynamicArgType::IntType, 1);
+        break;
+      }
       default: {
         TORCH_CHECK(
             false,
@@ -579,14 +616,9 @@ std::unique_ptr<OSSCallTorchBindKernel> OSSProxyExecutor::
 
 OSSProxyExecutor::OSSProxyExecutor(
     const std::string& json_path,
-    bool is_cpu,
+    const std::string& device_str,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
-  if (is_cpu) {
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CPU);
-  } else {
-    int device_idx = -1;
-    device_ = std::make_unique<c10::Device>(c10::DeviceType::CUDA, device_idx);
-  }
+  device_ = std::make_unique<c10::Device>(device_str);
 
   // If custom_objs is provided, use it instead of loading from
   // custom_objs_config.json If custom_objs is not provided, try to load from
@@ -597,10 +629,8 @@ OSSProxyExecutor::OSSProxyExecutor(
     // Load custom objects from custom_objs_config.json file
     // Get the constants json path from the extern_kernel_nodes .json file
 
-    size_t lastSlash = json_path.find_last_of("/\\");
-    std::string folder_path = json_path.substr(0, lastSlash);
-    std::string custom_objs_json_path =
-        folder_path + k_separator + "custom_objs_config.json";
+    auto folder_path = c10::filesystem::path(json_path).parent_path();
+    auto custom_objs_json_path = folder_path / "custom_objs_config.json";
     LOG(INFO) << "Loading custom_objs_config .json file from "
               << custom_objs_json_path;
 
@@ -615,8 +645,7 @@ OSSProxyExecutor::OSSProxyExecutor(
       custom_objs_json_file >> custom_objs_json;
       // Load custom objects from binary torchbind file
       for (auto& [customObjName, file_name] : custom_objs_json.items()) {
-        std::string customObjPath =
-            folder_path + k_separator + file_name.get<std::string>();
+        auto customObjPath = folder_path / file_name.get<std::string>();
         LOG(INFO) << "Loading custom object to FbProxyExecutor from: "
                   << customObjPath;
 
@@ -672,9 +701,27 @@ OSSProxyExecutor::OSSProxyExecutor(
           get_call_torch_bind_kernel(serialized_node);
       op_kernels_.emplace_back(std::move(op_kernel));
     } else {
-      c10::OperatorHandle op_handle =
-          c10::Dispatcher::singleton().findSchemaOrThrow(
+      c10::OperatorHandle op_handle = [&]() {
+        try {
+          return c10::Dispatcher::singleton().findSchemaOrThrow(
               opName.c_str(), overloadName.c_str());
+        } catch (const c10::Error&) {
+          if (serialized_node.contains("metadata") &&
+              serialized_node["metadata"].value(
+                  "torch_library_custom_op", "") == "1") {
+            TORCH_CHECK(
+                false,
+                "Could not find schema for ",
+                target,
+                ". Custom operators created via torch.library.custom_op cannot "
+                "be run via AOTI without Python environment. Consider using C++ "
+                "TORCH_LIBRARY APIs. See the Custom Operators Landing Page "
+                "https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html "
+                "for more details.");
+          }
+          throw;
+        }
+      }();
       const c10::FunctionSchema& schema = op_handle.schema();
 
       const auto& schema_args = schema.arguments();
@@ -713,6 +760,17 @@ void OSSProxyExecutor::call_function(
     int length = dynamic_arg.length;
 
     if (length == 0) {
+      // An empty (Sym)IntList contributes no runtime ints, so the switch below
+      // never writes its slot and the op would see the default None and abort
+      // in toIntList()/toSymIntList(). An empty list is what the caller meant
+      // -- an empty size/stride is exactly a 0-d tensor. A genuinely-None
+      // optional list does not reach here: the as_none branch above registers a
+      // zero-length ListIntType only for a bare List[SymInt], which an Optional
+      // never is.
+      if (dynamic_arg_type == DynamicArgType::ListIntType &&
+          stack[arg_index].isNone()) {
+        stack[arg_index] = c10::List<int64_t>{};
+      }
       continue;
     }
 
@@ -730,21 +788,23 @@ void OSSProxyExecutor::call_function(
       }
       case DynamicArgType::ListTensorType: {
         std::vector<at::Tensor> tensor_list;
+        tensor_list.reserve(length);
         for (int j = 0; j < length; j++) {
           at::Tensor* tensor =
               tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
           tensor_list.push_back(*tensor);
         }
-        stack[arg_index] = tensor_list;
+        stack[arg_index] = std::move(tensor_list);
         break;
       }
       case DynamicArgType::ListOptionalTensorType: {
-        std::vector<std::optional<at::Tensor>> optional_tensor_list;
         auto& list_item_types = dynamic_arg.list_item_types;
         TORCH_CHECK(
             list_item_types.has_value(),
             "Could not find list of item types for optional tensor list input");
 
+        std::vector<std::optional<at::Tensor>> optional_tensor_list;
+        optional_tensor_list.reserve(list_item_types.value().size());
         for (const std::string& item_type : list_item_types.value()) {
           if (item_type == "as_tensor") {
             at::Tensor* tensor = tensor_handle_to_tensor_pointer(
@@ -754,7 +814,7 @@ void OSSProxyExecutor::call_function(
             optional_tensor_list.emplace_back(std::nullopt);
           }
         }
-        stack[arg_index] = optional_tensor_list;
+        stack[arg_index] = std::move(optional_tensor_list);
         break;
       }
       case DynamicArgType::ListIntType: {
@@ -763,7 +823,7 @@ void OSSProxyExecutor::call_function(
         for (int j = 0; j < length; j++) {
           vals.push_back(flatten_int_args[int_id++]);
         }
-        stack[arg_index] = vals;
+        stack[arg_index] = std::move(vals);
         break;
       }
       default:
@@ -783,12 +843,14 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors - num_output_tensors);
+
+  int num_output_ints = op_kernel->num_output_ints();
   TORCH_CHECK(
-      int_id == num_ints,
+      int_id == num_ints - num_output_ints,
       "Mismatch between ints consumed and num_ints, got int_id = ",
       int_id,
       ", num_ints = ",
-      num_ints);
+      num_ints - num_output_ints);
 
   // Call the op with the prepared stack.
   op_kernel->run(stack);
@@ -797,7 +859,6 @@ void OSSProxyExecutor::call_function(
   const auto& schema_returns = schema.returns();
 
   TORCH_CHECK(op_kernel->outputs_.size() == stack.size());
-  // TODO: what about optional outputs? This assert may not hold
   TORCH_CHECK(stack.size() == schema_returns.size());
 
   int index = 0;
@@ -817,6 +878,36 @@ void OSSProxyExecutor::call_function(
             tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
         *tensor = t;
       }
+    } else if (
+        schema_return.type()->kind() == c10::TypeKind::OptionalType &&
+        schema_return.type()
+                ->castRaw<at::OptionalType>()
+                ->getElementType()
+                ->kind() == c10::TypeKind::TensorType) {
+      if (op_kernel->outputs_[index].arg_type == DynamicArgType::TensorType) {
+        auto stack_tensor = stack[index++].toOptional<at::Tensor>();
+        at::Tensor* tensor =
+            tensor_handle_to_tensor_pointer(flatten_tensor_args[tensor_id++]);
+        if (stack_tensor.has_value()) {
+          *tensor = stack_tensor.value();
+        } else {
+          TORCH_CHECK(false, "Expected tensor, got None");
+        }
+      } else {
+        index++;
+      }
+    } else if (schema_return.real_type()->kind() == c10::TypeKind::IntType) {
+      // need to use real_type() to differentiate between IntType and SymIntType
+      // for int type, it is already specialized in downstream kernels. So we
+      // don't need to do anything here.
+      auto returned_int_value = stack[index++].toInt();
+      auto serialized_int_value = flatten_int_args[int_id++];
+      TORCH_CHECK(
+          returned_int_value == serialized_int_value,
+          "Expect returned int value to match the serialized int value, but got returned int value: ",
+          returned_int_value,
+          " and serialized int value: ",
+          serialized_int_value);
     } else {
       TORCH_CHECK(
           false,
@@ -831,6 +922,13 @@ void OSSProxyExecutor::call_function(
       tensor_id,
       ", expected num = ",
       num_tensors);
+
+  TORCH_CHECK(
+      int_id == num_ints,
+      "Mismatch between tensors consumed and num_ints, got tensor_id = ",
+      int_id,
+      ", expected num = ",
+      num_ints);
 }
 
 } // namespace torch::aot_inductor

@@ -3,7 +3,7 @@
 import contextlib
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -28,8 +28,11 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+BACKEND = dist.get_default_backend_for_device(device_type)
+WORLD_SIZE = min(4, max(2, torch.accelerator.device_count()))
 
 # Constants used for testing post-hooks
 BEFORE_CONSTANT = 41
@@ -97,7 +100,9 @@ class AllReducer(Joinable):
         All-reduces a dim-1 one tensor ``num_allreduces``-many times, and
         returns the total result.
         """
-        Join.notify_join_context(self)
+        work = Join.notify_join_context(self)
+        if work is not None:
+            work.wait()
         device = self.device
         total = 0
         for _ in range(num_allreduces):
@@ -130,7 +135,8 @@ class AllReducer(Joinable):
         common_rank = torch.tensor([rank if to_consider else -1], device=self.device)
         dist.all_reduce(common_rank, op=dist.ReduceOp.MAX, group=self.process_group)
         common_rank = common_rank.item()
-        assert common_rank >= 0
+        if not (common_rank >= 0):
+            raise AssertionError(f"Expected common_rank >= 0, got {common_rank}")
         return common_rank
 
 
@@ -147,7 +153,7 @@ class TestJoin(MultiProcessTestCase):
     def device(self):
         return (
             torch.device(self.rank)
-            if BACKEND == dist.Backend.NCCL
+            if BACKEND == dist.Backend.NCCL or BACKEND == dist.Backend.XCCL
             else torch.device("cpu")
         )
 
@@ -207,7 +213,7 @@ class TestJoin(MultiProcessTestCase):
         throw_on_early_termination: bool,
         num_allreduces: int,
         run_post_hooks: bool,
-        expected_total: Optional[int] = None,
+        expected_total: int | None = None,
     ):
         r"""
         Skeleton for all :class:`Join` tests.
@@ -250,9 +256,11 @@ class TestJoin(MultiProcessTestCase):
             else "Detected at least one rank that exhausted inputs. "
             "Throwing across all ranks."
         )
-        with self.assertRaisesRegex(
-            RuntimeError, expected_msg
-        ) if throw_on_early_termination else contextlib.nullcontext():
+        with (
+            self.assertRaisesRegex(RuntimeError, expected_msg)
+            if throw_on_early_termination
+            else contextlib.nullcontext()
+        ):
             with Join(
                 allreducers,
                 enable=enable,

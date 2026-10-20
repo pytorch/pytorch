@@ -1,16 +1,16 @@
 # Owner(s): ["module: nn"]
 import pickle
-import unittest
 
 import torch
 import torch.nn as nn
 from torch.nn import Buffer, Parameter
 from torch.nn.parameter import UninitializedBuffer, UninitializedParameter
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     suppress_warnings,
-    TEST_PRIVATEUSE1,
     TestCase,
 )
 
@@ -20,6 +20,8 @@ class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
 
 
 class TestLazyModules(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @suppress_warnings
     def test_lazy_module_parameter(self):
         module = LazyModule()
@@ -33,7 +35,7 @@ class TestLazyModules(TestCase):
         new_module.register_parameter("test_param", nn.Parameter(torch.ones(5, 5)))
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             new_module.load_state_dict(state_dict)
-        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        # Uninitialized parameters are overridden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
         new_module.register_parameter("test_param", nn.Parameter(torch.ones(5, 5)))
         module.load_state_dict(new_module.state_dict())
@@ -62,7 +64,7 @@ class TestLazyModules(TestCase):
         new_module.test_buffer = Buffer(torch.ones(5, 5))
         with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
             new_module.load_state_dict(state_dict)
-        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        # Uninitialized parameters are overridden when the state dict to be loaded contains a valid one
         new_module = LazyModule()
         new_module.test_buffer = Buffer(torch.ones(5, 5))
         module.load_state_dict(new_module.state_dict())
@@ -750,25 +752,6 @@ class TestLazyModules(TestCase):
         module.test_param.materialize(10)
         self.assertTrue(module.test_param.dtype == torch.float16)
 
-    @unittest.skipIf(
-        not (TEST_CUDA or TEST_PRIVATEUSE1), "CUDA and PRIVATEUSE1 not available"
-    )
-    @suppress_warnings
-    def test_materialize_device(self):
-        module = LazyModule()
-        module.register_parameter("test_param", UninitializedParameter())
-        module.test_param.materialize(10)
-        self.assertTrue(module.test_param.device.type == "cpu")
-        if TEST_CUDA:
-            device = "cuda"
-        elif TEST_PRIVATEUSE1:
-            device = torch._C._get_privateuse1_backend_name()
-        module = LazyModule()
-        module.register_parameter("test_param", UninitializedParameter())
-        module.to(device)
-        module.test_param.materialize(10)
-        self.assertTrue(module.test_param.device.type == device)
-
     @suppress_warnings
     def test_chained_initialization(self):
         class MyNetwork(torch.nn.Module):
@@ -857,6 +840,27 @@ class TestLazyModules(TestCase):
 
         with self.assertRaisesRegex(ValueError, "uninitialized parameter"):
             param + param
+
+
+class TestLazyModulesDevice(NNTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @suppress_warnings
+    def test_materialize_device(self, device):
+        module = LazyModule()
+        module.register_parameter("test_param", UninitializedParameter())
+        module.test_param.materialize(10)
+        self.assertTrue(module.test_param.device.type == "cpu")
+
+        # Test materialization on the current device
+        module = LazyModule()
+        module.register_parameter("test_param", UninitializedParameter())
+        module.to(device)
+        module.test_param.materialize(10)
+        self.assertEqual(module.test_param.device.type, device.split(":")[0])
+
+
+instantiate_device_type_tests(TestLazyModulesDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

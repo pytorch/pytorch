@@ -5,7 +5,7 @@ namespace detail {
 
 const XPUHooksInterface& getXPUHooks() {
   auto create_impl = [] {
-    auto hooks = XPUHooksRegistry()->Create("XPUHooks", XPUHooksArgs{});
+    auto hooks = XPUHooksRegistry()->Create("XPUHooks");
     if (hooks) {
       return hooks;
     }
@@ -16,6 +16,6 @@ const XPUHooksInterface& getXPUHooks() {
 }
 } // namespace detail
 
-C10_DEFINE_REGISTRY(XPUHooksRegistry, XPUHooksInterface, XPUHooksArgs)
+C10_DEFINE_REGISTRY(XPUHooksRegistry, XPUHooksInterface)
 
 } // namespace at

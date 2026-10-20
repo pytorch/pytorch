@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from dataclasses import dataclass
-from typing import cast, Optional, TYPE_CHECKING, Union
+from typing import cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -36,10 +36,8 @@ class ChunkShardingSpec(ShardingSpec):
     in the placement specified.
 
     Args:
-        dim (int or str):
-            The dimension to shard on, could be an integer representing the
-            dimension or a string in case of named tensors where dimensions are
-            named. Note that named tensor support is not added yet.
+        dim (int):
+            The dimension to shard on, an integer representing the dimension.
         placement(List[Union[_remote_device, str]]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This could
@@ -50,10 +48,10 @@ class ChunkShardingSpec(ShardingSpec):
             :class:`torch.distributed._remote_device`
     """
 
-    ShardingDim = Union[int, str]
+    ShardingDim = int | str
 
     dim: ShardingDim
-    placements: list[Union[torch.distributed._remote_device, str]]
+    placements: list[torch.distributed._remote_device | str]
 
     def __post_init__(self):
         self._verify_dim(self.dim)
@@ -134,7 +132,7 @@ class ChunkShardingSpec(ShardingSpec):
         local_metadata = None
 
         tensors_to_scatter = cast(
-            list[Optional[torch.Tensor]],
+            list[torch.Tensor | None],
             [None] * dist.get_world_size(process_group),
         )
 
@@ -167,6 +165,7 @@ class ChunkShardingSpec(ShardingSpec):
                     )
 
                 tensors_to_scatter[
+                    # pyrefly: ignore [bad-argument-type]
                     dist.get_group_rank(process_group, remote_global_rank)
                 ] = tensor_to_scatter
 
@@ -181,8 +180,10 @@ class ChunkShardingSpec(ShardingSpec):
 
         # each rank should have local_tensor and local_metadata initialized if we build
         # the metadata list in a correct way.
-        assert local_tensor is not None
-        assert local_metadata is not None
+        if local_tensor is None:
+            raise AssertionError
+        if local_metadata is None:
+            raise AssertionError
 
         # Scatter the shards to all ranks in the pg
         # scatter takes the global rank as ``src``
@@ -195,11 +196,12 @@ class ChunkShardingSpec(ShardingSpec):
                 process_group, src_for_scatter
             )
 
-        tensors_to_scatter_: Optional[list[torch.Tensor]] = None
+        tensors_to_scatter_: list[torch.Tensor] | None = None
         if current_rank == src_rank:
             tensors_to_scatter_ = []
             for t in tensors_to_scatter:
-                assert isinstance(t, torch.Tensor)
+                if not isinstance(t, torch.Tensor):
+                    raise AssertionError
                 tensors_to_scatter_.append(t)
 
         dist.scatter(

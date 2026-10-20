@@ -63,8 +63,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-
-    config = json.load(open(args.config_json))
+    with open(args.config_json) as f:
+        config = json.load(f)
     linter_config = config[args.linter][args.platform]
     bucket = linter_config["s3_bucket"]
     object_name = linter_config["object_name"]

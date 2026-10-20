@@ -1,12 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from fnmatch import fnmatch
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
@@ -15,16 +13,16 @@ __all__ = ["parallelize_module"]
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
-    device_mesh: Optional[DeviceMesh] = None,
-    parallelize_plan: Optional[Union[ParallelStyle, dict[str, ParallelStyle]]] = None,
+    device_mesh: DeviceMesh | None = None,
+    parallelize_plan: ParallelStyle | dict[str, ParallelStyle] | None = None,
     *,
-    src_data_rank: Optional[int] = 0,
+    src_data_rank: int | None = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
 
     We parallelize module or sub_modules based on a parallelize_plan. The parallelize_plan contains
-    :class:`ParallelStyle`, which indicates how user wants the module or sub_module
+    :class:`~torch.distributed.tensor.parallel.ParallelStyle`, which indicates how user wants the module or sub_module
     to be parallelized.
 
     User can also specify different parallel style per module fully qualified name (FQN).
@@ -38,11 +36,11 @@ def parallelize_module(  # type: ignore[return]
         device_mesh (:class:`DeviceMesh`, optional):
             Object which describes the mesh topology of devices for the DTensor.
             If not specified, the call must be under a DeviceMesh context.
-        parallelize_plan (Union[:class:`ParallelStyle`, Dict[str, :class:`ParallelStyle`]], optional):
+        parallelize_plan (Union[:class:`~torch.distributed.tensor.parallel.ParallelStyle`, Dict[str, :class:`~torch.distributed.tensor.parallel.ParallelStyle`]], optional):
             The plan used to parallelize the module. It can be either a
-            :class:`ParallelStyle` object which contains how we prepare
+            :class:`~torch.distributed.tensor.parallel.ParallelStyle` object which contains how we prepare
             input/output for Tensor Parallelism or it can be a dict of module
-            FQN and its corresponding :class:`ParallelStyle` object. If not
+            FQN and its corresponding :class:`~torch.distributed.tensor.parallel.ParallelStyle` object. If not
             specified, the call will do nothing at the moment.
     Keyword args:
         src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is used by
@@ -55,7 +53,11 @@ def parallelize_module(  # type: ignore[return]
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
-        >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.tensor.parallel import (
+        ...     ColwiseParallel,
+        ...     parallelize_module,
+        ...     RowwiseParallel,
+        ... )
         >>> from torch.distributed.device_mesh import init_device_mesh
         >>>
         >>> # Define the module.
@@ -66,17 +68,17 @@ def parallelize_module(  # type: ignore[return]
 
     .. note:: For complex module architecture like Attention, MLP layers, we recommend composing
         different ParallelStyles together (i.e. ``ColwiseParallel`` and ``RowwiseParallel``) and pass
-        as a parallelize_plan, to achieves the desired sharding computation.
+        as a parallelize_plan, to achieve the desired sharding computation.
     """
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-    _validate_tp_mesh_dim(device_mesh)
 
     if parallelize_plan is None:
         warnings.warn(
             "No parallelize_plan is provided and auto-parallel is not supported "
-            "at the moment, so this parallelize_module call will do nothing."
+            "at the moment, so this parallelize_module call will do nothing.",
+            stacklevel=2,
         )
         return module
 
@@ -88,39 +90,54 @@ def parallelize_module(  # type: ignore[return]
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
+            if module_path == "":
+                # shortcut: empty string means to apply the plan to the current module
+                parallelize_module(module, device_mesh, parallelize_style)
+                continue
+
             path_splits = module_path.split(".")
-            if len(path_splits) == 0:
-                raise ValueError(
-                    "Expect module path to be non-empty, but got empty string!"
-                )
-            while path_splits:
-                atom = path_splits.pop(0)
-                matched_children = filter(
+            # Instead of blindly popping tokens, first check the match,
+            # we only consume/pop the token if we found a match.
+            token = path_splits[0]
+
+            matched_children = list(
+                filter(
                     # `t[0]` is child name
-                    lambda t: fnmatch(t[0], atom),
+                    lambda t: fnmatch(t[0], token),
                     module.named_children(),
                 )
-                # apply the plan to all matched submodules
-                for _, submodule in matched_children:
-                    if path_splits:
-                        # we haven't reached the leaf, apply in dict style
-                        leaf_path = ".".join(
-                            path_splits
-                        )  # rest of the path after `atom`
-                        parallelize_module(
-                            submodule,
-                            device_mesh,
-                            {leaf_path: parallelize_style},
-                            src_data_rank=src_data_rank,
-                        )
-                    else:
-                        # otherwise, directly apply style to this submodule
-                        parallelize_module(
-                            submodule,
-                            device_mesh,
-                            parallelize_style,
-                            src_data_rank=src_data_rank,
-                        )
+            )
+            if not matched_children:
+                # No match at this level. Log a warning and process next plan entry.
+                warnings.warn(
+                    f"Parallelize plan key '{module_path}' could not be resolved: "
+                    f"no submodule matching token '{token}' in module {module}, "
+                    f"skipping this plan entry.",
+                    stacklevel=2,
+                )
+                continue
+
+            # Now that we have a match, we can consume the token.
+            path_splits.pop(0)
+            # apply the plan to all matched submodules
+            for _, submodule in matched_children:
+                if path_splits:
+                    # we haven't reached the leaf, apply in dict style
+                    leaf_path = ".".join(path_splits)  # rest of the path after `token`
+                    parallelize_module(
+                        submodule,
+                        device_mesh,
+                        {leaf_path: parallelize_style},
+                        src_data_rank=src_data_rank,
+                    )
+                else:
+                    # otherwise, directly apply style to this submodule
+                    parallelize_module(
+                        submodule,
+                        device_mesh,
+                        parallelize_style,
+                        src_data_rank=src_data_rank,
+                    )
         return module
     else:
         raise TypeError(  # pyre-ignore[7]

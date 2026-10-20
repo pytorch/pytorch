@@ -1,6 +1,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
+#include <cstring>
 #include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
@@ -19,32 +20,87 @@
 #else
 #include <ATen/ops/_foreach_max_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
+#include <ATen/ops/_foreach_powsum_native.h>
 
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
 
-// _foreach_norm supports only L1, L2, and inf norm
-enum class NormType { L1, L2, LInf };
+// _foreach_norm supports L0, L1, L2, and inf norm
+enum class NormType { L0, L1, L2, LInf };
 
 // NOTE: This is a simple variant of TensorListMetadata in MultiTensorApply.cuh
 // as we only need to track addresses for the lpnorm_cleanup function below.
 // Why is this struct necessary? For the same reason the TensorListMetadata
 // struct is necessary--which is to ferry static metadata to the CUDA kernel
-// while complying with the 4kb size constraint. Since we only need to track
-// addresses, we introduce this struct to be able to fit more Tensor pointers at
-// a time, currently 400 empirically, compared to the much smaller values in
-// depth_to_max_tensors. This way, we can launch fewer kernels for better
-// performance.
+// while complying with the kernel arg size constraint. Since we only need to
+// track addresses, we introduce this struct to be able to fit more Tensor
+// pointers at a time compared to depth_to_max_tensors. This way, we can
+// launch fewer kernels for better performance.
 //
 // IF YOU USE THIS STRUCT, PLEASE ADD A ONE-OFF TEST IN test_foreach.py AS THIS
 // IS CURRENTLY ONLY TESTED FOR _foreach_norm.
-const size_t MAX_TENSORS_PER_KERNEL = 400;
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000 && !defined(USE_ROCM)
+static constexpr size_t MAX_TENSORS_PER_KERNEL = 3200;
+#else
+static constexpr size_t MAX_TENSORS_PER_KERNEL = 400;
+#endif
 struct TensorListAddresses {
   const void* addresses[MAX_TENSORS_PER_KERNEL];
 };
+
+// Compact, ragged scratch layout for foreach reductions.
+// multi_tensor_apply skips empty tensors and writes partials in non-empty
+// tensor order, so partials are stored at prefix offsets over the non-empty
+// tensors rather than in a rectangular (ntensors x max_chunks) buffer. The
+// rectangular buffer sizes every tensor to the largest tensor's chunk count,
+// which wastes allocation and fill time for ragged lists (e.g. one large
+// embedding alongside many small parameters).
+//
+// chunk_offsets holds num_nonempty+1 prefix offsets (chunk_offsets[0]==0,
+// chunk_offsets[num_nonempty]==total_chunks); a tensor's chunk count is the
+// adjacent difference, so a single small host-to-device buffer serves both the
+// producer (partial write location) and the cleanup (per-tensor slice bounds).
+struct ForeachReductionChunks {
+  Tensor chunk_offsets;
+  int64_t total_chunks;
+  size_t num_nonempty;
+};
+
+inline ForeachReductionChunks compute_foreach_reduction_chunks(
+    TensorList tensors,
+    const TensorOptions& options) {
+  const size_t ntensors = tensors.size();
+  std::vector<int64_t> offsets_host;
+  offsets_host.reserve(ntensors + 1);
+  int64_t total_chunks = 0;
+  for (const auto t : c10::irange(ntensors)) {
+    const auto numel = tensors[t].numel();
+    if (numel == 0) {
+      continue;
+    }
+    offsets_host.push_back(total_chunks);
+    total_chunks += (numel + kChunkSize - 1) / kChunkSize;
+  }
+  const size_t num_nonempty = offsets_host.size();
+  offsets_host.push_back(total_chunks);
+
+  auto offsets_cpu = at::empty(
+      {static_cast<int64_t>(num_nonempty + 1)},
+      at::TensorOptions().dtype(at::kLong).device(at::kCPU).pinned_memory(
+          true));
+  std::memcpy(
+      offsets_cpu.mutable_data_ptr<int64_t>(),
+      offsets_host.data(),
+      (num_nonempty + 1) * sizeof(int64_t));
+  return ForeachReductionChunks{
+      offsets_cpu.to(options.device(), /*non_blocking=*/true),
+      total_chunks,
+      num_nonempty};
+}
 
 template <
     typename T,
@@ -53,10 +109,10 @@ template <
     int res_arg_index = 0>
 struct LpMaxFunctor {
   __device__ __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       T* output_per_tensor_ptr,
-      const int max_chunks_per_tensor) {
+      const int64_t* chunk_offsets) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];
@@ -105,7 +161,7 @@ struct LpMaxFunctor {
 
     if (threadIdx.x == 0) {
       output_per_tensor_ptr
-          [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
+          [chunk_offsets[tl.start_tensor_this_launch + tensor_loc] +
            chunk_idx] = final_val;
     }
   }
@@ -115,12 +171,15 @@ template <typename T>
 __global__ void lpmax_cleanup(
     const T* output_per_tensor,
     TensorListAddresses addr_struct,
-    int max_chunks_per_tensor) {
+    const int64_t* chunk_offsets,
+    int base_tensor) {
   __shared__ T vals[512];
-  const T* output_this_tensor =
-      output_per_tensor + blockIdx.x * max_chunks_per_tensor;
+  const int64_t g = base_tensor + blockIdx.x;
+  const int64_t offset = chunk_offsets[g];
+  const T* output_this_tensor = output_per_tensor + offset;
+  const int64_t num_chunks = chunk_offsets[g + 1] - offset;
   T val = std::numeric_limits<T>::lowest();
-  for (size_t i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
+  for (int32_t i = threadIdx.x; i < num_chunks; i += blockDim.x) {
     val = max_propagate_nan(val, output_this_tensor[i]);
   }
   T final_val = at::native::cuda_utils::BlockReduceMax(val, vals);
@@ -131,35 +190,31 @@ __global__ void lpmax_cleanup(
 
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
-  if (!can_use_fast_route(tensors)) {
-    return foreach_tensor_max_slow(tensors);
-  }
 
-  // for parity with max in ReduceAllOps.cpp, as max(empty) is ???
+  // for parity with max in ReduceAllOps.cpp, as max(empty) is undefined
+  // Check this early before routing to slow path
   TORCH_CHECK(
       std::all_of(
           tensors.begin(),
           tensors.end(),
           [](const auto& t) { return t.numel() > 0; }),
-      "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
+      "_foreach_max cannot compute the maximum of an empty tensor; max over zero elements is undefined.");
+
+  if (!can_use_fast_route(tensors)) {
+    return foreach_tensor_max_slow(tensors);
+  }
 
   const size_t ntensors = tensors.size();
-  int max_chunks_per_tensor = -1;
-
-  for (const auto t : c10::irange(ntensors)) {
-    int max_chunks_this_tensor =
-        (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
-    if (max_chunks_this_tensor > max_chunks_per_tensor) {
-      max_chunks_per_tensor = max_chunks_this_tensor;
-    }
-  }
   const auto options = tensors[0].options();
-  auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor}, options);
+  const auto chunk_meta = compute_foreach_reduction_chunks(tensors, options);
+  const int64_t* chunk_offsets_ptr =
+      chunk_meta.chunk_offsets.const_data_ptr<int64_t>();
+
+  Tensor output_per_tensor;
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
-  for (const auto i : c10::irange(ntensors)) {
+  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
     vec_res.push_back(at::native::empty_cuda(
         {},
         optTypeMetaToScalarType(options.dtype_opt()),
@@ -169,7 +224,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
         options.memory_format_opt()));
   }
 
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
 
   AT_DISPATCH_ALL_TYPES_AND3(
       kHalf,
@@ -178,35 +233,40 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       tensor_lists[0][0].scalar_type(),
       "foreach_tensor_max_cuda_scalar_type",
       [&]() {
+        output_per_tensor = at::empty({chunk_meta.total_chunks}, options);
+
         multi_tensor_apply<1>(
             tensor_lists,
             LpMaxFunctor<scalar_t>(),
             output_per_tensor.mutable_data_ptr<scalar_t>(),
-            max_chunks_per_tensor);
+            chunk_offsets_ptr);
 
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         const at::cuda::OptionalCUDAGuard device_guard(
             device_of(output_per_tensor));
         auto stream = at::cuda::getCurrentCUDAStream();
 
-        const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
+        const size_t num_kernels =
+            ceil_div(chunk_meta.num_nonempty, MAX_TENSORS_PER_KERNEL);
         for (const auto i : c10::irange(num_kernels)) {
           const size_t num_tensors_this_kernel =
-              (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
+              (i < num_kernels - 1 ||
+               chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL == 0)
               ? MAX_TENSORS_PER_KERNEL
-              : (ntensors % MAX_TENSORS_PER_KERNEL);
+              : (chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL);
 
           TensorListAddresses addr_struct;
           for (const auto j : c10::irange(num_tensors_this_kernel)) {
             addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                                            .mutable_data_ptr<scalar_t>();
           }
+          const int base_tensor = static_cast<int>(i * MAX_TENSORS_PER_KERNEL);
 
           lpmax_cleanup<scalar_t><<<num_tensors_this_kernel, 512, 0, stream>>>(
-              output_per_tensor.const_data_ptr<scalar_t>() +
-                  i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
+              output_per_tensor.const_data_ptr<scalar_t>(),
               addr_struct,
-              max_chunks_per_tensor);
+              chunk_offsets_ptr,
+              base_tensor);
         }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
@@ -218,7 +278,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   int i = 0;
   for (const auto& t : tensors) {
     if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
+      result.emplace_back(std::move(vec_res[i]));
       i++;
     } else {
       result.emplace_back(at::native::empty_cuda(
@@ -233,6 +293,15 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   return result;
 }
 
+template <NormType norm_type, typename T>
+__device__ T block_reduce_norm(T val, T* shared) {
+  if constexpr (norm_type == NormType::LInf) {
+    return at::native::cuda_utils::BlockReduceMax(val, shared);
+  } else {
+    return at::native::cuda_utils::BlockReduceSum(val, shared);
+  }
+}
+
 template <
     typename T,
     NormType norm_type,
@@ -243,10 +312,10 @@ template <
 struct LpNormFunctor {
   using out_opmath_t = typename at::opmath_type<out_t>;
   __device__ __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
-      const int max_chunks_per_tensor) {
+      const int64_t* chunk_offsets) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     auto n = tl.numel_for_tensor[tensor_loc];
@@ -272,7 +341,10 @@ struct LpNormFunctor {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           const auto next = static_cast<out_opmath_t>(r_x[ii]);
-          if constexpr (norm_type == NormType::LInf) {
+          if constexpr (norm_type == NormType::L0) {
+            vals[ii] +=
+                next != out_opmath_t(0) ? out_opmath_t(1) : out_opmath_t(0);
+          } else if constexpr (norm_type == NormType::LInf) {
             vals[ii] = max_propagate_nan(vals[ii], ::abs(next));
           } else {
             vals[ii] += norm_type == NormType::L1 ? ::abs(next) : next * next;
@@ -287,7 +359,10 @@ struct LpNormFunctor {
           int i = i_start + threadIdx.x + ii * blockDim.x;
           if (i < n && i < chunk_size) {
             const auto next = static_cast<out_opmath_t>(x[i]);
-            if constexpr (norm_type == NormType::LInf) {
+            if constexpr (norm_type == NormType::L0) {
+              vals[ii] +=
+                  next != out_opmath_t(0) ? out_opmath_t(1) : out_opmath_t(0);
+            } else if constexpr (norm_type == NormType::LInf) {
               vals[ii] = max_propagate_nan(vals[ii], ::abs(next));
             } else {
               vals[ii] += norm_type == NormType::L1 ? ::abs(next) : next * next;
@@ -305,13 +380,11 @@ struct LpNormFunctor {
         val += vals[i];
       }
     }
-    auto final_val = norm_type == NormType::L1 || norm_type == NormType::L2
-        ? at::native::cuda_utils::BlockReduceSum(val, s_vals)
-        : at::native::cuda_utils::BlockReduceMax(val, s_vals);
+    const auto final_val = block_reduce_norm<norm_type>(val, s_vals);
 
     if (threadIdx.x == 0) {
       output_per_tensor_ptr
-          [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
+          [chunk_offsets[tl.start_tensor_this_launch + tensor_loc] +
            chunk_idx] = final_val;
     }
   }
@@ -321,32 +394,34 @@ template <
     typename T,
     NormType norm_type,
     typename out_t,
+    bool apply_root = true,
     typename out_opmath_t = at::opmath_type<out_t>>
 __global__ void lpnorm_cleanup(
     const out_opmath_t* output_per_tensor,
     TensorListAddresses addr_struct,
-    int max_chunks_per_tensor) {
+    const int64_t* chunk_offsets,
+    int base_tensor) {
   __shared__ out_opmath_t vals[512];
 
-  const out_opmath_t* output_this_tensor =
-      output_per_tensor + blockIdx.x * max_chunks_per_tensor;
+  const int64_t g = base_tensor + blockIdx.x;
+  const int64_t offset = chunk_offsets[g];
+  const out_opmath_t* output_this_tensor = output_per_tensor + offset;
+  const int64_t num_chunks = chunk_offsets[g + 1] - offset;
   out_opmath_t val = 0;
-  for (size_t i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
+  for (int32_t i = threadIdx.x; i < num_chunks; i += blockDim.x) {
     if constexpr (norm_type == NormType::LInf) {
       val = max_propagate_nan(val, output_this_tensor[i]);
     } else {
       val += output_this_tensor[i];
     }
   }
-  out_opmath_t final_val =
-      norm_type == NormType::L1 || norm_type == NormType::L2
-      ? at::native::cuda_utils::BlockReduceSum<out_opmath_t>(val, vals)
-      : at::native::cuda_utils::BlockReduceMax(val, vals);
+  const auto final_val = block_reduce_norm<norm_type>(val, vals);
   if (threadIdx.x == 0) {
-    *(out_t*)addr_struct.addresses[blockIdx.x] =
-        norm_type == NormType::L1 || norm_type == NormType::LInf
-        ? final_val
-        : ::sqrt(final_val);
+    out_opmath_t result = final_val;
+    if constexpr (apply_root && norm_type == NormType::L2) {
+      result = ::sqrt(final_val);
+    }
+    *(out_t*)addr_struct.addresses[blockIdx.x] = result;
   }
 }
 
@@ -399,6 +474,172 @@ inline void check_foreach_norm_dtype(
                   AT_PRIVATE_CASE_TYPE_USING_HINT(          \
                       at::ScalarType::BFloat16, out_t, __VA_ARGS__))
 
+// Traits struct for dispatch function names - MSVC requires this pattern
+// instead of constexpr ternary for string literals used in AT_DISPATCH macros
+template <bool apply_root>
+struct ForeachNormDispatchName;
+
+template <>
+struct ForeachNormDispatchName<true> {
+  static constexpr const char* value = "foreach_tensor_norm_cuda";
+};
+
+template <>
+struct ForeachNormDispatchName<false> {
+  static constexpr const char* value = "foreach_tensor_powsum_cuda";
+};
+
+// Internal implementation for foreach_tensor_norm_cuda and
+// foreach_tensor_powsum_cuda apply_root: if true, applies sqrt for L2 norm; if
+// false, returns raw sum support_infinity: if true, includes L-infinity norm
+// handling
+template <bool apply_root, bool support_infinity>
+std::vector<Tensor> foreach_tensor_norm_cuda_internal(
+    TensorList tensors,
+    double p,
+    std::optional<ScalarType> dtype) {
+  const size_t ntensors = tensors.size();
+  const auto options = tensors[0].options();
+  const auto chunk_meta = compute_foreach_reduction_chunks(tensors, options);
+  const int64_t* chunk_offsets_ptr =
+      chunk_meta.chunk_offsets.const_data_ptr<int64_t>();
+  const ScalarType output_dtype =
+      dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
+  const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
+  auto output_per_tensor = at::empty(
+      {chunk_meta.total_chunks}, options.dtype(output_per_tensor_dtype));
+
+  std::vector<at::Tensor> vec_res;
+  vec_res.reserve(ntensors);
+  const auto res_option = options.dtype(output_dtype);
+  for ([[maybe_unused]] const auto i : c10::irange(ntensors)) {
+    vec_res.push_back(at::native::empty_cuda(
+        {},
+        optTypeMetaToScalarType(res_option.dtype_opt()),
+        res_option.layout_opt(),
+        res_option.device_opt(),
+        res_option.pinned_memory_opt(),
+        res_option.memory_format_opt()));
+  }
+
+  auto tensor_lists = c10::make_nested<Tensor>(tensors.vec());
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      c10::kBFloat16,
+      tensor_lists[0][0].scalar_type(),
+      ForeachNormDispatchName<apply_root>::value,
+      [&]() {
+        AT_DISPATCH_OUT_DTYPES(
+            output_dtype, ForeachNormDispatchName<apply_root>::value, [&]() {
+              using out_opmath_t = typename at::opmath_type<out_t>;
+              if (p == static_cast<double>(0)) {
+                multi_tensor_apply<1>(
+                    tensor_lists,
+                    LpNormFunctor<scalar_t, NormType::L0, out_t>(),
+                    output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
+                    chunk_offsets_ptr);
+              } else if (p == static_cast<double>(1)) {
+                multi_tensor_apply<1>(
+                    tensor_lists,
+                    LpNormFunctor<scalar_t, NormType::L1, out_t>(),
+                    output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
+                    chunk_offsets_ptr);
+              } else if (p == static_cast<double>(2)) {
+                multi_tensor_apply<1>(
+                    tensor_lists,
+                    LpNormFunctor<scalar_t, NormType::L2, out_t>(),
+                    output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
+                    chunk_offsets_ptr);
+              } else if constexpr (support_infinity) {
+                if (p == std::numeric_limits<double>::infinity()) {
+                  multi_tensor_apply<1>(
+                      tensor_lists,
+                      LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
+                      output_per_tensor
+                          .template mutable_data_ptr<out_opmath_t>(),
+                      chunk_offsets_ptr);
+                }
+              }
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              const at::cuda::OptionalCUDAGuard device_guard(
+                  device_of(output_per_tensor));
+              auto stream = at::cuda::getCurrentCUDAStream();
+
+              const size_t num_kernels =
+                  ceil_div(chunk_meta.num_nonempty, MAX_TENSORS_PER_KERNEL);
+              for (const auto i : c10::irange(num_kernels)) {
+                const size_t num_tensors_this_kernel =
+                    (i < num_kernels - 1 ||
+                     chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL == 0)
+                    ? MAX_TENSORS_PER_KERNEL
+                    : (chunk_meta.num_nonempty % MAX_TENSORS_PER_KERNEL);
+
+                TensorListAddresses addr_struct;
+                for (const auto j : c10::irange(num_tensors_this_kernel)) {
+                  addr_struct.addresses[j] =
+                      vec_res[i * MAX_TENSORS_PER_KERNEL + j]
+                          .template mutable_data_ptr<out_t>();
+                }
+                const int base_tensor =
+                    static_cast<int>(i * MAX_TENSORS_PER_KERNEL);
+
+                if (p == static_cast<double>(0)) {
+                  lpnorm_cleanup<scalar_t, NormType::L0, out_t, apply_root>
+                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                          output_per_tensor
+                              .template const_data_ptr<out_opmath_t>(),
+                          addr_struct,
+                          chunk_offsets_ptr,
+                          base_tensor);
+                } else if (p == static_cast<double>(1)) {
+                  lpnorm_cleanup<scalar_t, NormType::L1, out_t, apply_root>
+                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                          output_per_tensor
+                              .template const_data_ptr<out_opmath_t>(),
+                          addr_struct,
+                          chunk_offsets_ptr,
+                          base_tensor);
+                } else if (p == static_cast<double>(2)) {
+                  lpnorm_cleanup<scalar_t, NormType::L2, out_t, apply_root>
+                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                          output_per_tensor
+                              .template const_data_ptr<out_opmath_t>(),
+                          addr_struct,
+                          chunk_offsets_ptr,
+                          base_tensor);
+                } else if constexpr (support_infinity) {
+                  if (p == std::numeric_limits<double>::infinity()) {
+                    lpnorm_cleanup<scalar_t, NormType::LInf, out_t, apply_root>
+                        <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                            output_per_tensor
+                                .template const_data_ptr<out_opmath_t>(),
+                            addr_struct,
+                            chunk_offsets_ptr,
+                            base_tensor);
+                  }
+                }
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }
+            });
+      });
+
+  // correctly assign values to only non-empty slots, as the empty slots should
+  // get skipped
+  std::vector<Tensor> result;
+  result.reserve(ntensors);
+  int i = 0;
+  for (const auto& t : tensors) {
+    if (t.numel() != 0) {
+      result.emplace_back(std::move(vec_res[i]));
+      i++;
+    } else {
+      result.emplace_back(at::zeros({}, res_option));
+    }
+  }
+  return result;
+}
+
 // note(mkozuki): Why excluding Int and Complex from fast path
 // - Int: at::norm does not support.
 // - Complex: __shfl_down_sync does not support complex and foreach does not
@@ -418,147 +659,78 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
     }
   }();
   check_foreach_api_restrictions(tensors);
-  const bool has_int_or_complex =
-      std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
-        const auto scalar_type = t.scalar_type();
-        return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
-            at::isComplexType(scalar_type);
-      });
+  // If the tensor is empty and norm == infty, we cannot compute the norm
+  // because the operation does not have an identity. Also populate the
+  // has_int_or_complex flag.
+  bool has_int_or_complex = false;
+  if (p == std::numeric_limits<double>::infinity()) {
+    for (const auto& t : tensors) {
+      TORCH_SYM_CHECK(
+          t.sym_numel().sym_gt(0),
+          "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
+      const auto scalar_type = t.scalar_type();
+      if (at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+          at::isComplexType(scalar_type)) {
+        has_int_or_complex = true;
+      }
+    }
+  } else {
+    has_int_or_complex =
+        std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
+          const auto scalar_type = t.scalar_type();
+          return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+              at::isComplexType(scalar_type);
+        });
+  }
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
-      !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
+      !(p == static_cast<double>(0) || p == static_cast<double>(1) ||
+        p == static_cast<double>(2) ||
         p == std::numeric_limits<double>::infinity())) {
     return foreach_tensor_norm_slow(tensors, ord, dtype);
   }
   check_foreach_norm_dtype(
       dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
 
-  const size_t ntensors = tensors.size();
-  int max_chunks_per_tensor = -1;
+  return foreach_tensor_norm_cuda_internal<
+      /*apply_root=*/true,
+      /*support_infinity=*/true>(tensors, p, dtype);
+}
 
-  for (const auto t : c10::irange(ntensors)) {
-    int max_chunks_this_tensor =
-        (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
-    if (max_chunks_this_tensor > max_chunks_per_tensor) {
-      max_chunks_per_tensor = max_chunks_this_tensor;
-    }
-  }
-  const auto options = tensors[0].options();
-  const ScalarType output_dtype =
-      dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
-  const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
-  auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
-      options.dtype(output_per_tensor_dtype));
-
-  std::vector<at::Tensor> vec_res;
-  vec_res.reserve(ntensors);
-  const auto res_option = options.dtype(output_dtype);
-  for (const auto i : c10::irange(ntensors)) {
-    vec_res.push_back(at::native::empty_cuda(
-        {},
-        optTypeMetaToScalarType(res_option.dtype_opt()),
-        res_option.layout_opt(),
-        res_option.device_opt(),
-        res_option.pinned_memory_opt(),
-        res_option.memory_format_opt()));
-  }
-
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
-
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      kHalf,
-      c10::kBFloat16,
-      tensor_lists[0][0].scalar_type(),
-      "foreach_tensor_norm_cuda_scalar_type",
-      [&]() {
-        // using opmath_t = typename at::opmath_type<scalar_t>;
-        AT_DISPATCH_OUT_DTYPES(
-            output_dtype, "foreach_tensor_norm_cuda_out_dtype", [&]() {
-              using out_opmath_t = typename at::opmath_type<out_t>;
-              if (p == static_cast<double>(1)) {
-                multi_tensor_apply<1>(
-                    tensor_lists,
-                    LpNormFunctor<scalar_t, NormType::L1, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
-              } else if (p == static_cast<double>(2)) {
-                multi_tensor_apply<1>(
-                    tensor_lists,
-                    LpNormFunctor<scalar_t, NormType::L2, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
-              } else if (p == std::numeric_limits<double>::infinity()) {
-                multi_tensor_apply<1>(
-                    tensor_lists,
-                    LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_chunks_per_tensor);
-              }
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
-              const at::cuda::OptionalCUDAGuard device_guard(
-                  device_of(output_per_tensor));
-              auto stream = at::cuda::getCurrentCUDAStream();
-
-              const size_t num_kernels =
-                  ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-              for (const auto i : c10::irange(num_kernels)) {
-                const size_t num_tensors_this_kernel =
-                    (i < num_kernels - 1 ||
-                     ntensors % MAX_TENSORS_PER_KERNEL == 0)
-                    ? MAX_TENSORS_PER_KERNEL
-                    : (ntensors % MAX_TENSORS_PER_KERNEL);
-
-                TensorListAddresses addr_struct;
-                for (const auto j : c10::irange(num_tensors_this_kernel)) {
-                  addr_struct.addresses[j] =
-                      vec_res[i * MAX_TENSORS_PER_KERNEL + j]
-                          .mutable_data_ptr<out_t>();
-                }
-
-                if (p == static_cast<double>(1)) {
-                  lpnorm_cleanup<scalar_t, NormType::L1, out_t>
-                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                          output_per_tensor.const_data_ptr<out_opmath_t>() +
-                              i * MAX_TENSORS_PER_KERNEL *
-                                  max_chunks_per_tensor,
-                          addr_struct,
-                          max_chunks_per_tensor);
-                } else if (p == static_cast<double>(2)) {
-                  lpnorm_cleanup<scalar_t, NormType::L2, out_t>
-                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                          output_per_tensor.const_data_ptr<out_opmath_t>() +
-                              i * MAX_TENSORS_PER_KERNEL *
-                                  max_chunks_per_tensor,
-                          addr_struct,
-                          max_chunks_per_tensor);
-                } else if (p == std::numeric_limits<double>::infinity()) {
-                  lpnorm_cleanup<scalar_t, NormType::LInf, out_t>
-                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                          output_per_tensor.const_data_ptr<out_opmath_t>() +
-                              i * MAX_TENSORS_PER_KERNEL *
-                                  max_chunks_per_tensor,
-                          addr_struct,
-                          max_chunks_per_tensor);
-                }
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
-              }
-            });
-      });
-
-  // correctly assign values to only non-empty slots, as the empty slots should
-  // get skipped
-  std::vector<Tensor> result;
-  result.reserve(ntensors);
-  int i = 0;
-  for (const auto& t : tensors) {
-    if (t.numel() != 0) {
-      result.emplace_back(vec_res[i]);
-      i++;
+// _foreach_powsum: like _foreach_norm but returns sum(|x|^p) without the root
+// Fast path only for p=1 and p=2; other values fall back to slow path
+std::vector<Tensor> foreach_tensor_powsum_cuda(
+    TensorList tensors,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  const auto p = [&]() -> double {
+    if (ord.isIntegral(false)) {
+      return ord.to<int64_t>();
+    } else if (ord.isFloatingPoint()) {
+      return ord.to<double>();
     } else {
-      result.emplace_back(at::zeros({}, res_option));
+      TORCH_CHECK(
+          false,
+          "foreach_tensor_powsum_cuda expects ord to be integer or float");
     }
+  }();
+  check_foreach_api_restrictions(tensors);
+  const bool has_int_or_complex =
+      std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
+        const auto scalar_type = t.scalar_type();
+        return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+            at::isComplexType(scalar_type);
+      });
+  // Only use fast path for p=1 or p=2
+  if (!can_use_fast_route(tensors) || has_int_or_complex ||
+      !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
+    return foreach_tensor_powsum_slow(tensors, ord, dtype);
   }
-  return result;
+  check_foreach_norm_dtype(
+      dtype, tensors[0].scalar_type(), "_foreach_tensor_powsum_cuda");
+
+  return foreach_tensor_norm_cuda_internal<
+      /*apply_root=*/false,
+      /*support_infinity=*/false>(tensors, p, dtype);
 }
 
 #undef AT_DISPATCH_OUT_DTYPES

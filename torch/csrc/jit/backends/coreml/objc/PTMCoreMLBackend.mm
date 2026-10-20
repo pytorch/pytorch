@@ -20,18 +20,15 @@
 // useful info extracted from the NSError.
 #define COREML_THROW_IF_ERROR(error, preamble, ...)     \
   do {                                                                           \
-    if C10_LIKELY(error) {                                                       \
-      throw c10::Error(                                                          \
-          {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},                 \
-          c10::str(                                                              \
-              preamble,                                                          \
-              " Error details: ",                                                \
-              " Localized_description: ", error.localizedDescription.UTF8String, \
-              " Domain: ", error.domain.UTF8String,                              \
-              " Code: ", error.code,                                             \
-              " User Info: ", error.userInfo.description.UTF8String,             \
-              ##__VA_ARGS__));                                                   \
-    }                                                                            \
+    TORCH_CHECK(                                                                 \
+        !(error),                                                                \
+        preamble,                                                                \
+        " Error details: ",                                                      \
+        " Localized_description: ", error.localizedDescription.UTF8String,       \
+        " Domain: ", error.domain.UTF8String,                                    \
+        " Code: ", error.code,                                                   \
+        " User Info: ", error.userInfo.description.UTF8String,                   \
+        ##__VA_ARGS__);                                                          \
   } while (false)
 
 namespace torch {
@@ -143,7 +140,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       config = extra_json["config"].get<CoreMLConfig>();
       input_specs = extra_json["inputs"].get<std::vector<TensorSpec>>();
       output_specs = extra_json["outputs"].get<std::vector<TensorSpec>>();
-    } catch (std::exception& exn) {
+    } catch (std::exception&) {
       TORCH_CHECK(false, "Parsing model dict failed!");
     }
 
@@ -213,8 +210,9 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
 #elif TARGET_OS_MAC
     NSOperatingSystemVersion supportedVer = {10, 13, 0};
     return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:supportedVer];
-#endif
+#else
     return false;
+#endif
   }
 };
 

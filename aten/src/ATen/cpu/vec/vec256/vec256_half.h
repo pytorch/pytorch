@@ -13,8 +13,11 @@ inline namespace CPU_CAPABILITY {
 #ifdef CPU_CAPABILITY_AVX2
 
 template <>
-class Vectorized<Half>: public Vectorized16<Half> {
-public:
+struct is_vec_specialized_for<Half> : std::bool_constant<true> {};
+
+template <>
+class Vectorized<Half> : public Vectorized16<Half> {
+ public:
   using Vectorized16::Vectorized16;
 
   using value_type = Half;
@@ -29,44 +32,72 @@ public:
   Vectorized<Half> le(const Vectorized<Half>& other) const;
 };
 
-Vectorized<Half> inline operator+(const Vectorized<Half>& a, const Vectorized<Half>& b) {
-  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_add_ps(x, y); });
+Vectorized<Half> inline operator+(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
+  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) {
+    return _mm256_add_ps(x, y);
+  });
 }
-Vectorized<Half> inline operator-(const Vectorized<Half>& a, const Vectorized<Half>& b) {
-  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_sub_ps(x, y); });
+Vectorized<Half> inline operator-(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
+  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) {
+    return _mm256_sub_ps(x, y);
+  });
 }
-Vectorized<Half> inline operator*(const Vectorized<Half>& a, const Vectorized<Half>& b) {
-  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_mul_ps(x, y); });
+Vectorized<Half> inline operator*(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
+  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) {
+    return _mm256_mul_ps(x, y);
+  });
 }
-Vectorized<Half> inline operator/(const Vectorized<Half>& a, const Vectorized<Half>& b) {
-  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) { return _mm256_div_ps(x, y); });
+Vectorized<Half> inline operator/(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
+  return binary_op_as_fp32(a, b, [](const __m256& x, const __m256& y) {
+    return _mm256_div_ps(x, y);
+  });
 }
-Vectorized<Half> inline operator&(const Vectorized<Half>& a, const Vectorized<Half>& b) {
+Vectorized<Half> inline operator&(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
   return _mm256_and_si256(a, b);
 }
-Vectorized<Half> inline operator|(const Vectorized<Half>& a, const Vectorized<Half>& b) {
+Vectorized<Half> inline operator|(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
   return _mm256_or_si256(a, b);
 }
-Vectorized<Half> inline operator^(const Vectorized<Half>& a, const Vectorized<Half>& b) {
+Vectorized<Half> inline operator^(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
   return _mm256_xor_si256(a, b);
 }
 
-inline Vectorized<Half> Vectorized<Half>::eq(const Vectorized<Half>& other) const {
+inline Vectorized<Half> Vectorized<Half>::eq(
+    const Vectorized<Half>& other) const {
   return (*this == other) & Vectorized<Half>(1.0f);
 }
-inline Vectorized<Half> Vectorized<Half>::ne(const Vectorized<Half>& other) const {
+inline Vectorized<Half> Vectorized<Half>::ne(
+    const Vectorized<Half>& other) const {
   return (*this != other) & Vectorized<Half>(1.0f);
 }
-inline Vectorized<Half> Vectorized<Half>::gt(const Vectorized<Half>& other) const {
+inline Vectorized<Half> Vectorized<Half>::gt(
+    const Vectorized<Half>& other) const {
   return (*this > other) & Vectorized<Half>(1.0f);
 }
-inline Vectorized<Half> Vectorized<Half>::ge(const Vectorized<Half>& other) const {
+inline Vectorized<Half> Vectorized<Half>::ge(
+    const Vectorized<Half>& other) const {
   return (*this >= other) & Vectorized<Half>(1.0f);
 }
-inline Vectorized<Half> Vectorized<Half>::lt(const Vectorized<Half>& other) const {
+inline Vectorized<Half> Vectorized<Half>::lt(
+    const Vectorized<Half>& other) const {
   return (*this < other) & Vectorized<Half>(1.0f);
 }
-inline Vectorized<Half> Vectorized<Half>::le(const Vectorized<Half>& other) const {
+inline Vectorized<Half> Vectorized<Half>::le(
+    const Vectorized<Half>& other) const {
   return (*this <= other) & Vectorized<Half>(1.0f);
 }
 
@@ -78,7 +109,9 @@ inline Vectorized<Half> Vectorized<Half>::frac() const {
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<Half> inline maximum(const Vectorized<Half>& a, const Vectorized<Half>& b) {
+Vectorized<Half> inline maximum(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
   __m256 a_lo, a_hi;
   __m256 b_lo, b_hi;
   cvtfp16_fp32(__m256i(a), a_lo, a_hi);
@@ -96,7 +129,9 @@ Vectorized<Half> inline maximum(const Vectorized<Half>& a, const Vectorized<Half
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<Half> inline minimum(const Vectorized<Half>& a, const Vectorized<Half>& b) {
+Vectorized<Half> inline minimum(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b) {
   __m256 a_lo, a_hi;
   __m256 b_lo, b_hi;
   cvtfp16_fp32(__m256i(a), a_lo, a_hi);
@@ -112,8 +147,10 @@ Vectorized<Half> inline minimum(const Vectorized<Half>& a, const Vectorized<Half
 }
 
 template <>
-Vectorized<Half> inline clamp(const Vectorized<Half>& a,
-    const Vectorized<Half>& min, const Vectorized<Half>& max) {
+Vectorized<Half> inline clamp(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& min,
+    const Vectorized<Half>& max) {
   __m256 a_lo, a_hi;
   __m256 min_lo, min_hi;
   __m256 max_lo, max_hi;
@@ -126,7 +163,9 @@ Vectorized<Half> inline clamp(const Vectorized<Half>& a,
 }
 
 template <>
-Vectorized<Half> inline clamp_max(const Vectorized<Half>& a, const Vectorized<Half>& max) {
+Vectorized<Half> inline clamp_max(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& max) {
   __m256 a_lo, a_hi;
   __m256 max_lo, max_hi;
   cvtfp16_fp32(__m256i(a), a_lo, a_hi);
@@ -137,7 +176,9 @@ Vectorized<Half> inline clamp_max(const Vectorized<Half>& a, const Vectorized<Ha
 }
 
 template <>
-Vectorized<Half> inline clamp_min(const Vectorized<Half>& a, const Vectorized<Half>& min) {
+Vectorized<Half> inline clamp_min(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& min) {
   __m256 a_lo, a_hi;
   __m256 min_lo, min_hi;
   cvtfp16_fp32(__m256i(a), a_lo, a_hi);
@@ -153,8 +194,10 @@ inline void convert(const Half* src, Half* dst, int64_t n) {
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
-  for (i = 0; i <= (n - Vectorized<Half>::size()); i += Vectorized<Half>::size()) {
-    auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
+  for (i = 0; i <= (n - Vectorized<Half>::size());
+       i += Vectorized<Half>::size()) {
+    auto vsrc =
+        _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
     _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
   }
 #ifndef __msvc_cl__
@@ -168,7 +211,8 @@ inline void convert(const Half* src, Half* dst, int64_t n) {
 template <>
 inline void convert(const float* src, Half* dst, int64_t n) {
   int64_t i;
-  for (i = 0; i + Vectorized<Half>::size() <= n; i += Vectorized<Half>::size()) {
+  for (i = 0; i + Vectorized<Half>::size() <= n;
+       i += Vectorized<Half>::size()) {
     __m256 a = _mm256_loadu_ps(&src[i]);
     __m256 b = _mm256_loadu_ps(&src[i + 8]);
 
@@ -182,7 +226,7 @@ inline void convert(const float* src, Half* dst, int64_t n) {
 
 template <>
 inline void convert(const double* src, Half* dst, int64_t n) {
-  auto load_float = [](const double *src) -> __m256 {
+  auto load_float = [](const double* src) -> __m256 {
     // Load one float vector from an array of doubles
     __m128 a = _mm256_cvtpd_ps(_mm256_loadu_pd(src));
     __m128 b = _mm256_cvtpd_ps(_mm256_loadu_pd(src + 4));
@@ -190,7 +234,8 @@ inline void convert(const double* src, Half* dst, int64_t n) {
   };
 
   int64_t i;
-  for (i = 0; i + Vectorized<Half>::size() <= n; i += Vectorized<Half>::size()) {
+  for (i = 0; i + Vectorized<Half>::size() <= n;
+       i += Vectorized<Half>::size()) {
     __m256 a = load_float(&src[i]);
     __m256 b = load_float(&src[i + 8]);
 
@@ -203,8 +248,10 @@ inline void convert(const double* src, Half* dst, int64_t n) {
 }
 
 template <>
-Vectorized<Half> inline fmadd(const Vectorized<Half>& a,
-    const Vectorized<Half>& b, const Vectorized<Half>& c) {
+Vectorized<Half> inline fmadd(
+    const Vectorized<Half>& a,
+    const Vectorized<Half>& b,
+    const Vectorized<Half>& c) {
   __m256 a_lo, a_hi;
   __m256 b_lo, b_hi;
   __m256 c_lo, c_hi;
@@ -221,10 +268,13 @@ LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
-#if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
+#if !(                                                                      \
+    defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
+    !defined(CPU_CAPABILITY_SVE256))
 CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 #endif // defined(CPU_CAPABILITY_AVX2)
-}} // namsepace at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

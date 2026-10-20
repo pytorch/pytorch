@@ -2,26 +2,23 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor._ops._common_rules import einop_rule, pointwise_rule
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
+    DTensorContinuousTestBase,
 )
 
 
 aten = torch.ops.aten
 
 
-class CommonRulesTest(DTensorTestBase):
-    @property
-    def world_size(self) -> int:
-        # hard code world size to 4 as we need to test
-        # at least with 2d mesh
-        return 4
+class CommonRulesTest(DTensorContinuousTestBase):
+    # hard code world size to 4 as we need to test
+    # at least with 2d mesh
+    world_size = 4
 
     def _gen_tensor_meta(self, shape):
         empty_tensor = torch.empty(shape)
@@ -31,7 +28,6 @@ class CommonRulesTest(DTensorTestBase):
             empty_tensor.dtype,
         )
 
-    @with_comms
     def test_einop_basic_propagation(self):
         # plain einsum, mm
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -85,7 +81,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertIsNotNone(output_spec)
         self.assertTrue(output_spec.placements[0].is_partial())
 
-    @with_comms
     def test_einop_pointwise_propagation(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -137,7 +132,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertIsNotNone(output_spec)
         self.assertEqual(output_spec.dim_map, [0, -1, -1])
 
-    @with_comms
     def test_einop_merge_sharding(self):
         # 2d mesh einop merge sharding
         mesh_shape = torch.arange(self.world_size).reshape(
@@ -163,7 +157,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertIsNotNone(output_spec)
         self.assertEqual(output_spec.dim_map, [0, 1])
 
-    @with_comms
     def test_einop_linearity(self):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
@@ -231,7 +224,6 @@ class CommonRulesTest(DTensorTestBase):
         # mat2 mesh dim 1 should become partial now!
         self.assertTrue(mat2_spec.placements[1].is_partial())
 
-    @with_comms
     def test_einop_multi_sharding_on_mesh_dim(self):
         # einop prop with multi sharding on same mesh dim
         mesh_shape = torch.arange(self.world_size)
@@ -260,7 +252,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertEqual(schema_suggestion.args_schema[0].dim_map, [0, -1])
         self.assertEqual(schema_suggestion.args_schema[1].dim_map, [-1, -1])
 
-    @with_comms
     def test_einop_errors(self):
         mesh_shape = torch.arange(self.world_size).reshape(
             self.world_size // 2, self.world_size // 2
@@ -281,7 +272,6 @@ class CommonRulesTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "sharded two different ways:"):
             einop_rule("ij,ij->ij", OpSchema(add_call, (mat1_spec, mat2_spec), {}))
 
-    @with_comms
     def test_pointwise_rules_broadcasting(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -307,7 +297,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertIsNotNone(output_spec)
         self.assertEqual(output_spec.dim_map, [-1, 0])
 
-    @with_comms
     def test_pointwise_rules_suggestion(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -335,7 +324,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertEqual(len(schema_suggestion.args_schema), 3)
         self.assertEqual(schema_suggestion.args_schema[2], -1)
 
-    @with_comms
     def test_pointwise_multi_sharding_on_mesh_dim(self):
         # 2d mesh pointwise sharding
         mesh_shape = torch.arange(self.world_size).reshape(
@@ -381,7 +369,6 @@ class CommonRulesTest(DTensorTestBase):
         self.assertEqual(schema_suggestion.args_schema[0].dim_map, [-1, -1, -1, 1])
         self.assertEqual(schema_suggestion.args_schema[1].dim_map, mat2)
 
-    @with_comms
     def test_pointwise_enforce_sharding_multi_sharding_on_mesh_dim(self):
         # 2d mesh pointwise sharding
         mesh_shape = torch.arange(self.world_size).reshape(

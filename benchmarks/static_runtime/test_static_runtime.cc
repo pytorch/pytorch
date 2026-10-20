@@ -662,6 +662,30 @@ TEST(StaticRuntime, EmbeddingBagWithMixedInt32Int64Input) {
   testStaticRuntime(embedding_bag_default, args);
 }
 
+TEST(StaticRuntime, EmbeddingBagHalfTypesWithAndWithoutWeights) {
+  const std::string embedding_bag = R"JIT(
+    def forward(self, weight: Tensor, indices: Tensor, offsets: Tensor, per_sample_weights: Tensor):
+        unweighted, _, _, _ = torch.embedding_bag(weight, indices, offsets)
+        weighted, _, _, _ = torch.embedding_bag(
+            weight, indices, offsets, False, 0, False, per_sample_weights)
+        return unweighted.clone(), weighted.clone()
+  )JIT";
+
+  const auto indices = torch::tensor({0, 2, 1, 3}, at::ScalarType::Long);
+  const auto offsets = torch::tensor({0, 2}, at::ScalarType::Long);
+  const auto make_args = [&](const at::ScalarType dtype) {
+    const auto options = torch::TensorOptions().dtype(dtype);
+    const auto weight = torch::arange(1, 33, options).reshape({4, 8}) / 8;
+    const auto per_sample_weights =
+        torch::tensor({0.5, 1.5, 2.0, 0.25}, options);
+    return std::vector<IValue>{
+        weight, indices, offsets, per_sample_weights};
+  };
+
+  testStaticRuntime(embedding_bag, make_args(at::ScalarType::Half));
+  testStaticRuntime(embedding_bag, make_args(at::ScalarType::BFloat16));
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
@@ -1074,6 +1098,10 @@ TEST(StaticRuntime, NanToNum) {
 }
 
 TEST(StaticRuntime, Stack) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP() << "Skipping StaticRuntime.Stack on AArch64.";
+#endif
   const auto stack_dim = R"JIT(
     def forward(self, a: Tensor, b: Tensor, dim: int):
         inputs = [a]
@@ -2249,6 +2277,10 @@ TEST(StaticRuntime, Narrow) {
 
   testStaticRuntime(narrow_with_int_script, args_a);
   testStaticRuntime(narrow_with_int_script, args_a, args_b);
+
+  auto c = at::tensor({1, 2, 3, 4, 5, 6, 7, 8, 9}).reshape({3, 3});
+  std::vector<IValue> args_c{c, -1, -1, 1};
+  testStaticRuntime(narrow_with_int_script, args_c);
 }
 
 TEST(StaticRuntime, TupleUnpack) {
@@ -2307,6 +2339,10 @@ TEST(StaticRuntime, Append) {
 }
 
 TEST(StaticRuntime, QuantizedLinear) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP() << "Skipping QuantizedLinear on AArch64.";
+#endif
   const std::string quantize_script = R"IR(
     graph(%input: Tensor, %weights: Tensor):
         %scale: float = prim::Constant[value=1.]()
@@ -2403,6 +2439,54 @@ TEST(StaticRuntime, VarStack) {
   testStaticRuntime(var_stack_script, args6);
 
   testStaticRuntime(var_stack_script, args1, args2);
+}
+
+// [1, 1] column views of a [1, N] row have strides [N, 1] and count as
+// contiguous, so they reach the native serial stack kernel. The inputs and the
+// output sit inside larger buffers, so a wrong copy length stays in bounds and
+// shows up as wrong values.
+TEST(StaticRuntime, SerialStackOfSingleElementStridedViews) {
+  constexpr int64_t kWidth = 566;
+  const auto base = at::arange(4 * kWidth, at::kFloat).view({4, kWidth});
+  const auto a = base.narrow(0, 0, 1).narrow(1, kWidth - 1, 1);
+  const auto b = base.narrow(0, 2, 1).narrow(1, 7, 1);
+  ASSERT_TRUE(a.is_contiguous());
+  ASSERT_EQ(a.strides(), b.strides());
+
+  auto buffer = at::full({4 * kWidth}, -1.0, at::kFloat);
+  auto out = buffer.narrow(0, 0, 2).view({2, 1, 1});
+  at::_stack_out(out, {a, b}, 0);
+
+  EXPECT_TRUE(at::equal(out, at::stack({a, b}, 0)));
+  EXPECT_TRUE(at::equal(
+      buffer.narrow(0, 2, 4 * kWidth - 2),
+      at::full({4 * kWidth - 2}, -1.0, at::kFloat)));
+}
+
+// A size-1 stack dim may carry any stride and still be contiguous.
+TEST(StaticRuntime, SerialStackIntoOutputWithStridedSingleElementDim) {
+  const auto a = at::full({1, 1}, 3.0, at::kFloat);
+  auto out = at::zeros({1000}, at::kFloat).as_strided({1, 1, 1}, {999, 1, 1});
+  ASSERT_TRUE(out.is_contiguous());
+
+  at::_stack_out(out, {a}, 0);
+
+  EXPECT_TRUE(at::equal(out, at::stack({a}, 0)));
+}
+
+// Both VarStack inputs are [1, 1] views with strides [566, 1] into rows of
+// larger bases. x's base holds smaller values than y's, so a wrong copy length
+// changes the result. Static runtime allocates the output, so only the inputs
+// are padded.
+TEST(StaticRuntime, VarStackOfSingleElementStridedViews) {
+  const auto script = R"JIT(
+    def forward(self, x: Tensor, y: Tensor):
+        return torch.max(torch.stack([x[:, 565:566], y[:, 565:566]], 0), 0)[0].clone()
+  )JIT";
+
+  const auto x_base = at::full({2, 566}, -1.0, at::kFloat);
+  const auto y_base = at::full({2, 566}, 1.0, at::kFloat);
+  testStaticRuntime(script, {x_base.narrow(0, 0, 1), y_base.narrow(0, 0, 1)});
 }
 
 TEST(StaticRuntime, FmodTensor) {
@@ -3076,6 +3160,10 @@ namespace {
 
 void maybe_throw(bool should_throw) {
   if (should_throw) {
+    // The ModelCrash* tests below assert EXPECT_THROW(..., std::runtime_error)
+    // on what escapes the runtime. c10::Error derives from std::exception, not
+    // std::runtime_error, so TORCH_CHECK here would stop matching.
+    // @allow-raw-throw: tests below match on std::runtime_error
     throw std::runtime_error("test exception");
   }
 }
@@ -3386,7 +3474,7 @@ TEST(StaticRuntime, TupleIndex) {
   torch::jit::Module mod("module");
   mod.define(src);
   StaticModule smod(mod);
-  EXPECT_THROW(smod({100, tuple}), std::out_of_range);
+  EXPECT_THROW(smod({100, tuple}), c10::IndexError);
 }
 
 TEST(StaticRuntime, RaiseException) {
@@ -3585,10 +3673,9 @@ TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
   auto graph = getGraphFromIR(src);
   torch::jit::StaticModule smod(graph);
   // Not 0D tensor
-  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), c10::Error);
   // Wrong dtype
-  EXPECT_THROW(
-      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+  EXPECT_THROW(smod({at::tensor({1}, at::kFloat).squeeze()}), c10::Error);
 }
 
 TEST(StaticRuntime, Select) {

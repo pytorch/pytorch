@@ -60,8 +60,6 @@ optionalTensorRefT = BaseCppType("at", "OptionalTensorRef")
 tensorListT = BaseCppType("at", "TensorList")
 iTensorListRefT = BaseCppType("at", "ITensorListRef")
 iOptTensorListRefT = BaseCppType("at", "IOptTensorListRef")
-dimnameT = BaseCppType("at", "Dimname")
-dimnameListT = BaseCppType("at", "DimnameList")
 dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
@@ -79,6 +77,7 @@ tensorOptionsT = BaseCppType("at", "TensorOptions")
 typeAndSizeT = BaseCppType("torch::autograd::generated", "TypeAndSize")
 tensorGeometryT = BaseCppType("at", "TensorGeometry")
 SymIntT = BaseCppType("c10", "SymInt")
+SymBoolT = BaseCppType("c10", "SymBool")
 symIntArrayRefT = BaseCppType("c10", "SymIntArrayRef")
 
 # Types representing template parameters.  Technically, we probably shouldn't
@@ -114,7 +113,6 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.Generator: generatorT,
     BaseTy.ScalarType: scalarTypeT,
     BaseTy.Tensor: tensorT,
-    BaseTy.Dimname: dimnameT,
     BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
@@ -125,6 +123,7 @@ BaseTypeToCppMapping: dict[BaseTy, BaseCppType] = {
     BaseTy.Storage: storageT,
     BaseTy.Stream: streamT,
     BaseTy.SymInt: SymIntT,
+    BaseTy.SymBool: SymBoolT,
 }
 
 # CTypes encode C++ type structure as needed for translation.

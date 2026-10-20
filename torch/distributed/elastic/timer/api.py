@@ -10,7 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from inspect import getframeinfo, stack
-from typing import Any, Optional
+from typing import Any
 
 
 __all__ = [
@@ -130,14 +130,14 @@ class TimerServer(abc.ABC):
         self._request_queue = request_queue
         self._max_interval = max_interval
         self._daemon = daemon
-        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: threading.Thread | None = None
         self._stop_signaled = False
 
     @abc.abstractmethod
     def register_timers(self, timer_requests: list[TimerRequest]) -> None:
         """
         Processes the incoming timer requests and registers them with the server.
-        The timer request can either be a acquire-timer or release-timer request.
+        The timer request can either be an acquire-timer or release-timer request.
         Timer requests with a negative expiration_time should be interpreted
         as a release-timer request.
         """
@@ -234,7 +234,7 @@ class TimerServer(abc.ABC):
             logger.info("No watchdog thread running, doing nothing")
 
 
-_timer_client: Optional[TimerClient] = None
+_timer_client: TimerClient | None = None
 
 
 def configure(timer_client: TimerClient):
@@ -247,9 +247,7 @@ def configure(timer_client: TimerClient):
 
 
 @contextmanager
-def expires(
-    after: float, scope: Optional[str] = None, client: Optional[TimerClient] = None
-):
+def expires(after: float, scope: str | None = None, client: TimerClient | None = None):
     """
     Acquires a countdown timer that expires in ``after`` seconds from now,
     unless the code-block that it wraps is finished within the timeframe.

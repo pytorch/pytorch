@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-#include <c10/util/irange.h>
-
 namespace torch::jit::tensorexpr {
 
 template <
@@ -46,7 +44,7 @@ static ExprPtr mutate_binary_op(
     case IRNodeType::kRshift:
       return alloc<Rshift>(lhs_new, rhs_new);
     default:
-      throw unimplemented_lowering(v);
+      TORCH_CHECK(false, "UNIMPLEMENTED LOWERING: ", std::to_string(v));
   }
 }
 

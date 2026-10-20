@@ -2,7 +2,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include <ATen/mps/MPSDevice.h>
@@ -11,10 +15,15 @@
 #include <c10/util/Exception.h>
 
 #ifdef __OBJC__
-#include <Foundation/Foundation.h>
+// Apple framework headers emit deprecation warnings from CarbonCore and
+// missing-attribute warnings from MPSGraph on recent macOS SDKs.
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wobjc-property-no-attribute")
 #include <Metal/Metal.h>
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #include <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
+C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 typedef MPSCommandBuffer* MPSCommandBuffer_t;
 typedef id<MTLCommandQueue> MTLCommandQueue_t;
 typedef id<MTLComputeCommandEncoder> MTLComputeCommandEncoder_t;
@@ -70,10 +79,13 @@ class TORCH_API MPSStream {
   }
 
   MPSCommandBuffer_t commandBuffer();
+  // Must be called from a block running on queue(), and the returned encoder
+  // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
-  void fill(MTLBuffer_t buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
+  // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
+  void commitIfNeeded();
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -110,6 +122,9 @@ class TORCH_API MPSStream {
     return _stream;
   }
 
+  MTLBuffer_t getErrorBuffer();
+  void checkLastError();
+
  private:
   Stream _stream;
   MTLCommandQueue_t _commandQueue = nil;
@@ -121,23 +136,64 @@ class TORCH_API MPSStream {
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
+  uint32_t _kernelsSinceCommit = 0;
+  std::atomic<uint32_t> _commandBuffersInFlight{0};
+  // Buffer that contains last raised error
+  MTLBuffer_t _errorBuffer = nil;
+  // First execution error reported by an asynchronously committed command buffer
+  // (e.g. out of memory), rethrown by checkLastError() at the next sync point
+  struct CommandBufferError {
+    bool is_oom;
+    int32_t code;
+    std::string message;
+  };
+  std::mutex _commandBufferErrorMutex;
+  std::optional<CommandBufferError> _commandBufferError;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
   void commitAndContinue();
   void flush();
+  // records execution errors of the current command buffer once it completes
+  void addErrorHandler();
+  void recordCommandBufferError(CommandBufferError error);
 };
 
 /**
- * Get the current MPS stream
+ * Get the current MPS stream for this thread. Returns the default stream if no
+ * other stream has been set with `setCurrentMPSStream()`.
  */
 TORCH_API MPSStream* getCurrentMPSStream();
+
+/**
+ * Set the current MPS stream for this thread. Kernels that call
+ * `getCurrentMPSStream()` will enqueue their work onto this stream. Passing
+ * nullptr sets to the default stream.
+ */
+TORCH_API void setCurrentMPSStream(MPSStream* stream);
 
 /**
  * Get the default MPS stream
  */
 TORCH_API MPSStream* getDefaultMPSStream();
+
+/**
+ * Get a stream from the pool. There are 32 streams in the pool which live for
+ * the lifetime of a process. The stream returned by this function is chosen
+ * in round-robin order. Note: The default stream is not in the pool.
+ */
+TORCH_API MPSStream* getStreamFromPool();
+
+/**
+ * Get a stream by its ID. 0 is the default stream, 1 - 32 are pool streams.
+ */
+TORCH_API MPSStream* getStreamByID(int64_t stream_id);
+
+/**
+ * Synchronize the default stream and any pool streams created so far.
+ */
+TORCH_API void synchronizeAllMPSStreams(SyncType syncType);
 
 //-----------------------------------------------------------------
 //  MPSStreamImpl
@@ -155,4 +211,7 @@ class TORCH_API MPSStreamImpl {
   MPSStreamImpl();
 };
 
+#ifdef __OBJC__
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
+#endif
 } // namespace at::mps

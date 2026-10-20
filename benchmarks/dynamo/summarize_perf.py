@@ -8,6 +8,9 @@ import pandas as pd
 from tabulate import tabulate
 
 
+log = logging.getLogger(__name__)
+
+
 def gmean(s):
     return s.product() ** (1 / len(s))
 
@@ -45,8 +48,8 @@ def find_csv_files(path, perf_compare):
 def main(directory, amp, float32, perf_compare):
     """
     Given a directory containing multiple CSVs from --performance benchmark
-    runs, aggregates and generates summary statistics similar to the web UI at
-    https://torchci-git-fork-huydhn-add-compilers-bench-74abf8-fbopensource.vercel.app/benchmark/compilers
+    runs, aggregates and generates summary statistics similar to the compilers
+    benchmark web UI.
 
     This is most useful if you've downloaded CSVs from CI and need to quickly
     look at aggregate stats.  The CSVs are expected to follow exactly the same
@@ -67,7 +70,7 @@ def main(directory, amp, float32, perf_compare):
         try:
             dfs[os.path.basename(f)].append(pd.read_csv(f))
         except Exception:
-            logging.warning("failed parsing %s", f)
+            log.warning("failed parsing %s", f)
             raise
 
     # dtype -> statistic -> benchmark -> compiler -> value
@@ -81,7 +84,8 @@ def main(directory, amp, float32, perf_compare):
         if perf_compare:
             regex = r"training_(torchbench|huggingface|timm_models)\.csv"
             m = re.match(regex, k)
-            assert m is not None, k
+            if m is None:
+                raise AssertionError(f"Failed to match regex for key: {k}")
             compiler = "inductor"
             benchmark = m.group(1)
             dtype = "float32"

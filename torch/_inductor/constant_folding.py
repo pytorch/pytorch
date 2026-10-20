@@ -1,5 +1,7 @@
 import collections
-from typing import Any, Callable, Optional
+import typing_extensions
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -16,12 +18,24 @@ META_TAG = "MODULE_TYPE"
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
 
+_dont_constant_fold: list[torch.fx.node.Target] = []
+
+
+def add_dont_constant_fold(op: torch.fx.node.Target) -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.append(op)
+
+
+def clear_dont_constant_fold() -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.clear()
+
 
 def replace_node_with_constant(
     gm: torch.fx.GraphModule,
     node: torch.fx.Node,
-    constant: Optional[torch.Tensor] = None,
-    name: Optional[str] = None,
+    constant: torch.Tensor | None = None,
+    name: str | None = None,
 ) -> None:
     g = gm.graph
 
@@ -31,7 +45,7 @@ def replace_node_with_constant(
         if not hasattr(gm, "_frozen_param_count"):
             gm._frozen_param_count = 0  # type: ignore[assignment]
         i = gm._frozen_param_count
-
+        # pyrefly: ignore [bad-assignment]
         while True:
             qualname = f"_frozen_param{i}"
             if not hasattr(gm, qualname):
@@ -60,7 +74,7 @@ def replace_node_with_constant(
 
 
 def is_const_source(
-    node: torch.fx.Node, lifted_constant_names: Optional[list[str]]
+    node: torch.fx.Node, lifted_constant_names: list[str] | None
 ) -> bool:
     return node.op == "get_attr" or node.name in (lifted_constant_names or ())
 
@@ -70,8 +84,8 @@ class ConstantFolder(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         skip_constructors: bool = False,
-        lifted_constant_names: Optional[list[str]] = None,
-        skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+        lifted_constant_names: list[str] | None = None,
+        skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
     ) -> None:
         super().__init__(gm)
         self.node_replacements: dict[torch.fx.Node, Any] = {}
@@ -102,7 +116,7 @@ class ConstantFolder(torch.fx.Interpreter):
             if (
                 isinstance(inp, torch.fx.Node)
                 and inp.name not in (self.lifted_constant_names or ())
-                and self.env[inp] != self.deferred_value
+                and self.env[inp] is not self.deferred_value
             ):
                 return self.unknown_value
         return self.deferred_value
@@ -110,7 +124,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def is_impure(self, node: torch.fx.node.Node) -> bool:
         def is_woq_int8_pattern(node: torch.fx.node.Node) -> bool:
             return (
-                node.target == torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
+                node.target is torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
                 and isinstance(node.args[0], torch.fx.Node)
                 and "val" in node.args[0].meta
                 and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
@@ -120,7 +134,7 @@ class ConstantFolder(torch.fx.Interpreter):
         if (
             is_woq_int8_pattern(node)
             or (
-                node.target == torch.ops.aten.permute.default
+                node.target is torch.ops.aten.permute.default
                 and len(node.users) == 1
                 and is_woq_int8_pattern(next(iter(node.users)))
             )
@@ -145,6 +159,9 @@ class ConstantFolder(torch.fx.Interpreter):
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
             # int8_weight and leave dq in graph to be fused
+            return True
+
+        if node.target in _dont_constant_fold:
             return True
         return False
 
@@ -173,6 +190,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
         return last_non_output_use
 
+    @typing_extensions.override
     def run_node(self, node: torch.fx.Node) -> Any:
         if node.target == "output":
             # because we remove nodes from env on last non output use,
@@ -191,7 +209,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # contains a ScriptObject, equality checking results in a type error if
         # the types are different.
         if any(
-            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            type(self.unknown_value) is type(input_) and self.unknown_value == input_
             for input_ in flattened_inputs
         ):
             return self.unknown_value
@@ -199,7 +217,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 
@@ -234,25 +252,36 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = self._deduce_value(node)
 
-        if isinstance(out, torch._C.ScriptObject):
+        if isinstance(
+            out,
+            (
+                torch._C.ScriptObject,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ),
+        ):
             return out
 
-        if out == self.unknown_value:
+        if out is self.unknown_value:
             return self.unknown_value
 
         if not is_const_source(node, self.lifted_constant_names) and (
-            isinstance(out, torch.Tensor) or out == self.deferred_value
+            isinstance(out, torch.Tensor) or out is self.deferred_value
         ):
-            if out != self.deferred_value and out.device.type == "meta":
+            if (
+                out is not self.deferred_value
+                and out.device.type == "meta"  # pyrefly: ignore[missing-attribute]
+            ):
                 return out
 
-            if not self.insertable_tensor_check(out):
+            if not self.insertable_tensor_check(
+                out  # pyrefly: ignore[bad-argument-type]
+            ):
                 return out
 
             if self.is_impure(node):
                 return self.unknown_value
 
-            self.add_node_replacement(node, out)
+            self.add_node_replacement(node, out)  # pyrefly: ignore[bad-argument-type]
 
             flattened_node_inps = pytree.arg_tree_leaves(*node.args, **node.kwargs)
 
@@ -291,7 +320,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
 def constant_fold(
     gm: torch.fx.GraphModule,
-    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    constraint_fn: Callable[[torch.fx.Node], bool] | None = None,
 ) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
@@ -320,8 +349,8 @@ def constant_fold(
 def constant_graph_tag(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[list[str]] = None,
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    lifted_constant_names: list[str] | None = None,
+    skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
 ) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(
@@ -349,8 +378,8 @@ def constant_graph_tag(
 def run_and_get_constant_graph(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[list[str]] = None,
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    lifted_constant_names: list[str] | None = None,
+    skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
 ) -> torch.fx.GraphModule:
     """
     Construct a GraphModule which corresponds to the part which could be
@@ -374,7 +403,7 @@ def run_and_get_constant_graph(
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
     for node in gm.graph.nodes:
-        if node.op == "getattr" or (node.name in (lifted_constant_names or ())):
+        if node.op == "get_attr" or (node.name in (lifted_constant_names or ())):
             untag(node)
 
     new_graph = torch.fx.Graph()

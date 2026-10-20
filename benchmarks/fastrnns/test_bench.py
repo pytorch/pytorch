@@ -12,7 +12,7 @@ def modeldef(request, net_name, executor, fuser):
 
     # Given a 'net_name' provided by generate_tests, build the thing
     name, rnn_creator, context = get_nn_runners(net_name)[0]
-    creator_args = creator_args = {
+    creator_args = {
         "seqLength": 100,
         "numLayers": 1,
         "inputSize": 512,
@@ -52,5 +52,6 @@ class TestBenchNetwork:
 
             with torch.no_grad():
                 for param in modeldef.params:
-                    assert param.grad is not None
+                    if param.grad is None:
+                        raise AssertionError("Parameter gradient must not be None")
                     param.grad.zero_()

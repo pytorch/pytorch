@@ -13,16 +13,21 @@
 
 namespace at::native::onednn {
 
-TORCH_XPU_API dnnl::memory make_onednn_memory(
+dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     void* ptr);
+
+TORCH_XPU_API dnnl::memory make_onednn_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    const void* ptr);
 
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
 
 // GpuEngineManager singleton
-struct TORCH_XPU_API GpuEngineManager {
+struct GpuEngineManager {
   static GpuEngineManager& Instance(); // Singleton
 
   dnnl::engine& get_engine(
@@ -50,7 +55,7 @@ struct TORCH_XPU_API GpuEngineManager {
 };
 
 // GpuStreamManager singleton
-struct TORCH_XPU_API GpuStreamManager {
+struct GpuStreamManager {
   static GpuStreamManager& Instance(); // Singleton
 
   dnnl::stream& get_stream(

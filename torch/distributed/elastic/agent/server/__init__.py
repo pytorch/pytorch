@@ -22,14 +22,14 @@ The agent is responsible for:
 3. Elasticity: Reacts to membership changes and restarts workers with the new
    members.
 
-The simplest agents are deployed per node and works with local processes.
+The simplest agents are deployed per node and work with local processes.
 A more advanced agent can launch and manage workers remotely. Agents can
 be completely decentralized, making decisions based on the workers it manages.
 Or can be coordinated, communicating to other agents (that manage workers
 in the same job) to make a collective decision.
 """
 
-from .api import (  # noqa: F401
+from .api import (
     ElasticAgent,
     RunResult,
     SimpleElasticAgent,

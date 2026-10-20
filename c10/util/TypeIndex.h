@@ -8,11 +8,6 @@
 #include <string>
 #include <type_traits>
 
-#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
-#define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
 namespace c10::util {
 
 struct type_index final : IdWrapper<type_index, uint64_t> {
@@ -34,41 +29,37 @@ namespace detail {
 template <typename T>
 inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
-  constexpr c10::string_view fun_sig = __FUNCSIG__;
+  constexpr std::string_view fun_sig = __FUNCSIG__;
 #if defined(__NVCC__)
-  constexpr c10::string_view prefix =
+  constexpr std::string_view prefix =
       "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr c10::string_view suffix = ">()";
+  constexpr std::string_view suffix = ">()";
 #else
-  constexpr c10::string_view prefix =
+  constexpr std::string_view prefix =
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr c10::string_view suffix = ">(void)";
+  constexpr std::string_view suffix = ">(void)";
 #endif
 #elif defined(__clang__)
-  constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
-  constexpr c10::string_view prefix =
+  constexpr std::string_view fun_sig = __PRETTY_FUNCTION__;
+  constexpr std::string_view prefix =
       "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ";
-  constexpr c10::string_view suffix = "]";
+  constexpr std::string_view suffix = "]";
 #elif defined(__GNUC__)
-  constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
-  constexpr c10::string_view prefix =
+  constexpr std::string_view fun_sig = __PRETTY_FUNCTION__;
+  constexpr std::string_view prefix =
       "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ";
-  constexpr c10::string_view suffix =
+  constexpr std::string_view suffix =
       "; c10::c10_string_view = c10::basic_string_view<char>]";
 #endif
-#if !defined(__CUDA_ARCH__)
-  static_assert(c10::starts_with(
-      static_cast<std::string_view>(fun_sig),
-      static_cast<std::string_view>(prefix)));
-  static_assert(c10::ends_with(
-      static_cast<std::string_view>(fun_sig),
-      static_cast<std::string_view>(suffix)));
+#if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
+  static_assert(fun_sig.starts_with(prefix));
+  static_assert(fun_sig.ends_with(suffix));
 #endif
   return fun_sig.substr(
       prefix.size(), fun_sig.size() - prefix.size() - suffix.size());
 }
 
-#if !defined(__CUDA_ARCH__)
+#if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
 template <typename T>
 inline constexpr uint64_t type_index_impl() {
 // Idea: __PRETTY_FUNCTION__ (or __FUNCSIG__ on msvc) contains a qualified name
@@ -89,7 +80,7 @@ inline constexpr uint64_t type_index_impl() {
 
 template <typename T>
 inline constexpr type_index get_type_index() {
-#if !defined(__CUDA_ARCH__)
+#if !defined(__CUDA_ARCH__) && !defined(__CUDA_ARCH_LIST__)
   // To enforce that this is really computed at compile time, we pass the
   // type index through std::integral_constant.
   return type_index{std::integral_constant<

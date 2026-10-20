@@ -16,6 +16,17 @@ AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
           "",
           run_single_threaded) {}
 
+AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
+    const std::string& model_so_path,
+    size_t num_models,
+    std::unordered_map<std::string, at::Tensor>& constants)
+    : AOTIModelContainerRunner(
+          model_so_path,
+          num_models,
+          "cpu",
+          "",
+          constants) {}
+
 AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() = default;
 
 namespace {
@@ -23,11 +34,10 @@ std::unique_ptr<AOTIModelContainerRunner> create_aoti_runner_cpu(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,
-    const std::string& cubin_dir,
+    const std::string& /*cubin_dir*/,
     const bool run_single_threaded) {
-  if (device_str != "cpu") {
-    throw std::runtime_error("Incorrect device passed to aoti_runner_cpu");
-  }
+  TORCH_CHECK(
+      device_str == "cpu", "Incorrect device passed to aoti_runner_cpu");
   return std::make_unique<AOTIModelContainerRunnerCpu>(
       model_so_path, num_models, run_single_threaded);
 }

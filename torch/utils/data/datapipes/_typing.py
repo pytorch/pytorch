@@ -14,15 +14,16 @@ from abc import ABCMeta
 from collections.abc import Iterator
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated
-from typing import (  # type: ignore[attr-defined]
-    _eval_type,
-    _GenericAlias,
-    _tp_cache,
-    _type_check,
+from typing import (
+    _eval_type,  # pyrefly: ignore [missing-module-attribute]
+    _GenericAlias,  # pyrefly: ignore [missing-module-attribute]
+    _tp_cache,  # pyrefly: ignore [missing-module-attribute]
+    _type_check,  # pyrefly: ignore [missing-module-attribute]
     _type_repr,
     Any,
     ForwardRef,
     Generic,
+    get_args,
     get_type_hints,
     TypeVar,
     Union,
@@ -78,7 +79,7 @@ def issubtype(left, right, recursive=True):
         if getattr(right, "__origin__", None) is Generic:
             return True
 
-    if right == type(None):
+    if right is type(None):
         return False
 
     # Right-side type
@@ -111,7 +112,7 @@ def _decompose_type(t, to_list=True):
             # For T_co, __constraints__ is ()
             ts = list(t.__constraints__)
     elif hasattr(t, "__origin__") and t.__origin__ == Union:
-        ts = t.__args__
+        ts = get_args(t)
     else:
         if not to_list:
             return None
@@ -138,7 +139,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     #   - TypeVar[TypeVar[...]]
     # So, variant and each constraint may be a TypeVar or a Union.
     # In these cases, all of inner types from the variant are required to be
-    # extraced and verified as a subtype of any constraint. And, all of
+    # extracted and verified as a subtype of any constraint. And, all of
     # inner types from any constraint being a TypeVar or a Union are
     # also required to be extracted and verified if the variant belongs to
     # any of them.
@@ -153,8 +154,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     # Variant is not TypeVar or Union
     if hasattr(variant, "__origin__") and variant.__origin__ is not None:
         v_origin = variant.__origin__
-        # In Python-3.9 typing library untyped generics do not have args
-        v_args = getattr(variant, "__args__", None)
+        v_args = get_args(variant) or None
     else:
         v_origin = variant
         v_args = None
@@ -175,8 +175,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                 if v_origin == c_origin:
                     if not recursive:
                         return True
-                    # In Python-3.9 typing library untyped generics do not have args
-                    c_args = getattr(constraint, "__args__", None)
+                    c_args = get_args(constraint) or None
                     if c_args is None or len(c_args) == 0:
                         return True
                     if (
@@ -184,7 +183,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                         and len(v_args) == len(c_args)
                         and all(
                             issubtype(v_arg, c_arg)
-                            for v_arg, c_arg in zip(v_args, c_args)
+                            for v_arg, c_arg in zip(v_args, c_args, strict=True)
                         )
                     ):
                         return True
@@ -200,14 +199,13 @@ def issubinstance(data, data_type):
     if not issubtype(type(data), data_type, recursive=False):
         return False
 
-    # In Python-3.9 typing library __args__ attribute is not defined for untyped generics
-    dt_args = getattr(data_type, "__args__", None)
+    dt_args = get_args(data_type) or None
     if isinstance(data, tuple):
         if dt_args is None or len(dt_args) == 0:
             return True
         if len(dt_args) != len(data):
             return False
-        return all(issubinstance(d, t) for d, t in zip(data, dt_args))
+        return all(issubinstance(d, t) for d, t in zip(data, dt_args, strict=True))
     elif isinstance(data, (list, set)):
         if dt_args is None or len(dt_args) == 0:
             return True
@@ -235,10 +233,10 @@ def issubinstance(data, data_type):
 class _DataPipeType:
     r"""Save type annotation in `param`."""
 
-    def __init__(self, param):
+    def __init__(self, param) -> None:
         self.param = param
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return _type_repr(self.param)
 
     def __eq__(self, other):
@@ -265,6 +263,7 @@ class _DataPipeType:
 
 # Default type for DataPipe without annotation
 _T_co = TypeVar("_T_co", covariant=True)
+# pyrefly: ignore [invalid-annotation]
 _DEFAULT_TYPE = _DataPipeType(Generic[_T_co])
 
 
@@ -298,7 +297,7 @@ class _DataPipeMeta(GenericMeta):
         )
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-    def __init__(self, name, bases, namespace, **kwargs):
+    def __init__(self, name, bases, namespace, **kwargs) -> None:
         super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     # TODO: Fix isinstance bug
@@ -386,7 +385,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             reset_func = namespace["reset"]
 
             @functools.wraps(reset_func)
-            def conditional_reset(*args, **kwargs):
+            def conditional_reset(*args, **kwargs) -> None:
                 r"""
                 Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`.
 
@@ -411,7 +410,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
-def _dp_init_subclass(sub_cls, *args, **kwargs):
+def _dp_init_subclass(sub_cls, *args, **kwargs) -> None:
     # Add function for datapipe instance to reinforce the type
     sub_cls.reinforce_type = reinforce_type
 
@@ -454,7 +453,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
                         sub_cls.__name__, _type_repr(hints["return"])
                     )
                 )
-            data_type = return_hint.__args__[0]
+            data_type = get_args(return_hint)[0]
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError(
                     f"Expected return type of '__iter__' as a subtype of {sub_cls.type},"

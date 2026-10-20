@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+from unittest.mock import patch
 
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import (
@@ -14,19 +16,23 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._shard.sharded_tensor.metadata import (
     TensorProperties as TensorProperties_Shard,
 )
+from torch.distributed.checkpoint import CheckpointableTensor
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.default_planner import (
     _create_default_local_metadata,
+    _validate_global_plan,
     create_default_global_save_plan,
     create_default_local_load_plan,
     create_default_local_save_plan,
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.checkpoint.filesystem import CURRENT_DCP_VERSION
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
+    Metadata,
     MetadataIndex,
     TensorProperties,
     TensorStorageMetadata,
@@ -47,6 +53,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.distributed_utils import (
     with_dist,
@@ -65,7 +75,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     shards_metadata = []
     local_shards = []
-    for idx in range(0, world_size * shards_per_rank):
+    for idx in range(world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
         shard_md = ShardMetadata(
             shard_offsets=[idx * shard_size],
@@ -90,6 +100,96 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards=local_shards, sharded_tensor_metadata=sharded_tensor_md
     )
+
+
+class TestCheckpointableTensorDistributed(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @property
+    def device_type(self) -> str:
+        return "cpu"
+
+    @with_comms
+    @with_temp_dir
+    def test_checkpointable_tensor_shard_save_load(self):
+        shard_size = 4
+        rank = dist.get_rank()
+        start = rank * shard_size
+        expected = torch.arange(start, start + shard_size, dtype=torch.float32)
+
+        tensor = expected.clone()
+        tensor.global_shape = (self.world_size * shard_size,)
+        tensor.global_offsets = ((start,),)
+        tensor.local_offsets = ((0,),)
+        tensor.local_sizes = ((shard_size,),)
+        self.assertIsInstance(tensor, CheckpointableTensor)
+
+        dcp.save({"proto": tensor}, checkpoint_id=self.temp_dir)
+        dist.barrier()
+
+        metadata = dcp.FileSystemReader(self.temp_dir).read_metadata()
+        tensor_metadata = metadata.state_dict_metadata["proto"]
+        self.assertIsInstance(tensor_metadata, TensorStorageMetadata)
+        self.assertEqual(
+            torch.Size([self.world_size * shard_size]), tensor_metadata.size
+        )
+        self.assertEqual(
+            [
+                ChunkStorageMetadata(
+                    offsets=torch.Size([rank * shard_size]),
+                    sizes=torch.Size([shard_size]),
+                )
+                for rank in range(self.world_size)
+            ],
+            sorted(tensor_metadata.chunks, key=lambda chunk: tuple(chunk.offsets)),
+        )
+
+        target = torch.empty(shard_size, device="meta")
+        target.global_shape = (self.world_size * shard_size,)
+        target.global_offsets = ((start,),)
+        target.local_offsets = ((0,),)
+        target.local_sizes = ((shard_size,),)
+        state_dict = {"proto": target}
+
+        dcp.load(state_dict, checkpoint_id=self.temp_dir)
+
+        loaded = state_dict["proto"]
+        self.assertFalse(loaded.is_meta)
+        self.assertEqual(torch.device("cpu"), loaded.device)
+        self.assertIsInstance(loaded, CheckpointableTensor)
+        self.assertEqual(torch.Size([shard_size]), loaded.size())
+        self.assertEqual((self.world_size * shard_size,), loaded.global_shape)
+        self.assertEqual(((start,),), loaded.global_offsets)
+        self.assertEqual(expected, loaded)
+
+
+class TestTensorPropertiesStrides(TestCase):
+    def test_create_from_tensor_populates_strides(self):
+        tensor = torch.rand(4, 8)  # shape [4, 8], strides (8, 1)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (8, 1))
+
+    def test_create_from_tensor_non_contiguous_strides(self):
+        tensor = torch.rand(5, 10).t()  # shape [10, 5], strides (1, 10)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (1, 10))
+
+    def test_create_from_tensor_transposed_strides(self):
+        tensor = torch.rand(2, 1).t()  # shape [1, 2], strides (1, 1)
+        self.assertEqual(tensor.shape, (1, 2))
+        self.assertEqual(tensor.stride(), (1, 1))
+
+        props = TensorProperties.create_from_tensor(tensor)
+        # Test that even though (2, 1) is a valid stride,
+        # but we still retain the original strides (1, 1)
+        self.assertEqual(props.strides, tensor.stride())
+        self.assertNotEqual(props.strides, (2, 1))
+
+    def test_strides_default_none(self):
+        props = TensorProperties(dtype=torch.float32)
+        self.assertIsNone(props.strides)
 
 
 class TestSavePlan(TestCase):
@@ -152,7 +252,13 @@ class TestSavePlan(TestCase):
         # First iteration, should create a new plan
         first_plan = planner.create_local_plan()
 
-        # Validate that the plan has been cached
+        # Plan should be pending, not yet in the class-level cache
+        self.assertNotIn(planner._cached_plans_key, SavePlanner._cached_save_plan)
+
+        # Promote the pending plan by calling finish_plan
+        planner.finish_plan(first_plan)
+
+        # Validate that the plan has been cached after finish_plan
         cached_plan = SavePlanner._cached_save_plan[planner._cached_plans_key]
         self.assertEqual(first_plan, cached_plan)
 
@@ -162,6 +268,11 @@ class TestSavePlan(TestCase):
         self.assertEqual(0, len(second_plan.items))
         self.assertIsNone(second_plan.planner_data)
         self.assertIsNone(second_plan.storage_data)
+
+        # Clean up class-level caches
+        key = planner._cached_plans_key
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
 
     def test_global_plan(self):
         def create_data(rank):
@@ -215,7 +326,7 @@ class TestSavePlan(TestCase):
         # Number of plans should remain unchanged
         self.assertEqual(len(all_plans), len(deduped_plans))
 
-        # Numer of items in the deduped plans should be less than the original plans
+        # Number of items in the deduped plans should be less than the original plans
         for new_plan, old_plan in zip(deduped_plans, all_plans):
             self.assertFalse(_compare_save_plans(new_plan, old_plan))
             self.assertTrue(len(new_plan.items) < len(old_plan.items))
@@ -310,6 +421,14 @@ class TestSavePlan(TestCase):
         ]
         self.assertEqual(cached_global_plan, tensor_plan)
 
+        # Clean up class-level caches
+        key = planner._cached_plans_key
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
+        SavePlanner._cached_all_plans.pop(key, None)
+        SavePlanner._cached_global_plan.pop(key, None)
+        SavePlanner._cached_metadata.pop(key, None)
+
     def test_finish_plan_with_caching(self):
         planner = DefaultSavePlanner(enable_plan_caching=True)
         tensor = torch.rand(10)
@@ -330,6 +449,67 @@ class TestSavePlan(TestCase):
         # second iteration, should return the cached plan
         second_finished_plan = planner.finish_plan(SavePlan([], usable=False))
         self.assertEqual(second_finished_plan, first_finished_plan)
+
+        # Clean up class-level caches
+        key = planner._cached_plans_key
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
+
+    def test_caching_after_validation_failure(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                planner = DefaultSavePlanner(enable_plan_caching=True)
+                tensor = torch.rand(10)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                planner.set_up_planner(state_dict, is_coordinator=(rank == 0))
+                return planner.create_local_plan()
+
+        planner = DefaultSavePlanner(enable_plan_caching=True)
+        key = planner._cached_plans_key
+
+        tensor = torch.rand(10)
+        val = [1, 2, 3]
+        state_dict = {"tensor": tensor, "value": val}
+        planner.set_up_planner(state_dict, is_coordinator=True)
+
+        local_plan = planner.create_local_plan()
+        self.assertTrue(local_plan.usable)
+        self.assertNotIn(key, SavePlanner._cached_save_plan)
+
+        all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+
+        with patch(
+            "torch.distributed.checkpoint.default_planner._validate_global_plan",
+            return_value=["mock validation error"],
+        ):
+            with self.assertRaises(ValueError):
+                planner.create_global_plan(all_plans)
+
+        self.assertNotIn(key, SavePlanner._cached_all_plans)
+        self.assertNotIn(key, SavePlanner._cached_global_plan)
+        self.assertNotIn(key, SavePlanner._cached_metadata)
+        self.assertNotIn(key, SavePlanner._cached_save_plan)
+
+        # Second save should succeed, not KeyError
+        planner.set_up_planner(state_dict, is_coordinator=True)
+        local_plan_2 = planner.create_local_plan()
+        self.assertTrue(local_plan_2.usable)
+
+        global_plan, metadata = planner.create_global_plan(all_plans)
+        self.assertIsNotNone(global_plan)
+        self.assertIsNotNone(metadata)
+        self.assertIn(key, SavePlanner._cached_all_plans)
+        self.assertIn(key, SavePlanner._cached_global_plan)
+        self.assertIn(key, SavePlanner._cached_metadata)
+
+        # Clean up class-level caches
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
+        SavePlanner._cached_all_plans.pop(key, None)
+        SavePlanner._cached_global_plan.pop(key, None)
+        SavePlanner._cached_metadata.pop(key, None)
 
     def test_local_load_plan(self):
         def create_state_dict(rank):
@@ -559,6 +739,32 @@ class TestPlannerHelpers(TestCase):
         self.assertTrue(_compare_save_plans(plan2, plan2))
 
 
+class TestValidateGlobalPlan(TestCase):
+    def _make_metadata(self, chunks, size):
+        storage = TensorStorageMetadata(
+            properties=TensorProperties(dtype=torch.float32),
+            size=torch.Size(size),
+            chunks=chunks,
+        )
+        return Metadata(state_dict_metadata={"param": storage})
+
+    def test_non_overlapping_chunks(self):
+        chunks = [
+            ChunkStorageMetadata(offsets=torch.Size([i]), sizes=torch.Size([1]))
+            for i in range(4)
+        ]
+        metadata = self._make_metadata(chunks, [4])
+        self.assertEqual(_validate_global_plan([SavePlan([])], metadata), [])
+
+    def test_detect_overlapping_chunks(self):
+        chunks = [
+            ChunkStorageMetadata(offsets=torch.Size([0]), sizes=torch.Size([2])),
+            ChunkStorageMetadata(offsets=torch.Size([1]), sizes=torch.Size([2])),
+        ]
+        metadata = self._make_metadata(chunks, [4])
+        self.assertGreater(len(_validate_global_plan([SavePlan([])], metadata)), 0)
+
+
 class TestLoadPlanner(TestCase):
     @with_temp_dir
     def test_strict(self):
@@ -592,6 +798,22 @@ class TestLoadPlanner(TestCase):
                 checkpoint_id=self.temp_dir,
                 planner=DefaultLoadPlanner(),
             )
+
+    @with_temp_dir
+    def test_version_key_in_planner_data(self):
+        original_module = nn.Linear(2, 2)
+
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        planner = DefaultLoadPlanner()
+        dcp.load(
+            state_dict={"module": new_module},
+            checkpoint_id=self.temp_dir,
+            planner=planner,
+        )
+
+        self.assertEqual(planner.metadata.version, CURRENT_DCP_VERSION)
 
 
 if __name__ == "__main__":

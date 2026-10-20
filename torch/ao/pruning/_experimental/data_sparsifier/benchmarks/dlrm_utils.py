@@ -19,9 +19,6 @@ class SparseDLRM(DLRM_Net):
     layer of the top layer.
     """
 
-    def __init__(self, **args):
-        super().__init__(**args)
-
     def forward(self, dense_x, lS_o, lS_i):
         x = self.apply_mlp(dense_x, self.bot_l)  # dense features
         ly = self.apply_emb(lS_o, lS_i, self.emb_l, self.v_W_l)  # apply embedding bag

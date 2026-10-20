@@ -1,10 +1,12 @@
 #pragma once
 #include <cstdint>
+#include <limits>
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 #include <ATen/cuda/CUDAConfig.h>
 
 // NOTE: These templates are intentionally not defined in this header,
-// which aviods re-compiling them for each translation unit. If you get
+// which avoids re-compiling them for each translation unit. If you get
 // a link error, you need to add an explicit instantiation for your
 // types in cub.cu
 
@@ -24,7 +26,13 @@ namespace detail {
 // radix_sort_pairs doesn't interact with value_t other than to copy
 // the data, so we can save template instantiations by reinterpreting
 // it as an opaque type.
+// We use native integer types for 1/2/4/8-byte values to reduce
+// register usage in CUDA kernels. For sizes > 8 fall back to char array.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
+template <> struct alignas(1) OpaqueType<1> { uint8_t data; };
+template <> struct alignas(2) OpaqueType<2> { uint16_t data; };
+template <> struct alignas(4) OpaqueType<4> { uint32_t data; };
+template <> struct alignas(8) OpaqueType<8> { uint64_t data; };
 
 template<typename key_t, int value_size>
 void radix_sort_pairs_impl(
@@ -34,11 +42,18 @@ void radix_sort_pairs_impl(
 
 }  // namespace detail
 
+// The backends take a 64-bit item count, but most callers here (randperm,
+// embedding backward, index_put) index their own surrounding kernels in 32
+// bits and rely on this check to reject oversized inputs. Only pass
+// allow_large_n from a caller that has been audited for it.
 template<typename key_t, typename value_t>
 void radix_sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
-    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8) {
+    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8,
+    bool allow_large_n=false) {
+  TORCH_CHECK(allow_large_n || n <= std::numeric_limits<int>::max(),
+              "cub sort does not support sorting more than INT_MAX elements");
   static_assert(std::is_trivially_copyable_v<value_t> ||
                 AT_ROCM_ENABLED(),  // ROCm incorrectly fails this check for vector types
                 "radix_sort_pairs value type must be trivially copyable");

@@ -1,9 +1,12 @@
-import dataclasses
+import argparse
 import datetime
+import os
 import tempfile
 from collections import defaultdict
+from collections.abc import Sequence
+from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 import torch
 from torch.autograd import DeviceType
@@ -30,7 +33,7 @@ _kernel_category_choices = [
 def get_kernel_category_by_source_code(src_code: str) -> str:
     """
     Similar to get_kernel_category but use the source code. Call this API
-    if we have not compile the src_code to module yet.
+    if we have not compiled the src_code to module yet.
     """
     choices = [
         ch for ch in _kernel_category_choices if f"@triton_heuristics.{ch}" in src_code
@@ -67,12 +70,17 @@ def get_triton_kernel(mod: ModuleType):  # type: ignore[no-untyped-def]
         for k, v in mod.__dict__.items()
         if k.startswith("triton_") and isinstance(v, CachingAutotuner)
     ]
-    assert len(cand_list) == 1
+    if len(cand_list) != 1:
+        raise AssertionError(
+            f"expected exactly one triton kernel, got {len(cand_list)}"
+        )
     return cand_list[0]
 
 
 def benchmark_all_kernels(
-    benchmark_name: str, benchmark_all_configs: Optional[dict[Any, Any]]
+    benchmark_name: str,
+    benchmark_all_configs: dict[Any, Any] | None,
+    kernel_modules: Sequence[str] = (),
 ) -> None:
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -83,7 +91,19 @@ def benchmark_all_kernels(
     Put this method here rather than codegen it for convenience since its implementation
     does not change based on different graph modules being compiled.
     """
-    from torch._inductor.codecache import PyCodeCache
+    from torch._inductor.codecache import get_path, PyCodeCache
+
+    # The cache keys of the modules a module-level kernel's harness stays in, which
+    # nothing else loads when the wrapper runs as a script. Loaded by async_compile, they
+    # would be precompiled, which benchmark_all_configs needs for its launchers.
+    for key in kernel_modules:
+        path = get_path(key, "py")[2]
+        # e.g. an FX graph cache hit served from TritonBundler writes no kernel module.
+        if not os.path.exists(path):
+            print(f"Skipping kernel module {key}: {path} is not in this cache dir")
+            continue
+        mod = PyCodeCache.load_by_key_path(key, path)
+        get_triton_kernel(mod).precompile()
 
     nfound = 0
     for kernel_mod in PyCodeCache.modules:
@@ -92,6 +112,7 @@ def benchmark_all_kernels(
             continue
 
         triton_kernel = get_triton_kernel(kernel_mod)
+        device_type = triton_kernel.device_props.type
         kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
         num_in_out_ptrs = len(
@@ -107,12 +128,12 @@ def benchmark_all_kernels(
 
         def get_info_str(
             ms: float,
-            n_regs: Optional[Any],
-            n_spills: Optional[Any],
-            shared: Optional[Any],
+            n_regs: int | None,
+            n_spills: int | None,
+            shared: int | None,
             prefix: str = "",
         ) -> str:
-            if not any(x is None for x in [n_regs, n_spills, shared]):
+            if n_regs is not None and n_spills is not None and shared is not None:
                 kernel_detail_str = (
                     f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
                 )
@@ -128,7 +149,8 @@ def benchmark_all_kernels(
             f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
         )
         if benchmark_all_configs:
-            assert hasattr(kernel_mod, "benchmark_all_configs")
+            if not hasattr(kernel_mod, "benchmark_all_configs"):
+                raise AssertionError("kernel_mod is missing benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
             print(kernel_desc)
             for launcher, ms in bench_result.items():
@@ -136,10 +158,13 @@ def benchmark_all_kernels(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
-            assert len(triton_kernel.launchers) == 1, (
-                "Autotuner should have selected the best config"
+            ms = benchmarker.benchmark(
+                lambda: kernel_mod.call(args),
+                device=device_type,
+                rep=40,
             )
+            if len(triton_kernel.launchers) != 1:
+                raise AssertionError("Autotuner should have selected the best config")
             launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
@@ -158,7 +183,7 @@ def benchmark_all_kernels(
         )
 
 
-@dataclasses.dataclass
+@dataclass
 class ProfileEvent:
     category: str
     key: str
@@ -175,6 +200,10 @@ def parse_profile_event_list(
     nruns: int,
     device_name: str,
 ) -> None:
+    """
+    Parse and generate a report for an event_list.
+    """
+
     def get_self_device_time(
         ev: torch.autograd.profiler_util.EventList,
     ) -> float:
@@ -198,7 +227,8 @@ def parse_profile_event_list(
         all_events[category].append(profile_ev)
 
     for ev in event_list:
-        assert not ev.is_legacy, "Don't support the legacy profiler"
+        if ev.is_legacy:
+            raise AssertionError("Don't support the legacy profiler")
         if ev.device_type == DeviceType.CPU:
             # ignore the event on CPU side
             continue
@@ -255,9 +285,8 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)), (
-            f"{list(all_events.keys())}"
-        )
+        if not OrderedSet(all_events.keys()).issubset(OrderedSet(category_list)):
+            raise AssertionError(f"{list(all_events.keys())}")
 
         per_category_wall_time = {}
         total_device_ms = 0.0
@@ -294,6 +323,10 @@ def parse_profile_event_list(
     report()
 
 
+PROFILE_DIR = tempfile.gettempdir()
+PROFILE_PATH = f"{PROFILE_DIR}/compiled_module_profile.json"
+
+
 def perf_profile(
     wall_time_ms: float,
     times: int,
@@ -304,23 +337,28 @@ def perf_profile(
     with torch.profiler.profile(record_shapes=True) as p:
         benchmark_compiled_module_fn(times=times, repeat=repeat)
 
-    path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+    path = PROFILE_PATH
     p.export_chrome_trace(path)
     print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
     print(f"Chrome trace for the profile is written to {path}")
     event_list = p.key_averages(group_by_input_shape=True)
     print(event_list.table(sort_by="self_device_time_total", row_limit=10))
     parse_profile_event_list(
-        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device
+        benchmark_name, event_list, wall_time_ms, times * repeat, p.use_device or ""
     )
 
 
 def ncu_analyzer(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+    benchmark_name: str,
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+    args: argparse.Namespace,
 ) -> None:
     import inspect
     import os
     import subprocess
+
+    kernel_regex = args.ncu_kernel_regex
+    metrics = args.ncu_metrics
 
     module_file = inspect.getfile(benchmark_compiled_module_fn)
     module_dir = os.path.dirname(module_file)
@@ -345,17 +383,28 @@ def ncu_analyzer(
         "function",
         "--print-units",
         "base",
-        "--set",
-        "full",
         "--import-source",
         "yes",
         "--force-overwrite",
         "--export",
         ncu_output,
-        "python",
-        "-c",
-        python_cmd,
     ]
+
+    if kernel_regex:
+        ncu_cmd.extend(["--kernel-name", f"regex:{kernel_regex}"])
+
+    if metrics:
+        ncu_cmd.extend(["--metrics", metrics])
+    else:
+        ncu_cmd.extend(["--set", "full"])
+
+    ncu_cmd.extend(
+        [
+            "python",
+            "-c",
+            python_cmd,
+        ]
+    )
 
     try:
         subprocess.run(ncu_cmd, check=True)
@@ -370,7 +419,8 @@ def ncu_analyzer(
 def collect_memory_snapshot(
     benchmark_compiled_module_fn: BenchmarkCallableType,
 ) -> None:
-    assert torch.cuda.is_available()
+    if not torch.cuda.is_available():
+        raise AssertionError("CUDA is not available")
 
     torch.cuda.memory._record_memory_history(max_entries=100000)
     benchmark_compiled_module_fn(times=10, repeat=1)  # run 10 times
@@ -380,8 +430,13 @@ def collect_memory_snapshot(
     print(f"The collect memory snapshot has been written to {snapshot_path}")
 
 
+# With AOTAutograd cache, we directly call the compiled module. So prevent
+# Dynamo from reentering
+@torch.compiler.disable  # type: ignore[misc]
 def compiled_module_main(
-    benchmark_name: str, benchmark_compiled_module_fn: BenchmarkCallableType
+    benchmark_name: str,
+    benchmark_compiled_module_fn: BenchmarkCallableType,
+    kernel_modules: Sequence[str] = (),
 ) -> None:
     """
     This is the function called in __main__ block of a compiled module.
@@ -421,13 +476,46 @@ def compiled_module_main(
         action="store_true",
         help="Whether to run ncu analysis",
     )
+    parser.add_argument(
+        "--ncu-kernel-regex",
+        type=str,
+        default=None,
+        help=(
+            "Filter kernels profiled by NCU using a regex (e.g., '^triton_.*'). "
+            "Maps to '--kernel-name regex:<regex>'. "
+            "If None, NCU will profile all kernels."
+        ),
+    )
+    parser.add_argument(
+        "--ncu-metrics",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of NCU metrics to collect (e.g., 'dram__bytes.sum.per_second'). "
+            "If None, NCU will use '--set full'."
+        ),
+    )
+    parser.add_argument(
+        "--times",
+        type=int,
+        default=10,
+        help="Number of times to run each benchmark iteration",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=10,
+        help="Number of repetitions of each benchmark run",
+    )
+
     args = parser.parse_args()
 
     if args.benchmark_kernels:
-        benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
+        all_configs = args.benchmark_all_configs
+        benchmark_all_kernels(benchmark_name, all_configs, kernel_modules)
     else:
-        times = 10
-        repeat = 10
+        times = args.times
+        repeat = args.repeat
 
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
@@ -449,4 +537,8 @@ def compiled_module_main(
                 benchmark_compiled_module_fn,
             )
         if args.ncu:
-            ncu_analyzer(benchmark_name, benchmark_compiled_module_fn)
+            ncu_analyzer(
+                benchmark_name,
+                benchmark_compiled_module_fn,
+                args=args,
+            )

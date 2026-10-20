@@ -32,10 +32,10 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
 
  public:
   explicit SparseCsrTensorImpl(
-      at::DispatchKeySet,
+      at::DispatchKeySet /*key_set*/,
       at::Device device,
       Layout layout,
-      const caffe2::TypeMeta);
+      const caffe2::TypeMeta /*data_type*/);
 
   void resize_(int64_t nnz, IntArrayRef size);
   void resize_and_clear_(
@@ -86,7 +86,8 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
  protected:
   IntArrayRef strides_custom() const override;
   SymIntArrayRef sym_strides_custom() const override;
-  bool is_contiguous_custom(MemoryFormat) const override;
+  SymBool sym_is_contiguous_custom(
+      MemoryFormat /*memory_format*/) const override;
 
  public:
   void set_size(int64_t dim, int64_t new_size) override;
@@ -122,7 +123,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     } else if (
         key_set_.has(DispatchKey::Python) &&
         !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-      interpreter = pyobj_slot_.load_pyobj_interpreter();
+      interpreter = *c10::impl::getGlobalPyInterpreter();
     } else {
       // otherwise just copy the SparseTensorImpl and not the PyObject.
       auto impl = c10::make_intrusive<SparseCsrTensorImpl>(

@@ -3,26 +3,26 @@
 import io
 import os
 import sys
+import unittest
 from pathlib import Path
 from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TemporaryFileName
+from torch.testing._internal.common_cuda import SM120OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TemporaryFileName,
+)
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import clear_class_registry, JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestSaveLoad(JitTestCase):
@@ -185,7 +185,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script  # noqa: F811
+        @torch.jit.script
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -281,7 +281,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script  # noqa: F811
+        @torch.jit.script
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -718,18 +718,20 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
+    @unittest.skipIf(
+        IS_WINDOWS and SM120OrLater,
+        "Process crash in PyTorchStreamWriter on SM120+ Windows",
+    )
     @skipIfTorchDynamo("too slow")
+    # 60GB was profiled as the safe figure to run this test. The check used to be
+    # inline against psutil.virtual_memory().available, which reports the host
+    # rather than the cgroup, so on a memory-capped CI container it admitted the
+    # test and the allocation below was OOM-killed instead of skipped.
+    @largeTensorTest("60GB", "cpu")
     def test_save_load_large_string_attribute(self):
         """
         Check if the model with string > 4GB can be loaded.
         """
-        import psutil
-
-        if psutil.virtual_memory().available < 60 * 1024 * 1024 * 1024:
-            # Profiled the test execution, and got this number to be safe to run the test
-            self.skipTest(
-                "Doesn't have enough memory to run test_save_load_large_string_attribute"
-            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -904,7 +906,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script  # noqa: F811
+        @torch.jit.script
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -994,7 +996,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script  # noqa: F811
+        @torch.jit.script
         class ImplementInterface:  # noqa: F811
             def __init__(self) -> None:
                 pass
@@ -1197,3 +1199,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
         torch._C._get_model_extra_files_from_buffer(script_module_io, re_extra_files)
 
         self.assertEqual(extra_files, re_extra_files)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

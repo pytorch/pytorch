@@ -97,8 +97,8 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
     }
   }
 
-  int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_contig.data_ptr<c10::qint8>());
+  const int8_t* weight_ptr_int8 =
+      reinterpret_cast<const int8_t*>(weight_contig.const_data_ptr<c10::qint8>());
 
   std::vector<int32_t> col_offsets(N);
   calc_col_offsets_transpose(
@@ -198,7 +198,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightFp16::prepack(
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   at::Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  const float* weight_contig_ptr = weight_contig.const_data_ptr<float>();
 
   // TODO(mingzhe09088):
   // Consider using a functor here in PackedGemmMatrixFP16
@@ -297,14 +297,37 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
 static inline at::Tensor pack_weight_to_onednn_tensor(
     const at::Tensor& weight,
     std::optional<torch::List<int64_t>>& input_shape) {
+  at::ScalarType weigh_dtype = weight.scalar_type();
+  TORCH_CHECK(
+    weigh_dtype == at::kChar || weigh_dtype == at::kFloat8_e4m3fn,
+    "Weight should be of type int8 or float8_e4m3fn");
+  bool is_fp8 = weigh_dtype == at::kFloat8_e4m3fn;
+#if defined(__powerpc__)
+  if (is_fp8){
+#else
+  if(is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#endif
+    // oneDNN's fp8 requires AMX support
+    // If AMX is not available, fall back to reference implementation
+    // Transpose weight to align with behavior in oneDNN
+    return weight.t();
+  }
   std::vector<int64_t> w_dims = weight.sizes().vec();
-  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
+  auto w_data_type = is_fp8
+      ? dnnl::memory::data_type::f8_e4m3
+      : dnnl::memory::data_type::s8;
+  ideep::tensor wei = ideep::tensor({w_dims, w_data_type}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
   ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
   ideep::attr_t op_attr;
-  op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  if (!is_fp8) {
+    op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  }
+  auto x_data_type = is_fp8
+      ? dnnl::memory::data_type::f8_e4m3
+      : dnnl::memory::data_type::u8;
   auto w_desc = ideep::matmul_forward::expected_weights_desc(
-      wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8, op_attr);
+      wei.get_dims(), input_dims, w_data_type, x_data_type, op_attr);
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);
   auto packed_weight = at::native::new_with_itensor_mkldnn(
@@ -338,7 +361,7 @@ namespace at::native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  float* weight_contig_ptr = weight_contig.mutable_data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }
@@ -567,8 +590,11 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -579,7 +605,8 @@ class QLinearPackWeightInt8 final {
     }
 #endif
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
     }
 #endif // #if AT_MKLDNN_ENABLED()

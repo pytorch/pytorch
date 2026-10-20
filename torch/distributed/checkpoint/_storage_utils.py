@@ -1,15 +1,15 @@
 import os
-from typing import Union
 
 from .filesystem import FileSystemReader, FileSystemWriter
+from .fsspec_filesystem import FsspecReader, FsspecWriter
 from .storage import StorageReader, StorageWriter
 
 
 def _storage_setup(
-    storage: Union[StorageReader, StorageWriter, None],
-    checkpoint_id: Union[str, os.PathLike, None],
+    storage: StorageReader | StorageWriter | None,
+    checkpoint_id: str | os.PathLike | None,
     reader: bool = False,
-) -> Union[None, StorageReader, StorageWriter]:
+) -> StorageReader | StorageWriter | None:
     if storage:
         if checkpoint_id is not None:
             storage.reset(checkpoint_id)
@@ -17,25 +17,15 @@ def _storage_setup(
 
     if not checkpoint_id:
         raise RuntimeError(
-            "`checkpoint_id` must be specificed if "
+            "`checkpoint_id` must be specified if "
             "storage_reader/storage_writer is None."
         )
 
-    targets: list[type[Union[StorageReader, StorageWriter]]] = []
+    targets: list[type[StorageReader | StorageWriter]]
     if reader:
-        targets = [
-            FileSystemReader,
-        ]
+        targets = [FileSystemReader, FsspecReader]
     else:
-        targets = [
-            FileSystemWriter,
-        ]
-    try:
-        from ._fsspec_filesystem import FsspecReader, FsspecWriter
-
-        targets.append(FsspecReader if reader else FsspecWriter)
-    except Exception:
-        pass
+        targets = [FileSystemWriter, FsspecWriter]
 
     for target in targets:
         if target.validate_checkpoint_id(checkpoint_id):

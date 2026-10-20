@@ -1,18 +1,358 @@
 #pragma once
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_convert.h>
+#include <c10/util/bit_cast.h>
 
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
-#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+#if defined(__aarch64__)
+
+// Define these specializations to match c10::convert, as defined in TypeCast.h,
+// which narrows float -> uint8_t via int64_t for CPU/CUDA consistency (see
+// https://github.com/pytorch/pytorch/issues/36807). Note that torch.Tensor.to
+// documents the result for values that do not fit into uint8_t as undefined.
+template <typename from_type>
+inline void convertToUint8(
+    const from_type* __restrict src,
+    uint8_t* __restrict dst,
+    int64_t n) {
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = static_cast<uint8_t>(static_cast<int64_t>(src[i]));
+  }
+}
+
+template <>
+inline void convert(const float* src, uint8_t* dst, int64_t n) {
+  convertToUint8(src, dst, n);
+}
+
+template <>
+inline void convert(const at::Half* src, uint8_t* dst, int64_t n) {
+  convertToUint8(src, dst, n);
+}
+
+template <>
+inline void convert(const c10::BFloat16* src, uint8_t* dst, int64_t n) {
+  convertToUint8(src, dst, n);
+}
+
+#if !defined(CPU_CAPABILITY_SVE256)
+
+// Enable auto-vectorization for clang-17+
+// GCC-12 has a bug: gcc.gnu.org/bugzilla/show_bug.cgi?id=117001
+#if defined(__clang__) && (__clang_major__ >= 17)
+
+template <typename from_type, typename to_type>
+inline void convertImpl(
+    const from_type* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = static_cast<to_type>(src[i]);
+  }
+}
+
+template <typename to_type>
+inline void convertFromBool(
+    const bool* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  const uint8_t* srcPtr = reinterpret_cast<const uint8_t*>(src);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dst[i] = srcPtr[i] != 0 ? static_cast<to_type>(1) : static_cast<to_type>(0);
+  }
+}
+
+template <typename from_type>
+inline void convertToBool(
+    const from_type* __restrict src,
+    bool* __restrict dst,
+    int64_t n) {
+  uint8_t* dstPtr = reinterpret_cast<uint8_t*>(dst);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dstPtr[i] = src[i] != static_cast<from_type>(0) ? 1 : 0;
+  }
+}
+
+#define CONVERT_TEMPLATE(from_type, to_type)                           \
+  template <>                                                          \
+  inline void convert(const from_type* src, to_type* dst, int64_t n) { \
+    return convertImpl<from_type, to_type>(src, dst, n);               \
+  }
+
+#define CONVERT_FROM_BOOL_TEMPLATE(to_type)                       \
+  inline void convert(const bool* src, to_type* dst, int64_t n) { \
+    return convertFromBool<to_type>(src, dst, n);                 \
+  }
+
+#define CONVERT_TO_BOOL_TEMPLATE(from_type)                         \
+  inline void convert(const from_type* src, bool* dst, int64_t n) { \
+    return convertToBool<from_type>(src, dst, n);                   \
+  }
+
+CONVERT_TEMPLATE(uint8_t, uint8_t)
+CONVERT_TEMPLATE(uint8_t, int8_t)
+CONVERT_TEMPLATE(uint8_t, int16_t)
+CONVERT_TEMPLATE(uint8_t, int32_t)
+CONVERT_TEMPLATE(uint8_t, int64_t)
+CONVERT_TEMPLATE(uint8_t, float)
+CONVERT_TEMPLATE(uint8_t, double)
+CONVERT_TO_BOOL_TEMPLATE(uint8_t)
+CONVERT_TEMPLATE(int8_t, uint8_t)
+CONVERT_TEMPLATE(int8_t, int8_t)
+CONVERT_TEMPLATE(int8_t, int16_t)
+CONVERT_TEMPLATE(int8_t, int32_t)
+CONVERT_TEMPLATE(int8_t, int64_t)
+CONVERT_TEMPLATE(int8_t, float)
+CONVERT_TEMPLATE(int8_t, double)
+CONVERT_TO_BOOL_TEMPLATE(int8_t)
+CONVERT_TEMPLATE(int16_t, uint8_t)
+CONVERT_TEMPLATE(int16_t, int8_t)
+CONVERT_TEMPLATE(int16_t, int16_t)
+CONVERT_TEMPLATE(int16_t, int32_t)
+CONVERT_TEMPLATE(int16_t, int64_t)
+CONVERT_TEMPLATE(int16_t, float)
+CONVERT_TEMPLATE(int16_t, double)
+CONVERT_TO_BOOL_TEMPLATE(int16_t)
+CONVERT_TEMPLATE(int32_t, uint8_t)
+CONVERT_TEMPLATE(int32_t, int8_t)
+CONVERT_TEMPLATE(int32_t, int16_t)
+CONVERT_TEMPLATE(int32_t, int32_t)
+CONVERT_TEMPLATE(int32_t, int64_t)
+CONVERT_TEMPLATE(int32_t, float)
+CONVERT_TEMPLATE(int32_t, double)
+CONVERT_TO_BOOL_TEMPLATE(int32_t)
+CONVERT_TEMPLATE(int64_t, uint8_t)
+CONVERT_TEMPLATE(int64_t, int8_t)
+CONVERT_TEMPLATE(int64_t, int16_t)
+CONVERT_TEMPLATE(int64_t, int32_t)
+CONVERT_TEMPLATE(int64_t, int64_t)
+CONVERT_TEMPLATE(int64_t, float)
+CONVERT_TEMPLATE(int64_t, double)
+CONVERT_TO_BOOL_TEMPLATE(int64_t)
+CONVERT_TEMPLATE(float, int8_t)
+CONVERT_TEMPLATE(float, int16_t)
+CONVERT_TEMPLATE(float, int32_t)
+CONVERT_TEMPLATE(float, int64_t)
+CONVERT_TEMPLATE(float, float)
+CONVERT_TEMPLATE(float, double)
+CONVERT_TO_BOOL_TEMPLATE(float)
+CONVERT_TEMPLATE(double, uint8_t)
+CONVERT_TEMPLATE(double, int8_t)
+CONVERT_TEMPLATE(double, int16_t)
+CONVERT_TEMPLATE(double, int32_t)
+CONVERT_TEMPLATE(double, int64_t)
+CONVERT_TEMPLATE(double, float)
+CONVERT_TEMPLATE(double, double)
+CONVERT_TO_BOOL_TEMPLATE(double)
+CONVERT_FROM_BOOL_TEMPLATE(uint8_t)
+CONVERT_FROM_BOOL_TEMPLATE(int8_t)
+CONVERT_FROM_BOOL_TEMPLATE(int16_t)
+CONVERT_FROM_BOOL_TEMPLATE(int32_t)
+CONVERT_FROM_BOOL_TEMPLATE(int64_t)
+CONVERT_FROM_BOOL_TEMPLATE(float)
+CONVERT_FROM_BOOL_TEMPLATE(double)
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+
+#define CONVERT_FROM_FP16_TEMPLATE(to_type)                            \
+  template <>                                                          \
+  inline void convert(const at::Half* src, to_type* dst, int64_t n) {  \
+    const float16_t* srcPtr = reinterpret_cast<const float16_t*>(src); \
+    return convertImpl<float16_t, to_type>(srcPtr, dst, n);            \
+  }
+
+#define CONVERT_TO_FP16_TEMPLATE(from_type)                             \
+  template <>                                                           \
+  inline void convert(const from_type* src, at::Half* dst, int64_t n) { \
+    float16_t* dstPtr = reinterpret_cast<float16_t*>(dst);              \
+    return convertImpl<from_type, float16_t>(src, dstPtr, n);           \
+  }
+
+CONVERT_FROM_FP16_TEMPLATE(int8_t)
+CONVERT_FROM_FP16_TEMPLATE(int16_t)
+CONVERT_FROM_FP16_TEMPLATE(int32_t)
+CONVERT_FROM_FP16_TEMPLATE(int64_t)
+CONVERT_FROM_FP16_TEMPLATE(float16_t)
+CONVERT_FROM_FP16_TEMPLATE(float)
+CONVERT_FROM_FP16_TEMPLATE(double)
+CONVERT_TO_FP16_TEMPLATE(uint8_t)
+CONVERT_TO_FP16_TEMPLATE(int8_t)
+CONVERT_TO_FP16_TEMPLATE(int16_t)
+CONVERT_TO_FP16_TEMPLATE(int32_t)
+CONVERT_TO_FP16_TEMPLATE(int64_t)
+CONVERT_TO_FP16_TEMPLATE(float)
+CONVERT_TO_FP16_TEMPLATE(double)
+
+inline void convertBoolToFp16Impl(
+    const bool* __restrict src,
+    at::Half* __restrict dst,
+    int64_t n) {
+  const uint8_t* srcPtr = reinterpret_cast<const uint8_t*>(src);
+  float16_t* dstPtr = reinterpret_cast<float16_t*>(dst);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dstPtr[i] = srcPtr[i] != 0 ? 1.0 : 0;
+  }
+}
+
+template <>
+inline void convert(const bool* src, at::Half* dst, int64_t n) {
+  return convertBoolToFp16Impl(src, dst, n);
+}
+
+inline void convertFp16ToBoolImpl(
+    const at::Half* __restrict src,
+    bool* __restrict dst,
+    int64_t n) {
+  const float16_t* srcPtr = reinterpret_cast<const float16_t*>(src);
+  uint8_t* dstPtr = reinterpret_cast<uint8_t*>(dst);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    dstPtr[i] = srcPtr[i] != 0.0 ? 1 : 0;
+  }
+}
+
+template <>
+inline void convert(const at::Half* src, bool* dst, int64_t n) {
+  return convertFp16ToBoolImpl(src, dst, n);
+}
+
+#endif
+
+template <typename to_type>
+inline void convertFromBf16Impl(
+    const c10::BFloat16* __restrict src,
+    to_type* __restrict dst,
+    int64_t n) {
+  const uint16_t* srcPtr = reinterpret_cast<const uint16_t*>(src);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    uint32_t tmp = static_cast<uint32_t>(srcPtr[i]) << 16;
+    dst[i] = static_cast<to_type>(c10::bit_cast<float>(tmp));
+  }
+}
+#define CONVERT_FROM_BF16_TEMPLATE(to_type)                                \
+  template <>                                                              \
+  inline void convert(const c10::BFloat16* src, to_type* dst, int64_t n) { \
+    return convertFromBf16Impl<to_type>(src, dst, n);                      \
+  }
+
+CONVERT_FROM_BF16_TEMPLATE(int8_t)
+CONVERT_FROM_BF16_TEMPLATE(int16_t)
+CONVERT_FROM_BF16_TEMPLATE(int32_t)
+CONVERT_FROM_BF16_TEMPLATE(int64_t)
+CONVERT_FROM_BF16_TEMPLATE(float)
+CONVERT_FROM_BF16_TEMPLATE(double)
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+CONVERT_FROM_BF16_TEMPLATE(float16_t)
+#endif
+
+#ifdef __ARM_FEATURE_BF16
+
+// clang-[17, 20] crashes when autovectorizing static cast to bf16
+// Below is a workaround to have some vectorization
+// Works decently well for smaller int types
+template <typename from_type>
+inline void convertToBf16Impl(
+    const from_type* __restrict src,
+    c10::BFloat16* __restrict dst,
+    uint64_t n) {
+  bfloat16_t* dstPtr = reinterpret_cast<bfloat16_t*>(dst);
+  uint64_t loopBound = n - (n % 16);
+  uint64_t i = 0;
+  for (; i < loopBound; i += 16) {
+    float32x4_t a, b, c, d;
+    a[0] = static_cast<float>(src[i]);
+    a[1] = static_cast<float>(src[i + 1]);
+    a[2] = static_cast<float>(src[i + 2]);
+    a[3] = static_cast<float>(src[i + 3]);
+    b[0] = static_cast<float>(src[i + 4]);
+    b[1] = static_cast<float>(src[i + 5]);
+    b[2] = static_cast<float>(src[i + 6]);
+    b[3] = static_cast<float>(src[i + 7]);
+    c[0] = static_cast<float>(src[i + 8]);
+    c[1] = static_cast<float>(src[i + 9]);
+    c[2] = static_cast<float>(src[i + 10]);
+    c[3] = static_cast<float>(src[i + 11]);
+    d[0] = static_cast<float>(src[i + 12]);
+    d[1] = static_cast<float>(src[i + 13]);
+    d[2] = static_cast<float>(src[i + 14]);
+    d[3] = static_cast<float>(src[i + 15]);
+
+    vst1q_bf16(dstPtr + i, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(a), b));
+    vst1q_bf16(dstPtr + i + 8, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(c), d));
+  }
+
+#pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
+  for (; i < n; i++) {
+    float a = static_cast<float>(src[i]);
+    dstPtr[i] = vcvth_bf16_f32(a);
+  }
+}
+
+#define CONVERT_TO_BF16_TEMPLATE(from_type)                                  \
+  template <>                                                                \
+  inline void convert(const from_type* src, c10::BFloat16* dst, int64_t n) { \
+    return convertToBf16Impl<from_type>(src, dst, n);                        \
+  }
+
+CONVERT_TO_BF16_TEMPLATE(uint8_t)
+CONVERT_TO_BF16_TEMPLATE(int8_t)
+CONVERT_TO_BF16_TEMPLATE(int16_t)
+CONVERT_TO_BF16_TEMPLATE(int32_t)
+
+#endif
+
+inline void convertBoolToBfloat16Impl(
+    const bool* __restrict src,
+    c10::BFloat16* __restrict dst,
+    int64_t n) {
+  const uint8_t* srcPtr = reinterpret_cast<const uint8_t*>(src);
+  uint16_t* dstPtr = reinterpret_cast<uint16_t*>(dst);
+  uint64_t len = static_cast<uint64_t>(n);
+  constexpr uint16_t kBf16One = 0x3f80; // 1.0 in bfloat16
+  for (uint64_t i = 0; i < len; i++) {
+    dstPtr[i] = srcPtr[i] != 0 ? kBf16One : 0;
+  }
+}
+
+template <>
+inline void convert(const bool* src, c10::BFloat16* dst, int64_t n) {
+  return convertBoolToBfloat16Impl(src, dst, n);
+}
+
+inline void convertBfloat16ToBoolImpl(
+    const c10::BFloat16* __restrict src,
+    bool* __restrict dst,
+    int64_t n) {
+  uint8_t* dstPtr = reinterpret_cast<uint8_t*>(dst);
+  const uint16_t* srcPtr = reinterpret_cast<const uint16_t*>(src);
+  uint64_t len = static_cast<uint64_t>(n);
+  for (uint64_t i = 0; i < len; i++) {
+    // Check if all non-sign bits are 0
+    bool isBf16Zero = (srcPtr[i] & 0x7fff) == 0;
+    dstPtr[i] = isBf16Zero ? 0 : 1;
+  }
+}
+
+template <>
+inline void convert(const c10::BFloat16* src, bool* dst, int64_t n) {
+  return convertBfloat16ToBoolImpl(src, dst, n);
+}
+
+#endif
+
 template <typename src_t>
 struct VecConvert<
     float,
     1,
     src_t,
     1,
-    typename std::enable_if_t<is_8bit_integer_v<src_t>,
-        void>> {
+    typename std::enable_if_t<is_8bit_integer_v<src_t>, void>> {
   static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
     return convert_int8_half_register_to_float(src[0]);
   }
@@ -23,11 +363,119 @@ struct VecConvert<
     2,
     src_t,
     1,
-    typename std::enable_if_t<is_8bit_integer_v<src_t>,
-        void>> {
+    typename std::enable_if_t<is_8bit_integer_v<src_t>, void>> {
   static inline VectorizedN<float, 2> apply(const VectorizedN<src_t, 1>& src) {
     const auto [v0, v1] = convert_int8_to_float(src[0]);
     return VectorizedN<float, 2>(v0, v1);
+  }
+};
+
+template <int src_n>
+inline uint8x16_t convert_float_to_uint8(const VectorizedN<float, src_n>& src) {
+  // Widening to double before truncating puts the saturation point at the
+  // int64_t bounds rather than the int32_t ones, so every input that is not
+  // astronomically large contributes its true low byte, as the scalar
+  // float -> int64_t -> uint8_t narrowing in c10::convert does. Converting via
+  // int32_t instead would be cheaper but would report 0xff rather than the
+  // true low byte across [2^31, 2^63), where FCVTZS saturates.
+  const auto lo_i64 = [](const float32x4_t f) {
+    return vcvtq_s64_f64(vcvt_f64_f32(vget_low_f32(f)));
+  };
+  const auto hi_i64 = [](const float32x4_t f) {
+    return vcvtq_s64_f64(vcvt_high_f64_f32(f));
+  };
+  // The eight indices past the 64-byte table are out of range and read as
+  // zero, so only the low half of the result carries bytes.
+  const auto low_bytes =
+      [](int64x2_t a, int64x2_t b, int64x2_t c, int64x2_t d) {
+        const uint8x16x4_t table = {
+            vreinterpretq_u8_s64(a),
+            vreinterpretq_u8_s64(b),
+            vreinterpretq_u8_s64(c),
+            vreinterpretq_u8_s64(d)};
+        const uint8x16_t low_byte_of_each_i64 = {
+            0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
+        return vqtbl4q_u8(table, low_byte_of_each_i64);
+      };
+
+  // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+  // count) that the generic fallback ends with.
+  if constexpr (src_n == 4) {
+    return vcombine_u8(
+        vget_low_u8(low_bytes(
+            lo_i64(src[0]), hi_i64(src[0]), lo_i64(src[1]), hi_i64(src[1]))),
+        vget_low_u8(low_bytes(
+            lo_i64(src[2]), hi_i64(src[2]), lo_i64(src[3]), hi_i64(src[3]))));
+  } else if constexpr (src_n >= 2) {
+    return low_bytes(
+        lo_i64(src[0]), hi_i64(src[0]), lo_i64(src[1]), hi_i64(src[1]));
+  } else {
+    const int64x2_t zero = vdupq_n_s64(0);
+    return low_bytes(lo_i64(src[0]), hi_i64(src[0]), zero, zero);
+  }
+}
+
+template <int src_n>
+struct VecConvert<uint8_t, 1, float, src_n> {
+  static inline VectorizedN<uint8_t, 1> apply(
+      const VectorizedN<float, src_n>& src) {
+    return Vectorized<uint8_t>(convert_float_to_uint8(src));
+  }
+};
+
+template <>
+struct VecConvert<double, 2, float, 1> {
+  static inline VectorizedN<double, 2> apply(const VectorizedN<float, 1>& src) {
+    const float32x4_t f32 = src[0];
+    VectorizedN<double, 2> result;
+    result[0] = vcvt_f64_f32(vget_low_f32(f32));
+    result[1] = vcvt_high_f64_f32(f32);
+    return result;
+  }
+};
+
+// Half register to full register.
+template <>
+struct VecConvert<double, 1, float, 1> {
+  static inline VectorizedN<double, 1> apply(const VectorizedN<float, 1>& src) {
+    return Vectorized<double>(vcvt_f64_f32(vget_low_f32(src[0])));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, double, 2> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 2>& src) {
+    return Vectorized<float>(vcvt_high_f32_f64(vcvt_f32_f64(src[0]), src[1]));
+  }
+};
+
+// Full register to half register.
+template <>
+struct VecConvert<float, 1, double, 1> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 1>& src) {
+    // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+    // count) that the generic fallback ends with.
+    return Vectorized<float>(
+        vcombine_f32(vcvt_f32_f64(src[0]), vdup_n_f32(0.0f)));
+  }
+};
+
+// Truncates toward zero, as the generic static_cast does. Where that cast is
+// undefined, FCVTZS is not: out-of-range lanes saturate and NaN gives 0.
+template <>
+struct VecConvert<int64_t, 1, double, 1> {
+  static inline VectorizedN<int64_t, 1> apply(
+      const VectorizedN<double, 1>& src) {
+    return Vectorized<int64_t>(vcvtq_s64_f64(src[0]));
+  }
+};
+
+// Rounds in the current rounding mode, as the generic static_cast does.
+template <>
+struct VecConvert<double, 1, int64_t, 1> {
+  static inline VectorizedN<double, 1> apply(
+      const VectorizedN<int64_t, 1>& src) {
+    return Vectorized<double>(vcvtq_f64_s64(src[0]));
   }
 };
 
@@ -39,8 +487,10 @@ struct VecConvert<float, 2, BFloat16, 1> {
     uint16x8_t u16_8 = vld1q_u16(reinterpret_cast<const uint16_t*>(&src[0]));
     auto u16_low1 = vget_low_u16(u16_8);
     auto u16_high1 = vget_high_u16(u16_8);
-    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_low1), 16));
-    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_high1), 16));
+    float32x4_t f32x4_0 =
+        vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_low1), 16));
+    float32x4_t f32x4_1 =
+        vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_high1), 16));
     result[0] = f32x4_0;
     result[1] = f32x4_1;
     return result;
@@ -53,12 +503,36 @@ struct VecConvert<float, 1, BFloat16, 1> {
       const VectorizedN<BFloat16, 1>& src) {
     VectorizedN<float, 1> result;
     uint16x4_t u16_8 = vld1_u16(reinterpret_cast<const uint16_t*>(&src[0]));
-    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_8), 16));
+    float32x4_t f32x4_0 =
+        vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(u16_8), 16));
     result[0] = f32x4_0;
     return result;
   }
 };
 
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+// bf16/fp16 vec classes are not available for C10_MOBILE
+#if !defined(C10_MOBILE)
+template <>
+struct VecConvert<BFloat16, 1, float, 2> {
+  static inline VectorizedN<BFloat16, 1> apply(
+      const VectorizedN<float, 2>& src) {
+    VectorizedN<BFloat16, 1> result;
+    result[0] = convert_float_bfloat16(src[0], src[1]);
+    return result;
+  }
+};
+
+template <>
+struct VecConvert<Half, 1, float, 2> {
+  static inline VectorizedN<Half, 1> apply(const VectorizedN<float, 2>& src) {
+    VectorizedN<Half, 1> result;
+    result[0] = convert_float_half(src[0], src[1]);
+    return result;
+  }
+};
+
+#endif // !defined(C10_MOBILE)
+#endif // !defined(CPU_CAPABILITY_SVE256)
+#endif // defined(__aarch64__)
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

@@ -23,7 +23,7 @@
 namespace torch::jit {
 
 static inline bool PyNone_Check(PyObject* o) {
-  return o == Py_None;
+  return Py_IsNone(o);
 }
 
 std::pair<TypePtr, bool> MergeInferredType(
@@ -260,7 +260,7 @@ Value* CloneValueFromListConstruct(
   // prim::ListConstruct is converted to onnx::Concat. The conversion should
   // eventually be moved to symbolic. For now, treat this operator as
   // special case, and change from list type to tensor type. The scalar type
-  // is preserved. If the elemtype is Int, insert a onnx::Concat node into
+  // is preserved. If the elemtype is Int, insert an onnx::Concat node into
   // the graph.
   TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
   std::optional<at::ScalarType> scalar_type = std::nullopt;
@@ -282,7 +282,7 @@ Value* CloneValueFromListConstruct(
   auto input = n_graph->addInput();
   if (scalar_type) {
     auto v_type = TensorType::create(
-        scalar_type.value(),
+        scalar_type,
         at::kCPU,
         c10::SymbolicShape(),
         c10::VaryingShape<c10::Stride>{},
@@ -411,7 +411,9 @@ void ConvertGraphToONNXProto(
   }
 }
 
-std::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
+std::optional<at::Tensor> ComputeConstantFolding(
+    const Node* n,
+    int opset_version) {
   if (n->inputs().empty()) {
     return std::nullopt;
   }
@@ -463,7 +465,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   auto it_0 = std::find_if(shape_vector.begin(), shape_vector.end(), is_zero);
   bool shape_has_zero = it_0 != shape_vector.end();
 
-  int minus_one_pos = -1;
+  int64_t minus_one_pos = -1;
   for (auto i : c10::irange(shape_vector.size())) {
     if (shape_vector[i].value() == -1) {
       minus_one_pos = i;
@@ -515,7 +517,7 @@ std::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
       shape_ratio /= static_cast<uint64_t>(target_shape.static_size());
     } else {
       auto value = target_shape.value();
-      if (sym_map.find(value) == sym_map.end()) {
+      if (!sym_map.contains(value)) {
         return std::nullopt;
       }
       sym_map[value]--;
@@ -773,7 +775,7 @@ void ProcessBroadcastNode(Node* n) {
 }
 
 void ProcessShapeForConcatNode(Node* n) {
-  int axis = n->i(attr::axis);
+  auto axis = n->i(attr::axis);
   if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
     auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
     size_t axis_adjust = 0;
@@ -928,9 +930,9 @@ void ProcessReduceNode(Node* n) {
       std::iota(axes_vector.begin(), axes_vector.end(), 0);
     }
 
-    for (auto idx : c10::irange(axes_vector.size())) {
-      if (axes_vector[idx] < 0) {
-        axes_vector[idx] += rank_0;
+    for (auto& axis : axes_vector) {
+      if (axis < 0) {
+        axis += rank_0;
       }
     }
     final_shape.reserve(rank_0);
@@ -1200,8 +1202,9 @@ void ProcessTimeSeriesNode(Node* n) {
           hidden_size = c10::ShapeSymbol::fromStaticSize(input1_value / 3);
           break;
         default:
-          throw std::runtime_error(
-              std::string() + "This is not a valid TimeSeries Node with type " +
+          TORCH_CHECK(
+              false,
+              "This is not a valid TimeSeries Node with type ",
               n->kind().toDisplayString());
       }
     } else {
@@ -1244,7 +1247,7 @@ void ProcessUnsqueezeNode(Node* n) {
 void ComputeConstant(Node* n, int opset_version) {
   if (n->kind() == ::c10::onnx::Constant) {
     if (n->kindOf(attr::value) == AttributeKind::t) {
-      at::Tensor const_val = n->t(attr::value);
+      const at::Tensor& const_val = n->t(attr::value);
       at::Tensor const_val_copy =
           at::empty(const_val.sizes(), const_val.options());
       const_val_copy.copy_(const_val);
@@ -1381,7 +1384,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             // When value of `shape` is statically known,
             // output shape can be computed.
@@ -1437,8 +1440,8 @@ void ComputeConstant(Node* n, int opset_version) {
                   for (auto cur_dim : shape_vector_0) {
                     num_elements *= cur_dim.static_size();
                   }
-                  dims.emplace_back(c10::ShapeSymbol::fromStaticSize(
-                      static_cast<int64_t>(num_elements)));
+                  dims.emplace_back(
+                      c10::ShapeSymbol::fromStaticSize(num_elements));
                 }
               }
             }
@@ -1474,12 +1477,12 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           int64_t total_size = 1;
           auto is_full_static = true;
-          for (const auto i : c10::irange(input0_shape_value.size())) {
-            if (input0_shape_value[i].is_static()) {
-              total_size *= input0_shape_value[i].static_size();
+          for (const auto& shape_symbol : input0_shape_value) {
+            if (shape_symbol.is_static()) {
+              total_size *= shape_symbol.static_size();
             } else {
               is_full_static = false;
               break;
@@ -1510,7 +1513,7 @@ void ComputeConstant(Node* n, int opset_version) {
                 .value()
                 .sizes();
         if (input0_shape_size.has_value()) {
-          auto input0_shape_value = input0_shape_size.value();
+          const auto& input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
@@ -1659,10 +1662,10 @@ void SpecialPostProcess(Node* n) {
       };
 
       auto find_sequence_empty = [](Value* input,
-                                    TensorTypePtr t_type) -> Node* {
+                                    const TensorTypePtr& t_type) -> Node* {
         auto find_sequence_empty_impl =
             [](Value* input,
-               TensorTypePtr t_type,
+               const TensorTypePtr& t_type,
                auto& find_sequence_empty_ref) -> Node* {
           auto input_node = input->node();
           TORCH_INTERNAL_ASSERT(input_node);
@@ -1708,7 +1711,7 @@ void SpecialPostProcess(Node* n) {
           return nullptr;
         };
         return find_sequence_empty_impl(
-            input, std::move(t_type), find_sequence_empty_impl);
+            input, t_type, find_sequence_empty_impl);
       };
 
       if (seq_node && t_type && t_type->scalarType()) {
@@ -1891,7 +1894,8 @@ void ONNXShapeTypeInference(
       const_val_copy.copy_(const_val);
       ConstantValueMap::SetValue(value.first, const_val_copy);
     } else {
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "ONNXShapeTypeInference - Unsupported kind of constant node found.");
     }
   }
@@ -1940,14 +1944,13 @@ std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
   auto complete = true;
   auto input_size = n->inputs().size();
   std::unordered_set<int64_t> non_required_idx = {};
-  if (non_required_shape_inference_idx_map.find(n->kind().toDisplayString()) !=
-      non_required_shape_inference_idx_map.end()) {
+  if (non_required_shape_inference_idx_map.contains(
+          n->kind().toDisplayString())) {
     non_required_idx =
         non_required_shape_inference_idx_map[n->kind().toDisplayString()];
   }
   for (auto idx : c10::irange(input_size)) {
-    if (!non_required_idx.empty() &&
-        non_required_idx.find(idx) != non_required_idx.end()) {
+    if (!non_required_idx.empty() && non_required_idx.contains(idx)) {
       continue;
     }
     auto input = n->inputs()[idx];
@@ -1983,10 +1986,8 @@ void UpdateReliable(
     bool no_type_warning) {
   auto inferred =
       ConstantValueMap::GetUseInferredType(output->debugName()).value_or(false);
-  auto isTypeReliableForTracer =
-      nodeTypeReliableForTracer.find(
-          output->node()->kind().toDisplayString()) !=
-      nodeTypeReliableForTracer.end();
+  auto isTypeReliableForTracer = nodeTypeReliableForTracer.contains(
+      output->node()->kind().toDisplayString());
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
     TORCH_WARN(
@@ -2223,7 +2224,7 @@ void ONNXSetDynamicInputShape(
 
   for (const auto i : c10::irange(input_names.size())) {
     const auto& input_name = input_names[i];
-    if (dynamic_axes.find(input_name) != dynamic_axes.end()) {
+    if (dynamic_axes.contains(input_name)) {
       auto axes_names = dynamic_axes.find(input_name)->second;
       TORCH_INTERNAL_ASSERT(i < graph->inputs().size());
       auto input_tensor_type = graph->inputs()[i]->type()->cast<TensorType>();
@@ -2239,7 +2240,7 @@ void ONNXSetDynamicInputShape(
       for (const auto& pair : axes_names) {
         const auto axis = pair.first;
         const auto name = pair.second;
-        if (name_to_sym.find(name) == name_to_sym.end()) {
+        if (!name_to_sym.contains(name)) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
         TORCH_CHECK(
@@ -2255,7 +2256,7 @@ void ONNXSetDynamicInputShape(
   }
 }
 
-static bool HasSequenceTypeOutput(Node* node) {
+static bool HasSequenceTypeOutput(const Node* node) {
   if (node->kind() == ::c10::onnx::SplitToSequence ||
       node->kind() == ::c10::onnx::SequenceInsert ||
       node->kind() == ::c10::onnx::SequenceEmpty ||
@@ -2412,10 +2413,10 @@ static size_t ONNXAssignOutputShape(
     }
   } else {
     std::string msg =
-        ("Model output has unsupported type. See "
-         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ");
+        "Model output has unsupported type. See "
+        "https://pytorch.org/docs/stable/onnx.html#types. Got type: ";
     msg += THPUtils_typename(output_obj);
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, msg);
   }
 
   index_check();

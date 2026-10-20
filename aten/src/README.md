@@ -8,7 +8,7 @@ multiple variants of the library, summarized here:
 * THC = TorcH Cuda
 * THCS = TorcH Cuda Sparse (now defunct)
 * THNN = TorcH Neural Network (now defunct)
-* THS = TorcH Sparse (now defunct)
+* THS = TorcH Sparse (now defunct)  <!-- codespell:ignore -->
 
 (You'll also see these abbreviations show up in symbol names.)
 

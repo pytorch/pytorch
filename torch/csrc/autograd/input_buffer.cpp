@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/input_buffer.h>
 
 #include <ATen/CachedTensorUtils.h>
@@ -19,6 +20,46 @@
 
 namespace torch::autograd {
 
+std::optional<c10::Stream> maybe_override_stale_capture_stream(
+    const std::optional<c10::Stream>& node_stream,
+    const std::optional<c10::Stream>& capturing_stream,
+    const std::string& node_name) {
+  TORCH_INTERNAL_ASSERT(
+      node_stream.has_value() && !node_stream->is_capturing(),
+      "maybe_override_stale_capture_stream: node_stream must be set and "
+      "non-capturing");
+  TORCH_INTERNAL_ASSERT(
+      capturing_stream.has_value() && capturing_stream->is_capturing(),
+      "maybe_override_stale_capture_stream: capturing_stream must be set "
+      "and capturing");
+  if (at::globalContext().overrideStaleCaptureStream()) {
+    return capturing_stream;
+  }
+  if (node_stream->id() == 0) {
+    TORCH_CHECK(
+        false,
+        "During CUDA graph capture, autograd node '",
+        node_name,
+        "' has a stale reference to the default stream (stream 0) from "
+        "warmup. This will invalidate the capture because "
+        "cudaStreamWaitEvent on the default stream pulls a non-capturing "
+        "stream into the graph.\n\n"
+        "To fix, either:\n"
+        "  (a) Run warmup on the same stream that capture will use, or\n"
+        "  (b) Delete references to the loss / autograd graph (e.g. "
+        "`del loss`) before capture, or\n"
+        "  (c) Call torch.autograd.graph."
+        "set_override_stale_capture_stream(True) to automatically "
+        "redirect stale nodes to the capturing stream.");
+  }
+  // Non-default stale stream: leave unchanged. The user may have joined it
+  // into the capture (e.g. via `capture_stream.wait_stream(stale_stream)`)
+  // in which case the capture will succeed; otherwise the CUDA runtime will
+  // fail the capture with a downstream error. Users who want an automatic
+  // redirect can opt in via set_override_stale_capture_stream(True).
+  return node_stream;
+}
+
 namespace {
 // look what you made me do >.<
 // Divergent paths for per-Impl stream recording that leak implementation
@@ -26,8 +67,13 @@ namespace {
 // See https://github.com/pytorch/pytorch/issues/60306
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
-void record_stream_any_impl(Variable& var, c10::Stream& stream) {
+void record_stream_any_impl(Variable& var, const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+
+  if (stream.device_index() != var.device().index()) {
+    return;
+  }
+
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
   if (C10_UNLIKELY(at::isBatchedTensor(var))) {
@@ -79,8 +125,8 @@ bool can_accumulate_inplace(const Variable& v) {
       v.is_non_overlapping_and_dense() &&
 
       // and we hold the last reference
-      at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
-      v.storage().use_count() == 1);
+      impl::is_tensor_stealable(v, 1 + at::caching::is_cached_tensor(v)) &&
+      v.has_storage() && v.storage().use_count() == 1);
 }
 } // anonymous namespace
 
@@ -126,99 +172,362 @@ static void accumulate(
   }
 }
 
-void InputBuffer::add(
+// Note [Direct accumulation thread and stream safety]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The default engine holds GraphTask::mutex_ while calling both add() and
+// get_for_direct_accumulation(). This protects direct_accumulation_threads_ and
+// prevents the eligibility check and thread recording from racing with another
+// producer's get_for_direct_accumulation() or add(). Subsequent calls observe
+// the recorded thread while holding the same mutex.
+//
+// The mutex is released before the custom backward mutates the Tensor, so it
+// does not serialize tensor writes. Later producers must run on the recorded
+// engine thread, where execution is sequential; a producer on another thread
+// is rejected before performing an addition.
+//
+// The thread check is defensive for the default engine. InputBuffers are local
+// to one GraphTask, so concurrent backward executions do not share them. Within
+// a GraphTask, the device and stream checks below restrict eligible producers
+// to one execution device. One active worker services an accelerator device's
+// ready queue, and the owning thread services non-accelerator work. Reentrant
+// execution, which could hand work to another worker, is rejected while a
+// buffer is exposed.
+//
+// Accelerator writes are asynchronous, so thread serialization is not enough.
+// The producer, accumulation, ready, and consumer streams must all match. This
+// orders prior writes, the direct mutation, later additions, and the consumer
+// without recording a new completion event when backward returns None.
+void InputBuffer::validate_direct_accumulation(
     size_t pos,
-    Variable&& var,
+    const at::Device& device,
+    const std::optional<c10::Stream>& opt_producer_stream,
+    const std::optional<c10::Stream>& opt_consumer_stream,
+    std::thread::id expected_thread) const {
+  TORCH_INTERNAL_ASSERT(buffer[pos].defined());
+  const auto buffer_device = buffer[pos].device();
+  TORCH_CHECK(
+      buffer_device == device,
+      "Direct InputBuffer accumulation requires the buffer and gradient to be "
+      "on the same device, but the buffer is on ",
+      buffer_device,
+      " and the gradient is on ",
+      device);
+
+  const auto current_thread = std::this_thread::get_id();
+  TORCH_CHECK(
+      expected_thread == current_thread,
+      "Direct InputBuffer accumulation requires the same autograd engine "
+      "thread, but the buffer was exposed on thread ",
+      expected_thread,
+      " and is now being accessed on thread ",
+      current_thread);
+
+  if (at::accelerator::isAccelerator(device.type())) {
+    TORCH_INTERNAL_ASSERT(
+        pos < opt_accum_streams.size() && opt_accum_streams[pos] &&
+        pos < ready_streams.size() && ready_streams[pos]);
+    TORCH_CHECK(
+        opt_producer_stream && opt_consumer_stream,
+        "Direct InputBuffer accumulation for an accelerator buffer requires "
+        "producer and consumer streams, but got producer stream present: ",
+        opt_producer_stream.has_value(),
+        " and consumer stream present: ",
+        opt_consumer_stream.has_value());
+    TORCH_CHECK(
+        *opt_producer_stream == *opt_consumer_stream &&
+            *opt_producer_stream == *opt_accum_streams[pos] &&
+            *opt_producer_stream == *ready_streams[pos],
+        "Direct InputBuffer accumulation requires the same stream, but got "
+        "producer ",
+        *opt_producer_stream,
+        ", consumer ",
+        *opt_consumer_stream,
+        ", accumulation ",
+        *opt_accum_streams[pos],
+        ", and ready ",
+        *ready_streams[pos]);
+  } else {
+    TORCH_CHECK(
+        !opt_producer_stream && !opt_consumer_stream,
+        "Direct InputBuffer accumulation for a non-accelerator buffer requires "
+        "producer and consumer streams to be absent, but got producer stream "
+        "present: ",
+        opt_producer_stream.has_value(),
+        " and consumer stream present: ",
+        opt_consumer_stream.has_value());
+  }
+}
+
+Variable InputBuffer::get_for_direct_accumulation(
+    size_t pos,
     const std::optional<c10::Stream>& opt_producer_stream,
     const std::optional<c10::Stream>& opt_consumer_stream) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
+  auto& var = buffer[pos];
+  if (!var.defined()) {
+    return {};
+  }
+
+  if (!can_accumulate_inplace(var)) {
+    return {};
+  }
+
+  if (!direct_accumulation_threads_) {
+    direct_accumulation_threads_ =
+        std::make_unique<std::optional<std::thread::id>[]>(buffer.size());
+  }
+  auto& thread = direct_accumulation_threads_[pos];
+  const auto current_thread = std::this_thread::get_id();
+  // See Note [Direct accumulation thread and stream safety].
+  validate_direct_accumulation(
+      pos,
+      var.device(),
+      opt_producer_stream,
+      opt_consumer_stream,
+      thread.value_or(current_thread));
+  if (!thread.has_value()) {
+    thread.emplace(current_thread);
+  }
+  return var;
+}
+
+// Note: [Stream sync contract when dealing with multi-deviced-ness]
+//
+// An operator can deal with multiple devices, e.g. if it does a device
+// transfer, etc. However, for the purpose of stream synchronization, the engine
+// is only aware of single canonical device/stream for each autograd Node.
+//
+// For the proper synchronization, the Node author should make sure of the
+// following:
+//
+// 1) A node consuming a gradient should wait on the canonical stream before
+//    using it.
+// 2) A node producing a gradient should have it ready on the canonical
+//    stream during node execution.
+//
+
+// Note: [Autograd Producer-Consumer Stream Syncs]
+//
+// The producer-consumer stream syncs are partially handled in this method
+// and partially handled in the engine prior to the consumer's execution.
+// The logic here is mainly responsible for handling the synchronization needed
+// for accumulation and recording the event that the consumer should wait on
+// later. The corresponding wait and record_stream happens in the engine.
+//
+// First producer
+// ==============
+// There are several things we need to do upon seeing the first producer:
+// 1) Determine the accumulation stream (which may or may not be used):
+//    case A) var's device matches consumer node's canonical device
+//            (The producer node's canonical device may or may not match)
+//            -> accumulator stream = consumer stream
+//    case B) var's device matches producer node's canonical device
+//            and does not match consumer node's canonical device
+//            -> accumulator stream = producer stream
+//    case C) var device matches neither
+//            -> accumulator stream = var device's current stream
+//            See Note [Stream sync contract when dealing with
+//            multi-deviced-ness]
+// 2) Because we are the first producer, there's no accumulation necessary.
+//    Just move var into the buffer.
+// 3) Update the ready_events and streams for the current position.**
+//    ready_events are events you need to wait for to ensure the corresponding
+//    buffers are ready. The events are updated as we accumulate into the
+//    buffer.
+//
+// Nth producer
+// ============
+// 1) Synchronize for accumulation. Accumulation operates on both the new
+//   incoming gradient and the existing gradient in the buffer.
+//   (i) wait stream and (ii) record stream to make sure both are ready to be
+//   used on the accumulation stream.
+// 2) Accumulate on the accumulation stream
+// 3) Update the ready event and stream for the current position.**
+//
+// **As an optimization, we avoid creating and recording an event if we
+// know that we won't need to wait on it, saving on the order of microseconds.
+//
+void InputBuffer::add(
+    size_t pos,
+    Variable&& var,
+    const std::optional<c10::Stream>& opt_producer_stream_,
+    const std::optional<c10::Stream>& opt_consumer_stream_,
+    Node* fn) {
+  TORCH_INTERNAL_ASSERT(pos < buffer.size());
+
   if (!var.defined()) {
     return;
   }
-
-  // Switches to accumulate device
-  // The device (and stream) chosen for accumulation is:
-  //  (1) var is not a CUDA/privateuse1 variable. Accumulation happens on var's
-  //  device. (2) var is a CUDA/privateuse1 variable and it, the consumer, and
-  //  the producer share the same device:
-  //       (2a) Uses the consumer's stream as the accumulation stream
-  //       (2b) Syncs the accumulation stream with the producer's stream (if
-  //       different) (2c) Accumulates.
-  //  (3) var is a CUDA/MTIA/privateuse1 variable and it shares a device with
-  //  the consumer but not the producer:
-  //       (3a) Uses the consumer's stream as the accumulation stream
-  //       (3b) Syncs the accumulation stream with the consumer device's default
-  //       stream (3c) Accumulates.
-  //  (4) var is a CUDA/MTIA/privateuse1 variable and it shares a device with
-  //  the producer but not the consumer:
-  //       (4a) Uses the producer device's default stream as the accumulation
-  //       stream (4b) Syncs the accumulation stream with the producer's
-  //       stream (4c) Accumulates.
-  //  (5) var is a CUDA/MTIA/privateuse1 variable and it does not share a device
-  //  with the consumer or producer.
-  //      Accumulation happens on the var device's default stream.
-
-  auto const device = device_of(var);
-  TORCH_INTERNAL_ASSERT(device.has_value());
-  std::optional<c10::Stream> opt_accumulate_stream = std::nullopt;
-  const auto device_type = device->type();
-  if (device->is_cuda() || device->is_mtia() || device->is_privateuseone()) {
-    const auto on_producer =
-        opt_producer_stream && device == opt_producer_stream->device();
-    const auto on_consumer =
-        opt_consumer_stream && device == opt_consumer_stream->device();
-
-    if (on_producer && on_consumer) {
-      // (2a)
-      opt_accumulate_stream = opt_consumer_stream;
-      if (opt_accumulate_stream != opt_producer_stream) {
-        // (2b)
-        auto event = c10::Event{device_type};
-        event.record(*opt_producer_stream);
-        opt_accumulate_stream->wait(event);
-        record_stream_any_impl(var, *opt_accumulate_stream);
-      }
-    } else {
-      std::optional<c10::Stream> opt_sync_stream = std::nullopt;
-      const auto guard = c10::impl::VirtualGuardImpl{device_type};
-      if (on_consumer && !on_producer) {
-        // (3a)
-        opt_accumulate_stream = opt_consumer_stream;
-        opt_sync_stream = guard.getDefaultStream(opt_consumer_stream->device());
-      } else if (on_producer && !on_consumer) {
-        // (4a)
-        opt_accumulate_stream =
-            guard.getDefaultStream(opt_producer_stream->device());
-        opt_sync_stream = opt_producer_stream;
-      } else {
-        // (5)
-        opt_accumulate_stream = guard.getDefaultStream(*device);
-      }
-      if (opt_sync_stream && (opt_accumulate_stream != opt_sync_stream)) {
-        // (3b), (4b)
-        c10::OptionalDeviceGuard device_guard{opt_sync_stream->device()};
-        auto event = c10::Event{device_type};
-        event.record(*opt_sync_stream);
-        opt_accumulate_stream->wait(event);
-        const auto guard = c10::impl::VirtualGuardImpl(device_type);
-        record_stream_any_impl(var, *opt_accumulate_stream);
-      }
+  const auto device = var.device();
+  const auto device_type = device.type();
+  bool is_accelerator = at::accelerator::isAccelerator(device.type());
+  //
+  // Non-accelerator case
+  //
+  if (!is_accelerator) {
+    if (C10_UNLIKELY(
+            direct_accumulation_threads_ != nullptr &&
+            direct_accumulation_threads_[pos].has_value())) {
+      // See Note [Direct accumulation thread and stream safety].
+      validate_direct_accumulation(
+          pos,
+          device,
+          opt_producer_stream_,
+          opt_consumer_stream_,
+          *direct_accumulation_threads_[pos]);
     }
-  }
-
-  auto& old_var = buffer[pos];
-  if (!old_var.defined()) {
-    buffer[pos] = std::move(var);
-  } else {
-    if (opt_accumulate_stream) {
-      c10::OptionalStreamGuard stream_guard{opt_accumulate_stream};
-      accumulate(buffer, pos, std::move(var));
+    if (!buffer[pos].defined()) {
+      buffer[pos] = std::move(var);
     } else {
-      // (1) non-CUDA/privateuse1 variable
-      //     Accumulation happens on variable's device
       c10::OptionalDeviceGuard device_guard{device};
       accumulate(buffer, pos, std::move(var));
     }
+    return;
+  }
+  // Handle the case where var is on an accelerator but producer node has no
+  // canonical stream, e.g. this can happen if forward is DtoH
+  const std::optional<c10::Stream>& opt_producer_stream =
+      (opt_producer_stream_.has_value()
+           ? opt_producer_stream_
+           : std::optional<c10::Stream>(
+                 at::accelerator::getCurrentStream(device.index())));
+
+  // opt_consumer_stream is always non-null when is_accelerator is true
+  // when InputBuffer is used in the engine. InputBuffer is also called
+  // elsewhere however! (e.g. other engine implementations)
+  //
+  // If a prior add() on this InputBuffer applied the stale-capture
+  // override, reuse the cached stream so every producer sees the same
+  // consumer stream. Otherwise honor the caller-provided value, falling
+  // back to the device's current stream.
+  std::optional<c10::Stream> opt_consumer_stream;
+  if (opt_overridden_consumer_stream.has_value()) {
+    opt_consumer_stream = opt_overridden_consumer_stream;
+  } else if (opt_consumer_stream_.has_value()) {
+    opt_consumer_stream = opt_consumer_stream_;
+  } else {
+    opt_consumer_stream = at::accelerator::getCurrentStream(device.index());
+  }
+
+  TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
+  if (C10_UNLIKELY(
+          direct_accumulation_threads_ != nullptr &&
+          direct_accumulation_threads_[pos].has_value())) {
+    // See Note [Direct accumulation thread and stream safety].
+    validate_direct_accumulation(
+        pos,
+        device,
+        opt_producer_stream,
+        opt_consumer_stream,
+        *direct_accumulation_threads_[pos]);
+  }
+
+  // Handle producer/consumer stream mismatch. Two independent cases:
+  //   1. Producer is capturing but the consumer holds a stale non-capturing
+  //      stream (e.g. from warmup). Depending on
+  //      `set_override_stale_capture_stream` the helper either errors out
+  //      (default stream), overrides the consumer stream with the producer's
+  //      capturing stream, or leaves it unchanged. A successful override
+  //      resolves the mismatch for case 2 and is cached on the InputBuffer
+  //      so every producer and Engine::evaluate_function see it.
+  //   2. Pre-existing AccumulateGrad-stream-mismatch warning from
+  //      PR #166136. Fires only when the mismatch still exists after case 1.
+  bool stream_mismatch = opt_consumer_stream->id() != opt_producer_stream->id();
+  if (stream_mismatch && opt_producer_stream->is_capturing() &&
+      !opt_consumer_stream->is_capturing()) {
+    auto resolved = maybe_override_stale_capture_stream(
+        opt_consumer_stream, opt_producer_stream, fn->name());
+    if (resolved != opt_consumer_stream) {
+      // Override was applied. Cache so subsequent add() calls and
+      // Engine::evaluate_function consult the same consumer stream.
+      opt_consumer_stream = resolved;
+      opt_overridden_consumer_stream = opt_consumer_stream;
+      stream_mismatch = false;
+    }
+  }
+  if (stream_mismatch && dynamic_cast<AccumulateGrad*>(fn) &&
+      at::globalContext().warnOnAccumulateGradStreamMismatch()) {
+    TORCH_WARN_ONCE(
+        "The AccumulateGrad node's stream does not match the stream of the "
+        "node that produced the incoming gradient. This may incur unnecessary "
+        "synchronization and break CUDA graph capture if the AccumulateGrad "
+        "node's stream is the default stream. This mismatch is caused by an "
+        "AccumulateGrad node created prior to the current iteration being "
+        "kept alive. This can happen if the autograd graph is still being "
+        "kept alive by tensors such as the loss, or if you are using DDP, "
+        "which will stash a reference to the node. To resolve the mismatch, "
+        "delete all references to the autograd graph or ensure that DDP "
+        "initialization is performed under the same stream as subsequent "
+        "forwards. If the mismatch is intentional, you can use "
+        "torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch("
+        "False) to suppress this warning.");
+  }
+  // See Note: [Autograd Producer-Consumer Stream Syncs]
+  if (!opt_accum_streams[pos].has_value()) {
+    // [ First producer ]
+    TORCH_INTERNAL_ASSERT(!buffer[pos].defined());
+    // 1)
+    if (opt_consumer_stream->device() == device) {
+      // Case A
+      opt_accum_streams[pos] = opt_consumer_stream;
+      if (*opt_consumer_stream != *opt_producer_stream) {
+        // We will end up doing record_stream on the accumulation stream
+        // (which is the consumer stream) later, but we also need to do
+        // it here in case we don't end up accumulating.
+        record_stream_any_impl(var, *opt_consumer_stream);
+      }
+    } else if (opt_producer_stream->device() == device) {
+      // Case B
+      opt_accum_streams[pos] = opt_producer_stream;
+    } else {
+      // Case C
+      opt_accum_streams[pos] =
+          at::accelerator::getCurrentStream(device.index());
+    }
+    // 2)
+    buffer[pos] = std::move(var);
+    // 3)
+    auto& opt_accum_stream = opt_accum_streams[pos];
+    TORCH_INTERNAL_ASSERT(opt_accum_stream.has_value());
+    if (*opt_consumer_stream != *opt_producer_stream ||
+        *opt_accum_stream != *opt_producer_stream) {
+      // Either the consumer or accum stream waits for the producer
+      // stream depending on whether accumulation is needed.
+      auto event = c10::Event{device_type};
+      event.record(*opt_producer_stream);
+      ready_events[pos] = std::move(event);
+    }
+    ready_streams[pos] = opt_producer_stream;
+  } else {
+    // [ Nth producer ]
+    auto accum_stream = opt_accum_streams[pos];
+    auto& ready_event = ready_events[pos];
+    auto& ready_stream = ready_streams[pos];
+    TORCH_INTERNAL_ASSERT(accum_stream && ready_stream);
+    // 1)
+    if (*accum_stream != *opt_producer_stream) {
+      auto event = c10::Event{device_type};
+      event.record(*opt_producer_stream);
+      accum_stream->wait(event);
+      record_stream_any_impl(var, *accum_stream);
+    }
+    if (*accum_stream != *ready_stream) {
+      TORCH_INTERNAL_ASSERT(ready_event);
+      accum_stream->wait(*ready_event);
+      // This is redundant for case A, but needed for case C
+      record_stream_any_impl(buffer[pos], *accum_stream);
+    }
+    // 2)
+    c10::OptionalStreamGuard stream_guard{accum_stream};
+    accumulate(buffer, pos, std::move(var));
+    // 3)
+    if (*opt_consumer_stream != *accum_stream) {
+      // Only the consumer stream needs to wait for this event
+      auto event = c10::Event{device_type};
+      event.record(*accum_stream);
+      ready_events[pos] = std::move(event);
+    }
+    ready_streams[pos] = accum_stream;
   }
 }
 

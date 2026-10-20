@@ -55,7 +55,7 @@ def make_fx_check(
 # If any argument is a torch.Size(), maybe get dynamic shapes for it by:
 # - Create a temporary Tensor whose size is the torch.Size() we want. Note that
 #   we use an expanded Tensor as we cannot pass "meta" Tensors to make_fx.
-# - Pass it to make_fx such that it is is converted to a proxy Tensor
+# - Pass it to make_fx such that it is converted to a proxy Tensor
 # - Unpack the size in the wrapper to get a torch.Size with dynamic shapes (in
 #   symbolic mode, a no-op otherwise)
 def handle_sizes_for_dynamic_shapes(func, args, kwargs):

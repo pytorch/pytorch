@@ -6,6 +6,8 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <algorithm>
+#include <iterator>
 #include <vector>
 
 #include <curand.h>
@@ -46,7 +48,7 @@ void assert_with_expected_uniforms(uint64_t counter_offset) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Wait for GPU to finish before accessing on host
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
 
   // get 4 new float from uniform_()
   auto self = at::empty({4}, at::TensorOptions(at::kCUDA));
@@ -151,12 +153,15 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
   assert_with_expected_uniforms(4);
 }
 
-__managed__ int keys[] = {
+// Copied into cudaMallocManaged memory rather than declared __managed__: on ROCm
+// GPUs without SVM (e.g. SR-IOV VFs), kernels see the unmapped host address of a
+// __managed__ global.
+const int keys_init[] = {
   1, (1 << 15) + 1,  (1 << 16) + 1,
   2, (1 << 14) + 2, 2
 };
 
-__managed__ int values[] = { 1, 2, 3, 4, 5, 9999 };
+const int values_init[] = { 1, 2, 3, 4, 5, 9999 };
 
 std::vector<std::vector<int>> valid_perms1 = {
   {1, 2, 3}, {1, 3, 2}, {2, 1, 3}, {2, 3, 1}, {3, 1, 2}, {3, 2, 1}
@@ -169,13 +174,19 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   if (!at::cuda::is_available()) return;
   at::manual_seed(123);
 
+  int *keys, *values;
+  ASSERT_EQ(cudaSuccess, cudaMallocManaged(&keys, sizeof(keys_init)));
+  ASSERT_EQ(cudaSuccess, cudaMallocManaged(&values, sizeof(values_init)));
+  std::copy(std::begin(keys_init), std::end(keys_init), keys);
+  std::copy(std::begin(values_init), std::end(values_init), values);
+
   bool shuffled1 = false;
   bool shuffled2 = false;
   for (int i = 0; i < 100; i++) {
-    cudaDeviceSynchronize();
+    ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
     std::optional<at::Generator> gen = std::nullopt;
     randperm_handle_duplicate_keys(keys, values, 8, 5, gen);
-    cudaDeviceSynchronize();
+    ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
     std::vector<int> slice1 = {values[0], values[1], values[2]};
     std::vector<int> slice2 = {values[3], values[4]};
     if (slice1 != valid_perms1[0]) {
@@ -203,4 +214,6 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   }
   ASSERT_TRUE(shuffled1);
   ASSERT_TRUE(shuffled2);
+  ASSERT_EQ(cudaSuccess, cudaFree(keys));
+  ASSERT_EQ(cudaSuccess, cudaFree(values));
 }

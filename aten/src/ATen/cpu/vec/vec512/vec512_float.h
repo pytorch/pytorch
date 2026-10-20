@@ -6,11 +6,12 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+
+#include <limits>
 #if defined(CPU_CAPABILITY_AVX512)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
-
 
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
@@ -18,54 +19,125 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512)
 
-template <> class Vectorized<float> {
-private:
-  static constexpr __m512i zero_vec {0, 0, 0, 0, 0, 0, 0, 0};
-public:
+template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
+class Vectorized<float> {
+ private:
+  static constexpr __m512i zero_vec{0, 0, 0, 0, 0, 0, 0, 0};
+
+ public:
   __m512 values;
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm512_setzero_ps();
+  }
   Vectorized(__m512 v) : values(v) {}
   Vectorized(float val) {
     values = _mm512_set1_ps(val);
   }
-  Vectorized(float val1, float val2, float val3, float val4,
-         float val5, float val6, float val7, float val8,
-         float val9, float val10, float val11, float val12,
-         float val13, float val14, float val15, float val16) {
-    values = _mm512_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8,
-                            val9, val10, val11, val12, val13, val14, val15, val16);
+  Vectorized(
+      float val1,
+      float val2,
+      float val3,
+      float val4,
+      float val5,
+      float val6,
+      float val7,
+      float val8,
+      float val9,
+      float val10,
+      float val11,
+      float val12,
+      float val13,
+      float val14,
+      float val15,
+      float val16) {
+    values = _mm512_setr_ps(
+        val1,
+        val2,
+        val3,
+        val4,
+        val5,
+        val6,
+        val7,
+        val8,
+        val9,
+        val10,
+        val11,
+        val12,
+        val13,
+        val14,
+        val15,
+        val16);
   }
   Vectorized(const float (&arr)[16])
-      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7],
-                   arr[8], arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15]) {}
+      : Vectorized(
+            arr[0],
+            arr[1],
+            arr[2],
+            arr[3],
+            arr[4],
+            arr[5],
+            arr[6],
+            arr[7],
+            arr[8],
+            arr[9],
+            arr[10],
+            arr[11],
+            arr[12],
+            arr[13],
+            arr[14],
+            arr[15]) {}
   operator __m512() const {
     return values;
   }
   template <int64_t mask>
-  static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static Vectorized<float> blend(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b) {
     return _mm512_mask_blend_ps(mask, a.values, b.values);
   }
-  static Vectorized<float> blendv(const Vectorized<float>& a, const Vectorized<float>& b,
-                              const Vectorized<float>& mask) {
+  static Vectorized<float> blendv(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      const Vectorized<float>& mask) {
     auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
-    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask.values), all_ones, _MM_CMPINT_EQ);
+    auto mmask = _mm512_cmp_epi32_mask(
+        _mm512_castps_si512(mask.values), all_ones, _MM_CMPINT_EQ);
     return _mm512_mask_blend_ps(mmask, a.values, b.values);
   }
-  template<typename step_t>
-  static Vectorized<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vectorized<float> arange(
+      float base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     return Vectorized<float>(
-      base,            base +     step, base + 2 * step, base + 3 * step,
-      base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step,
-      base + 8 * step, base + 9 * step, base + 10 * step, base + 11 * step,
-      base + 12 * step, base + 13 * step, base + 14 * step, base + 15 * step);
+        base,
+        base + step,
+        base + 2 * step,
+        base + 3 * step,
+        base + 4 * step,
+        base + 5 * step,
+        base + 6 * step,
+        base + 7 * step,
+        base + 8 * step,
+        base + 9 * step,
+        base + 10 * step,
+        base + 11 * step,
+        base + 12 * step,
+        base + 13 * step,
+        base + 14 * step,
+        base + 15 * step);
   }
-  static Vectorized<float> set(const Vectorized<float>& a, const Vectorized<float>& b,
-                           int64_t count = size()) {
+  static Vectorized<float> set(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -117,21 +189,23 @@ public:
       _mm512_mask_storeu_ps(reinterpret_cast<float*>(ptr), mask, values);
     }
   }
-  const float& operator[](int idx) const  = delete;
+  const float& operator[](int idx) const = delete;
   float& operator[](int idx) = delete;
   int zero_mask() const {
-    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    // returns an integer mask where all zero elements are translated to 1-bit
+    // and others are translated to 0-bit
     __mmask16 cmp = _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0), _CMP_EQ_OQ);
     return static_cast<int32_t>(cmp);
   }
   Vectorized<float> isnan() const {
-    auto mask =  _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0), _CMP_UNORD_Q);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    auto mask = _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0), _CMP_UNORD_Q);
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
   bool has_inf_nan() const {
-    __m512 self_sub  = _mm512_sub_ps(values, values);
-    return (_mm512_movepi8_mask(_mm512_castps_si512(self_sub)) & 0x7777777777777777) != 0;
+    __m512 self_sub = _mm512_sub_ps(values, values);
+    return (_mm512_movepi8_mask(_mm512_castps_si512(self_sub)) &
+            0x7777777777777777) != 0;
   }
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
@@ -147,12 +221,13 @@ public:
   }
   Vectorized<float> angle() const {
     __m512 zero_vec = _mm512_set1_ps(0.f);
-    const auto nan_vec = _mm512_set1_ps(NAN);
+    const auto nan_vec =
+        _mm512_set1_ps(std::numeric_limits<float>::quiet_NaN());
     const auto not_nan_mask = _mm512_cmp_ps_mask(values, values, _CMP_EQ_OQ);
-    const auto not_nan_vec = _mm512_mask_set1_epi32(_mm512_castps_si512(zero_vec),
-                                                    not_nan_mask, 0xFFFFFFFF);
-    const auto nan_mask = _mm512_cmp_ps_mask(_mm512_castsi512_ps(not_nan_vec),
-                                             zero_vec, _CMP_EQ_OQ);
+    const auto not_nan_vec = _mm512_mask_set1_epi32(
+        _mm512_castps_si512(zero_vec), not_nan_mask, 0xFFFFFFFF);
+    const auto nan_mask = _mm512_cmp_ps_mask(
+        _mm512_castsi512_ps(not_nan_vec), zero_vec, _CMP_EQ_OQ);
     const auto pi = _mm512_set1_ps(c10::pi<double>);
 
     const auto neg_mask = _mm512_cmp_ps_mask(values, zero_vec, _CMP_LT_OQ);
@@ -169,11 +244,24 @@ public:
   Vectorized<float> conj() const {
     return *this;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> acos() const;
+  Vectorized<float> acosh() const;
+  Vectorized<float> asin() const;
+  Vectorized<float> asinh() const;
+  Vectorized<float> atan() const;
+  Vectorized<float> atanh() const;
+  Vectorized<float> atan2(const Vectorized<float>& b) const;
+  Vectorized<float> copysign(const Vectorized<float>& sign) const;
+#else
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf16_u10(values));
   }
+  // Sleef acoshf/sinhf/coshf overflow for large float inputs where the scalar
+  // C library returns finite results, because Sleef uses float-range
+  // intermediates internally while the scalar C library uses double precision.
   Vectorized<float> acosh() const {
-    return Vectorized<float>(Sleef_acoshf16_u10(values));
+    return map(std::acosh);
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf16_u10(values));
@@ -187,12 +275,16 @@ public:
   Vectorized<float> atanh() const {
     return Vectorized<float>(Sleef_atanhf16_u10(values));
   }
-  Vectorized<float> atan2(const Vectorized<float> &b) const {
+  Vectorized<float> atan2(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_atan2f16_u10(values, b));
   }
-  Vectorized<float> copysign(const Vectorized<float> &sign) const {
+  Vectorized<float> copysign(const Vectorized<float>& sign) const {
     return Vectorized<float>(Sleef_copysignf16(values, sign));
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erf() const;
+#else
   Vectorized<float> erf() const {
     // constants
     const auto neg_zero_vec = _mm512_set1_ps(-0.f);
@@ -225,6 +317,14 @@ public:
     auto tmp7 = _mm512_fmadd_ps(tmp6, r, one_vec);
     return _mm512_xor_ps(sign_mask, tmp7);
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erfc() const;
+  Vectorized<float> erfinv() const;
+  Vectorized<float> exp() const;
+  Vectorized<float> exp2() const;
+  Vectorized<float> expm1() const;
+#else
   Vectorized<float> erfc() const {
     return Vectorized<float>(Sleef_erfcf16_u15(values));
   }
@@ -239,6 +339,61 @@ public:
   }
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f16_u10(values));
+  }
+#endif
+  Vectorized<float> fexp_u20() const {
+    const __m512 vec_c0 = _mm512_set1_ps(0.00010703434948458272f);
+    const __m512 vec_c1 = _mm512_set1_ps(0.30354260500649682f);
+    const __m512 vec_c2 = _mm512_set1_ps(-0.22433836478672356);
+    const __m512 vec_c3 = _mm512_set1_ps(-0.079204240219773236);
+
+    const __m512 vec_exp_log2ef =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x3fb8aa3b)); // log2(e)
+
+    const __m512 vec_a = _mm512_set1_ps(std::pow(2, 23) / std::log2(2));
+    const __m512 vec_b = _mm512_set1_ps(std::pow(2, 23) * 127.f);
+
+    const __m512 vec_ln_flt_min =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
+    const __m512 vec_ln_flt_max =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
+    __m512i vec_infinity = _mm512_set1_epi32(0x7F800000);
+    __m512i vec_zero = _mm512_setzero_epi32();
+
+    // Fast Exponential Computation on SIMD Architectures
+    // A. Cristiano I. Malossi, Yves Ineichen, Costas Bekas, and Alessandro
+    // Curioni exp(x) = 2**(x * log2(e))
+    //        = 2**xi * 2**xf   - TIPS we are using  the EEEE floating point
+    //        representation with identification to the exponent and the
+    //        mentissa
+    //  2**xf will be approximated to a polynomial of degree 3 computed with
+    //  Horner method
+    // mask for the boundary condition
+    auto min_mask = _mm512_cmp_ps_mask(values, vec_ln_flt_min, _CMP_LT_OS);
+    auto max_mask = _mm512_cmp_ps_mask(values, vec_ln_flt_max, _CMP_GT_OS);
+
+    // transformation with log2(e)
+    auto vec_src = _mm512_mul_ps(values, vec_exp_log2ef);
+    auto vec_fractional = _mm512_sub_ps(vec_src, _mm512_floor_ps(vec_src));
+
+    // compute polynomial using Horner Scheme, for superscalar processor
+    auto vec_res = _mm512_fmadd_ps(vec_fractional, vec_c3, vec_c2);
+    vec_res = _mm512_fmadd_ps(vec_fractional, vec_res, vec_c1);
+    vec_res = _mm512_fmadd_ps(vec_fractional, vec_res, vec_c0);
+
+    vec_src = _mm512_sub_ps(vec_src, vec_res);
+    // the tips is here, headache in perspective
+    auto tmp = _mm512_fmadd_ps(vec_a, vec_src, vec_b);
+    // headache bis - we loose precision with the cast but it "fits", but ok
+    // after f32 -> f16 later
+    __m512i casted_integer = _mm512_cvttps_epi32(tmp);
+    // boundary condition, lower than the min -> 0
+    casted_integer = _mm512_mask_mov_epi32(casted_integer, min_mask, vec_zero);
+    // boundary condition, larger than the max -> +oo
+    casted_integer =
+        _mm512_mask_mov_epi32(casted_integer, max_mask, vec_infinity);
+    // final interpretation to float
+    return _mm512_castsi512_ps(casted_integer);
   }
   Vectorized<float> exp_u20() const {
     // A faster version of exp with ULP=20
@@ -258,9 +413,12 @@ public:
     const __m512 vec_one = _mm512_set1_ps(1.f);
     const __m512 vec_zero = _mm512_set1_ps(0.f);
     const __m512 vec_two = _mm512_set1_ps(2.f);
-    const __m512 vec_ln2f = _mm512_castsi512_ps(_mm512_set1_epi32(0x3f317218)); // ln(2)
-    const __m512 vec_ln_flt_min = _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
-    const __m512 vec_ln_flt_max = _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
+    const __m512 vec_ln2f =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x3f317218)); // ln(2)
+    const __m512 vec_ln_flt_min =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
+    const __m512 vec_ln_flt_max =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
     const __m512i vec_127 = _mm512_set1_epi32(0x0000007f);
     const int n_mantissa_bits = 23;
 
@@ -304,6 +462,13 @@ public:
     vec_res = _mm512_mul_ps(vec_res, vec_two);
     return vec_res;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> fmod(const Vectorized<float>& q) const;
+  Vectorized<float> log() const;
+  Vectorized<float> log2() const;
+  Vectorized<float> log10() const;
+  Vectorized<float> log1p() const;
+#else
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     return Vectorized<float>(Sleef_fmodf16(values, q));
   }
@@ -319,18 +484,36 @@ public:
   Vectorized<float> log1p() const {
     return Vectorized<float>(Sleef_log1pf16_u10(values));
   }
+#endif
   Vectorized<float> frac() const;
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> sin() const;
+  Vectorized<float> sinh() const;
+  Vectorized<float> cos() const;
+  Vectorized<float> cosh() const;
+  Vectorized<float> ceil() const;
+  Vectorized<float> floor() const;
+  Vectorized<float> hypot(const Vectorized<float>& b) const;
+  Vectorized<float> i0() const;
+  Vectorized<float> i0e() const;
+  Vectorized<float> digamma() const;
+  Vectorized<float> igamma(const Vectorized<float>& x) const;
+  Vectorized<float> igammac(const Vectorized<float>& x) const;
+#else
   Vectorized<float> sin() const {
     return Vectorized<float>(Sleef_sinf16_u35(values));
   }
+  // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
+  // return finite results, because Sleef uses float-range intermediates
+  // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
-    return Vectorized<float>(Sleef_sinhf16_u10(values));
+    return map(std::sinh);
   }
   Vectorized<float> cos() const {
     return Vectorized<float>(Sleef_cosf16_u35(values));
   }
   Vectorized<float> cosh() const {
-    return Vectorized<float>(Sleef_coshf16_u10(values));
+    return map(std::cosh);
   }
   Vectorized<float> ceil() const {
     return _mm512_ceil_ps(values);
@@ -338,7 +521,7 @@ public:
   Vectorized<float> floor() const {
     return _mm512_floor_ps(values);
   }
-  Vectorized<float> hypot(const Vectorized<float> &b) const {
+  Vectorized<float> hypot(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_hypotf16_u05(values, b));
   }
   Vectorized<float> i0() const {
@@ -350,7 +533,7 @@ public:
   Vectorized<float> digamma() const {
     return map(calc_digamma);
   }
-  Vectorized<float> igamma(const Vectorized<float> &x) const {
+  Vectorized<float> igamma(const Vectorized<float>& x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];
     store(tmp);
@@ -360,7 +543,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorized<float> igammac(const Vectorized<float> &x) const {
+  Vectorized<float> igammac(const Vectorized<float>& x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];
     store(tmp);
@@ -370,14 +553,22 @@ public:
     }
     return loadu(tmp);
   }
+#endif
   Vectorized<float> neg() const {
     return _mm512_xor_ps(_mm512_set1_ps(-0.f), values);
   }
-  Vectorized<float> nextafter(const Vectorized<float> &b) const {
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> nextafter(const Vectorized<float>& b) const;
+  Vectorized<float> round() const;
+  Vectorized<float> tan() const;
+  Vectorized<float> tanh() const;
+#else
+  Vectorized<float> nextafter(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_nextafterf16(values, b));
   }
   Vectorized<float> round() const {
-    return _mm512_roundscale_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    return _mm512_roundscale_ps(
+        values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
   Vectorized<float> tan() const {
     return Vectorized<float>(Sleef_tanf16_u10(values));
@@ -385,12 +576,18 @@ public:
   Vectorized<float> tanh() const {
     return Vectorized<float>(Sleef_tanhf16_u10(values));
   }
+#endif
   Vectorized<float> trunc() const {
-    return _mm512_roundscale_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+    return _mm512_roundscale_ps(
+        values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> lgamma() const;
+#else
   Vectorized<float> lgamma() const {
     return Vectorized<float>(Sleef_lgammaf16_u10(values));
   }
+#endif
   Vectorized<float> sqrt() const {
     return _mm512_sqrt_ps(values);
   }
@@ -400,52 +597,61 @@ public:
   Vectorized<float> rsqrt() const {
     return _mm512_div_ps(_mm512_set1_ps(1), _mm512_sqrt_ps(values));
   }
-  Vectorized<float> pow(const Vectorized<float> &b) const {
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> pow(const Vectorized<float>& b) const;
+#else
+  Vectorized<float> pow(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_powf16_u10(values, b));
   }
+#endif
   float reduce_add() const {
     return _mm512_reduce_add_ps(values);
   }
+  // Propagates NaN, matching maximum() and torch.max; the vmaxps sequence
+  // behind _mm512_reduce_max_ps drops it. See Vectorized<float> in vec256.
   float reduce_max() const {
-    return _mm512_reduce_max_ps(values);
+    const float m = _mm512_reduce_max_ps(values);
+    return _mm512_cmp_ps_mask(values, values, _CMP_UNORD_Q)
+        ? std::numeric_limits<float>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
   Vectorized<float> operator==(const Vectorized<float>& other) const {
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_EQ_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
 
   Vectorized<float> operator!=(const Vectorized<float>& other) const {
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_UQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
 
   Vectorized<float> operator<(const Vectorized<float>& other) const {
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_LT_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
 
   Vectorized<float> operator<=(const Vectorized<float>& other) const {
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_LE_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
 
   Vectorized<float> operator>(const Vectorized<float>& other) const {
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_GT_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
 
   Vectorized<float> operator>=(const Vectorized<float>& other) const {
     auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_GE_OQ);
-    return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
-                                                      0xFFFFFFFF));
+    return _mm512_castsi512_ps(
+        _mm512_mask_set1_epi32(zero_vec, mask, 0xFFFFFFFF));
   }
 
   Vectorized<float> eq(const Vectorized<float>& other) const;
@@ -457,22 +663,30 @@ public:
 };
 
 template <>
-Vectorized<float> inline operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator+(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_add_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator-(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_sub_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator*(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_mul_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator/(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_div_ps(a, b);
 }
 
@@ -484,12 +698,14 @@ inline Vectorized<float> Vectorized<float>::frac() const {
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline maximum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   auto zero_vec = _mm512_set1_epi32(0);
   auto max = _mm512_max_ps(a, b);
   auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
-                                                          0xFFFFFFFF));
+  auto isnan = _mm512_castsi512_ps(
+      _mm512_mask_set1_epi32(zero_vec, isnan_mask, 0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_ps(max, isnan);
 }
@@ -497,67 +713,88 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline minimum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   auto zero_vec = _mm512_set1_epi32(0);
   auto min = _mm512_min_ps(a, b);
   auto isnan_mask = _mm512_cmp_ps_mask(a, b, _CMP_UNORD_Q);
-  auto isnan = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, isnan_mask,
-                                                          0xFFFFFFFF));
+  auto isnan = _mm512_castsi512_ps(
+      _mm512_mask_set1_epi32(zero_vec, isnan_mask, 0xFFFFFFFF));
   // Exploit the fact that all-ones is a NaN.
   return _mm512_or_ps(min, isnan);
 }
 
 template <>
-Vectorized<float> inline clamp(const Vectorized<float>& a, const Vectorized<float>& min, const Vectorized<float>& max) {
+Vectorized<float> inline clamp(
+    const Vectorized<float>& a,
+    const Vectorized<float>& min,
+    const Vectorized<float>& max) {
   return _mm512_min_ps(max, _mm512_max_ps(min, a));
 }
 
 template <>
-Vectorized<float> inline clamp_max(const Vectorized<float>& a, const Vectorized<float>& max) {
+Vectorized<float> inline clamp_max(
+    const Vectorized<float>& a,
+    const Vectorized<float>& max) {
   return _mm512_min_ps(max, a);
 }
 
 template <>
-Vectorized<float> inline clamp_min(const Vectorized<float>& a, const Vectorized<float>& min) {
+Vectorized<float> inline clamp_min(
+    const Vectorized<float>& a,
+    const Vectorized<float>& min) {
   return _mm512_max_ps(min, a);
 }
 
 template <>
-Vectorized<float> inline operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator&(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_and_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator|(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_or_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator^(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm512_xor_ps(a, b);
 }
 
-inline Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::eq(
+    const Vectorized<float>& other) const {
   return (*this == other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ne(
+    const Vectorized<float>& other) const {
   return (*this != other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::gt(
+    const Vectorized<float>& other) const {
   return (*this > other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ge(
+    const Vectorized<float>& other) const {
   return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::lt(
+    const Vectorized<float>& other) const {
   return (*this < other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::le(
+    const Vectorized<float>& other) const {
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
@@ -567,7 +804,8 @@ inline void convert(const float* src, float* dst, int64_t n) {
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
-  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
+  for (i = 0; i <= (n - Vectorized<float>::size());
+       i += Vectorized<float>::size()) {
     _mm512_storeu_ps(dst + i, _mm512_loadu_ps(src + i));
   }
 #ifndef __msvc_cl__
@@ -579,13 +817,35 @@ inline void convert(const float* src, float* dst, int64_t n) {
 }
 
 template <>
-Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+Vectorized<float> inline fmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
   return _mm512_fmadd_ps(a, b, c);
 }
 
 template <>
-Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return _mm512_fnmadd_ps(a, b, c);
+}
+
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
   return _mm512_fmsub_ps(a, b, c);
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return _mm512_fnmsub_ps(a, b, c);
 }
 
 // TODO: rewrite with ATEN vectorized (need to add unpack and shuffle)
@@ -594,7 +854,10 @@ Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<floa
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L230-L304
 // kernel for transposing mxn where m, n <= 16
 // (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + N instructions
-inline void transpose_block(at::vec::VectorizedN<float, 16> &input, int M=16, int N=16) {
+inline void transpose_block(
+    at::vec::VectorizedN<float, 16>& input,
+    int M = 16,
+    int N = 16) {
   TORCH_CHECK(M <= 16 && N <= 16, "transpose_block expects M, N <= 16.");
   // unpacking and interleaving 32-bit elements
   __m512 temp[16];
@@ -653,7 +916,13 @@ inline void transpose_block(at::vec::VectorizedN<float, 16> &input, int M=16, in
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#L230-L304
 // kernel for transposing mxn where m, n <= 16
 // M + (M + 1) / 2 * 2 + (M + 3) / 4 * 4 + (M + 7) / 8 * 8 + 2 * N instructions
-inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+inline void transpose_mxn_16x16(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
   TORCH_CHECK(M <= 16 && N <= 16, "transpose_mxn<float> expects M, N <= 16.");
   // load from src to registers
   at::vec::VectorizedN<float, 16> input;
@@ -690,8 +959,14 @@ inline void transpose_mxn_16x16(const float* src, int64_t ld_src, float* dst, in
   }
 }
 
-template<>
-inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, int64_t ld_dst, int M, int N) {
+template <>
+inline void transpose_mxn<float>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
   int64_t i = 0;
   for (; i < M / 16 * 16; i += 16) {
     int64_t j = 0;
@@ -721,12 +996,20 @@ inline void transpose_mxn<float>(const float* src, int64_t ld_src, float* dst, i
   }
 }
 
-template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same_v<T, float>, int> = 0>
-inline void transpose_mxn(const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
+template <
+    typename T,
+    int M,
+    int N,
+    typename std::enable_if_t<std::is_same_v<T, float>, int> = 0>
+inline void transpose_mxn(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
   transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
 }
 
 #endif
 
-}}
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

@@ -69,11 +69,20 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
+void ldexp_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(0), "ldexp_cuda", [&] {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t x, int exp) -> scalar_t {
+      return ::ldexp(x, exp);
+    });
+  });
+}
+
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda)
 REGISTER_DISPATCH(huber_stub, &huber_kernel_cuda)
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda)
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel_cuda)
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel_cuda)
+REGISTER_DISPATCH(ldexp_stub, &ldexp_kernel_cuda)
 
 // DO NOT ADD ANY NEW KERNELS HERE
 // CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.

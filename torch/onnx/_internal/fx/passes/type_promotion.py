@@ -6,7 +6,7 @@ import abc
 import dataclasses
 import inspect
 import logging
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._dispatch.python
@@ -22,11 +22,11 @@ from torch._refs import linalg as _linalg_refs, nn as _nn_refs, special as _spec
 from torch._refs.nn import functional as _functional_refs
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal.fx import _pass, type_utils as fx_type_utils
-from torch.utils import _python_dispatch, _pytree
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from types import ModuleType
 
     from torch._subclasses import fake_tensor
@@ -63,7 +63,7 @@ class TypePromotionSnapshot:
 class TypePromotionRule(abc.ABC):
     """Base class for type promotion rule per 'torch.ops.{namespace}.{op_name}'."""
 
-    def __init__(self, namespace: str, op_name: str):
+    def __init__(self, namespace: str, op_name: str) -> None:
         self.namespace = namespace
         self.op_name = op_name
 
@@ -74,7 +74,7 @@ class TypePromotionRule(abc.ABC):
     def __hash__(self) -> int: ...
 
     @abc.abstractmethod
-    def __repr__(self): ...
+    def __repr__(self) -> str: ...
 
     @abc.abstractmethod
     def __eq__(self, other: object) -> bool: ...
@@ -128,7 +128,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         promote_args_positions: Sequence[int],
         promote_kwargs_names: Sequence[str],
         promotion_kind: _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND,
-    ):
+    ) -> None:
         """Constructs a TypePromotionRule for elementwise operators.
 
         Args:
@@ -143,12 +143,13 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         self.promote_kwargs_names = promote_kwargs_names
         self.promotion_kind = promotion_kind
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"ElementwiseTypePromotionRule('{self.namespace}', '{self.op_name}', "
             f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
         )
 
+    # pyrefly: ignore [bad-override]
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
@@ -215,7 +216,7 @@ class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     Rule depends on the value of the `rounding_mode` argument.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             "aten",
             "div",
@@ -227,7 +228,7 @@ class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        rounding_mode = kwargs.get("rounding_mode", None)
+        rounding_mode = kwargs.get("rounding_mode")
         if rounding_mode is None:
             # true_divide
             self.promotion_kind = (
@@ -251,7 +252,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         namespace: str,
         op_name: str,
         promotion_kind: _prims_common.REDUCTION_OUTPUT_TYPE_KIND,
-    ):
+    ) -> None:
         """Constructs a TypePromotionRule for reduction operators.
 
         Args:
@@ -262,9 +263,10 @@ class ReductionTypePromotionRule(TypePromotionRule):
         super().__init__(namespace, op_name)
         self.promotion_kind = promotion_kind
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
 
+    # pyrefly: ignore [bad-override]
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
@@ -280,12 +282,14 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1, (
-            f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
-        )
+        if len(args) < 1:
+            raise AssertionError(
+                f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+            )
         arg = args[0]
-        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: torch.dtype | None = kwargs.get("dtype", None)
+        if not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"{type(arg)=} is not torch.Tensor")
+        dtype: torch.dtype | None = kwargs.get("dtype")
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
             arg, self.promotion_kind, dtype
@@ -309,7 +313,7 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     The result dtype is always uint8 if `dtype` kwarg is uint8, otherwise torch.bool.
     """
 
-    def __init__(self, op_name: str):
+    def __init__(self, op_name: str) -> None:
         super().__init__(
             "aten",
             op_name,
@@ -319,11 +323,13 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1, (
-            f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
-        )
+        if len(args) < 1:
+            raise AssertionError(
+                f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+            )
         arg = args[0]
-        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
+        if not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"{type(arg)=} is not torch.Tensor")
         computation_dtype = torch.bool
         # Preserves uint8 -- probably a legacy mask thing
         result_dtype = torch.uint8 if arg.dtype == torch.uint8 else torch.bool
@@ -344,12 +350,14 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        assert len(args) >= 1, (
-            f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
-        )
+        if len(args) < 1:
+            raise AssertionError(
+                f"Reduction op torch.ops.{self.namespace}.{self.op_name} expects at least one argument"
+            )
         arg = args[0]
-        assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: torch.dtype | None = kwargs.get("dtype", None)
+        if not isinstance(arg, torch.Tensor):
+            raise AssertionError(f"{type(arg)=} is not torch.Tensor")
+        dtype: torch.dtype | None = kwargs.get("dtype")
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
             if _prims_common.is_boolean_dtype(
@@ -1106,7 +1114,7 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
 
 
 class ElementwiseTypePromotionRuleSetGenerator:
-    """Hackly distilling info from reference ops decorated with elementwise type promotion rule.
+    """Hackily distilling info from reference ops decorated with elementwise type promotion rule.
 
     The goal is to retrieve the decorator
 
@@ -1203,7 +1211,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
 class TypePromotionTable:
     """Type promotion table for torch.ops."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._rule_table = {}
         for rule in _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET:
             self.add_rule(rule)
@@ -1252,23 +1260,6 @@ def get_type_promotion_rule(
     return rule
 
 
-class _OpTraceDispatchMode(_python_dispatch.TorchDispatchMode):
-    """Trace ops that were dispatched.
-
-    Utilize the dispatch mechanism in [`__torch_dispatch__`](https://dev-discuss.pytorch.org/t/what-and-why-is-torch-dispatch/557)
-    to trace op overloads that were dispatched to. This is used to find the compatible
-    op overload for a given op overload packet for different set of args and kwargs.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.traced_ops = []
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        self.traced_ops.append(func)
-        return func(*args, **kwargs)
-
-
 def find_compatible_op_overload(
     op: torch._ops.OpOverloadPacket, args: tuple, kwargs: dict
 ) -> torch._ops.OpOverload:
@@ -1303,23 +1294,27 @@ def find_compatible_op_overload(
         >>> find_compatible_op_overload(packet, args, {})._overloadname
         'Tensor_Tensor'
     """
-    # Utilize the dispatch mechanism to find the compatible op overload.
-    op_trace_dispatch_mode = _OpTraceDispatchMode()
-    with op_trace_dispatch_mode:
-        op(*args, **kwargs)
-    assert len(op_trace_dispatch_mode.traced_ops) >= 1, (
-        "Expected at least 1 traced op, got 0"
-    )
+    exceptions = {}
+    for overload_name in op.overloads():
+        op_overload = getattr(op, overload_name)
+        if not isinstance(op_overload, torch._ops.OpOverload):
+            raise AssertionError(f"Expected OpOverload, got {type(op_overload)}")
+        try:
+            torch._C._check_schema_allow_fake_script_object(
+                op_overload._schema, *args, **kwargs
+            )
+        except RuntimeError as e:
+            exceptions[overload_name] = e
+        else:
+            return op_overload
 
-    new_op_overload = op_trace_dispatch_mode.traced_ops[0]
-    assert isinstance(new_op_overload, torch._ops.OpOverload), (
-        f"Expected OpOverload, got {type(new_op_overload)}"
+    error_messages = "\n".join(
+        f"Overload name {name}:\n{exception}" for name, exception in exceptions.items()
     )
-    assert new_op_overload.overloadpacket == op, (
-        f"Expected same OpOverload packet, got {new_op_overload.overloadpacket} != {op}"
+    raise RuntimeError(
+        f"Cannot find a compatible OpOverload for {op} with the provided "
+        f"arguments. Tried overloads:\n{error_messages}"
     )
-
-    return new_op_overload
 
 
 class _TypePromotionInterpreter(torch.fx.Interpreter):
@@ -1329,7 +1324,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         self,
         module: torch.fx.GraphModule,
         type_promotion_table: TypePromotionTable,
-    ):
+    ) -> None:
         super().__init__(module)
         self.type_promotion_table = type_promotion_table
 
@@ -1361,14 +1356,15 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         kwargs: dict,
     ) -> torch.fx.Node:
         """Create a node and set its metadata."""
-        assert op_type in (
+        if op_type not in (
             "call_function",
             "call_method",
             "get_attr",
             "call_module",
             "placeholder",
             "output",
-        ), f"Unexpected op_type: {op_type}"
+        ):
+            raise AssertionError(f"Unexpected op_type: {op_type}")
         node = getattr(graph, op_type)(target, args, kwargs)
         self._run_node_and_set_meta(node)
         return node
@@ -1380,27 +1376,29 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
     ) -> None:
         """Rerun a node after type promotion and update node.meta["val"] with the output value."""
         node_val = node.meta.get("val", None)
-        assert node_val is not None, f"Node {node} node.meta['val'] is not set."
+        if node_val is None:
+            raise AssertionError(f"Node {node} node.meta['val'] is not set.")
         args, kwargs = self.fetch_args_kwargs_from_env(node)
         target = node.target
-        assert isinstance(target, torch._ops.OpOverload), (
-            f"Expected OpOverload, got {type(target)}"
-        )
+        if not isinstance(target, torch._ops.OpOverload):
+            raise AssertionError(f"Expected OpOverload, got {type(target)}")
         node.target = find_compatible_op_overload(target.overloadpacket, args, kwargs)
 
         new_node_val = self._run_node_and_set_meta(node)
-        assert isinstance(new_node_val, type(node_val)), (
-            f"run_node output type should not change between runs. "
-            f"Got {type(new_node_val)}, expect {type(node_val)}."
-        )
+        if not isinstance(new_node_val, type(node_val)):
+            raise AssertionError(
+                f"run_node output type should not change between runs. "
+                f"Got {type(new_node_val)}, expect {type(node_val)}."
+            )
 
         if isinstance(node_val, torch.Tensor):
             prev_node_dtype = node_val.dtype
 
-            assert prev_node_dtype == expected_out_dtype, (
-                f"node.meta['val'].dtype({prev_node_dtype}) does not agree with "
-                f"type promotion rule({expected_out_dtype})."
-            )
+            if prev_node_dtype != expected_out_dtype:
+                raise AssertionError(
+                    f"node.meta['val'].dtype({prev_node_dtype}) does not agree with "
+                    f"type promotion rule({expected_out_dtype})."
+                )
 
             if new_node_val.dtype != expected_out_dtype:
                 # With explicit type promotion, the expected result dtype may not be
@@ -1478,7 +1476,8 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 equivalent_dtype = fx_type_utils.from_scalar_type_to_torch_dtype(
                     arg_type
                 )
-                assert equivalent_dtype is not None, f"Unexpected arg_type: {arg_type}"
+                if equivalent_dtype is None:
+                    raise AssertionError(f"Unexpected arg_type: {arg_type}")
                 if equivalent_dtype != dtype:
                     # Promote Sym number to tensor of dtype.
                     graph = node.graph
@@ -1601,7 +1600,7 @@ class InsertTypePromotion(_pass.Transform):
         self,
         module: torch.fx.GraphModule,
         type_promotion_table: TypePromotionTable | None = None,
-    ):
+    ) -> None:
         super().__init__(module)
         self.interpreter = _TypePromotionInterpreter(
             module, type_promotion_table or TypePromotionTable()
@@ -1646,17 +1645,20 @@ class InsertTypePromotion(_pass.Transform):
         return fake_args
 
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
-        assert not args, (
-            "`InsertTypePromotion` deduces symbolic fake arguments from the graph. "
-            "It does not accept concrete arguments as input because this pass requires "
-            "re-running the graph. When executed with newly faked concrete arguments, "
-            "the pass loses the symbolic dynamic shape information."
-        )
-        assert not kwargs, "`kwargs` is not supported"
+        if args:
+            raise AssertionError(
+                "`InsertTypePromotion` deduces symbolic fake arguments from the graph. "
+                "It does not accept concrete arguments as input because this pass requires "
+                "re-running the graph. When executed with newly faked concrete arguments, "
+                "the pass loses the symbolic dynamic shape information."
+            )
+        if kwargs:
+            raise AssertionError("`kwargs` is not supported")
 
         fake_args = self._fetch_fake_args()
         fake_mode = self.fake_mode
-        assert fake_mode is not None, "Cannot detect fake_mode."
+        if fake_mode is None:
+            raise AssertionError("Cannot detect fake_mode.")
 
         # Use the python dispatcher to run through some python kernels which
         # can better handle symints. Without this, some SymInts can become static

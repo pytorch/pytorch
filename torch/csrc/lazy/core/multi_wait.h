@@ -1,6 +1,6 @@
 /**
  * This file is adapted from PyTorch/XLA
- * https://github.com/pytorch/xla/blob/master/third_party/xla_client/multi_wait.h
+ * https://github.com/pytorch/xla/blob/e0e5f937a0ba8d904f9608137dc8c51ba439df2d/third_party/xla_client/multi_wait.h
  */
 
 #pragma once
@@ -41,7 +41,7 @@ class TORCH_API MultiWait {
   // the whole lifetime of the returned function.
   std::function<void()> Completer(std::function<void()> func);
 
-  // Similar as the above API, but with explicit capture of the MultiWait shared
+  // Similar to the above API, but with explicit capture of the MultiWait shared
   // pointer.
   static std::function<void()> Completer(
       std::shared_ptr<MultiWait> mwait,

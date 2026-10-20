@@ -2,10 +2,12 @@
 
 import torch
 from torch.fx.experimental._dynamism import track_dynamism_across_examples
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestDynamism(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamic_tensor(self):
         ex1 = {"x": 1, "y": torch.ones(1, 1), "z": {0: torch.ones(1)}}
         ex2 = {"x": 2, "y": torch.ones(2, 1), "z": {0: torch.ones(2)}}
@@ -148,4 +150,7 @@ class TestDynamism(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

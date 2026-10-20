@@ -49,9 +49,9 @@ def main():
 
         # Print header
         print()
-        print(f"{'':>10s}", end="")  # noqa: E999
+        print(f"{'':>10s}", end="")
         for _ in [75, 95]:
-            print(f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end="")  # noqa: E999
+            print(f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end="")
         print()
 
         # Print measurements
@@ -66,7 +66,7 @@ def main():
             ngpus = len(xa["ranks"])
             ma = sorted(xa["measurements"])
             mb = sorted(xb["measurements"])
-            print(f"{ngpus:>4d} GPUs:", end="")  # noqa: E999
+            print(f"{ngpus:>4d} GPUs:", end="")
             for p in [75, 95]:
                 va = np.percentile(ma, p)
                 vb = np.percentile(mb, p)
@@ -75,7 +75,7 @@ def main():
                 print(
                     f"  p{p:02d}: {vb:8.3f}s {int(batch_size / vb):7d}/s {delta:+8.1f}%",
                     end="",
-                )  # noqa: E999
+                )
             print()
         print()
 

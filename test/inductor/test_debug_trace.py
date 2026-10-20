@@ -10,7 +10,7 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.logging_utils import multiple_logs_to_string
@@ -28,7 +28,8 @@ except unittest.SkipTest:
 
 
 def filesize(filename: Path):
-    assert filename.exists(), f"{filename} is missing"
+    if not filename.exists():
+        raise AssertionError(f"{filename} is missing")
     return os.stat(filename).st_size
 
 
@@ -44,7 +45,7 @@ class TestDebugTrace(test_torchinductor.TestCase):
             "torch._inductor.debug", "ir_pre_fusion", "ir_post_fusion"
         )
 
-        # TODO(aakhundov): make this work with fresh_inductor_cache
+        # TODO(aakhundov): make this work with fresh_cache
         # instead of force_disable_caches. currently, with the latter
         # enabled, we get `inductor [('fxgraph_cache_hit', 1)]` in
         # the counters: so the cache is actually hit and the test fails.
@@ -54,9 +55,12 @@ class TestDebugTrace(test_torchinductor.TestCase):
                 "force_disable_caches": True,
             }
         ):
-            with self.assertLogs(
-                logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-            ) as cm, ctx():
+            with (
+                self.assertLogs(
+                    logging.getLogger("torch._inductor.debug"), level=logging.WARNING
+                ) as cm,
+                ctx(),
+            ):
                 fn(torch.randn(16, 16), torch.randn(16, 16))
 
         m = None
@@ -67,7 +71,8 @@ class TestDebugTrace(test_torchinductor.TestCase):
                 break
         self.assertTrue(m, "debug trace file path not found in logs")
         # For type checking, have to ensure it's not none.
-        assert m is not None
+        if m is None:
+            raise AssertionError
         filename = Path(m.group(1))
         self.assertTrue(filename.is_dir())
         self.assertGreater(filesize(filename / "fx_graph_readable.py"), 512)
@@ -84,6 +89,8 @@ op0: SchedulerNode(ComputedBuffer)
 op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
 op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0.min_input_distance = 0
+op0.max_input_distance = 0
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -111,6 +118,8 @@ op1: SchedulerNode(ComputedBuffer)
 op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
 op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
+op1.min_input_distance = 1
+op1.max_input_distance = 1
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -138,6 +147,8 @@ op2: ExternKernelSchedulerNode(ExternKernelOut)
 op2.writes = [StarDep(name='buf2', mode=None)]
 op2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
 op2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
+op2.min_input_distance = 2
+op2.max_input_distance = 2
 op2.outputs = [
     buf2: ExternKernelOut
     buf2.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -155,6 +166,8 @@ op0_op1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
 op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
 op0_op1.unmet_dependencies = []
 op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0_op1.min_input_distance = 0
+op0_op1.max_input_distance = 1
 op0_op1.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -168,6 +181,8 @@ op0: SchedulerNode(ComputedBuffer)
 op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
 op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0.min_input_distance = 0
+op0.max_input_distance = 0
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -194,6 +209,8 @@ op1: SchedulerNode(ComputedBuffer)
 op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
 op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
+op1.min_input_distance = 1
+op1.max_input_distance = 1
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -221,6 +238,8 @@ op2: ExternKernelSchedulerNode(ExternKernelOut)
 op2.writes = [StarDep(name='buf2', mode=None)]
 op2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
 op2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
+op2.min_input_distance = 2
+op2.max_input_distance = 2
 op2.outputs = [
     buf2: ExternKernelOut
     buf2.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -261,13 +280,54 @@ op2.node.kernel = extern_kernels.mm""",
                 return self.relu(self.l(x))
 
         # no failure
-        with self.assertLogs(
-            logging.getLogger("torch._inductor.debug"), level=logging.WARNING
-        ), fresh_inductor_cache():
+        with (
+            self.assertLogs(
+                logging.getLogger("torch._inductor.debug"),
+                level=logging.WARNING,
+            ),
+            fresh_cache(),
+        ):
             m = ToyModel().to(device=GPU_TYPE)
             m = torch.compile(m, mode="max-autotune")
             input_tensor = torch.randn(100).to(device=GPU_TYPE)
             m(input_tensor)
+
+
+class TestLogAutotuningResultsCallSite(test_torchinductor.TestCase):
+    def test_log_results_forwards_required_args_to_debug_formatter(self):
+        # Regression: AlgorithmSelectorCache.log_results omitted
+        # prescreening_elapse, which raised TypeError under
+        # TORCH_COMPILE_DEBUG=1 + LOG_AUTOTUNE_RESULTS=1 (those flags route
+        # V.debug to the real DebugFormatter, whose signature requires it).
+        import inspect
+
+        from torch._inductor.debug import DebugFormatter
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
+        from torch._inductor.virtualized import V
+
+        captured: dict = {}
+
+        class _Recorder:
+            def log_autotuning_results(self, *args, **kwargs):
+                captured["args"] = args
+                captured["kwargs"] = kwargs
+
+        with V.set_debug_handler(_Recorder()):
+            AlgorithmSelectorCache.log_results(
+                name="test_op",
+                input_nodes=[],
+                timings={},
+                elapse=0.0,
+                precompile_elapse=0.0,
+                prescreening_elapse=None,
+            )
+
+        self.assertIn("args", captured, "V.debug.log_autotuning_results was not called")
+        # Bind the captured call to the real DebugFormatter signature; missing
+        # required positional arg (e.g. prescreening_elapse) raises TypeError
+        # exactly like the production failure under LOG_AUTOTUNE_RESULTS=1.
+        sig = inspect.signature(DebugFormatter.log_autotuning_results)
+        sig.bind(_Recorder(), *captured["args"], **captured["kwargs"])
 
 
 if __name__ == "__main__":

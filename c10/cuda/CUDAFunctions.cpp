@@ -53,13 +53,12 @@ int device_count_impl(bool fail_if_no_driver) {
             "https://pytorch.org to install a PyTorch version that has been "
             "compiled with your version of the CUDA driver.");
       }
-    } break;
+    }
     case cudaErrorInitializationError:
       TORCH_CHECK(
           false,
           "CUDA driver initialization failed, you might not "
           "have a CUDA gpu.");
-      break;
     case cudaErrorUnknown:
       TORCH_CHECK(
           false,
@@ -67,7 +66,6 @@ int device_count_impl(bool fail_if_no_driver) {
           "incorrectly set up environment, e.g. changing env "
           "variable CUDA_VISIBLE_DEVICES after program start. "
           "Setting the available devices to be zero.");
-      break;
 #if C10_ASAN_ENABLED
     case cudaErrorMemoryAllocation:
       // In ASAN mode, we know that a cudaErrorMemoryAllocation error will
@@ -80,6 +78,18 @@ int device_count_impl(bool fail_if_no_driver) {
           "would like to use GPUs, turn off ASAN.");
       break;
 #endif // C10_ASAN_ENABLED
+#if defined(_WIN32) && CUDA_VERSION >= 13000
+    // Workaround for CUDA-13.0 error handling on Windows, see
+    // https://github.com/pytorch/pytorch/issues/162333#issuecomment-3267929585
+    case cudaErrorNotSupported:
+      if (!fail_if_no_driver) {
+        TORCH_WARN(
+            "cudaGetDeviceCount() returned cudaErrorNotSupported, "
+            "likely using older driver or on CPU machine");
+        count = 0;
+        break;
+      }
+#endif
     default:
       TORCH_CHECK(
           false,
@@ -130,8 +140,8 @@ DeviceIndex current_device() {
   return cur_device;
 }
 
-void set_device(DeviceIndex device) {
-  C10_CUDA_CHECK(c10::cuda::SetDevice(device));
+void set_device(DeviceIndex device, const bool force) {
+  C10_CUDA_CHECK(c10::cuda::SetDevice(device, force));
 }
 
 void device_synchronize() {
@@ -231,9 +241,13 @@ cudaError_t GetDevice(DeviceIndex* device) {
   return err;
 }
 
-cudaError_t SetDevice(DeviceIndex device) {
-  TORCH_CHECK(device >= 0, "device id must be positive!", device);
+cudaError_t SetDevice(DeviceIndex device, const bool force) {
+  TORCH_CHECK(
+      device >= 0, "device id must be non-negative!", static_cast<int>(device));
   targetDeviceIndex = -1;
+  if (force) {
+    return cudaSetDevice(device);
+  }
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (device == cur_device) {
@@ -309,8 +323,12 @@ cudaError_t GetDevice(DeviceIndex* device) {
   return err;
 }
 
-cudaError_t SetDevice(DeviceIndex device) {
-  TORCH_CHECK(device >= 0, "device id must be positive!", device);
+cudaError_t SetDevice(DeviceIndex device, const bool force) {
+  TORCH_CHECK(
+      device >= 0, "device id must be non-negative!", static_cast<int>(device));
+  if (force) {
+    return cudaSetDevice(device);
+  }
   int cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&cur_device));
   if (device == cur_device) {

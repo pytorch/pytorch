@@ -137,7 +137,6 @@ Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_inverse(const a
     TORCH_INTERNAL_ASSERT(false,
     "Attempted to call _test_autograd_multiple_dispatch_view_inverse() during the functionalization pass. ",
     "This function is for testing only and should never be called.");
-    return Tensor();
 }
 
 } // namespace at::functionalization

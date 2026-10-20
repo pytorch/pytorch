@@ -28,6 +28,10 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wswitch-default")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wswitch-enum")
+
 namespace torch::jit {
 
 using flatbuffers::FlatBufferBuilder;
@@ -280,7 +284,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
 
   for (const TypePtr& t : code.types_) {
     auto type_str = realType(t)->annotation_str();
-    if (type_str.find(torch_prefix) == 0) {
+    if (type_str.starts_with(torch_prefix)) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
@@ -518,6 +522,7 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
   } else {
     size_t num_attr = class_ptr->numAttributes();
     std::vector<flatbuffers::Offset<flatbuffers::String>> names;
+    names.reserve(num_attr);
     for (size_t i = 0; i < num_attr; ++i) {
       names.push_back(fbb.CreateSharedString(class_ptr->getAttributeName(i)));
     }
@@ -588,6 +593,7 @@ flatbuffers::Offset<mobile::serialization::Object> FlatbufferSerializer::
   } else {
     size_t num_attr = type->numAttributes();
     std::vector<uint32_t> tuple_index;
+    tuple_index.reserve(num_attr);
     for (size_t i = 0; i < num_attr; ++i) {
       tuple_index.push_back(storeIValueAndGetIndex(fbb, obj->getSlot(i)));
     }
@@ -856,3 +862,5 @@ bool register_flatbuffer_serializer() {
 }
 
 } // namespace torch::jit
+
+C10_CLANG_DIAGNOSTIC_POP()

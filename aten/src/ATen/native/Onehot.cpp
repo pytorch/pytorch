@@ -1,10 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/DTensorState.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq.h>
@@ -24,44 +26,48 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         if (num_classes == -1) {
           num_classes = self.max().item().toLong() + 1;
         }
-        at::Tensor index = at::arange(num_classes, self.options());
-        return at::eq(self.unsqueeze(-1), index).to(kLong);
+        {
+          // If `self` is a DTensor, then allow implicit replication
+          // of the `index` Tensor.
+          at::DTensorAllowImplicitReplication guard;
+          at::Tensor index = at::arange(num_classes, self.options());
+          return at::eq(self.unsqueeze(-1), index).to(kLong);
+        }
     }
 
-    auto shape = self.sizes().vec();
+    auto shape = self.sym_sizes().vec();
 
     // empty tensor could be converted to one hot representation,
     // but shape inference is not possible.
-    if (self.numel() == 0) {
+    if (self.sym_numel() == 0) {
         if (num_classes <= 0) {
             TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
-            shape.push_back(num_classes);
-            return at::empty(shape, self.options());
+            shape.emplace_back(num_classes);
+            return at::empty_symint(shape, self.options());
         }
     }
 
     // non-empty tensor
-    if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
-        self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
+    if (self.device().is_cpu()) {
       // for cuda, rely on device assert thrown by scatter
-      TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
-    }
-    if (num_classes == -1) {
-        num_classes = self.max().item().toLong() + 1;
-    } else {
-        if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
-            self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
+      auto [self_min, self_max] = at::aminmax(self);
+      TORCH_CHECK(self_min.item<int64_t>() >= 0, "Class values must be non-negative.");
+      if (num_classes == -1) {
+          num_classes = self_max.item<int64_t>() + 1;
+      } else {
           // rely on device asserts from scatter to avoid sync here
-          TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
-        } else {
-            //for cuda, assert that num_classes is at least 1
-            TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
-        }
+          TORCH_CHECK(num_classes > self_max.item<int64_t>(), "Class values must be smaller than num_classes.");
+      }
+    } else if (num_classes == -1) {
+        num_classes = self.max().item<int64_t>() + 1;
+    } else {
+        //for cuda, assert that num_classes is at least 1
+        TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
     }
 
-    shape.push_back(num_classes);
-    Tensor ret = at::zeros(shape, self.options());
+    shape.emplace_back(num_classes);
+    Tensor ret = at::zeros_symint(shape, self.options());
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }

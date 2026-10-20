@@ -31,9 +31,11 @@ set(C10_CUDA_SRCS
     CUDADeviceAssertionHost.cpp
     CUDAException.cpp
     CUDAFunctions.cpp
+    CUDAGraphMemory.cpp
     CUDAMallocAsyncAllocator.cpp
     CUDAMiscFunctions.cpp
     CUDAStream.cpp
+    PeerToPeerAccess.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
     driver_api.cpp
@@ -43,23 +45,25 @@ set(C10_CUDA_HEADERS
     CUDACachingAllocator.h
     CUDADeviceAssertionHost.h
     CUDAException.h
+    CUDAEvent.h
     CUDAFunctions.h
     CUDAGuard.h
     CUDAMacros.h
     CUDAMathCompat.h
     CUDAMiscFunctions.h
     CUDAStream.h
+    PeerToPeerAccess.h
+    impl/CUDAGraphMemory.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )
-set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
 
 if(NOT BUILD_LIBTORCHLESS)
   torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
   torch_compile_options(c10_cuda)
-  set(CUDA_LINK_LIBRARIES_KEYWORD)
+  torch_optimize_layout_if_enabled(c10_cuda)
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+  target_compile_definitions(c10_cuda PRIVATE C10_CUDA_BUILD_MAIN_LIB)
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
@@ -70,8 +74,10 @@ if(NOT BUILD_LIBTORCHLESS)
 
   if(NOT WIN32)
   target_link_libraries(c10_cuda PRIVATE dl)
-  target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
+  else()
+  target_link_libraries(c10_cuda PRIVATE fmt::fmt)
   endif()
+  target_compile_definitions(c10_cuda PRIVATE PYTORCH_C10_DRIVER_API_SUPPORTED)
 
   target_include_directories(
       c10_cuda PUBLIC

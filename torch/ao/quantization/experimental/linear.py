@@ -28,8 +28,12 @@ class LinearAPoT(WeightedQuantizedModule):
     """
 
     def __init__(self, weight2quantize: torch.Tensor, b: int, k: int):
-        assert weight2quantize.dim() == 2
-        assert b % k == 0
+        if weight2quantize.dim() != 2:
+            raise AssertionError(
+                f"weight2quantize must be a 2-D tensor, got dim={weight2quantize.dim()}"
+            )
+        if b % k != 0:
+            raise AssertionError(f"b must be divisible by k, got b={b}, k={k}")
 
         super().__init__()
 
@@ -142,7 +146,10 @@ class LinearAPoT(WeightedQuantizedModule):
         Args:
             activation (Tensor): uniformly quantized activation tensor
         """
-        assert activation.dim() == 2
+        if activation.dim() != 2:
+            raise AssertionError(
+                f"activation must be a 2-D tensor, got dim={activation.dim()}"
+            )
 
         weight_rows = self.weight_transposed.size()[0]
         weight_cols = self.weight_transposed.size()[1]

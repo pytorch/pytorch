@@ -14,10 +14,10 @@ When a _BaseDataLoaderIter starts worker processes, their pids are registered in
 defined in `DataLoader.cpp`: id(_BaseDataLoaderIter) => Collection[ Worker pids ]
 via `_set_worker_pids`.
 
-When an error happens in a worker process, the main process received a SIGCHLD,
+When an error happens in a worker process, the main process receives a SIGCHLD,
 and Python will eventually call the handler registered below
 (in `_set_SIGCHLD_handler`). In the handler, the `_error_if_any_worker_fails`
-call checks all registered worker pids and raise proper error message to
+call checks all registered worker pids and raises a proper error message to
 prevent main process from hanging waiting for data from worker.
 
 Additionally, at the beginning of each worker's `_utils.worker._worker_loop`,
@@ -51,7 +51,7 @@ r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
 handler needs to be set for all DataLoaders in a process."""
 
 
-def _set_SIGCHLD_handler():
+def _set_SIGCHLD_handler() -> None:
     # Windows doesn't support SIGCHLD handler
     if IS_WINDOWS:
         return
@@ -67,12 +67,13 @@ def _set_SIGCHLD_handler():
         # no-op.
         previous_handler = None
 
-    def handler(signum, frame):
+    def handler(signum, frame) -> None:
         # This following call uses `waitid` with WNOHANG from C side. Therefore,
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
         if previous_handler is not None:
-            assert callable(previous_handler)
+            if not callable(previous_handler):
+                raise AssertionError("previous_handler is not callable")
             previous_handler(signum, frame)
 
     signal.signal(signal.SIGCHLD, handler)

@@ -198,7 +198,7 @@ inline Tensor gumbel_softmax(
     auto y_hard = torch::zeros_like(logits).scatter_(dim, index, 1.0);
     ret = y_hard - y_soft.detach() + y_soft;
   } else {
-    ret = y_soft;
+    ret = std::move(y_soft);
   }
   return ret;
 }
@@ -344,7 +344,7 @@ namespace detail {
 inline Tensor glu(const Tensor& input, int64_t dim) {
   TORCH_CHECK(
       input.dim() != 0,
-      "glu does not suppport scalars because halving size must be even");
+      "glu does not support scalars because halving size must be even");
   return torch::glu(input, dim);
 }
 } // namespace detail
@@ -370,7 +370,7 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor gelu(const Tensor& input, const string& approximate) {
+inline Tensor gelu(const Tensor& input, const std::string& approximate) {
   return torch::gelu(input, approximate);
 }
 } // namespace detail
@@ -672,6 +672,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   TORCH_INTERNAL_ASSERT(embed_dim == embed_dim_to_check);
   TORCH_INTERNAL_ASSERT(key.sizes() == value.sizes());
 
+  TORCH_CHECK(num_heads > 0, "num_heads must be greater than 0");
   const auto head_dim = embed_dim / num_heads;
   TORCH_CHECK(
       head_dim * num_heads == embed_dim,
@@ -918,9 +919,10 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       // average attention weights over heads
       attn_output_weights = attn_output_weights.sum(/*dim=*/1) / num_heads;
     }
-    return std::make_tuple(attn_output, attn_output_weights);
+    return std::make_tuple(
+        std::move(attn_output), std::move(attn_output_weights));
   } else {
-    return std::make_tuple(attn_output, Tensor());
+    return std::make_tuple(std::move(attn_output), Tensor());
   }
 }
 } // namespace detail

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
-from typing import cast, Optional, Union
+
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -11,6 +12,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
@@ -26,19 +28,19 @@ from .optimizer import (
 __all__ = ["Rprop", "rprop"]
 
 
-class Rprop(Optimizer):  # noqa: D101
+class Rprop(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         etas: tuple[float, float] = (0.5, 1.2),
         step_sizes: tuple[float, float] = (1e-6, 50),
         *,
         capturable: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -46,18 +48,18 @@ class Rprop(Optimizer):  # noqa: D101
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
 
-        defaults = dict(
-            lr=lr,
-            etas=etas,
-            step_sizes=step_sizes,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            capturable=capturable,
-        )
+        defaults = {
+            "lr": lr,
+            "etas": etas,
+            "step_sizes": step_sizes,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "capturable": capturable,
+        }
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):  # noqa: D105
+    def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
@@ -122,7 +124,7 @@ class Rprop(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -199,9 +201,9 @@ Rprop.__doc__ = (
 
     For further details regarding the algorithm we refer to the paper
     `A Direct Adaptive Method for Faster Backpropagation Learning: The RPROP Algorithm
-    <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_.
-    """
+    <http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.21.1417>`_."""  # codespell:ignore
     + rf"""
+
     Args:
         {_params_doc}
         lr (float, optional): learning rate (default: 1e-2)
@@ -234,7 +236,7 @@ def _single_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -245,10 +247,13 @@ def _single_tensor_rprop(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type == step.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+                )
 
         step += 1
 
@@ -302,20 +307,24 @@ def _multi_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            for p, step in zip(params, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, prevs, step_sizes, state_steps]  # type: ignore[list-item]
@@ -410,7 +419,7 @@ def rprop(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     capturable: bool = False,
     maximize: bool = False,
     differentiable: bool = False,
@@ -420,11 +429,7 @@ def rprop(
     step_size_max: float,
     etaminus: float,
     etaplus: float,
-):
-    r"""Functional API that performs rprop algorithm computation.
-
-    See :class:`~torch.optim.Rprop` for details.
-    """
+) -> None:
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
     if not torch.compiler.is_compiling() and not all(
@@ -462,3 +467,6 @@ def rprop(
         differentiable=differentiable,
         has_complex=has_complex,
     )
+
+
+rprop.__doc__ = _functional_api_doc.format(optimizer="Rprop")

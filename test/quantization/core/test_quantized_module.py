@@ -31,6 +31,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_onednn,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 import torch.fx
 from hypothesis import assume, given
 from hypothesis import strategies as st
@@ -156,7 +157,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             loaded_dict = torch.load(b, weights_only=weights_only)
             for key in model_dict:
                 if isinstance(model_dict[key], torch._C.ScriptObject):
-                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                        raise AssertionError(
+                            f"Expected loaded_dict[{key}] to be ScriptObject, got {type(loaded_dict[key])}"
+                        )
                     w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                     w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                     self.assertEqual(w_model, w_loaded)
@@ -205,7 +209,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         for name, _ in loaded_from_package.named_modules():
             # noop, just make sure attribute "_modules" is restored correctly during torch.package import
-            assert(name is not None)  # noqa: E275
+            if name is None:
+                raise AssertionError("name is None")
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
@@ -320,7 +325,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
-        # (https://docs.scipy.org/doc/numpy/reference/generated/numpy.testing.assert_almost_equal.html)
+        # (https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_almost_equal.html)
         # We use decimal = 0 to ignore off-by-1 differences between reference
         # and test. Off-by-1 differences arise due to the order of round and
         # zero_point addition operation, i.e., if addition followed by round is
@@ -1591,6 +1596,16 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         for bias in [True, False]:
             self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    def test_convtranspose_invalid_out_channels(self):
+        """Test that ConvTranspose modules raise ValueError for out_channels <= 0"""
+        for module_class in [
+            torch.ao.nn.quantized.ConvTranspose1d,
+            torch.ao.nn.quantized.ConvTranspose2d,
+            torch.ao.nn.quantized.ConvTranspose3d,
+        ]:
+            with self.assertRaisesRegex(ValueError, "out_channels must be greater than 0"):
+                module_class(in_channels=3, out_channels=0, kernel_size=3)
+
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -1632,7 +1647,10 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             loaded_dict = torch.load(b, weights_only=weights_only)
             for key in model_dict:
                 if isinstance(model_dict[key], torch._C.ScriptObject):
-                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                        raise AssertionError(
+                            f"Expected loaded_dict[{key}] to be ScriptObject, got {type(loaded_dict[key])}"
+                        )
                     w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                     w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                     self.assertEqual(w_model, w_loaded)
@@ -1839,7 +1857,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                     'RNNTanh': torch.ops.quantized.quantized_rnn_tanh_cell_dynamic,
                     'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
 
-        for rnn_type in cell_dict.keys():
+        for rnn_type in cell_dict:
             if not (dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn")):
                 # fp16 dynamic quant is not supported for qnnpack or onednn
                 kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
@@ -1902,7 +1920,7 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
                     'RNNTanh': nnqr.RNNCell,
                     'RNNReLU': nnqr.RNNCell}
 
-        for rnn_type in cell_dict.keys():
+        for rnn_type in cell_dict:
             kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias}
             if rnn_type == 'RNNReLU':
                 kwargs['nonlinearity'] = "relu"
@@ -2095,3 +2113,6 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
                 self.assertTrue(qmax == 127)
                 found += 1
         self.assertTrue(found == 2)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

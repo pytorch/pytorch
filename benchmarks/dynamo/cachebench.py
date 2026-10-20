@@ -6,9 +6,9 @@ import os
 import subprocess
 import sys
 import tempfile
-from typing import Callable
+from collections.abc import Callable
 
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -23,7 +23,6 @@ TORCHBENCH_MODELS: list[str] = [
     "resnet50",
     "moco",
     "llama",
-    "hf_T5",
 ]
 HUGGINGFACE_MODELS: list[str] = [
     "AllenaiLongformerBase",
@@ -62,7 +61,7 @@ def _run_torchbench_from_args(
     warm_compile_time: list[float] = []
 
     for _ in range(cmd_args.repeat):
-        with fresh_inductor_cache():
+        with fresh_cache():
             env = os.environ.copy()
             with tempfile.NamedTemporaryFile(suffix=".csv") as file:
                 args.append("--output=" + file.name)
@@ -101,9 +100,8 @@ def _run_torchbench_model(
     torchbench_file = os.path.join(
         os.path.dirname(cur_file), BENCHMARK_FILE[cmd_args.benchmark]
     )
-    assert os.path.exists(torchbench_file), (
-        f"Torchbench does not exist at {torchbench_file}"
-    )
+    if not os.path.exists(torchbench_file):
+        raise AssertionError(f"Torchbench does not exist at {torchbench_file}")
 
     dynamic = cmd_args.dynamic
     dynamic_args = ["--dynamic-shapes", "--dynamic-batch-only"] if dynamic else []

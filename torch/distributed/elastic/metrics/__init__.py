@@ -49,8 +49,8 @@ The example below measures the latency for the ``calculate()`` function.
   import torch.distributed.elastic.metrics as metrics
 
   # makes all metrics other than the one from "my_module" to go /dev/null
-  metrics.configure(metrics.NullMetricsHandler())
-  metrics.configure(metrics.ConsoleMetricsHandler(), "my_module")
+  metrics.configure(metrics.NullMetricHandler())
+  metrics.configure(metrics.ConsoleMetricHandler(), "my_module")
 
 
   def my_method():
@@ -59,8 +59,9 @@ The example below measures the latency for the ``calculate()`` function.
       end = time.time()
       metrics.put_metric("calculate_latency", int(end - start), "my_module")
 
-You may also use the torch.distributed.elastic.metrics.prof` decorator
-to conveniently and succinctly profile functions
+You may also use the :func:`torch.distributed.elastic.metrics.prof` decorator
+to conveniently and succinctly profile functions. Its metrics go to the
+``torchelastic`` group unless ``group`` is passed.
 
 ::
 
@@ -68,18 +69,17 @@ to conveniently and succinctly profile functions
 
   import torch.distributed.elastic.metrics as metrics
 
-  metrics.configure(metrics.ConsoleMetricsHandler(), "foobar")
-  metrics.configure(metrics.ConsoleMetricsHandler(), "Bar")
+  metrics.configure(metrics.ConsoleMetricHandler(), "foobar")
 
 
-  @metrics.prof
+  @metrics.prof(group="foobar")
   def foo():
       pass
 
 
   class Bar:
-      @metrics.prof
-      def baz():
+      @metrics.prof(group="foobar")
+      def baz(self):
           pass
 
 ``@metrics.prof`` will publish the following metrics
@@ -142,7 +142,7 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 
 from typing import Optional
 
-from .api import (  # noqa: F401
+from .api import (
     configure,
     ConsoleMetricHandler,
     get_elapsed_time_ms,
@@ -158,11 +158,11 @@ from .api import (  # noqa: F401
 )
 
 
-def initialize_metrics(cfg: Optional[MetricsConfig] = None):
+def initialize_metrics(cfg: MetricsConfig | None = None):
     pass
 
 
 try:
-    from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F401 F403
+    from torch.distributed.elastic.metrics.static_init import *  # type: ignore[import] # noqa: F403
 except ModuleNotFoundError:
     pass

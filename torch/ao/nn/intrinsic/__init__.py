@@ -1,12 +1,12 @@
 import types
 
 from .modules import *  # noqa: F403
-from .modules.fused import _FusedModule  # noqa: F403
+from .modules.fused import _FusedModule
 
 
 # # Subpackages
-# from . import qat  # noqa: F403
-# from . import quantized  # noqa: F403
+# from . import qat
+# from . import quantized
 
 __all__ = [
     "ConvBn1d",

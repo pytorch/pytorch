@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import collections.abc
 import copy
+import itertools
 from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed import distributed_c10d as c10d, rpc
@@ -55,7 +56,7 @@ def _validate_output_tensor_for_gather(
     my_rank: int,
     dst_rank: int,
     size: torch.Size,
-    dst_tensor: Optional[torch.Tensor],
+    dst_tensor: torch.Tensor | None,
 ) -> None:
     if dst_rank == my_rank:
         if dst_tensor is None:
@@ -91,7 +92,8 @@ def _flatten_tensor_size(size) -> torch.Size:
 
 def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
     if is_local:
-        assert isinstance(ranks, int)
+        if not isinstance(ranks, int):
+            raise AssertionError
         if expected != actual:
             raise ValueError(
                 f"Local shards' tensor {prop_name} property need to be the same on rank:{ranks}! "
@@ -100,7 +102,8 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
             )
     else:
         # compare failure check across ranks, ranks list should have two rank
-        assert len(ranks) == 2
+        if len(ranks) != 2:
+            raise AssertionError
         if expected != actual:
             raise ValueError(
                 f"ShardedTensor {prop_name} property does not match from different ranks! "
@@ -115,7 +118,8 @@ def build_metadata_from_local_shards(
     current_rank: int,
     pg: c10d.ProcessGroup,
 ) -> ShardedTensorMetadata:
-    assert len(local_shards) > 0, "must have local shards!"
+    if len(local_shards) <= 0:
+        raise AssertionError("must have local shards!")
     local_shard_metadatas: list[ShardMetadata] = []
 
     first_shard_dtype = local_shards[0].tensor.dtype
@@ -123,7 +127,7 @@ def build_metadata_from_local_shards(
     first_shard_requires_grad = local_shards[0].tensor.requires_grad
     first_shard_is_pinned = local_shards[0].tensor.is_pinned()
 
-    # 1). Validate local tensors and associated metadatas
+    # 1). Validate local tensors and associated metadata
     for local_shard in local_shards:
         local_shard_tensor = local_shard.tensor
         local_shard_meta = local_shard.metadata
@@ -201,11 +205,13 @@ def build_metadata_from_local_shards(
 
 
 def build_global_metadata(
-    gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]],
+    gathered_metadatas: Sequence[ShardedTensorMetadata | None],
+    recalc_metadata: bool = False,
 ):
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 
+    # pyrefly: ignore [bad-assignment]
     for rank, rank_metadata in enumerate(gathered_metadatas):
         if rank_metadata is None:
             continue
@@ -252,6 +258,12 @@ def build_global_metadata(
             )
 
     if global_sharded_tensor_metadata is not None:
+        if recalc_metadata:
+            recalc_global_sharded_tensor_metadata(
+                global_sharded_tensor_metadata,
+                0,  # sharded on 0th dim
+            )
+
         # check if shards_metadata have overlap shards
         validate_non_overlapping_shards_metadata(
             global_sharded_tensor_metadata.shards_metadata
@@ -266,3 +278,50 @@ def build_global_metadata(
         raise ValueError("ShardedTensor have no local shards on all ranks!")
 
     return global_sharded_tensor_metadata
+
+
+def recalc_global_sharded_tensor_metadata(
+    global_sharded_tensor_metadata: ShardedTensorMetadata, sharded_dim: int
+) -> None:
+    # recalculate global ShardedTensorMetadata
+
+    # reorder here in case shard metadata is not sorted on sharded_dim
+    placement_idx_pairs = []
+    for i, shard_metadata in enumerate(global_sharded_tensor_metadata.shards_metadata):
+        if shard_metadata.placement:
+            placement_idx_pairs.append((shard_metadata.placement.rank(), i))
+        else:
+            raise AssertionError(
+                "currently only support rw, it should always have valid rank info"
+            )
+    sorted_idx = sorted(placement_idx_pairs)
+    shard_sizes = [
+        global_sharded_tensor_metadata.shards_metadata[idx].shard_sizes[sharded_dim]
+        for _, idx in sorted_idx
+    ]
+    cum_sum = [0] + list(itertools.accumulate(shard_sizes))
+
+    for shard_id, shard_metadata in enumerate(
+        global_sharded_tensor_metadata.shards_metadata
+    ):
+        # update shard offset for each shard on the sharded dimension
+        shard_metadata.shard_offsets[sharded_dim] = cum_sum[shard_id]
+        for other_dim in range(
+            len(global_sharded_tensor_metadata.shards_metadata[0].shard_sizes)
+        ):
+            if other_dim != sharded_dim:
+                # shard offset for each shard on the unsharded dimension
+                shard_metadata.shard_offsets[other_dim] = 0
+
+    # update global size for ShardedTensorMetadata
+    global_size_list = []
+    for other_dim in range(
+        len(global_sharded_tensor_metadata.shards_metadata[0].shard_sizes)
+    ):
+        if other_dim != sharded_dim:
+            global_size_list.append(
+                global_sharded_tensor_metadata.shards_metadata[0].shard_sizes[other_dim]
+            )
+        else:
+            global_size_list.append(cum_sum[-1])
+    global_sharded_tensor_metadata.size = torch.Size(global_size_list)

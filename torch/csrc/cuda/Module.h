@@ -8,5 +8,6 @@ PyObject* THCPModule_getDeviceName_wrap(PyObject* self, PyObject* arg);
 PyObject* THCPModule_getDriverVersion(PyObject* self);
 PyObject* THCPModule_isDriverSufficient(PyObject* self);
 PyObject* THCPModule_getCurrentBlasHandle_wrap(PyObject* self);
+PyObject* THCPModule_getCurrentSolverHandle_wrap(PyObject* self);
 
 #endif

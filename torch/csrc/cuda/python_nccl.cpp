@@ -1,16 +1,13 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
-#include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 using namespace at;
@@ -18,19 +15,21 @@ using namespace torch;
 using namespace torch::cuda::nccl;
 using namespace torch::cuda::nccl::detail;
 
-static const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
+static constexpr const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
-PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_version(PyObject* /*self*/, PyObject* /*args*/) {
   return PyLong_FromUnsignedLongLong(version());
 }
 
-PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_version_suffix(
+    PyObject* /*self*/,
+    PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   return PyBytes_FromString(version_suffix());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_unique_id(PyObject* /*self*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;
   get_unique_id(id);
@@ -41,8 +40,7 @@ PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
 static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
   ncclComm_t comm =
       (ncclComm_t)PyCapsule_GetPointer(capsule, COMM_CAPSULE_NAME);
-  if (!comm)
-    throw python_error();
+  TORCH_CHECK_PYTHON(comm);
   return comm;
 }
 
@@ -59,14 +57,13 @@ static void destroy_nccl_comm(PyObject* capsule) {
 static std::vector<std::optional<at::cuda::CUDAStream>> unpack_streams(
     PyObject* obj,
     size_t size) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return std::vector<std::optional<at::cuda::CUDAStream>>(size, std::nullopt);
   }
   auto streams = THPUtils_PySequence_to_CUDAStreamList(obj);
-  if (streams.size() != size) {
-    throw std::runtime_error(
-        "number of streams is not equal to number of inputs");
-  }
+  TORCH_CHECK(
+      streams.size() == size,
+      "number of streams is not equal to number of inputs");
   return streams;
 }
 
@@ -74,7 +71,7 @@ static at::Tensor extract_tensor(PyObject* obj);
 static std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
 static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
-  if (obj == Py_None) {
+  if (Py_IsNone(obj)) {
     return std::vector<ncclComm_t>();
   }
   std::vector<ncclComm_t> comms;
@@ -82,22 +79,20 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
     comms = {unpack_nccl_comm(obj)};
   } else {
     auto seq = THPObjectPtr(PySequence_Fast(obj, "comm is not a sequence"));
-    if (!seq)
-      throw python_error();
+    TORCH_CHECK_PYTHON(seq);
     auto size = PySequence_Fast_GET_SIZE(seq.get());
     comms = std::vector<ncclComm_t>(size);
     for (const auto i : c10::irange(size)) {
       comms[i] = unpack_nccl_comm(PySequence_Fast_GET_ITEM(seq.get(), i));
     }
   }
-  if (comms.size() != size) {
-    throw std::runtime_error(
-        "number of communicators is not equal to number of inputs");
-  }
+  TORCH_CHECK(
+      comms.size() == size,
+      "number of communicators is not equal to number of inputs");
   return comms;
 }
 
-PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_init_rank(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   int nranks = 0;
   const char* id = nullptr;
@@ -127,7 +122,7 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_reduce(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_output = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -141,7 +136,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
         "nccl_reduce",
         1,
         "(sequence[Tensor] inputs, Tensor output, int root,"
-        " int op, sequence[torch.cuda.Stream or None]");
+        " int op, sequence[torch.cuda.Stream or None])");
     return nullptr;
   }
 
@@ -160,7 +155,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_all_reduce(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -193,7 +188,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_broadcast(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_streams = nullptr, *_comms = nullptr;
   int root = 0;
@@ -217,14 +212,14 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
 
   {
     pybind11::gil_scoped_release no_gil;
-    torch::cuda::nccl::broadcast(inputs, streams, user_comms);
+    torch::cuda::nccl::broadcast(inputs, root, streams, user_comms);
   }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_all_gather(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -256,7 +251,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_reduce_scatter(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -300,8 +295,7 @@ static at::Tensor extract_tensor(PyObject* obj) {
 
 static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
-  if (!seq)
-    throw python_error();
+  TORCH_CHECK_PYTHON(seq);
 
   const Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   std::vector<at::Tensor> list;

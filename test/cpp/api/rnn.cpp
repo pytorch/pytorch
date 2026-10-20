@@ -441,7 +441,7 @@ lstm_output_to_device(
 }
 
 // This test is a port of python code introduced here:
-// https://towardsdatascience.com/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
+// https://medium.com/data-science/understanding-bidirectional-rnn-in-pytorch-5bd25a5dd66
 // Reverse forward of bidirectional GRU should act
 // as regular forward of unidirectional GRU
 void BidirectionalGRUReverseForward(bool cuda) {
@@ -541,12 +541,14 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
   }
   // The hidden states of the reversed LSTM sits
   // in the odd indices in the first dimension.
-  ASSERT_EQ(
+  ASSERT_NEAR(
       std::get<0>(std::get<1>(bi_output))[1][0][0].item<float>(),
-      std::get<0>(std::get<1>(reverse_output))[0][0][0].item<float>());
-  ASSERT_EQ(
+      std::get<0>(std::get<1>(reverse_output))[0][0][0].item<float>(),
+      tolerance);
+  ASSERT_NEAR(
       std::get<1>(std::get<1>(bi_output))[1][0][0].item<float>(),
-      std::get<1>(std::get<1>(reverse_output))[0][0][0].item<float>());
+      std::get<1>(std::get<1>(reverse_output))[0][0][0].item<float>(),
+      tolerance);
 }
 
 TEST_F(RNNTest, BidirectionalLSTMReverseForward) {

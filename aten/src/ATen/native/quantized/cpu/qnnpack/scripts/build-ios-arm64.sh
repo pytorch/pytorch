@@ -40,7 +40,7 @@ CMAKE_ARGS+=("-DIOS_ARCH=arm64")
 CMAKE_ARGS+=("-DENABLE_BITCODE=OFF")
 CMAKE_ARGS+=("-DENABLE_ARC=OFF")
 
-# Use-specified CMake arguments go last to allow overridding defaults
+# Use-specified CMake arguments go last to allow overriding defaults
 CMAKE_ARGS+=($@)
 
 cd build/ios/arm64 && cmake ../../.. \

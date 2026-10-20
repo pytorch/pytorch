@@ -14,6 +14,12 @@
 
 namespace at::native { namespace {
 
+// fixes segfaults for GCC >= 12 on some AArch64 cpus https://github.com/pytorch/pytorch/issues/157626
+#if defined(__GNUC__) && __GNUC__ >= 12 && defined(__aarch64__)
+#pragma GCC push_options
+#pragma GCC optimize ("no-strict-aliasing")
+#endif
+
 /**  NOTE [ Grid Sample CPU Kernels ]
  *
  *   Implementation of vectorized grid sample CPU kernels is divided into three
@@ -287,7 +293,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    return (in + Vec(1)) * Vec(scaling_factor) - Vec(0.5);
+    return (in + Vec(static_cast<scalar_t>(1))) * Vec(scaling_factor) - Vec(static_cast<scalar_t>(0.5));
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
@@ -435,7 +441,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
 template<typename scalar_t>
-static inline void
+inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
@@ -570,15 +576,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     for (const auto c : c10::irange(C)) {
       auto inp_slice_C_ptr = inp_slice[c].data();
 
-      // mask_gather zeros out the mask, so we need to make copies
-      Vec nw_mask_copy = nw_mask;
-      Vec ne_mask_copy = ne_mask;
-      Vec sw_mask_copy = sw_mask;
-      Vec se_mask_copy = se_mask;
-      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask_copy);
-      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask_copy);
-      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask_copy);
-      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask_copy);
+      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask);
+      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask);
+      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask);
+      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask);
 
       auto interpolated = (nw_val * nw) + (ne_val * ne) + (sw_val * sw) + (se_val * se);
       interpolated.store(out_slice[c].data() + offset, len);
@@ -671,15 +672,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
         mask_scatter_add(gInp_corner_arr, gInp_slice_C_ptr, i_gInp_se_offset_arr, i_se_mask_arr, len);
       }
 
-      // mask_gather zeros out the mask, so we need to make copies
-      Vec nw_mask_copy = nw_mask;
-      Vec ne_mask_copy = ne_mask;
-      Vec sw_mask_copy = sw_mask;
-      Vec se_mask_copy = se_mask;
-      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask_copy);
-      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask_copy);
-      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask_copy);
-      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask_copy);
+      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask);
+      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask);
+      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask);
+      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask);
 
       gx = gx + ((ne_val - nw_val) * s + (se_val - sw_val) * n) * gOut;
       gy = gy + ((sw_val - nw_val) * e + (se_val - ne_val) * w) * gOut;
@@ -752,9 +748,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     # pragma unroll
     #endif
     for (int64_t c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
-      // mask_gather zeros out the mask, so we need to make a copy
-      auto mask_copy = mask;
-      auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_ptr, i_offset, mask_copy);
+      auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_ptr, i_offset, mask);
       inp_val.store(static_cast<void*>(out_ptr), len);
     }
   }
@@ -825,7 +819,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 
   // constant used in cubic convolution
   // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
-  const Vec A = Vec(-0.75);
+  const Vec A = Vec(static_cast<scalar_t>(-0.75));
 
   ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
@@ -1014,13 +1008,17 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   }
 };
 
+#if defined(__GNUC__) && __GNUC__ >= 12 && defined(__aarch64__)
+#pragma GCC pop_options
+#endif
+
 // ~~~~~~~~~~~~~~~~~~ grid_sample_2d_grid_slice_iterator ~~~~~~~~~~~~~~~~~~~~~~
 // Function to apply a vectorized function on a grid slice tensor (without batch
 // dimension).
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
 template<typename scalar_t, typename ApplyFn>
-static inline void grid_sample_2d_grid_slice_iterator(
+inline void grid_sample_2d_grid_slice_iterator(
     const TensorAccessor<const scalar_t, 3>& grid_slice, const ApplyFn &apply_fn) {
   int64_t out_H = grid_slice.size(0);
   int64_t out_W = grid_slice.size(1);

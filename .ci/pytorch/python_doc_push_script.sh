@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # This is where the local pytorch install in the docker image is located
-pt_checkout="/var/lib/jenkins/workspace"
+pt_checkout="${GITHUB_WORKSPACE:-/var/lib/jenkins/workspace}"
 
 source "$pt_checkout/.ci/pytorch/common_utils.sh"
 
@@ -50,8 +50,14 @@ echo "install_path: $install_path  version: $version"
 
 build_docs () {
   set +e
-  set -o pipefail
-  make "$1" 2>&1 | tee /tmp/docs_build.txt
+  # Don't pipe through tee: sphinx -j auto forks workers that inherit
+  # the pipe fd and hold it open after sphinx exits, causing tee to
+  # block forever. Write to a file and tail with --pid so it exits
+  # (after draining) when make finishes.
+  make "$1" > /tmp/docs_build.txt 2>&1 &
+  local make_pid=$!
+  tail -f --pid=$make_pid /tmp/docs_build.txt
+  wait $make_pid
   code=$?
   if [ $code -ne 0 ]; then
     set +x
@@ -87,26 +93,36 @@ pushd docs
 if [ "$is_main_doc" = true ]; then
   build_docs html || exit $?
 
-  make coverage
-  # Now we have the coverage report, we need to make sure it is empty.
-  # Count the number of lines in the file and turn that number into a variable
-  # $lines. The `cut -f1 ...` is to only parse the number, not the filename
-  # Skip the report header by subtracting 2: the header will be output even if
-  # there are no undocumented items.
-  #
-  # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
-  # be documented then removed from there.
-  lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
-  undocumented=$((lines - 2))
-  if [ $undocumented -lt 0 ]; then
-    echo coverage output not found
-    exit 1
-  elif [ $undocumented -gt 0 ]; then
-    echo undocumented objects found:
-    cat build/coverage/python.txt
-    echo "Make sure you've updated relevant .rsts in docs/source!"
-    echo "You can reproduce locally by running 'cd docs && make coverage && cat build/coverage/python.txt'"
-    exit 1
+  # Coverage check is only needed on PR builds (push=false) to catch
+  # undocumented APIs early. Nightly/release builds (push=true) skip it
+  # since PRs already enforce coverage.
+  if [[ "${WITH_PUSH:-}" != true ]]; then
+    SPHINXOPTS="-WT --keep-going" make coverage
+
+    undocumented=$(grep "| TOTAL" build/coverage/python.txt | awk -F'|' '{print $4}' | tr -d ' ')
+
+    if [ -z "$undocumented" ] || ! [[ "$undocumented" =~ ^[0-9]+$ ]]; then
+      echo coverage output not found
+      exit 1
+    elif [ "$undocumented" -gt 0 ]; then
+      set +x
+      echo ""
+      echo "====================="
+      echo "UNDOCUMENTED OBJECTS:"
+      echo "====================="
+      echo ""
+      total_line=$(grep -n "| TOTAL" build/coverage/python.txt | cut -d: -f1)
+      if [ -n "$total_line" ]; then
+        tail -n +$((total_line + 2)) build/coverage/python.txt
+      else
+        cat build/coverage/python.txt
+      fi
+      echo ""
+      echo "Make sure you've updated relevant .rsts in docs/source!"
+      echo "You can reproduce locally by running 'cd docs && make coverage && tail -n +\$((grep -n \"| TOTAL\" build/coverage/python.txt | cut -d: -f1) + 2)) build/coverage/python.txt'"
+      set -x
+      exit 1
+    fi
   fi
 else
   # skip coverage, format for stable or tags
@@ -119,12 +135,6 @@ popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
 
-# Prevent Google from indexing $install_path/_modules. This folder contains
-# generated source files.
-# NB: the following only works on gnu sed. The sed shipped with mac os is different.
-# One can `brew install gnu-sed` on a mac and then use "gsed" instead of "sed".
-find "$install_path/_modules" -name "*.html" -print0 | xargs -0 sed -i '/<head>/a \ \ <meta name="robots" content="noindex">'
-
 git add "$install_path" || true
 git status
 git config user.email "soumith+bot@pytorch.org"
@@ -134,6 +144,8 @@ git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
+  # Error out if credentials to push are missing
+  export GIT_TERMINAL_PROMPT=0
   # push to a temp branch first to trigger CLA check and satisfy branch protections
   git push -u origin HEAD:pytorchbot/temp-branch-py -f
   git push -u origin HEAD^:pytorchbot/base -f

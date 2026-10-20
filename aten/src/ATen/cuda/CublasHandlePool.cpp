@@ -4,11 +4,26 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <algorithm>
+#include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <regex>
+#include <shared_mutex>
 #include <string>
+#include <thread>
 #include <tuple>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#if defined(USE_ROCM)
+#include <ATen/cuda/MemPool.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/ScopeExit.h>
+#include <rocblas/rocblas.h>
+#endif
 
 /**
  * Note [hipblaslt handles]
@@ -23,14 +38,37 @@
  * To work around this difference in behavior, a separate handle pool is available for ROCm builds.
  * For CUDA builds, getCurrentCUDABlasLtHandle will alias for getCurrentCUDABlasHandle,
  * whereas for ROCm builds, it is a distinct function.
+ *
+ * Additionally, hipblaslt cannot share a single handle across multiple streams.
+ * On ROCm, getCurrentCUDABlasLtHandle returns a handle unique to each (device, stream)
+ * pair, rather than just per-device like the cublas handle pool.
+ *
+ * The workspace pools are separate for ROCm. When workspace caching is enabled on CUDA,
+ * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to unify the workspace pools.
  */
 
 namespace at::cuda {
 
 namespace {
+// -1 means no override; use env var / default
+std::atomic<int64_t> cublas_workspace_override{-1};
+std::atomic<int64_t> cublaslt_workspace_override{-1};
+} // namespace
+
+namespace {
 
 #if defined(USE_ROCM)
 void createCublasLtHandle(cublasLtHandle_t *handle) {
+  // hipblasLtCreate allocates device memory and uses the legacy stream. Under
+  // stream capture in any mode, including relaxed, that fails and hipBLASLt
+  // exits the process, which can hang in teardown instead of reporting an
+  // error.
+  TORCH_CHECK(
+      c10::cuda::currentStreamCaptureStatusMayInitCtx() ==
+          c10::cuda::CaptureStatus::None,
+      "Cannot create a hipBLASLt handle while the current stream is being "
+      "captured. hipBLASLt handles are created per (thread, stream) on first "
+      "use; run a hipBLASLt op on this thread and stream before capture begins.");
   TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
 }
 
@@ -50,8 +88,6 @@ void destroyCublasLtHandle(cublasLtHandle_t handle) {
 using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
 
 // ugly hack until hipblasSetWorkspace exists
-#include <rocblas/rocblas.h>
-
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error) {
     switch(error) {
     case rocblas_status_size_unchanged:
@@ -83,14 +119,19 @@ static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, v
 
 #endif
 
-std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
-  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
-  return instance;
-}
-
 void createCublasHandle(cublasHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
 }
+
+#ifdef USE_ROCM
+// rocblas_set_workspace frees the arena a handle owns from creation, and that
+// free is illegal under stream capture. ATen binds a workspace on every call,
+// so release the arena while the handle is created.
+void createInternalCublasHandle(cublasHandle_t *handle) {
+  createCublasHandle(handle);
+  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(*handle, nullptr, 0));
+}
+#endif
 
 void destroyCublasHandle(cublasHandle_t handle) {
 // this is because of something dumb in the ordering of
@@ -101,41 +142,198 @@ void destroyCublasHandle(cublasHandle_t handle) {
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
-    cublasDestroy(handle);
+  cublasDestroy(handle);
 #endif
 }
 
+#ifdef USE_ROCM
+// Buffers bound to public handles, keyed by handle, and the per-device pools
+// they come from.
+struct PublicWorkspaces {
+  std::mutex mutex;
+  std::unordered_map<cublasHandle_t, at::DataPtr> map;
+  std::unordered_map<c10::DeviceIndex, std::unique_ptr<at::cuda::MemPool>> pools;
+};
+
+PublicWorkspaces& publicWorkspaces() {
+  static auto& instance = *new PublicWorkspaces;
+  return instance;
+}
+
+// A public handle outlives any private pool the calling thread may be routed
+// to (torch.cuda.use_mem_pool, cudagraph-tree warmup), whose blocks can be
+// freed or reused behind the handle, so its buffer comes from a dedicated pool.
+// That also keeps these permanent blocks out of the default pool's segments,
+// which empty_cache could otherwise never release.
+at::DataPtr allocatePublicWorkspace(size_t size) {
+  auto& workspaces = publicWorkspaces();
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  const auto device = c10::cuda::current_device();
+  auto& pool = workspaces.pools[device];
+  if (!pool) {
+    pool = std::make_unique<at::cuda::MemPool>(
+        nullptr, /*is_user_created=*/false);
+  }
+  const auto tid = std::this_thread::get_id();
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      device, pool->id(), [tid](cudaStream_t) {
+        return std::this_thread::get_id() == tid;
+      });
+  auto end_allocate = c10::make_scope_exit([&] {
+    c10::cuda::CUDACachingAllocator::endAllocateToPool(device, pool->id());
+  });
+  return allocateCUDABlasWorkspace(size);
+}
+
+// Replaces the arena rocBLAS allocates at creation with a caching-allocator
+// buffer, so the handle's workspace is counted by the allocator. rocBLAS never
+// grows a bound workspace, so it is at least as large as the arena; a
+// ROCBLAS_DEVICE_MEMORY_SIZE below getChosenWorkspaceSize() has no effect.
+void createPublicCublasHandle(cublasHandle_t *handle) {
+  createCublasHandle(handle);
+  try {
+    size_t arena_size = 0;
+    TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_get_device_memory_size(
+        (rocblas_handle)*handle, &arena_size)));
+    const size_t workspace_size = std::max(arena_size, getChosenWorkspaceSize());
+    auto workspace = allocatePublicWorkspace(workspace_size);
+    TORCH_CUDABLAS_CHECK(
+        cublasSetWorkspace(*handle, workspace.get(), workspace_size));
+    auto& workspaces = publicWorkspaces();
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    workspaces.map.insert_or_assign(*handle, std::move(workspace));
+  } catch (...) {
+    destroyCublasHandle(*handle);
+    *handle = nullptr;
+    throw;
+  }
+}
+
+void destroyPublicCublasHandle(cublasHandle_t handle) {
+  destroyCublasHandle(handle);
+  auto& workspaces = publicWorkspaces();
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  workspaces.map.erase(handle);
+}
+
+// ATen binds a per-call workspace on its handle, so public callers get
+// separate handles, one per (device, stream), each bound to its own buffer.
+using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createInternalCublasHandle, destroyCublasHandle>;
+using CuBlasPublicPoolType = DeviceThreadHandlePool<cublasHandle_t, createPublicCublasHandle, destroyPublicCublasHandle>;
+
+// A distinct create function keeps the capture pool a separate type, and so a
+// separate singleton, from CuBlasPoolType.
+void createCaptureCublasHandle(cublasHandle_t *handle) {
+  createInternalCublasHandle(handle);
+}
+using CuBlasCapturePoolType = DeviceThreadHandlePool<cublasHandle_t, createCaptureCublasHandle, destroyCublasHandle>;
+
+// Workspaces bound to capture handles, keyed by (capture id, handle, stream),
+// and hipBLASLt workspaces handed out by getCUDABlasLtWorkspace under capture,
+// keyed by (capture id, stream). They are freed by
+// releaseCaptureCublasWorkspaces when the capture ends.
+struct CaptureWorkspace {
+  at::DataPtr workspace;
+  size_t size;
+  cublasPointerMode_t pointer_mode;
+  // Kernels captured with an earlier, smaller workspace still use it at replay.
+  std::vector<at::DataPtr> retired;
+};
+
+struct CaptureWorkspaces {
+  std::mutex mutex;
+  std::map<std::tuple<c10::CaptureId_t, cublasHandle_t, void*>, CaptureWorkspace>
+      map;
+  // The capture each handle is bound to. A thread's capture handle can serve
+  // concurrent captures, so ending one must not unbind it from another's
+  // workspace.
+  std::map<cublasHandle_t, c10::CaptureId_t> bound;
+  // The last entry is the largest. Earlier, smaller entries stay alive because
+  // kernels captured with them still use them at replay.
+  std::map<
+      std::pair<c10::CaptureId_t, void*>,
+      std::vector<std::pair<at::DataPtr, size_t>>>
+      lt_map;
+};
+
+CaptureWorkspaces& captureWorkspaces() {
+  static auto& instance = *new CaptureWorkspaces;
+  return instance;
+}
+#else
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
+#endif
+
+enum class WorkspaceMode { Cached, Explicit, Default };
 
 } // namespace
 
+WorkspaceMapWithMutex& cublas_handle_stream_to_workspace() {
+  static auto& instance = *new WorkspaceMapWithMutex;
+  return instance;
+}
+
+WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace() {
+  static auto& instance = *new WorkspaceMapWithMutex;
+  return instance;
+}
+
 void clearCublasWorkspaces() {
-  cublas_handle_stream_to_workspace().clear();
+  {
+    auto& workspace = cublas_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    workspace.map.clear();
+  }
+  {
+    auto& workspace = cublaslt_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    workspace.map.clear();
+  }
+}
+
+void clearCublasWorkspacesForStream(cudaStream_t stream) {
+  void* stream_ptr = static_cast<void*>(stream);
+  {
+    auto& workspace = cublas_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
+      return std::get<1>(entry.first) == stream_ptr;
+    });
+  }
+  {
+    auto& workspace = cublaslt_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    std::erase_if(workspace.map, [stream_ptr](const auto& entry) {
+      return std::get<1>(entry.first) == stream_ptr;
+    });
+  }
 }
 
 size_t parseChosenWorkspaceSize() {
-  const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
+  auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
   if (!val) {
-    val = getenv("HIPBLAS_WORKSPACE_CONFIG");
+    val = c10::utils::get_env("HIPBLAS_WORKSPACE_CONFIG");
   }
   if (!val) {
     // for extra convenience
-    val = getenv("ROCBLAS_WORKSPACE_CONFIG");
+    val = c10::utils::get_env("ROCBLAS_WORKSPACE_CONFIG");
   }
-  /* 32MiB default, 128MiB for gfx94x/gfx95x */
-  const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
-  const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
+  /* 32MiB default, 128MiB for gfx942/gfx950/gfx1250 */
+  const bool gfx942_950_1250 = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx1250"});
+  const size_t default_size = gfx942_950_1250 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
-  /* :4096:2:16:8 default, 32MiB for Hopper */
+  /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
-  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+  const bool use32mb = properties != nullptr &&
+      (properties->major == 9 || properties->major == 10 ||
+       properties->major == 11 || properties->major == 12);
+  const size_t default_size = use32mb ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
   if (val) {
     size_t total_size = 0;
-    const std::string config(val);
+    const std::string& config(val.value());
     std::regex exp(":([0-9]+):([0-9]+)");
     std::sregex_iterator next(config.begin(), config.end(), exp);
     std::sregex_iterator end;
@@ -146,8 +344,8 @@ size_t parseChosenWorkspaceSize() {
     while (next != end) {
       std::smatch match = *next;
       TORCH_CHECK(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
-      size_t curr_size = (size_t) std::stoi(match.str(1));
-      size_t count = (size_t) std::stoi(match.str(2));
+      size_t curr_size = std::stoull(match.str(1));
+      size_t count = std::stoull(match.str(2));
       total_size += curr_size * 1024 * count;
       next++;
     }
@@ -157,68 +355,300 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
+#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+#define TORCH_CUBLAS_WORKSPACE_CACHE "TORCH_CUBLAS_WORKSPACE_CACHE"
+bool isCUDABlasWorkspaceCachingEnabled() {
+  // default false
+  static bool cache =
+      c10::utils::check_env(TORCH_CUBLAS_WORKSPACE_CACHE) == true;
+  return cache;
+}
+
+#ifndef USE_ROCM
+inline bool unified_cublas_and_lt_workspaces() {
+  if (!isCUDABlasWorkspaceCachingEnabled()) {
+    return false;
+  }
+  static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
+#if !defined(FBCODE)
+  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
+#else
+  static bool unified = unified_env_var == true;
+#endif
+  return unified;
+}
+#endif
+
+size_t parseCUDABlasLtWorkspaceSize() {
+  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
+#ifdef USE_ROCM
+  if (!val.has_value()) {
+    // accept either env var
+    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+  }
+  // hipblaslt-bench defaults to a 128 MiB workspace (--workspace 134217728);
+  // 80 MiB covers the fp8 shapes that fail at 76 MiB on ROCm 7.14.
+  // https://rocm.docs.amd.com/projects/hipBLASLt/en/docs-7.14.1/conceptual/hipblaslt-clients.html
+  size_t workspace_size = 80*1024; /* Use 80 MiB for hipBLASLt */
+#else
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#endif
+
+  if (val.has_value()) {
+    try {
+      workspace_size = std::stoi(val.value());
+    } catch (std::invalid_argument const&) {
+      TORCH_WARN(
+          "invalid CUBLASLT_WORKSPACE_SIZE,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    } catch (std::out_of_range const&) {
+      TORCH_WARN(
+          "CUBLASLT_WORKSPACE_SIZE out of range,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
 size_t getChosenWorkspaceSize() {
-  size_t pool_size = parseChosenWorkspaceSize();
+  int64_t ov = cublas_workspace_override.load(std::memory_order_relaxed);
+  if (ov >= 0) {
+    return static_cast<size_t>(ov);
+  }
+  static size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
-at::DataPtr getNewWorkspace() {
-  return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
+void setChosenWorkspaceSize(size_t size) {
+  cublas_workspace_override.store(static_cast<int64_t>(size), std::memory_order_relaxed);
 }
 
-cublasHandle_t getCurrentCUDABlasHandle() {
-  c10::DeviceIndex device = 0;
-  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+void setCUDABlasLtWorkspaceSize(size_t size) {
+  cublaslt_workspace_override.store(static_cast<int64_t>(size), std::memory_order_relaxed);
+}
 
-#if !defined(USE_ROCM)
-  CUcontext pctx = nullptr;
-  at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
-  if (C10_UNLIKELY(!pctx)) {
-    // workaround for corner case where a primary context exists but is not
-    // the current context, seen in multithreaded use-cases
-    TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
-    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
-    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+void resetChosenWorkspaceSize() {
+  cublas_workspace_override.store(-1, std::memory_order_relaxed);
+}
+
+void resetCUDABlasLtWorkspaceSize() {
+  cublaslt_workspace_override.store(-1, std::memory_order_relaxed);
+}
+
+size_t getCUDABlasLtWorkspaceSize() {
+  int64_t ov = cublaslt_workspace_override.load(std::memory_order_relaxed);
+  const size_t pool_size = [&] {
+    if (ov >= 0) {
+      return static_cast<size_t>(ov);
+    }
+    static size_t parsed_pool_size = parseCUDABlasLtWorkspaceSize();
+    return parsed_pool_size;
+  }();
+#ifndef USE_ROCM
+  if (unified_cublas_and_lt_workspaces()) {
+    size_t cublasWorkspaceSize = getChosenWorkspaceSize();
+    if (cublasWorkspaceSize < pool_size) {
+      TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
+                      " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
+                      " bytes. Please increase CUBLAS workspace size",
+                      " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
+                      " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
+                      " size will be limited to the CUBLAS workspace size.");
+      return cublasWorkspaceSize;
+    }
   }
 #endif
+  return pool_size;
+}
 
-  // Thread local PoolWindows are lazily-initialized
-  // to avoid initialization issues that caused hangs on Windows.
-  // See: https://github.com/pytorch/pytorch/pull/22405
-  // This thread local unique_ptrs will be destroyed when the thread terminates,
-  // releasing its reserved handles back to the pool.
+at::DataPtr allocateCUDABlasWorkspace(size_t size) {
+  return c10::cuda::CUDACachingAllocator::get()->allocate(size);
+}
 
-  // Use a leaky singleton for the pool following standard practice around
-  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasPoolType>(
-      new CuBlasPoolType(), [](CuBlasPoolType* p) {
-        // Leak the memory.
-      });
-  thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
+void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
 
-  auto handle = myPoolWindow->reserve(device);
+  auto& workspace = cublas_handle_stream_to_workspace();
+
+  size_t workspace_size = getChosenWorkspaceSize();
+
+  // Fast path: check if workspace already exists and is large enough
+  {
+    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it != workspace.map.end() && workspace_it->second.second >= workspace_size) {
+      TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
+          handle, workspace_it->second.first.get(), workspace_size));
+      return;
+    }
+  }
+
+  // Slow path: allocate workspace outside the lock
+  auto new_workspace = allocateCUDABlasWorkspace(workspace_size);
+
+  // Insert with lock, replacing any undersized entry
+  {
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it == workspace.map.end() ||
+        workspace_it->second.second < workspace_size) {
+      workspace.map.insert_or_assign(
+          key, std::make_pair(std::move(new_workspace), workspace_size));
+      workspace_it = workspace.map.find(key);
+    }
+    TORCH_CUDABLAS_CHECK(
+        cublasSetWorkspace(handle, workspace_it->second.first.get(), workspace_size));
+  }
+}
+
+#ifdef USE_ROCM
+static void* getCaptureCUDABlasLtWorkspace(
+    cudaStream_t stream,
+    c10::CaptureId_t capture_id,
+    size_t workspace_size) {
+  auto key = std::make_pair(capture_id, static_cast<void*>(stream));
+  auto& workspaces = captureWorkspaces();
+  {
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    auto it = workspaces.lt_map.find(key);
+    if (it != workspaces.lt_map.end() &&
+        it->second.back().second >= workspace_size) {
+      return it->second.back().first.get();
+    }
+  }
+  // Allocated while capturing, so it comes from the capture's private pool.
+  auto new_workspace = allocateCUDABlasWorkspace(workspace_size);
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  auto& buffers = workspaces.lt_map[key];
+  if (buffers.empty() || buffers.back().second < workspace_size) {
+    buffers.emplace_back(std::move(new_workspace), workspace_size);
+  }
+  return buffers.back().first.get();
+}
+#endif
+
+void* getCUDABlasLtWorkspace(size_t workspace_size) {
+#ifdef USE_ROCM
+  if (!isCUDABlasWorkspaceCachingEnabled()) {
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+    if (auto capture_id = c10::cuda::captureIdMayInitCtx(stream)) {
+      // Captured kernels keep this address, so each capture gets its own
+      // buffer instead of the per-stream cached one other graphs share.
+      return getCaptureCUDABlasLtWorkspace(stream, *capture_id, workspace_size);
+    }
+  }
+#endif
+#ifndef USE_ROCM
+  if (unified_cublas_and_lt_workspaces()) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle(/*setup=*/false);
+    auto stream = c10::cuda::getCurrentCUDAStream();
+    cudaStream_t _stream = stream;
+    auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+    auto& workspace = at::cuda::cublas_handle_stream_to_workspace();
+    {
+      std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+      auto workspace_it = workspace.map.find(key);
+      if (workspace_it != workspace.map.end() &&
+          workspace_it->second.second >= workspace_size) {
+        return workspace_it->second.first.mutable_get();
+      }
+    }
+    // First use for this handle+stream pair — allocate and insert directly.
+    // No need to call cublasSetWorkspace; Lt passes workspace explicitly.
+    size_t allocation_size = std::max(workspace_size, getChosenWorkspaceSize());
+    auto new_workspace = allocateCUDABlasWorkspace(allocation_size);
+    {
+      std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+      auto workspace_it = workspace.map.find(key);
+      if (workspace_it == workspace.map.end() ||
+          workspace_it->second.second < workspace_size) {
+        workspace.map.insert_or_assign(
+            key, std::make_pair(std::move(new_workspace), allocation_size));
+        workspace_it = workspace.map.find(key);
+      }
+      return workspace_it->second.first.mutable_get();
+    }
+  }
+#endif
+  cublasLtHandle_t handle = getCurrentCUDABlasLtHandle();
   auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+
+  auto& workspace = cublaslt_handle_stream_to_workspace();
+
+  // Fast path: check if workspace already exists and is large enough
+  {
+    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it != workspace.map.end() && workspace_it->second.second >= workspace_size) {
+      return workspace_it->second.first.mutable_get();
+    }
+  }
+
+  // Slow path: allocate workspace outside the lock
+  auto new_workspace = allocateCUDABlasWorkspace(workspace_size);
+
+  // Insert with lock, replacing any undersized entry
+  {
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it == workspace.map.end() ||
+        workspace_it->second.second < workspace_size) {
+      workspace.map.insert_or_assign(
+          key, std::make_pair(std::move(new_workspace), workspace_size));
+      workspace_it = workspace.map.find(key);
+    }
+    return workspace_it->second.first.mutable_get();
+  }
+}
+
+void* getCUDABlasLtWorkspace() {
+  return getCUDABlasLtWorkspace(getCUDABlasLtWorkspaceSize());
+}
+
+static void setupCUDABlasHandle(
+    cublasHandle_t handle,
+    c10::cuda::CUDAStream stream,
+    void* workspace,
+    size_t workspace_size,
+    WorkspaceMode workspace_mode) {
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-  // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
-  // issue where memory usage increased during graph capture.
+  // ATen explicitly sets the cuBLAS workspace even though CUDA 12.2+ fixed the
+  // issue where memory usage increased during graph capture. Public handles
+  // use the cuBLAS default workspace instead when caching is disabled.
   // original issue: https://github.com/pytorch/pytorch/pull/83461
   // This is because in CUDA 12.2+, the use of cudaMallocAsync in cublas
   // will allocate memory dynamically (even if they're cheap) outside
   // PyTorch's CUDA caching allocator. It's possible that CCA used up
   // all the memory and cublas's cudaMallocAsync will return OOM
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = cublas_handle_stream_to_workspace().find(key);
-  if (workspace_it == cublas_handle_stream_to_workspace().end()) {
-    workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
+  switch (workspace_mode) {
+    case WorkspaceMode::Cached:
+      setWorkspaceForHandle(handle, stream);
+      break;
+    case WorkspaceMode::Explicit:
+      TORCH_CUDABLAS_CHECK(
+          cublasSetWorkspace(handle, workspace, workspace_size));
+      break;
+    case WorkspaceMode::Default:
+      // cuBLAS: cublasSetStream above resets the handle to its default
+      // workspace. rocBLAS: public handles keep the buffer bound at creation,
+      // and capture handles keep the capture workspace getCaptureCublasHandle
+      // bound.
+      break;
   }
-  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
+
 #if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-  if (!NoTF32Guard::should_disable_tf32() && at::globalContext().allowTF32CuBLAS()) {
+  if (!NoTF32Guard::should_disable_fp32_reduced_precision() &&
+      at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
@@ -232,8 +662,345 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   }
   TORCH_CUDABLAS_CHECK(hipblasSetAtomicsMode(handle, hipblas_mode));
 #endif
+}
+
+template <typename PoolType>
+static std::shared_ptr<PoolType> getCuBlasPool() {
+  // Use a leaky singleton for the pool following standard practice around
+  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
+  static auto pool = std::shared_ptr<PoolType>(
+      new PoolType(), [](PoolType* p) {
+        // Leak the memory.
+      });
+  return pool;
+}
+
+template <typename PoolType>
+static typename PoolType::PoolWindow& getCuBlasPoolWindow() {
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+  thread_local std::unique_ptr<typename PoolType::PoolWindow> myPoolWindow(
+      getCuBlasPool<PoolType>()->newPoolWindow());
+  return *myPoolWindow;
+}
+
+static cublasHandle_t getCurrentCUDABlasHandleImpl(
+    void* workspace,
+    size_t workspace_size,
+    WorkspaceMode workspace_mode,
+    bool setup) {
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+
+#if !defined(USE_ROCM)
+  CUcontext pctx = nullptr;
+  at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+  if (C10_UNLIKELY(!pctx)) {
+    TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
+    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+  }
+#endif
+
+  cublasHandle_t handle = getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
+
+  if (!setup) {
+    return handle;
+  }
+
+  setupCUDABlasHandle(
+      handle,
+      c10::cuda::getCurrentCUDAStream(),
+      workspace,
+      workspace_size,
+      workspace_mode);
   return handle;
 }
+
+#ifdef USE_ROCM
+static cublasHandle_t getCaptureCublasHandle(
+    c10::DeviceIndex device,
+    cudaStream_t stream,
+    c10::CaptureId_t capture_id) {
+  // One capture handle per thread serves every stream in the capture, because
+  // a stream that first appears mid-capture cannot create a handle. Each
+  // stream gets its own workspace and pointer mode, so the handle is pointed
+  // at the current stream's on every request.
+  cublasHandle_t handle =
+      getCuBlasPoolWindow<CuBlasCapturePoolType>().reserve(device);
+  cudaStream_t prev_stream = nullptr;
+  TORCH_CUDABLAS_CHECK(cublasGetStream(handle, &prev_stream));
+  cublasPointerMode_t prev_mode = CUBLAS_POINTER_MODE_HOST;
+  TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &prev_mode));
+  void* stream_key = static_cast<void*>(stream);
+  auto key = std::make_tuple(capture_id, handle, stream_key);
+  auto& workspaces = captureWorkspaces();
+  size_t workspace_size = getChosenWorkspaceSize();
+  void* workspace_ptr = nullptr;
+  cublasPointerMode_t pointer_mode = CUBLAS_POINTER_MODE_HOST;
+  {
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    // Keep the pointer mode the caller left for the stream the handle was
+    // last pointed at.
+    auto prev = workspaces.map.find(
+        std::make_tuple(capture_id, handle, static_cast<void*>(prev_stream)));
+    if (prev != workspaces.map.end()) {
+      prev->second.pointer_mode = prev_mode;
+    }
+    auto it = workspaces.map.find(key);
+    if (it != workspaces.map.end()) {
+      pointer_mode = it->second.pointer_mode;
+      if (it->second.size >= workspace_size) {
+        workspace_ptr = it->second.workspace.get();
+      }
+    } else if (auto eager_handle =
+                   getCuBlasPoolWindow<CuBlasPublicPoolType>().find(
+                       device, stream_key)) {
+      // Carry over a pointer mode the caller set on this stream's eager handle.
+      TORCH_CUDABLAS_CHECK(cublasGetPointerMode(eager_handle, &pointer_mode));
+    }
+  }
+  if (workspace_ptr == nullptr) {
+    // Allocated while capturing, so it comes from the capture's private pool.
+    auto workspace = allocateCUDABlasWorkspace(workspace_size);
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    auto it = workspaces.map.find(key);
+    if (it == workspaces.map.end()) {
+      it = workspaces.map
+               .emplace(key, CaptureWorkspace{std::move(workspace), workspace_size, pointer_mode, {}})
+               .first;
+    } else if (it->second.size < workspace_size) {
+      // The workspace size grew mid-capture; keep the old buffer alive.
+      it->second.retired.push_back(std::move(it->second.workspace));
+      it->second.workspace = std::move(workspace);
+      it->second.size = workspace_size;
+    }
+    workspace_ptr = it->second.workspace.get();
+    workspace_size = it->second.size;
+  }
+  // Bound under the lock so releaseCaptureCublasWorkspaces on another thread
+  // cannot unbind the handle between the check and the rebind.
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  workspaces.bound[handle] = capture_id;
+  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
+  TORCH_CUDABLAS_CHECK(
+      cublasSetWorkspace(handle, workspace_ptr, workspace_size));
+  TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, pointer_mode));
+  return handle;
+}
+#endif
+
+cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
+  if (isCUDABlasWorkspaceCachingEnabled()) {
+    return getCurrentCUDABlasHandleImpl(
+        nullptr, 0, WorkspaceMode::Cached, setup);
+  }
+#ifdef USE_ROCM
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t raw_stream = stream;
+  cublasHandle_t handle = nullptr;
+  if (auto capture_id = c10::cuda::captureIdMayInitCtx(raw_stream)) {
+    // Captured kernels keep the address of the workspace they used, so a graph
+    // must not share its scratch memory with eager work or with other graphs
+    // captured on this stream.
+    handle = getCaptureCublasHandle(device, raw_stream, *capture_id);
+  } else {
+    // Callers request the public handle to keep handle creation out of stream
+    // capture, so create this thread's internal handle too. Under capture the
+    // spare capture handle serves a new thread; creating an internal handle
+    // there would allocate and free its arena on a capturing device.
+    (void)getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
+    // A rocBLAS workspace must not be used by two streams at once, and
+    // rocblas_set_stream does not wait for the old stream, so each stream gets
+    // its own public handle.
+    handle = getCuBlasPoolWindow<CuBlasPublicPoolType>().reserve(
+        device, static_cast<void*>(raw_stream));
+  }
+  if (setup) {
+    setupCUDABlasHandle(handle, stream, nullptr, 0, WorkspaceMode::Default);
+  }
+  return handle;
+#else
+  return getCurrentCUDABlasHandleImpl(
+      nullptr, 0, WorkspaceMode::Default, setup);
+#endif
+}
+
+CUDABlasHandleWithWorkspace::CUDABlasHandleWithWorkspace(
+    cublasHandle_t handle,
+    cudaStream_t stream,
+    at::DataPtr workspace,
+    bool restore_default_workspace)
+    : handle_(handle),
+      stream_(stream),
+      workspace_(std::move(workspace)),
+      restore_default_workspace_(restore_default_workspace) {}
+
+CUDABlasHandleWithWorkspace::CUDABlasHandleWithWorkspace(
+    CUDABlasHandleWithWorkspace&& other) noexcept
+    : handle_(std::exchange(other.handle_, nullptr)),
+      stream_(std::exchange(other.stream_, nullptr)),
+      workspace_(std::move(other.workspace_)),
+      restore_default_workspace_(
+          std::exchange(other.restore_default_workspace_, false)) {}
+
+CUDABlasHandleWithWorkspace::~CUDABlasHandleWithWorkspace() {
+  if (!restore_default_workspace_) {
+    return;
+  }
+#ifdef USE_ROCM
+  // rocblas_set_stream leaves the workspace binding in place, so restore by
+  // unbinding explicitly instead of relying on cuBLAS's set-stream semantics.
+  const cublasStatus_t status = cublasSetWorkspace(handle_, nullptr, 0);
+#else
+  const cublasStatus_t status = cublasSetStream(handle_, stream_);
+#endif
+  if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+    // The handle may still refer to this allocation. Retain it rather than
+    // leaving a dangling workspace pointer in a pooled handle. Destructors
+    // cannot report this failure by throwing.
+    (void)workspace_.release_context();
+    TORCH_WARN_ONCE(
+        "Failed to restore the cuBLAS default workspace: ",
+        at::cuda::blas::_cublasGetErrorEnum(status),
+        ". Retaining the eager workspace to keep the handle binding valid.");
+  }
+}
+
+CUDABlasHandleWithWorkspace getCurrentCUDABlasHandleWithWorkspace() {
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  if (isCUDABlasWorkspaceCachingEnabled()) {
+    return CUDABlasHandleWithWorkspace(
+        getCurrentCUDABlasHandle(), stream, {}, false);
+  }
+  size_t workspace_size = getChosenWorkspaceSize();
+  auto workspace = allocateCUDABlasWorkspace(workspace_size);
+  void* workspace_ptr = workspace.get();
+  auto handle = getCurrentCUDABlasHandleImpl(
+      nullptr, 0, WorkspaceMode::Default, false);
+  CUDABlasHandleWithWorkspace scoped_handle(
+      handle, stream, std::move(workspace), true);
+  setupCUDABlasHandle(
+      handle,
+      stream,
+      workspace_ptr,
+      workspace_size,
+      WorkspaceMode::Explicit);
+  return scoped_handle;
+}
+
+#ifdef USE_ROCM
+static std::shared_ptr<CuBlasLtPoolType> getCuBlasLtPool() {
+  // Use a leaky singleton for the pool following standard practice around
+  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
+  static auto pool = std::shared_ptr<CuBlasLtPoolType>(
+      new CuBlasLtPoolType(), [](CuBlasLtPoolType* p) {
+        // Leak the memory.
+      });
+  return pool;
+}
+
+void ensureCublasLtHandlesAvailable(size_t n) {
+  // Pre-create hipblaslt handles into the shared free list so that a later
+  // reserve() from another thread can hand one out without running
+  // hipblasLtCreate. Called before graph capture begins: creation does raw
+  // hipMalloc/hipMemset calls that fail once capture is active, and the
+  // backward half of a whole-graph capture issues its first gemm on the
+  // capture stream from an autograd worker thread, which cannot have a
+  // handle for that (device, stream) key yet.
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  auto pool = getCuBlasLtPool();
+  std::lock_guard<std::mutex> guard(pool->mutex);
+  while (pool->available_handles[device].size() < n) {
+    pool->created_handles[device].emplace_back(true /*create*/);
+    pool->available_handles[device].push_back(
+        pool->created_handles[device].back().handle);
+  }
+}
+
+void prepareCaptureCublasHandles() {
+  // Devices whose public handle was never requested are skipped so that
+  // processes which never use it do not pay for capture handles.
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+  {
+    auto public_pool = getCuBlasPool<CuBlasPublicPoolType>();
+    std::lock_guard<std::mutex> guard(public_pool->mutex);
+    if (public_pool->created_handles[device].empty()) {
+      return;
+    }
+  }
+  (void)getCuBlasPoolWindow<CuBlasCapturePoolType>().reserve(device);
+  // For another thread (e.g. an autograd worker) in the capture.
+  auto pool = getCuBlasPool<CuBlasCapturePoolType>();
+  std::lock_guard<std::mutex> guard(pool->mutex);
+  if (pool->available_handles[device].empty()) {
+    pool->created_handles[device].emplace_back(true /*create*/);
+    pool->available_handles[device].push_back(
+        pool->created_handles[device].back().handle);
+  }
+}
+
+void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
+  std::map<cublasHandle_t, std::vector<at::DataPtr>> released;
+  std::vector<at::DataPtr> released_lt;
+  {
+    auto& workspaces = captureWorkspaces();
+    std::lock_guard<std::mutex> lock(workspaces.mutex);
+    for (auto it = workspaces.map.begin(); it != workspaces.map.end();) {
+      if (std::get<0>(it->first) == capture_id) {
+        auto& handle_workspaces = released[std::get<1>(it->first)];
+        for (auto& retired : it->second.retired) {
+          handle_workspaces.push_back(std::move(retired));
+        }
+        handle_workspaces.push_back(std::move(it->second.workspace));
+        it = workspaces.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = workspaces.lt_map.begin(); it != workspaces.lt_map.end();) {
+      if (it->first.first == capture_id) {
+        for (auto& buffer : it->second) {
+          released_lt.push_back(std::move(buffer.first));
+        }
+        it = workspaces.lt_map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto& [handle, handle_workspaces] : released) {
+      // A handle another capture has since bound to its own workspace does not
+      // reference this capture's memory, so only unbind handles still on it.
+      auto bound = workspaces.bound.find(handle);
+      if (bound == workspaces.bound.end() || bound->second != capture_id) {
+        continue;
+      }
+      workspaces.bound.erase(bound);
+      // A handle kept past the capture must not write into memory the graph
+      // owns.
+      const cublasStatus_t status = cublasSetWorkspace(handle, nullptr, 0);
+      if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+        // Keep the allocations rather than leave the handle bound to freed
+        // memory. It is bound to whichever stream's workspace it used last.
+        for (auto& workspace : handle_workspaces) {
+          (void)workspace.release_context();
+        }
+        TORCH_WARN_ONCE(
+            "Failed to unbind a capture cuBLAS workspace: ",
+            at::cuda::blas::_cublasGetErrorEnum(status),
+            ". Retaining the workspace to keep the handle binding valid.");
+      }
+    }
+  }
+}
+#endif
 
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
@@ -245,20 +1012,17 @@ cublasLtHandle_t getCurrentCUDABlasLtHandle() {
   // See: https://github.com/pytorch/pytorch/pull/22405
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
-
-  // Use a leaky singleton for the pool following standard practice around
-  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
-  static auto pool = std::shared_ptr<CuBlasLtPoolType>(
-      new CuBlasLtPoolType(), [](CuBlasLtPoolType* p) {
-        // Leak the memory.
-      });
   thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
-      pool->newPoolWindow());
+      getCuBlasLtPool()->newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
+  // hipblaslt cannot share a single handle across multiple streams,
+  // so reserve a handle unique to each (device, stream) pair.
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto handle = myPoolWindow->reserve(device, static_cast<void*>(_stream));
   return handle;
 #else
-  return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());
+  return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle(/*setup=*/false));
 #endif
 }
 

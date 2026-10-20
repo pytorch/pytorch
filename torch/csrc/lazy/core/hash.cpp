@@ -87,7 +87,7 @@ std::string HashToString(const hash_t& a) {
   std::stringstream ss;
   ss << std::hex << c10::Uint128High64(a) << std::setfill('0') << std::setw(16)
      << Uint128Low64(a);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 hash_t Hash(const std::vector<bool>& values) {

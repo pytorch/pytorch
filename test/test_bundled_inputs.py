@@ -4,7 +4,6 @@
 
 import io
 import textwrap
-from typing import Optional
 
 import torch
 import torch.utils.bundled_inputs
@@ -58,17 +57,20 @@ class TestBundledInputs(TestCase):
         # Make sure the model only grew a little bit,
         # despite having nominally large bundled inputs.
         augmented_size = model_size(sm)
+
         self.assertLess(augmented_size, original_size + (1 << 12))
 
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
         self.assertEqual(len(inflated), len(samples))
+
         self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
 
         for idx, inp in enumerate(inflated):
             self.assertIsInstance(inp, tuple)
             self.assertEqual(len(inp), 1)
+
             self.assertIsInstance(inp[0], torch.Tensor)
             if idx != 5:
                 # Strides might be important for benchmarking.
@@ -136,6 +138,7 @@ class TestBundledInputs(TestCase):
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(inflated, samples)
+
         self.assertTrue(loaded(*inflated[0]) == "first 1")
 
     def test_multiple_methods_with_inputs(self):
@@ -182,6 +185,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(inflated, loaded.get_all_bundled_inputs_for_foo())
 
         # Check running and size helpers
+
         self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
 
@@ -200,7 +204,7 @@ class TestBundledInputs(TestCase):
         self.assertEqual(all_info["foo"]["info"], info)
 
         # example of how to turn the 'get_inputs_function_name' into the actual list of bundled inputs
-        for func_name in all_info.keys():
+        for func_name in all_info:
             input_func_name = all_info[func_name]["get_inputs_function_name"][0]
             func_to_run = getattr(loaded, input_func_name)
             self.assertEqual(func_to_run(), samples)
@@ -328,8 +332,8 @@ class TestBundledInputs(TestCase):
         class MyModel(torch.nn.Module):
             def forward(
                 self,
-                arg1: Optional[dict[str, torch.Tensor]],
-                arg2: Optional[list[torch.Tensor]],
+                arg1: dict[str, torch.Tensor] | None,
+                arg2: list[torch.Tensor] | None,
                 arg3: torch.Tensor,
             ):
                 if arg1 is None:
@@ -355,7 +359,10 @@ class TestBundledInputs(TestCase):
 
         def condensed(t):
             ret = torch.empty_like(t).flatten()[0].clone().expand(t.shape)
-            assert ret.storage().size() == 1
+            if ret.storage().size() != 1:
+                raise AssertionError(
+                    f"storage size must be 1, got {ret.storage().size()}"
+                )
             # ret.storage()[0] = 0
             return ret
 
@@ -414,6 +421,7 @@ class TestBundledInputs(TestCase):
         )
         augmented_size = model_size(sm)
         # assert the size has not increased more than 8KB
+
         self.assertLess(augmented_size, original_size + (1 << 13))
 
         loaded = save_and_load(sm)

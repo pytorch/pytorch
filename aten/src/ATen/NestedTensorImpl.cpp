@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
@@ -211,7 +210,7 @@ NestedTensorImpl::NestedTensorImpl(
 }
 
 // assume contiguous, `nested_strides` and `offsets`
-// can be infered from `nested_sizes`
+// can be inferred from `nested_sizes`
 NestedTensorImpl::NestedTensorImpl(
     const at::Tensor& buffer,
     const at::Tensor& nested_sizes)
@@ -273,7 +272,7 @@ c10::SymInt NestedTensorImpl::sym_numel_custom() const {
   return NestedTensorImpl::numel_custom();
 }
 
-bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
+c10::SymBool NestedTensorImpl::sym_is_contiguous_custom(MemoryFormat /*memory_format*/) const {
   return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
@@ -302,7 +301,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_slot_.load_pyobj_interpreter()->detach(this);
+    auto r = (*c10::impl::getGlobalPyInterpreter())->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);

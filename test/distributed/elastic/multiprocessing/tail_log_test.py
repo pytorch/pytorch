@@ -6,19 +6,25 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+import builtins
 import io
 import os
 import shutil
 import sys
 import tempfile
 import time
-import unittest
 from concurrent.futures import wait
 from concurrent.futures._base import ALL_COMPLETED
 from concurrent.futures.thread import ThreadPoolExecutor
+from threading import Event
 from unittest import mock
 
-from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.distributed.elastic.multiprocessing.tail_log import tail_logfile, TailLog
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def write(max: int, sleep: float, file: str):
@@ -28,8 +34,11 @@ def write(max: int, sleep: float, file: str):
             time.sleep(sleep)
 
 
-class TailLogTest(unittest.TestCase):
+class TailLogTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
+        super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
         self.threadpool = ThreadPoolExecutor()
 
@@ -84,6 +93,149 @@ class TailLogTest(unittest.TestCase):
         )
         self.assertTrue(tail.stopped())
 
+    def test_tail_logfile_created_while_producer_finishes(self):
+        """
+        The producer may create the log file in the window between the tailer's
+        existence check and its check of the finished event. The file still has
+        to be tailed rather than dropped.
+        """
+        file = os.path.join(self.test_dir, "0_stdout.log")
+        finished = Event()
+        dst = io.StringIO()
+
+        real_exists = os.path.exists
+        raced = False
+
+        def exists_then_finish(path):
+            nonlocal raced
+            result = real_exists(path)
+            if path == file and not raced:
+                raced = True
+                # the producer writes the file and exits inside the window
+                with open(file, "w") as producer:
+                    producer.write("0\n")
+                finished.set()
+            return result
+
+        with mock.patch(
+            "torch.distributed.elastic.multiprocessing.tail_log.os.path.exists",
+            side_effect=exists_then_finish,
+        ):
+            tail_logfile(
+                header="[writer0]:",
+                file=file,
+                dst=dst,
+                finished=finished,
+                interval_sec=0.001,
+                log_line_filter=lambda _: True,
+            )
+
+        self.assertEqual("[writer0]:0\n", dst.getvalue())
+
+    def test_tail_logfile_producer_finishes_at_eof(self):
+        """
+        The producer may append its last lines and set the finished event in the
+        window between the tailer reading EOF and the tailer checking the event.
+        Those lines still have to be tailed. See issue 143823.
+        """
+        file = os.path.join(self.test_dir, "0_stdout.log")
+        with open(file, "w") as producer:
+            producer.write("0\n")
+
+        finished = Event()
+        dst = io.StringIO()
+        real_open = builtins.open
+
+        class LateWriteFile:
+            def __init__(self, fp):
+                self._fp = fp
+                self._raced = False
+
+            def readline(self):
+                line = self._fp.readline()
+                if not line and not self._raced:
+                    self._raced = True
+                    # the producer appends its last line and exits inside the
+                    # window between this read and the finished check
+                    with real_open(file, "a") as producer:
+                        producer.write("1\n")
+                    finished.set()
+                return line
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                self._fp.close()
+                return False
+
+        def open_late_write_file(path, *args, **kwargs):
+            opened = real_open(path, *args, **kwargs)
+            return LateWriteFile(opened) if path == file else opened
+
+        with mock.patch("builtins.open", side_effect=open_late_write_file):
+            tail_logfile(
+                header="[writer0]:",
+                file=file,
+                dst=dst,
+                finished=finished,
+                interval_sec=0.001,
+                log_line_filter=lambda _: True,
+            )
+
+        self.assertEqual("[writer0]:0\n[writer0]:1\n", dst.getvalue())
+
+    def test_tail_write_to_dst_file(self):
+        """
+        writer() writes 0 - max (on number on each line) to a log file.
+        Run nprocs such writers and tail the log files into a temp file
+        and validate that all lines are accounted for.
+        """
+        nprocs = 32
+        max = 1000
+        interval_sec = 0.0001
+
+        log_files = {
+            local_rank: os.path.join(self.test_dir, f"{local_rank}_stdout.log")
+            for local_rank in range(nprocs)
+        }
+
+        dst = os.path.join(self.test_dir, "tailed_stdout.log")
+        with open(dst, "w", encoding="utf8", buffering=1) as dst_file:
+            tail = TailLog(
+                name="writer",
+                log_files=log_files,
+                dst=dst_file,
+                interval_sec=interval_sec,
+            ).start()
+            # sleep here is intentional to ensure that the log tail
+            # can gracefully handle and wait for non-existent log files
+            time.sleep(interval_sec * 10)
+
+            futs = []
+            for local_rank, file in log_files.items():
+                f = self.threadpool.submit(
+                    write, max=max, sleep=interval_sec * local_rank, file=file
+                )
+                futs.append(f)
+
+            wait(futs, return_when=ALL_COMPLETED)
+            self.assertFalse(tail.stopped())
+            tail.stop()
+
+        actual: dict[int, set[int]] = {}
+        with open(dst, encoding="utf8") as read_dst_file:
+            for line in read_dst_file:
+                header, num = line.split(":")
+                nums = actual.setdefault(header, set())
+                nums.add(int(num))
+
+        self.assertEqual(nprocs, len(actual))
+        self.assertEqual(
+            {f"[writer{i}]": set(range(max)) for i in range(nprocs)}, actual
+        )
+        self.assertTrue(tail.stopped())
+
     def test_tail_with_custom_prefix(self):
         """
         writer() writes 0 - max (on number on each line) to a log file.
@@ -131,6 +283,52 @@ class TailLogTest(unittest.TestCase):
             self.assertIn(f"[worker{i}][{i}]", headers)
         self.assertTrue(tail.stopped())
 
+    def test_tail_with_custom_filter(self):
+        """
+        writer() writes 0 - max (on number on each line) to a log file.
+        Run nprocs such writers and tail the log files into an IOString
+        and validate that all lines are accounted for.
+        """
+        nprocs = 3
+        max = 20
+        interval_sec = 0.0001
+
+        log_files = {
+            local_rank: os.path.join(self.test_dir, f"{local_rank}_stdout.log")
+            for local_rank in range(nprocs)
+        }
+
+        dst = io.StringIO()
+        tail = TailLog(
+            "writer",
+            log_files,
+            dst,
+            interval_sec=interval_sec,
+            log_line_filter=lambda line: "2" in line,  # only print lines containing '2'
+        ).start()
+        # sleep here is intentional to ensure that the log tail
+        # can gracefully handle and wait for non-existent log files
+        time.sleep(interval_sec * 10)
+        futs = []
+        for local_rank, file in log_files.items():
+            f = self.threadpool.submit(
+                write, max=max, sleep=interval_sec * local_rank, file=file
+            )
+            futs.append(f)
+        wait(futs, return_when=ALL_COMPLETED)
+        self.assertFalse(tail.stopped())
+        tail.stop()
+        dst.seek(0)
+
+        actual: dict[int, set[int]] = {}
+        for line in dst.readlines():
+            header, num = line.split(":")
+            nums = actual.setdefault(header, set())
+            nums.add(int(num))
+        self.assertEqual(nprocs, len(actual))
+        self.assertEqual({f"[writer{i}]": {2, 12} for i in range(nprocs)}, actual)
+        self.assertTrue(tail.stopped())
+
     def test_tail_no_files(self):
         """
         Ensures that the log tail can gracefully handle no log files
@@ -163,4 +361,8 @@ class TailLogTest(unittest.TestCase):
         tail = TailLog("writer", log_files={0: self.test_dir}, dst=sys.stdout).start()
         tail.stop()
 
-        mock_logger.error.assert_called_once()
+        mock_logger.exception.assert_called_once()
+
+
+if __name__ == "__main__":
+    run_tests()

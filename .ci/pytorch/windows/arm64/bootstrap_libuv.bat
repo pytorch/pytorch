@@ -7,11 +7,11 @@ if not exist "%DOWNLOADS_DIR%" mkdir %DOWNLOADS_DIR%
 if not exist "%DEPENDENCIES_DIR%" mkdir %DEPENDENCIES_DIR%
 
 :: activate visual studio
-call "%DEPENDENCIES_DIR%\VSBuildTools\VC\Auxiliary\Build\vcvarsall.bat" arm64
+for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -find VC\Auxiliary\Build\vcvarsall.bat`) do call "%%i" arm64
 where cl.exe
 
 cd %DEPENDENCIES_DIR%
-git clone https://github.com/libuv/libuv.git -b v1.39.0
+git clone https://github.com/libuv/libuv.git -b v1.47.0
 
 echo Configuring libuv...
 mkdir libuv\build

@@ -1,30 +1,33 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import importlib.util
+import multiprocessing
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import traceback
+import types
 import unittest
 import warnings
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
+from unittest import mock
 
 import torch
-import torch.cuda
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
 from torch._utils import try_import
-from torch.autograd._functions.utils import check_onnx_broadcast
-from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch._utils_internal import deprecated
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCPU,
     ops,
 )
@@ -34,6 +37,8 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_ASAN,
 )
 from torch.utils._device import set_device
 from torch.utils._pytree import tree_all_only, tree_any
@@ -53,12 +58,12 @@ from torch.utils.data import DataLoader
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
-
-HAS_CUDA = torch.cuda.is_available()
-
+load_tests = load_tests  # noqa: PLW0127
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# mypy: disable-error-code="name-defined"
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
@@ -116,6 +121,7 @@ class TestCheckpoint(TestCase):
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/97402")
     def test_checkpoint_trigger(self):
         class Net(nn.Module):
             def __init__(self) -> None:
@@ -301,46 +307,6 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_checkpoint_rng_cuda(self):
-        for _ in range(5):
-            inp = torch.randn(20000, device="cuda").requires_grad_()
-            phase1 = torch.nn.Dropout()
-            phase2 = torch.nn.Dropout()
-
-            def run_fn(input):
-                return phase2(input)
-
-            state = torch.cuda.get_rng_state()
-
-            out = phase1(inp)
-            out = checkpoint(run_fn, out, use_reentrant=True)
-            out.sum().backward()
-            grad_with_checkpointing = inp.grad
-
-            torch.cuda.set_rng_state(state)
-
-            inp.grad = None
-
-            out = phase1(inp)
-            out = run_fn(out)
-            out.sum().backward()
-            grad_no_checkpointing = inp.grad
-
-            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
-        inp = torch.randn(2, device="cuda").requires_grad_()
-        layer = torch.nn.Dropout()
-
-        def run_fn(input):
-            return layer(input)
-
-        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
-        out.sum().backward()
-        # This should run without error
-
     def test_checkpoint_non_tensor(self):
         def run_fn(tensor1, tensor2):
             if tensor2 is None:
@@ -434,22 +400,30 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
-        # I don't know how to check if the temporary saved variable buffer
-        # get de-allocated directly. So using cuda memory usage as a proxy
+        _acc = torch.accelerator.current_accelerator()
+        if _acc is None:
+            self.skipTest("current_accelerator() not supported")
+
+        _device_type = _acc.type
+
+        # Functional check: verify memory tracking actually works on this backend
+        test_tensor = torch.zeros(1024, device=_device_type)
+        torch.accelerator.synchronize()
+        if torch.accelerator.memory_allocated() == 0:
+            del test_tensor
+            self.skipTest(f"{_device_type} does not support memory_allocated tracking")
+        del test_tensor
 
         def _do_test(fn, should_free):
             stats: list[int] = []
 
             def track(x, idx):
-                # Track that at each step of the backward, some Tensor were
-                # de-allocated (which correspond to the checkpoint storage being
-                # emptied at each step)
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
-                    torch.cuda.synchronize()
-                    stats.append(torch.cuda.memory_allocated())
+                    torch.accelerator.synchronize()
+                    stats.append(torch.accelerator.memory_allocated())
                     if idx > 0:
                         if should_free:
                             self.assertLess(stats[idx], stats[idx - 1])
@@ -459,8 +433,6 @@ class TestCheckpoint(TestCase):
                 x.register_hook(hook)
 
             def test_fn(x):
-                # The main property of this function is that it contains multiple
-                # operations that save gradients in a chain.
                 x = x**2
                 track(x, 2)
                 x = x**2
@@ -474,23 +446,19 @@ class TestCheckpoint(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x = torch.zeros(10, device=_device_type, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
-        # In a regular backward, buffers get eagerly freed
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
 
-        # In a retain_grad backward, buffers get preserved
         _unused_retain_stats = _do_test(
             lambda fn: fn(x).backward(retain_graph=True), False
         )
 
-        # In a regular backward with checkpoint, buffers get eagerly freed
         checkpoint_non_retain_stats = _do_test(
             lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True
         )
 
-        # In a retain_grad backward with checkpoint, buffers get eagerly freed
         checkpoint_retain_stats = _do_test(
             lambda fn: checkpoint(fn, x, use_reentrant=False).backward(
                 retain_graph=True
@@ -501,11 +469,59 @@ class TestCheckpoint(TestCase):
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
         self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_get_device_states_recursive(self):
+    def test_infer_device_state_recursive_meta(self):
+        inp = {"foo": torch.rand(10, device="meta")}
+        device_type = _infer_device_type(inp)
+        self.assertEqual("meta", device_type)
+
+
+class TestCheckpointDeviceType(TestCase):
+    @onlyAccelerator
+    def test_checkpoint_rng_accelerator(self, device):
+        for _ in range(5):
+            inp = torch.randn(20000, device=device).requires_grad_()
+            phase1 = torch.nn.Dropout()
+            phase2 = torch.nn.Dropout()
+
+            def run_fn(input):
+                return phase2(input)
+
+            state = torch.get_device_module(device).get_rng_state()
+
+            out = phase1(inp)
+            out = checkpoint(run_fn, out, use_reentrant=True)
+            out.sum().backward()
+            grad_with_checkpointing = inp.grad
+
+            torch.get_device_module(device).set_rng_state(state)
+
+            inp.grad = None
+
+            out = phase1(inp)
+            out = run_fn(out)
+            out.sum().backward()
+            grad_no_checkpointing = inp.grad
+
+            self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
+
+    @onlyAccelerator
+    def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self, device):
+        inp = torch.randn(2, device=device).requires_grad_()
+        layer = torch.nn.Dropout()
+
+        def run_fn(input):
+            return layer(input)
+
+        out = checkpoint(run_fn, inp, use_reentrant=False, preserve_rng_state=False)
+        out.sum().backward()
+
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_get_device_states_recursive(self, devices):
+        dev_type = torch.device(devices[0]).type
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:1")],
         }
         device_ids, device_states = get_device_states(inp)
         self.assertEqual(2, len(device_ids))
@@ -515,53 +531,73 @@ class TestCheckpoint(TestCase):
         self.assertTrue(isinstance(device_states[0], torch.Tensor))
         self.assertTrue(isinstance(device_states[1], torch.Tensor))
 
-    def test_infer_device_state_recursive_meta(self):
-        inp = {"foo": torch.rand(10, device="meta")}
-        device_type = _infer_device_type(inp)
-        self.assertEqual("meta", device_type)
-
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_infer_device_state_recursive_multi_cuda(self):
-        # Check that no warning is issued for either cuda:0, cuda:1 or
-        # cuda:0, cuda:0 cases since they are both the same device type
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_infer_device_state_recursive_multi_device(self, devices):
+        dev_type = torch.device(devices[0]).type
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:1")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(dev_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:0")],
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
+            "bar": [torch.rand(10, device=f"{dev_type}:0")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
-        # Check that a warning is issued for cuda:0, meta and that it includes
-        # device type information
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(dev_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
+            "foo": torch.rand(10, device=f"{dev_type}:0"),
             "bar": [torch.rand(10, device="meta")],
         }
         with warnings.catch_warnings(record=True) as w:
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(dev_type, _device_type)
         self.assertEqual(len(w), 1)
         warning_msg = str(w[-1].message)
         self.assertTrue(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
             in warning_msg
         )
-        self.assertTrue("Device types: ['cuda', 'meta']" in warning_msg)
-        self.assertTrue("first device type: cuda" in warning_msg)
+        self.assertTrue(f"Device types: ['{dev_type}', 'meta']" in warning_msg)
+        self.assertTrue(f"first device type: {dev_type}" in warning_msg)
+
+    @onlyAccelerator
+    def test_checkpoint_preserves_device_context(self, device):
+        """Test that checkpoint preserves torch.device() context during recomputation."""
+        recomputed_devices = []
+        dev_type = torch.device(device).type
+
+        def fn_creates_tensor(x):
+            intermediate = torch.empty(4)
+            recomputed_devices.append(intermediate.device)
+            return x * intermediate.sum()
+
+        x = torch.randn(4, device=device, requires_grad=True)
+
+        with torch.device(dev_type):
+            y = checkpoint(fn_creates_tensor, x, use_reentrant=False)
+            self.assertEqual(recomputed_devices[-1].type, dev_type)
+
+            y.sum().backward()
+            self.assertEqual(len(recomputed_devices), 2)
+            self.assertEqual(recomputed_devices[-1].type, dev_type)
+
+
+instantiate_device_type_tests(
+    TestCheckpointDeviceType, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
+    @unittest.skipIf(TEST_WITH_ASAN, "https://github.com/pytorch/pytorch/issues/84937")
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(
@@ -603,7 +639,7 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip(
-        "FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN"
+        "FIXME: Intermittent GPU out-of-memory error on Windows and time-out under ASAN"
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
@@ -631,151 +667,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-@unittest.skipIf(
-    "SKIP_TEST_BOTTLENECK" in os.environ.keys(), "SKIP_TEST_BOTTLENECK is set"
-)
-class TestBottleneck(TestCase):
-    def _run(self, command, timeout=30):
-        """Returns (return-code, stdout, stderr)"""
-        import subprocess
-
-        p = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-        )
-        try:
-            output, err = p.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            p.kill()
-            output, err = p.communicate()
-        rc = p.returncode
-        output_str = output.decode("ascii")
-        err_str = err.decode("ascii")
-        return (rc, output_str, err_str)
-
-    def _run_bottleneck(self, test_file, scriptargs=""):
-        curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = f"{curdir}/{test_file}"
-        if scriptargs != "":
-            scriptargs = f" {scriptargs}"
-        rc, out, err = self._run(
-            f"{sys.executable} -m torch.utils.bottleneck {filepath}{scriptargs}"
-        )
-        return rc, out, err
-
-    def _check_run_args(self):
-        # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_args.py")
-        self.assertEqual(
-            rc,
-            2,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Missing args should error", out + err),
-        )
-
-        # This should succeed
-        rc, out, err = self._run_bottleneck(
-            "bottleneck_test/test_args.py", "--foo foo --bar bar"
-        )
-        self.assertEqual(
-            rc,
-            0,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Should pass args to script", out + err),
-        )
-
-    def _fail_msg(self, msg, output):
-        return f"{msg}, output was:\n{output}"
-
-    def _check_environment_summary(self, output):
-        results = re.search("Environment Summary", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have Environment Summary", output)
-        )
-
-        # Up to five lines away from the heading, there should be the version number
-        results = re.search(
-            r"Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+", output
-        )
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have PyTorch version", output)
-        )
-
-    def _check_cprof_summary(self, output):
-        results = re.search("cProfile output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have cProfile output", output)
-        )
-
-        # This assumes that after the cProfile output section we have
-        # the autograd profiler output
-        results = re.search(
-            r"cProfile output.*(\n.*){6,50}\n.*autograd profiler output", output
-        )
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between cProfile and autograd prof out not in [6, 50] lines",
-                output,
-            ),
-        )
-
-    def _check_autograd_summary(self, output):
-        results = re.search("autograd profiler output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have autograd profiler output", output)
-        )
-
-        # This assumes that after the autograd profiler output is the end of the
-        # output.
-        results = re.search(r"autograd profiler output.*(\n.*){6,100}", output)
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between autograd prof output and end of output not in [6, 100] lines",
-                output,
-            ),
-        )
-
-    def _check_cuda(self, output):
-        if HAS_CUDA:
-            results = re.search("CUDA mode", output)
-            self.assertIsNotNone(
-                results, self._fail_msg("Should tell users CUDA", output)
-            )
-        else:
-            results = re.search("CUDA mode", output)
-            self.assertIsNone(
-                results, self._fail_msg("Should not tell users about CUDA", output)
-            )
-
-    @unittest.skipIf(HAS_CUDA, "CPU-only test")
-    def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_cuda.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-
 from torch.utils.collect_env import get_pretty_env_info
 
 
@@ -784,75 +675,180 @@ class TestCollectEnv(TestCase):
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
-
-
-class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = _prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
-    def test_check_onnx_broadcast(self):
-        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
-            broadcast = True
-            fail = False
-            try:
-                broadcast = check_onnx_broadcast(dims1, dims2)
-            except ValueError:
-                fail = True
-            self.assertEqual(broadcast, expect_broadcast)
-            self.assertEqual(fail, expect_fail)
-
-        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
-        dims1 = [3, 4]
-        dims2 = [2, 3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
-        dims1 = [1, 1]
-        dims2 = [1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
-        dims1 = [2, 3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
-        dims1 = [2, 3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 6, check the equal case, no broadcast
-        dims1 = [3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, False, False)
-
-        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
-        dims1 = [3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
+        self.assertIn("ROCm SDK used to build PyTorch:", info_output)
+        self.assertIn("HIP used to build PyTorch:", info_output)
+        self.assertNotIn("ROCM used to build PyTorch:", info_output)
 
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks may require privileges on Windows")
+    def test_canonicalize_hip_source(self):
+        # `_canonicalize_hip_source` must leave a source that already lives under
+        # the build dir untouched (return its abspath), so a source symlinked
+        # *into* the build dir keeps its generated .hip under the build dir. A
+        # source outside the build dir must be realpath-resolved so the Windows
+        # `subst` drive / symlinked-path spelling matches the form hipify records.
+        from torch.utils.cpp_extension import _canonicalize_hip_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_real = os.path.realpath(tmp)
+            build_dir = os.path.join(tmp_real, "build")
+            real_dir = os.path.join(tmp_real, "real")
+            os.makedirs(build_dir)
+            os.makedirs(real_dir)
+
+            # Source that resolves under the build dir (via a symlink into it) is
+            # returned as its in-build-dir abspath, not the symlink target.
+            real_source = os.path.join(real_dir, "kernel.cu")
+            with open(real_source, "w"):
+                pass
+            linked_source = os.path.join(build_dir, "kernel.cu")
+            os.symlink(real_source, linked_source)
+            self.assertEqual(
+                _canonicalize_hip_source(linked_source, build_dir),
+                os.path.abspath(linked_source),
+            )
+
+            # Source outside the build dir reached via a symlinked directory is
+            # realpath-resolved to its true location on Windows only; POSIX keeps
+            # the abspath so includes still resolve next to the symlink.
+            link_dir = os.path.join(tmp_real, "link")
+            os.symlink(real_dir, link_dir)
+            outside_source = os.path.join(link_dir, "kernel.cu")
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", True):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    real_source,
+                )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", False):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    os.path.abspath(outside_source),
+                )
+
+    def test_hipify_processes_relative_extra_files(self):
+        # A relative `extra_files` entry must still be hipified. Previously the
+        # normalization loop rebound a local variable but the preprocessing loop
+        # iterated the raw (relative) `extra_files`, so the relative spelling
+        # never matched the normalized `all_files` set and the source was
+        # silently skipped (never hipified).
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void my_kernel() {}\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],  # relative entry
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            self.assertIn(key, result)
+            self.assertIsNotNone(
+                result[key].hipified_path,
+                "relative extra_files source was silently skipped by hipify",
+            )
+            self.assertTrue(result[key].hipified_path.endswith(".hip"))
+
+    def test_hipify_keeps_std_math_functions(self):
+        # hipify used to rewrite std::exp( and friends to the global namespace, a
+        # workaround for the hcc compiler. hip-clang resolves std:: math in device
+        # code, and the rewrite also hit host code and string literals.
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void k(float* x) { x[0] = std::exp(x[0]) + std::pow(x[1], 2); }\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            with open(result[key].hipified_path) as f:
+                hipified = f.read()
+            self.assertIn("std::exp(x[0]) + std::pow(x[1], 2)", hipified)
+            self.assertIn("hipDeviceSynchronize", hipified)
+
+    def test_hipify_extension_sources(self):
+        from torch.utils.hipify import hipify_python
+
+        with (
+            tempfile.TemporaryDirectory() as src_dir,
+            tempfile.TemporaryDirectory() as build_dir,
+        ):
+            include_dir = os.path.join(src_dir, "includes")
+            os.makedirs(include_dir)
+            with open(os.path.join(include_dir, "helper.cuh"), "w") as f:
+                f.write("#include <cuda_runtime.h>\n")
+            source = os.path.join(src_dir, "kernel.cu")
+            with open(source, "w") as f:
+                f.write('#include <ATen/cuda/CUDAContext.h>\n#include "helper.cuh"\n')
+
+            # Mirrors the hipify call in torch.utils.cpp_extension._jit_compile.
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                header_include_dirs=[include_dir],
+                extra_files=[os.path.abspath(source)],
+                show_detailed=False,
+                show_progress=False,
+                is_pytorch_extension=True,
+            )
+
+            hipified = result[os.path.abspath(source)].hipified_path
+            self.assertEqual(hipified, os.path.join(src_dir, "kernel.hip"))
+            with open(hipified) as f:
+                out = f.read()
+            self.assertIn("ATen/hip/HIPContext.h", out)
+            self.assertIn('#include "helper_hip.cuh"', out)
+            self.assertTrue(os.path.exists(os.path.join(include_dir, "helper_hip.cuh")))
+
+    def test_hipify_rel_path_without_common_root(self):
+        from torch.utils.hipify import hipify_python
+
+        # Windows raises ValueError from relpath for paths on different drives.
+        path = os.path.abspath(os.path.join("cuda", "kernel.cu"))
+        with mock.patch.object(
+            hipify_python.os.path, "relpath", side_effect=ValueError
+        ):
+            base, rel = hipify_python._rel_path_for_hipify(path, "unused")
+        self.assertFalse(os.path.isabs(rel))
+        self.assertNotIn("\\", rel)
+        self.assertEqual(os.path.normpath(os.path.join(base, rel)), path)
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
-        self.trie = torch.utils.hipify.hipify_python.Trie()
+        super().setUp()
+        from torch.utils.hipify import hipify_python
+
+        self.trie = hipify_python.Trie()
 
     def test_add_and_search_trie(self):
         self.trie.add("banana")
@@ -1058,20 +1054,42 @@ class TestDeviceUtils(TestCase):
         self.assertEqual(torch.get_default_device().type, "meta")
         torch.set_default_device(None)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_get_default_device_more(self):
-        torch.set_default_device("cuda")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+    @onlyAccelerator
+    @deviceCountAtLeast(2)
+    def test_get_default_device_more(self, devices):
+        dev_type = torch.device(devices[0]).type
+        try:
+            torch.set_default_device(dev_type)
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda")
-        torch.cuda.set_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device(dev_type)
+            torch.get_device_module(dev_type).set_device(f"{dev_type}:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.accelerator.set_device_index(1)
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device(f"{dev_type}:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
+
+            torch.set_default_device(f"{dev_type}:1")
+            with torch.device(f"{dev_type}:0"):
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{dev_type}", 0)
+                )
+
+            torch.set_default_device("cpu")
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+            with torch.device(f"{dev_type}:0"):
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{dev_type}", 0)
+                )
+
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+        finally:
+            torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)
@@ -1106,15 +1124,317 @@ class TestDeviceUtils(TestCase):
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
+class TestTorchPathResolution(TestCase):
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_torch_parent_follows_the_extension_module(self):
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        expected = os.path.dirname(os.path.dirname(spec.origin))
+        self.assertEqual(torch._utils_internal.torch_parent, expected)
+
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_installed_torch_dir_prefers_the_editable_loader_paths(self):
+        installed_torch_dir = torch._utils_internal._installed_torch_dir
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        spec_dir = os.path.dirname(spec.origin)
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "src", "torch")
+            installed = os.path.join(root, "site-packages", "torch")
+            # A checkout has a tracked torch/lib too, so lib/ alone cannot
+            # tell the trees apart; the checkout is excluded by identity.
+            os.makedirs(os.path.join(checkout, "lib"))
+            os.makedirs(os.path.join(installed, "lib"))
+            loader = types.SimpleNamespace(paths=[checkout, installed])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), installed)
+            if not IS_WINDOWS:
+                os.symlink(os.path.join(root, "src"), os.path.join(root, "alias"))
+                aliased = os.path.join(root, "alias", "torch")
+                loader = types.SimpleNamespace(paths=[aliased, installed])
+                with mock.patch.object(torch, "__loader__", loader):
+                    self.assertEqual(installed_torch_dir(checkout), installed)
+            # Only an entry holding lib/ is an install tree; otherwise the
+            # extension module's spec decides, as it does without any paths.
+            loader = types.SimpleNamespace(paths=[checkout, os.path.join(root, "x")])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            # A raising finder must not take `import torch` down with it.
+            err = mock.patch("importlib.util.find_spec", side_effect=ImportError)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()), err:
+                self.assertIsNone(installed_torch_dir(checkout))
+
+    def test_stale_checkout_artifacts(self):
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "torch")
+            for d in ("csrc", "lib/libshm", "bin", "include"):
+                os.makedirs(os.path.join(checkout, d))
+            os.makedirs(os.path.join(root, "torch.egg-info"))
+            ext = "_C.cpython-310-x86_64-linux-gnu.so"
+            deps = os.path.join("lib", "libtorch_global_deps.so")
+            c10 = os.path.join("lib", "libc10.so.1")
+            for f in (ext, deps, c10):
+                open(os.path.join(checkout, f), "w").close()
+            found = torch._utils_internal._stale_checkout_artifacts(checkout)
+            names = [ext, "bin", "include", c10, deps]
+            expected = [os.path.join(checkout, f) for f in names]
+            self.assertEqual(found, expected + [os.path.join(root, "torch.egg-info")])
+            clean = os.path.join(root, "clean", "torch")
+            os.makedirs(os.path.join(clean, "lib", "libshm"))
+            self.assertEqual(torch._utils_internal._stale_checkout_artifacts(clean), [])
+
+    @unittest.skipIf(IS_WINDOWS, "_load_global_deps is a no-op on Windows")
+    def test_load_global_deps_reports_missing_library(self):
+        real_exists = os.path.exists
+
+        def exists(path):
+            return "libtorch_global_deps" not in path and real_exists(path)
+
+        with unittest.mock.patch("os.path.exists", side_effect=exists):
+            with self.assertRaisesRegex(OSError, "libtorch_global_deps"):
+                torch._load_global_deps()
+
+
 class TestCppExtensionUtils(TestCase):
+    @unittest.skipIf(IS_FBCODE, "CMake package files are not shipped in fbcode")
+    def test_cmake_prefix_path(self):
+        # TorchConfig.cmake ships only with libtorch; a BUILD_LIBTORCHLESS build
+        # (no CI job runs one) has no share/cmake and would fail here.
+        prefix = torch.utils.cmake_prefix_path
+        config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
+        self.assertTrue(os.path.isfile(config), f"{config} does not exist")
+
+    def test_cmake_prefix_path_falls_back_when_get_file_path_raises(self):
+        # Build systems that do not ship the CMake package files have a
+        # get_file_path that raises for them, with an exception type of their
+        # choosing; torch.utils must still import.
+        expected = os.path.join(os.path.dirname(torch.__file__), "share", "cmake")
+        for exc in (OSError("not shipped"), ValueError("not packaged")):
+            with self.subTest(exc=type(exc).__name__):
+                with mock.patch.object(torch.utils, "_get_file_path", side_effect=exc):
+                    self.assertEqual(torch.utils._resolve_cmake_prefix_path(), expected)
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    @staticmethod
+    def _fake_version_module(**attrs):
+        module = types.ModuleType("fake_torch_version")
+        for name, value in attrs.items():
+            setattr(module, name, value)
+        return module
+
+    def test_derive_rocm_version_prefers_rocm(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm="6.4.2")
+        derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (6, 4))
+
+    def test_derive_rocm_version_falls_back_when_attribute_absent(self):
+        version = self._fake_version_module(hip="7.0.51831")
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+        self.assertIn("torch.version.rocm", logs.output[0])
+
+    def test_derive_rocm_version_falls_back_when_rocm_is_none(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm=None)
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING"):
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+
+    def test_derive_rocm_version_is_none_off_rocm(self):
+        version = self._fake_version_module(hip=None, rocm=None)
+        self.assertIsNone(torch.utils.cpp_extension._derive_rocm_version(version))
+
+
+def _load_verify_dynamo():
+    path = Path(__file__).resolve().parents[1] / "tools" / "dynamo" / "verify_dynamo.py"
+    spec = importlib.util.spec_from_file_location("verify_dynamo_under_test", path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise AssertionError(f"Could not load verify_dynamo from {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+class TestVerifyDynamoRocm(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.verify_dynamo = _load_verify_dynamo()
+
+    def _write_rocm_version_h(self, tmpdir, major, minor, patch):
+        header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+        header.parent.mkdir(parents=True)
+        header.write_text(
+            f"#define ROCM_VERSION_MAJOR {major}\n"
+            f"#define ROCM_VERSION_MINOR {minor}\n"
+            f"#define ROCM_VERSION_PATCH {patch}\n"
+        )
+
+    def test_parse_version_truncates_to_major_minor(self):
+        parsed = self.verify_dynamo._parse_version("7.14.1-githash", components=2)
+        self.assertEqual(str(parsed), "7.14")
+
+    def test_reads_full_rocm_sdk_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write_rocm_version_h(tmpdir, 10, 1, 2)
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertEqual(
+                    str(self.verify_dynamo.get_rocm_sdk_version()), "10.1.2"
+                )
+
+    def test_missing_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_malformed_rocm_sdk_header_falls_back(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header = Path(tmpdir) / "include" / "rocm-core" / "rocm_version.h"
+            header.parent.mkdir(parents=True)
+            header.write_text("#define ROCM_VERSION_MAJOR 7\n")
+            with mock.patch.object(
+                self.verify_dynamo, "_find_rocm_home", return_value=tmpdir
+            ):
+                self.assertIsNone(self.verify_dynamo.get_rocm_sdk_version())
+
+    def test_check_rocm_sdk_ignores_patch_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.14.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.14.1"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.14")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_sdk_warns_on_minor_mismatch(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", "7.14.0"),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_rocm_sdk_version",
+                return_value=TorchVersion("7.15.0"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            self.verify_dynamo.check_rocm()
+        self.assertTrue(any("mismatch" in str(w.message) for w in caught))
+
+    def test_check_rocm_falls_back_to_hip_for_old_wheel(self):
+        from torch.torch_version import TorchVersion
+
+        with (
+            mock.patch.object(torch.cuda, "is_available", return_value=True),
+            mock.patch.object(torch.version, "hip", "7.15.26306"),
+            mock.patch.object(torch.version, "rocm", None),
+            mock.patch.object(
+                self.verify_dynamo, "get_rocm_sdk_version", return_value=None
+            ),
+            mock.patch.object(
+                self.verify_dynamo,
+                "get_hip_version",
+                return_value=TorchVersion("7.15"),
+            ),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            result = self.verify_dynamo.check_rocm()
+        self.assertEqual(str(result), "7.15")
+        self.assertFalse(any("mismatch" in str(w.message) for w in caught))
+
 
 class TestTraceback(TestCase):
+    def test_symbolize_mode(self):
+        script = "import torch; print(torch._C._get_symbolize_mode())"
+        for disable_addr2line, expected in [
+            (None, "fast"),
+            ("0", "addr2line"),
+            ("1", "dladdr"),
+        ]:
+            with self.subTest(disable_addr2line=disable_addr2line):
+                env = os.environ.copy()
+                env.pop("TORCH_SYMBOLIZE_MODE", None)
+                if disable_addr2line is None:
+                    env.pop("TORCH_DISABLE_ADDR2LINE", None)
+                else:
+                    env["TORCH_DISABLE_ADDR2LINE"] = disable_addr2line
+                result = subprocess.run(
+                    [sys.executable, "-c", script],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated():
+            raise RuntimeError("test")
+
+        try:
+            decorated()
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_traceback_frame_name(self):
+        frame_names = self._context_decorator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("decorate_context", frame_names)
+
+    @staticmethod
+    @torch._dynamo.disable
+    def _context_decorator_generator_traceback_frame_names():
+        @torch.no_grad()
+        def decorated_generator():
+            yield None
+            raise RuntimeError("test")
+
+        gen = decorated_generator()
+        next(gen)
+        try:
+            next(gen)
+        except RuntimeError as e:
+            return [frame.name for frame in traceback.extract_tb(e.__traceback__)]
+        else:
+            raise AssertionError("Expected RuntimeError")
+
+    def test_context_decorator_generator_traceback_frame_name(self):
+        frame_names = self._context_decorator_generator_traceback_frame_names()
+        self.assertIn("no_grad", frame_names)
+        self.assertNotIn("generator_context", frame_names)
+
     def test_basic(self):
         source = """\
 def f(x):
@@ -1180,6 +1500,185 @@ class TestTryImport(TestCase):
     def test_import_missing(self):
         missing_module = try_import("missing_module")
         self.assertIsNone(missing_module)
+
+
+class TestUtilsInternal(TestCase):
+    def test_max_clock_rate_uses_requested_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_980_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(1), 1980)
+
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+    def test_max_clock_rate_uses_current_rocm_device(self):
+        properties = types.SimpleNamespace(clock_rate=1_700_000)
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.object(torch.version, "hip", "6.0"),
+                unittest.mock.patch.object(
+                    torch.cuda, "current_device", return_value=1
+                ) as current_device,
+                unittest.mock.patch.object(
+                    torch.cuda, "get_device_properties", return_value=properties
+                ) as get_device_properties,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1700)
+
+            current_device.assert_called_once_with()
+            get_device_properties.assert_called_once_with(1)
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+    def test_max_clock_rate_falls_back_to_pynvml_when_nvidia_smi_missing(self):
+        def nvsmi(_query):
+            raise FileNotFoundError("nvidia-smi")
+
+        triton = types.ModuleType("triton")
+        triton_testing = types.ModuleType("triton.testing")
+        cast(Any, triton_testing).nvsmi = nvsmi
+        cast(Any, triton).testing = triton_testing
+
+        pynvml = types.ModuleType("pynvml")
+        cast(Any, pynvml).NVML_CLOCK_SM = 1
+        calls = []
+
+        def nvmlDeviceGetMaxClockInfo(handle, clock_type):
+            calls.append(("max_clock", handle, clock_type))
+            return 1980
+
+        def nvmlShutdown():
+            calls.append("shutdown")
+
+        cast(Any, pynvml).nvmlDeviceGetMaxClockInfo = nvmlDeviceGetMaxClockInfo
+        cast(Any, pynvml).nvmlShutdown = nvmlShutdown
+
+        torch._utils_internal.max_clock_rate.cache_clear()
+        try:
+            with (
+                unittest.mock.patch.dict(
+                    sys.modules,
+                    {
+                        "triton": triton,
+                        "triton.testing": triton_testing,
+                        "pynvml": pynvml,
+                    },
+                ),
+                unittest.mock.patch.object(torch.version, "hip", None),
+                unittest.mock.patch.object(
+                    torch.cuda, "_get_pynvml_handler", return_value="handle"
+                ) as get_pynvml_handler,
+            ):
+                self.assertEqual(torch._utils_internal.max_clock_rate(), 1980)
+                get_pynvml_handler.assert_called_once_with()
+        finally:
+            torch._utils_internal.max_clock_rate.cache_clear()
+
+        self.assertEqual(
+            calls,
+            [("max_clock", "handle", 1), "shutdown"],
+        )
+
+
+@deprecated()
+def _deprecated_api(x, y=15):
+    return x + y
+
+
+class TestDeprecate(TestCase):
+    def test_deprecated(self):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
+            deprecated_api(1, 2)  # noqa: F821
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
+            deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
+
+
+class TestDeviceLazyInit(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
+    def test_fork_poison_on_lazy_init(self, device):
+        torch.empty(1, device=device)
+
+        def child(q):
+            try:
+                torch.empty(1, device=device)
+            except Exception as e:
+                q.put(e)
+
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        p = ctx.Process(target=child, args=(q,))
+        p.start()
+        p.join()
+        self.assertTrue(not q.empty())
+        exc = q.get()
+        pattern = (
+            r"Cannot re-initialize .* in forked subprocess\. "
+            r"To use .* with multiprocessing, you must use the 'spawn' start method"
+        )
+        self.assertIsInstance(exc, RuntimeError)
+        self.assertRegex(str(exc), pattern)
+
+
+instantiate_device_type_tests(
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
+)
+
+
+class TestEnv(TestCase):
+    def test_getenv_matches_os(self):
+        for name in ("PATH", "PATH_DOES_NOT_EXIST_TORCH_TEST"):
+            self.assertEqual(torch._utils.getenv(name), os.environ.get(name))
+
+    def test_setenv_roundtrip(self):
+        name = "TORCH_TEST_SETENV_VAR"
+        torch._utils.setenv(name, "hello")
+        self.assertEqual(torch._utils.getenv(name), "hello")
+
+    def test_setenv_overwrite(self):
+        name = "TORCH_TEST_SETENV_OVERWRITE"
+        torch._utils.setenv(name, "first")
+        torch._utils.setenv(name, "second", overwrite=False)
+        self.assertEqual(torch._utils.getenv(name), "first")
+        torch._utils.setenv(name, "second")
+        self.assertEqual(torch._utils.getenv(name), "second")
+
+    def test_unsetenv(self):
+        name = "TORCH_TEST_UNSETENV"
+        torch._utils.setenv(name, "gone")
+        self.assertEqual(torch._utils.getenv(name), "gone")
+        torch._utils.unsetenv(name)
+        self.assertIsNone(torch._utils.getenv(name))
+
+    def test_os_environ_hook(self):
+        name = "TORCH_TEST_ENVIRON_HOOK"
+        torch._utils.install_os_environ_hook()
+        try:
+            os.environ[name] = "hooked"
+            # Both the cached os.environ dict and c10 observe the write.
+            self.assertEqual(os.environ.get(name), "hooked")
+            self.assertEqual(torch._utils.getenv(name), "hooked")
+            del os.environ[name]
+            self.assertIsNone(os.environ.get(name))
+            self.assertIsNone(torch._utils.getenv(name))
+            # Idempotent while installed.
+            torch._utils.install_os_environ_hook()
+        finally:
+            torch._utils.remove_os_environ_hook()
+        # After removal os.putenv is restored, so it is no longer our hook.
+        self.assertIsNot(os.putenv, torch._utils._torch_putenv)
 
 
 if __name__ == "__main__":

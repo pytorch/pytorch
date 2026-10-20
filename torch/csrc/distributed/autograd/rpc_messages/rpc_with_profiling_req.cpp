@@ -45,7 +45,7 @@ RpcWithProfilingReq::RpcWithProfilingReq(
       tensors_(std::move(tensors)),
       profilerConfig_(std::move(profilerConfig)),
       profilingKeyId_(profilingKeyId) {
-  TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cant be null");
+  TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc can't be null");
 }
 
 rpc::MessageType RpcWithProfilingReq::wrappedMessageType() const {

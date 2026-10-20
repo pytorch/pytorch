@@ -1,6 +1,7 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
 
 #include <ATen/native/hip/ck_gemm.h>
+#if defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_gemm_template.h>
 
 #include <ck/utility/sequence.hpp>
@@ -12,7 +13,7 @@ namespace at::native {
 
 void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #if 0
-  // If any of the shapes cant be tiled, we must use padding.
+  // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
   // TODO add more configurations. Optimize.
@@ -298,7 +299,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #endif
 }
 void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  // If any of the shapes cant be tiled, we must use padding.
+  // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
   // TODO add more configurations. Optimize.
@@ -598,11 +599,22 @@ void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 
 template <>
 void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx1100"})) {
+  static const std::vector<std::string> wmma_archs = {
+    "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201",
+#if ROCM_VERSION >= 70000
+    "gfx1150", "gfx1151"
+#endif
+  };
+  if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGS(at::Half));
-  } else{
+  }
+  else if (at::detail::getCUDAHooks().isGPUArch({"gfx9"})) {
     dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+  else {
+    TORCH_CHECK(false, "gemm_internal_ck<at::Half> unsupported gfx arch");
   }
 }
 
 } // namespace at::native
+#endif // USE_ROCM_CK_GEMM

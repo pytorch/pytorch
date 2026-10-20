@@ -9,7 +9,7 @@
 #include <qnnpack/assembly.h>
 
 # Packed A format.
-# 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
+# 8kx4m blocks for all blocks given 4 rows (4m) are placed in contiguous memory.
 # Original A
 # --------- K -----------          -- (K + 4 - 1) / 4 --
 # |                     |          |                   |
@@ -30,7 +30,7 @@
 # This locality helps in loading 8kx8m blocks of activations
 # Note when M is not multiple of 8, the rest can contain arbitrary
 # data in packed A as we will not be writing those out.
-# This wil be taken care by just copying the appropriate valid data
+# This will be taken care by just copying the appropriate valid data
 
 # void pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch32_neon(
 #     size_t mr,
@@ -93,7 +93,7 @@ k_loop:
     LD1 {v3.d}[0], [x7], 8
     LD1 {v3.d}[1], [x11], 8
 
-    #  Now we have 8x8 block of values that we will tranpose
+    #  Now we have 8x8 block of values that we will transpose
     #  A matrix
     #  ------------------------
     #  |                      |
@@ -180,7 +180,7 @@ k_loop:
     LD1 {v3.s}[0], [x7]
     LD1 {v3.s}[1], [x11]
 
-    #  Now we have 8x4 block of values that we will tranpose
+    #  Now we have 8x4 block of values that we will transpose
     #  A matrix
     #  ----------------------------
     #  |                          |

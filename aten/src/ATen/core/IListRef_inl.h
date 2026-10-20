@@ -42,7 +42,7 @@ class IListRefTagImplBase<IListRefTag::Unboxed, T, ListElemT> {
   /*
    * We have these function (besides the `unwrap`s above) because the
    * implementation for both `IListRef::operator[]` and `IListRefIterator::operator*`
-   * weren't syntatically equal for the existing tags at the time
+   * weren't syntactically equal for the existing tags at the time
    * (`Unboxed` and `Boxed`).
    */
   static IListRefConstRef<T> front(const list_type& lst) {
@@ -168,7 +168,9 @@ class IListRefTagImpl<IListRefTag::Boxed, at::OptionalTensorRef>
    */
   static IListRefConstRef<at::OptionalTensorRef> iterator_get(
       const typename list_type::const_iterator& it) {
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdangling-reference")
     const auto& ivalue = (*it).get();
+    C10_DIAGNOSTIC_POP()
     if (!ivalue.isNone()) {
         const auto& tensor = ivalue.toTensor();
         return (tensor.defined()) ? tensor : at::OptionalTensorRef{};

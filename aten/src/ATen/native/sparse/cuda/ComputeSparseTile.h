@@ -112,7 +112,7 @@ struct LargestValuesGreedy {
   }
 };
 
-// We consider each rows independantly in order
+// We consider each rows independently in order
 // This is to ensure that a row's sparsity pattern is only determined
 // by its values and the rows before (but never the rows after)
 // This enforces causality strictly

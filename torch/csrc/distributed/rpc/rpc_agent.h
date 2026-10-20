@@ -10,6 +10,11 @@
 #include <mutex>
 #include <thread>
 
+#if defined(__cpp_lib_atomic_shared_ptr) && \
+    __cpp_lib_atomic_shared_ptr >= 201711L
+#define TORCH_RPC_HAS_ATOMIC_SHARED_PTR 1
+#endif
+
 namespace torch::distributed::rpc {
 
 using DeviceMap = std::unordered_map<c10::Device, c10::Device>;
@@ -24,6 +29,7 @@ constexpr auto kDefaultInitMethod = "env://";
 constexpr float kSecToMsConversion = 1000;
 constexpr auto kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
+constexpr auto kDefaultNumWorkerThreads = 16;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
@@ -197,7 +203,7 @@ class TORCH_API RpcAgent {
   // before every RPC process exits.
   virtual void join(bool shutdown = false, float timeout = 0) = 0;
 
-  // Synchronize the this process with other ``RpcAgent`` processes. Block until
+  // Synchronize this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
@@ -216,7 +222,7 @@ class TORCH_API RpcAgent {
   void shutdown();
 
   // Derived classes must override this function to start accepting requests.
-  // THis is used to clean up any backend-specific state. Users must call
+  // This is used to clean up any backend-specific state. Users must call
   // shutdown, not shutdownImpl, to shutdown the RPC Agent.
   virtual void shutdownImpl() = 0;
 
@@ -239,7 +245,7 @@ class TORCH_API RpcAgent {
   // should be profiled or not.
   void enableGILProfiling(bool flag);
 
-  // Retrieve wheher we should profile GIL wait times or not.
+  // Retrieve whether we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
   // Set type resolver that will be passed to JIT pickler to resolver type Ptr
@@ -273,7 +279,11 @@ class TORCH_API RpcAgent {
   std::atomic<bool> rpcAgentRunning_;
 
  private:
+#if defined(TORCH_RPC_HAS_ATOMIC_SHARED_PTR)
+  static std::atomic<std::shared_ptr<RpcAgent>> currentRpcAgent_;
+#else
   static std::shared_ptr<RpcAgent> currentRpcAgent_;
+#endif
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;

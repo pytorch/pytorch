@@ -15,6 +15,8 @@ import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic.timer.api import TimerRequest
 from torch.distributed.elastic.timer.local_timer import MultiprocessingRequestQueue
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -24,8 +26,10 @@ from torch.testing._internal.common_utils import (
 )
 
 
-# timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
+# timer is not supported on these platforms
+INVALID_PLATFORMS = IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN or IS_ARM64
+
+if not INVALID_PLATFORMS:
     # func2 should time out
     def func2(n, mp_queue):
         if mp_queue is not None:
@@ -36,6 +40,8 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
                 time.sleep(0.2)
 
     class LocalTimerTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self.ctx = mp.get_context("spawn")
@@ -124,15 +130,16 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
         interval seconds. Releases the given semaphore once before going to work.
         """
         sem.release()
-        for i in range(0, n):
+        for i in range(n):
             mp_queue.put(TimerRequest(i, "test_scope", 0))
             time.sleep(interval)
 
 
-# timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
+if not INVALID_PLATFORMS:
 
     class MultiprocessingRequestQueueTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def test_get(self):
             mp_queue = mp.Queue()
             request_queue = MultiprocessingRequestQueue(mp_queue)
@@ -197,10 +204,11 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             self.assertLessEqual(n / 2, len(requests))
 
 
-# timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
+if not INVALID_PLATFORMS:
 
     class LocalTimerServerTest(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def setUp(self):
             super().setUp()
             self.mp_queue = mp.Queue()

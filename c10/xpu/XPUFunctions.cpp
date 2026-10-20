@@ -1,4 +1,4 @@
-#include <c10/util/CallOnce.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -33,7 +33,6 @@ namespace {
  *    one iGPU and enumerate all iGPUs on that platform.
  * 3. If neither dGPUs nor iGPUs are found, conclude that no GPUs are available.
  */
-c10::once_flag init_flag;
 thread_local DeviceIndex curDeviceIndex = 0;
 
 struct DevicePool {
@@ -45,8 +44,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
   // See Note [Device Management] for more details.
   auto platform_list = sycl::platform::get_platforms();
   auto is_igpu = [](const sycl::device& device) {
-    // Generally, iGPUs share a unified memory subsystem with the host.
-    return device.get_info<sycl::info::device::host_unified_memory>();
+    return device.has(sycl::aspect::ext_oneapi_is_integrated_gpu);
   };
 
   // Check if a platform contains at least one GPU (either iGPU or dGPU).
@@ -120,26 +118,35 @@ inline void initGlobalDevicePoolState() {
   TORCH_CHECK(
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
-
-#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
-  // The default context feature is disabled by default on Windows for SYCL
-  // compiler versions earlier than 2025.0.0.
-  std::vector<sycl::device> deviceList;
-  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
-       ++it) {
-    deviceList.push_back(*(*it));
+  // Check each device's architecture and issue a warning if it is older than
+  // the officially supported range (Intel GPUs starting from Arc (Alchemist)
+  // series).
+  namespace syclex = sycl::ext::oneapi::experimental;
+  for (const auto& device : gDevicePool.devices) {
+    auto architecture = device->get_info<syclex::info::device::architecture>();
+    if (architecture < syclex::architecture::intel_gpu_acm_g10) {
+      TORCH_WARN(
+          "The detected GPU (",
+          device->get_info<sycl::info::device::name>(),
+          ") is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.\n",
+          "For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.\n",
+          "Refer to the hardware prerequisites for more information: ",
+          "https://docs.pytorch.org/docs/main/notes/get_start_xpu.html#hardware-prerequisite");
+    }
   }
-  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
-#else
+
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
-  gDevicePool.context = std::make_unique<sycl::context>(
-      gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
-#endif
+  const auto& platform = gDevicePool.devices[0]->get_platform();
+  gDevicePool.context =
+      std::make_unique<sycl::context>(platform.khr_get_default_context());
 }
 
 inline void initDevicePoolCallOnce() {
-  c10::call_once(init_flag, initGlobalDevicePoolState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalDevicePoolState();
+    return true;
+  }();
 }
 
 void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
@@ -152,17 +159,20 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 #define ASSIGN_DEVICE_PROP(property) \
   device_prop->property = raw_device.get_info<device::property>();
 
-#define ASSIGN_EXT_DEVICE_PROP(property, default_value)                      \
-  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##property) \
-      ? raw_device.get_info<intel::info::device::property>()                 \
+#define ASSIGN_EXT_DEVICE_PROP(property, aspect_tag, default_value)            \
+  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##aspect_tag) \
+      ? raw_device.get_info<intel::info::device::property>()                   \
       : default_value;
 
 #define ASSIGN_DEVICE_ASPECT(member) \
+  device_prop->member = raw_device.has(sycl::aspect::ext_oneapi_##member);
+
+#define ASSIGN_DEVICE_HAS_ASPECT(member) \
   device_prop->has_##member = raw_device.has(sycl::aspect::member);
 
-#define ASSIGN_EXP_CL_ASPECT(member)                                       \
-  device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
-      "cl_intel_" #member, &cl_version);
+#define ASSIGN_EXP_CL_ASPECT(member) \
+  device_prop->has_##member =        \
+      raw_device.ext_oneapi_supports_cl_extension("cl_intel_" #member);
 
 #define ASSIGN_EXP_DEVICE_PROP(property) \
   device_prop->property =                \
@@ -175,16 +185,30 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
 
-  AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
+  ASSIGN_DEVICE_ASPECT(is_integrated_gpu)
 
-  // TODO: Remove cl_version since it is unnecessary.
-  sycl::ext::oneapi::experimental::cl_version cl_version;
+  AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_HAS_ASPECT);
+
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
 
-#if SYCL_COMPILER_VERSION >= 20250000
   AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
-#endif
 
+#if SYCL_COMPILER_VERSION >= 20260100
+  // TODO: Remove once driver supports querying Xe topology properties.
+#define OVERRIDE_DEVICE_PROP_XE(name, property, default) \
+  device_prop->name = device_prop->name == 0 ? default : device_prop->name;
+
+  namespace syclex = sycl::ext::oneapi::experimental;
+  if (device_prop->architecture >= syclex::architecture::intel_gpu_acm_g10 ||
+      device_prop->architecture <= syclex::architecture::intel_gpu_pvc_vg) {
+    AT_FORALL_XPU_EXT_DEVICE_PROPERTIES_XE(OVERRIDE_DEVICE_PROP_XE)
+    device_prop->xe_cores_per_cluster =
+        (device_prop->gpu_eu_count / device_prop->gpu_eu_count_per_subslice) /
+        (device_prop->xe_stack_count * device_prop->xe_regions_per_stack *
+         device_prop->xe_clusters_per_region);
+    device_prop->eus_per_xe_core = device_prop->gpu_eu_count_per_subslice;
+  }
+#endif
   return;
 }
 
@@ -265,6 +289,29 @@ c10::DeviceIndex exchange_device(c10::DeviceIndex to_device) {
 
 c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
+}
+
+// TODO: Currently only used by syncStreamsOnDevice. Once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms,
+// deprecate syncStreamsOnDevice and route callers to device_synchronize.
+void device_synchronize(c10::DeviceIndex device) {
+#if SYCL_COMPILER_VERSION >= 20260100
+  initDevicePoolCallOnce();
+  if (device == -1) {
+    device = c10::xpu::current_device();
+  }
+  check_device_index(device);
+  get_raw_device(device).ext_oneapi_wait_and_throw();
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_device_synchronization(c10::kXPU);
+  }
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "device_synchronize is not supported for the current SYCL compiler version. ",
+      "Please upgrade to SYCL compiler version 2026.1 or newer.");
+#endif
 }
 
 } // namespace c10::xpu

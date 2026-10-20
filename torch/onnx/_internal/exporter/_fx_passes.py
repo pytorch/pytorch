@@ -24,7 +24,8 @@ def insert_type_promotion_nodes(
 ) -> None:
     """Inplace pass to insert explicit type promotion nodes, recursively through nested modules."""
     for module in graph_module.modules():
-        assert isinstance(module, torch.fx.GraphModule)
+        if not isinstance(module, torch.fx.GraphModule):
+            raise AssertionError(f"Expected GraphModule, got {type(module)}")
         passes.InsertTypePromotion(module).run()
 
 
@@ -37,8 +38,9 @@ def remove_assertion_nodes(graph_module: torch.fx.GraphModule) -> torch.fx.Graph
         torch.ops.aten._assert_scalar.default,
         torch.ops.aten._assert_tensor_metadata.default,
     }
-    for node in graph_module.graph.nodes:
-        if node.op == "call_function" and node.target in aten_assertion_targets:
-            graph_module.graph.erase_node(node)
-    graph_module.recompile()
+    for gm in graph_module.modules():
+        for node in gm.graph.nodes:  # type: ignore[union-attr]
+            if node.op == "call_function" and node.target in aten_assertion_targets:
+                gm.graph.erase_node(node)  # type: ignore[operator, union-attr]
+        gm.recompile()  # type: ignore[operator]
     return graph_module

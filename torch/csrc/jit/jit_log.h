@@ -1,12 +1,13 @@
 #pragma once
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/Export.h>
 #include <memory>
 #include <ostream>
 #include <string>
 #include <unordered_map>
 
-// `TorchScript` offers a simple logging facility that can enabled by setting an
-// environment variable `PYTORCH_JIT_LOG_LEVEL`.
+// `TorchScript` offers a simple logging facility that can be enabled by setting
+// an environment variable `PYTORCH_JIT_LOG_LEVEL`.
 
 // Logging is enabled on a per file basis. To enable logging in
 // `dead_code_elimination.cpp`, `PYTORCH_JIT_LOG_LEVEL` should be
@@ -94,12 +95,12 @@ TORCH_API std::ostream& operator<<(
   JIT_LOG(                                        \
       ::torch::jit::JitLoggingLevels::GRAPH_DUMP, \
       MSG,                                        \
-      "\n",                                       \
+      '\n',                                       \
       ::torch::jit::log_function(G));
 // use GRAPH_DUMP for dumping graphs after optimization passes
 #define GRAPH_DUMP(MSG, G) \
   JIT_LOG(                 \
-      ::torch::jit::JitLoggingLevels::GRAPH_DUMP, MSG, "\n", (G)->toString());
+      ::torch::jit::JitLoggingLevels::GRAPH_DUMP, MSG, '\n', (G)->toString());
 // use GRAPH_UPDATE for reporting graph transformations (i.e. node deletion,
 // constant folding, CSE)
 #define GRAPH_UPDATE(...) \

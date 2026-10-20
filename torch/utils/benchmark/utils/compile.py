@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast
+from collections.abc import Callable
 
 import torch
 import torch._dynamo
@@ -11,9 +12,10 @@ __all__ = ["bench_all", "benchmark_compile"]
 
 
 _warned_tensor_cores = False
-_default_float_32_precision = torch.get_float32_matmul_precision()
+_default_float_32_precision: str | None = None
 
 try:
+
     from tabulate import tabulate
 
     HAS_TABULATE = True
@@ -23,26 +25,32 @@ except ModuleNotFoundError:
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:
-    def _enable_tensor_cores():
-        global _warned_tensor_cores
+    def _enable_tensor_cores() -> None:
+        global _warned_tensor_cores, _default_float_32_precision
 
         if torch.cuda.is_available():
-            if torch.backends.cuda.matmul.allow_tf32 is False and torch.cuda.get_device_capability() >= (8, 0):
+            tf32_off = torch._C._get_fp32_precision_getter("cuda", "matmul") != "tf32"
+            if tf32_off and torch.cuda.get_device_capability() >= (8, 0):
+                # tf32 being off implies the legacy precision was "highest"
+                _default_float_32_precision = "highest"
                 torch.set_float32_matmul_precision("high")
                 if not _warned_tensor_cores:
                     print("Your GPU supports tensor cores")
                     print("we will enable it automatically by setting `torch.set_float32_matmul_precision('high')`")
                     _warned_tensor_cores = True
 
-    def _disable_tensor_cores():
-        torch.set_float32_matmul_precision(_default_float_32_precision)
+    def _disable_tensor_cores() -> None:
+        global _default_float_32_precision
+        if _default_float_32_precision is not None:
+            torch.set_float32_matmul_precision(_default_float_32_precision)
+            _default_float_32_precision = None
 
     def bench_loop(
-        model: Union[torch.nn.Module, Callable],
-        sample_input: Union[torch.Tensor, Any],
+        model: torch.nn.Module | Callable,
+        sample_input: torch.Tensor | Any,
         num_iters: int = 5,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn: Optional[Callable] = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        loss_fn: Callable | None = None,
     ):
         # Define the statement and setup for the benchmark
         if optimizer and loss_fn:
@@ -72,13 +80,13 @@ if HAS_TABULATE:
         return round(avg_time, 2)
 
     def benchmark_compile(
-        model: Union[torch.nn.Module, Callable],
-        sample_input: Union[torch.Tensor, Any],
+        model: torch.nn.Module | Callable,
+        sample_input: torch.Tensor | Any,
         num_iters: int = 5,
-        backend: Optional[str] = None,
-        mode: Optional[str] = "default",
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn : Union[torch.nn.Module, Callable, None] = None,
+        backend: str | None = None,
+        mode: str | None = "default",
+        optimizer: torch.optim.Optimizer | None = None,
+        loss_fn : torch.nn.Module | Callable | None = None,
     ):
         """
         Use this utility to benchmark torch.compile
@@ -117,17 +125,17 @@ if HAS_TABULATE:
 
 
     def bench_all(
-        model : Union[torch.nn.Module, Callable],
-        sample_input: Union[torch.Tensor, Any],
+        model : torch.nn.Module | Callable,
+        sample_input: torch.Tensor | Any,
         num_iters : int = 5,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn : Union[torch.nn.Module, Callable, None] = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        loss_fn : torch.nn.Module | Callable | None = None,
     ):
         """
         This is a simple utility that can be used to benchmark torch.compile
         In particular it ensures that your GPU is setup to use tensor cores if it supports its
         It also tries out all the main backends and prints a table of results so you can easily compare them all
-        Many of the backendds have their own optional dependencies so please pip install them seperately
+        Many of the backends have their own optional dependencies so please pip install them separately
 
         You will get one table for inference and another for training
         If you'd like to leverage this utility for training make sure to pass in a torch.optim.Optimizer
@@ -153,7 +161,7 @@ if HAS_TABULATE:
         for backend in torch._dynamo.list_backends():
 
             if backend == "inductor":
-                mode_options = cast(list[Optional[str]], list(torch._inductor.list_mode_options().keys())) + [None]
+                mode_options = cast(list[str | None], list(torch._inductor.list_mode_options().keys())) + [None]
                 for mode in mode_options:
                     if mode == "default":
                         continue
@@ -166,13 +174,13 @@ if HAS_TABULATE:
                     finally:
                         if torch.cuda.is_available():
                             _disable_tensor_cores()
-                            table.append([
-                                ("Training" if optimizer else "Inference"),
-                                backend if backend else "-",
-                                mode if mode is not None else "-",
-                                f"{compilation_time} ms " if compilation_time else "-",
-                                f"{running_time} ms " if running_time else "-",
-                            ])
+                    table.append([
+                        ("Training" if optimizer else "Inference"),
+                        backend if backend else "-",
+                        mode if mode is not None else "-",
+                        f"{compilation_time} ms " if compilation_time else "-",
+                        f"{running_time} ms " if running_time else "-",
+                    ])
 
             else:
                 torch._dynamo.reset()
@@ -188,4 +196,5 @@ if HAS_TABULATE:
                     ])
 
 
+        # pyrefly: ignore [not-callable]
         return tabulate(table, headers=field_names, tablefmt="github")

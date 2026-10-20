@@ -2,6 +2,7 @@
 
 #include <c10/util/Synchronized.h>
 #include <c10/util/WaitCounterDynamicBackend.h>
+#include <c10/util/string_view.h>
 
 #include <chrono>
 #include <memory>
@@ -49,7 +50,7 @@ class DynamicBackendWrapper : public WaitCounterBackendIf {
 
   void stop(std::chrono::steady_clock::time_point now, intptr_t ctx) noexcept
       override {
-    return impl_.stop(
+    impl_.stop(
         impl_.self,
         std::chrono::duration_cast<std::chrono::microseconds>(
             now.time_since_epoch())
@@ -87,12 +88,14 @@ std::unique_ptr<WaitCounterBackendIf> getDynamicBackend(std::string_view key) {
 class WaitCounterImpl {
  public:
   static WaitCounterImpl& getInstance(std::string_view key) {
-    static auto& implMapSynchronized = *new Synchronized<
-        std::unordered_map<std::string, std::unique_ptr<WaitCounterImpl>>>();
+    static auto& implMapSynchronized = *new Synchronized<std::unordered_map<
+        std::string,
+        std::unique_ptr<WaitCounterImpl>,
+        TransparentStringHash,
+        std::equal_to<>>>();
 
     return *implMapSynchronized.withLock([&](auto& implMap) {
-      if (auto implIt = implMap.find(std::string(key));
-          implIt != implMap.end()) {
+      if (auto implIt = implMap.find(key); implIt != implMap.end()) {
         return implIt->second.get();
       }
 
@@ -162,6 +165,6 @@ WaitCounterHandle::WaitGuard WaitCounterHandle::start() {
 }
 
 void WaitCounterHandle::stop(const SmallVector<intptr_t>& ctxs) {
-  return impl_.stop(ctxs);
+  impl_.stop(ctxs);
 }
 } // namespace c10::monitor

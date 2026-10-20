@@ -31,8 +31,7 @@ class TORCH_PYTHON_API THPPointer {
         const_cast<T*>(ptr)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
   }
   static THPPointer none() {
-    Py_INCREF(Py_None);
-    return THPPointer(reinterpret_cast<T*>(Py_None));
+    return THPPointer(reinterpret_cast<T*>(Py_NewRef(Py_None)));
   }
   T* release() {
     T* tmp = ptr;

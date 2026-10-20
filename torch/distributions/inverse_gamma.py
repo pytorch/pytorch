@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -22,7 +21,7 @@ class InverseGamma(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = InverseGamma(torch.tensor([2.0]), torch.tensor([3.0]))
         >>> m.sample()
         tensor([ 1.2953])
@@ -38,15 +37,17 @@ class InverseGamma(TransformedDistribution):
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
+    # pyrefly: ignore [bad-override]
     support = constraints.positive
     has_rsample = True
+    # pyrefly: ignore [bad-override]
     base_dist: Gamma
 
     def __init__(
         self,
-        concentration: Union[Tensor, float],
-        rate: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        concentration: Tensor | float,
+        rate: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = Gamma(concentration, rate, validate_args=validate_args)
         neg_one = -base_dist.rate.new_ones(())

@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/python_compat.h>
 
 namespace torch::distributed::rpc {
 
@@ -14,7 +13,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 #define PROFILE_GIL_SCOPED_ACQUIRE                                       \
   std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
   auto shouldProfileGIL =                                                \
-      RpcAgent::getCurrentRpcAgent() -> isGILProfilingEnabled();         \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
   if (shouldProfileGIL) {                                                \
     startTime = std::chrono::high_resolution_clock::now();               \
   }                                                                      \
@@ -95,7 +94,7 @@ void PythonRpcHandler::init() {
   }
 }
 
-PythonRpcHandler::PythonRpcHandler() : initialized_(false) {}
+PythonRpcHandler::PythonRpcHandler() = default;
 
 void PythonRpcHandler::cleanup() {
   std::lock_guard<std::mutex> guard(init_lock_);
@@ -121,7 +120,7 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   // initialization by calling `new PythonRpcHandler()`, inside of which GIL is
   // also required. Static data initialization is thread-safe, so the thread
   // holding the GIL will wait for the other thread to finish static data
-  // initializating before going forward. Because the initialization can't
+  // initializing before going forward. Because the initialization can't
   // proceed without GIL, there is a deadlock. We ask the calling thread to
   // release GIL to avoid this situation.
   TORCH_INTERNAL_ASSERT(!PyGILState_Check());
@@ -174,7 +173,7 @@ void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
 
 bool PythonRpcHandler::isRemoteException(const py::object& obj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
-  auto type = obj.get_type();
+  auto type = py::type::handle_of(obj);
   auto moduleName = type.attr("__module__").cast<std::string>();
   auto qualName = type.attr("__qualname__").cast<std::string>();
   return moduleName == kInternalModule && qualName == "RemoteException";

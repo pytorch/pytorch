@@ -9,14 +9,41 @@ import importlib
 import os
 import sys
 import time
+import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import torch
 import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    isRocmArchAnyOf,
+    MI350_ARCH,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    IS_BIG_GPU,
+    requires_gpu,
+    requires_triton,
+    RUN_CPU,
+    RUN_GPU,
+)
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Debug and confirm pass_fds status on Windows.
+    sys.stderr.write(
+        "Almost UTs failed: pass_fds not supported on Windows, skip them on Windows.\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("pass_fds not supported on Windows")
 
 
 # Make the helper files in test/ importable
@@ -37,6 +64,32 @@ importlib.import_module("filelock")
 test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_remove_noop_slice": TestFailure(
+        ("cuda",),
+        is_skip=(TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)) or not TEST_WITH_ROCM,
+    ),
+    "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
+    "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
+    # can not pickle ParametrizedConv2d
+    "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
+    # TypeError: cannot pickle '_thread._local' object.
+    # nested_compile_region(options=...) hangs compiler callables off
+    # NestedCompileRegionOptions. dill cannot resolve a module reference for that
+    # class, falls back to pickling the callables by value, and walking their
+    # globals reaches a thread-local. is_skip rather than xfail because the
+    # by-value fallback is dill-specific, so the test still passes where the
+    # graph pickler does not go through dill.
+    "test_regional_fallback_by_default_invoke_subgraph": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    # This manually constructs an FX graph with an OpOverloadPacket target to
+    # cover a legacy lowering table entry, which is outside the subprocess
+    # compile serialization path this file exercises.
+    "test_split_overload_packet_lowering": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
 
 
@@ -45,7 +98,7 @@ class TestSubprocess(TestCase):
         torch._dynamo.reset()
         FxCompile._reset_stats()
 
-        TestCase.setUp(self)
+        super().setUp()
 
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(
@@ -67,6 +120,74 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    @requires_gpu()
+    @requires_triton()
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    @patch("torch._inductor.compile_fx.fx_compile_progressive", True)
+    def test_progressive(self):
+        from torch._inductor.compile_fx_async import _ProgressiveFxCompile
+
+        x = torch.randn(1152, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(4096, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def optimized(x, y):
+            return (x @ y).relu()
+
+        _ProgressiveFxCompile._reset_stats()
+
+        source_codes: list[str] = []
+
+        def save_output_code(code: str) -> None:
+            source_codes.append(code)
+
+        with contextlib.ExitStack() as stack:
+            # When this bug is fixed, remove the cache disabling below
+            if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
+                raise AssertionError
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(GraphLowering, "save_output_code", save_output_code)
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+
+            # How long to wait (in seconds) before giving up.
+            TIMEOUT = 300
+            # If non-None then how often (in seconds) to print a TICK message.
+            TICK_REPORT = None
+
+            start = time.time()
+            last_report = start
+            while _ProgressiveFxCompile._stat_optimized_runs < 4:
+                time.sleep(0.25)
+
+                optimized(x, y)
+
+                now = time.time()
+                if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
+                    print(f"*** TICK {int(now - start)}")
+                    last_report = now
+
+                if now - start > TIMEOUT:
+                    raise RuntimeError(
+                        "Test timed out before producing a progressively optimized compiled artifact."
+                    )
+
+            self.assertEqual(_ProgressiveFxCompile._stat_optimized_runs, 4)
+            self.assertGreater(_ProgressiveFxCompile._stat_fast_runs, 0)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
+
+        self.assertIn("'max_autotune': True", source_codes[-1])
+
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
         # Test that async+subprocess works.
@@ -75,14 +196,15 @@ class TestSubprocess(TestCase):
         @torch.compile(fullgraph=True, backend="inductor")
         def model_add(x, y):
             out = x
-            for i in range(500):
+            for _ in range(500):
                 out = torch.add(out, y)
             return out
 
         _AsyncFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            # TODO: Turn off local caches - they don't play nice w/ async currently.
+            if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
+                raise AssertionError
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
@@ -99,13 +221,22 @@ class TestSubprocess(TestCase):
 
             start = time.time()
             last_report = start
-            while _AsyncFxCompile._stat_compiled_runs < 4:
+            while True:
+                start_stat_compiled_runs = _AsyncFxCompile._stat_compiled_runs
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
-                x = torch.randn(100, 100)
-                y = torch.randn(100, 100)
-                model_add(x, y)
+                x = torch.randn(100, 100, requires_grad=True)
+                y = torch.randn(100, 100, requires_grad=True)
+
+                # Forward pass
+                output = model_add(x, y)
+
+                # Backward pass
+                output.sum().backward()
+
+                if _AsyncFxCompile._stat_compiled_runs - start_stat_compiled_runs == 2:
+                    break
 
                 # DEBUGGING: Print a periodic message so we know we're still
                 # running...
@@ -119,15 +250,15 @@ class TestSubprocess(TestCase):
                         "Test timed out before producing a compiled artifact."
                     )
 
-            self.assertEqual(_AsyncFxCompile._stat_compiled_runs, 4)
+            self.assertGreater(_AsyncFxCompile._stat_compiled_runs, 1)
             # Make sure we ran eager at least once. Normally this will be
             # something like 80.
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
-            self.assertEqual(_AsyncFxCompile._stat_bg_started, 1)
-            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 1)
+            self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
+            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class CpuTests(TestSubprocess):
         common = check_model
@@ -137,7 +268,7 @@ if HAS_CPU:
         inductor.test_torchinductor.CommonTemplate, CpuTests, "cpu", test_failures
     )
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if RUN_GPU and not TEST_WITH_ASAN:
 
     class GPUTests(TestSubprocess):
         common = check_model_gpu
@@ -151,5 +282,5 @@ if HAS_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")

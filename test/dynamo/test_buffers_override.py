@@ -20,7 +20,7 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
                 return self.A * torch.zeros(1, 1)
 
         model = SomeModel().to(torch.device("cpu"))
-        compiled_model = torch.compile(model)
+        compiled_model = torch.compile(model, backend="eager")
         self.assertEqual(compiled_model.A, torch.ones(3, 3))
         compiled_model()
 
@@ -30,7 +30,7 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 # Override buffers; should not cause breakage
                 # but skip the marking static here since
-                # named_buffers is overriden
+                # named_buffers is overridden
                 self.register_buffer("B", torch.ones(3, 3))
                 self.named_buffers = []
 
@@ -38,7 +38,7 @@ class TestBuffersOverride(torch._dynamo.test_case.TestCase):
                 return self.B * torch.zeros(1, 1)
 
         model = SomeModel().to(torch.device("cpu"))
-        compiled_model = torch.compile(model)
+        compiled_model = torch.compile(model, backend="eager")
         self.assertEqual(compiled_model.B, torch.ones(3, 3))
         compiled_model()
 

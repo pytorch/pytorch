@@ -3,9 +3,11 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/ArrayRef.h>
 #include <caffe2/serialize/inline_container.h>
+
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
-#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/pickler_helper.h>
+#include <unordered_map>
 
 namespace torch::jit {
 
@@ -73,7 +75,6 @@ class TORCH_API Unpickler {
       TypeParserT type_parser = defaultTypeParser,
       std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
       : reader_(std::move(reader)),
-
         type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
@@ -82,6 +83,10 @@ class TORCH_API Unpickler {
         type_parser_(type_parser),
         storage_context_(std::move(storage_context)),
         version_(caffe2::serialize::kProducedFileFormatVersion) {}
+
+  Unpickler(Unpickler&&) = delete;
+  Unpickler& operator=(Unpickler&&) = delete;
+  ~Unpickler() = default;
 
   // consume the pickle stream, producing an IValue from the contents.
   // Type Tags: the pickler will restore the type tags on
@@ -104,6 +109,44 @@ class TORCH_API Unpickler {
   }
 
   static c10::TypePtr defaultTypeParser(const std::string& str) {
+    // Built-in container/scalar type tags recur across pickles; parse each once
+    // and reuse the shared immutable result. Registry-dependent tags (e.g.
+    // torch.classes.*/__torch__) are excluded and fall through to the full
+    // parser below.
+    static const std::unordered_map<std::string, c10::TypePtr>
+        kBuiltinTypeTags = [] {
+          std::unordered_map<std::string, c10::TypePtr> table;
+          for (const char* tag :
+               {"Tensor",
+                "int",
+                "float",
+                "bool",
+                "str",
+                "complex",
+                "List[Tensor]",
+                "List[int]",
+                "List[float]",
+                "List[bool]",
+                "List[str]",
+                "List[Optional[Tensor]]",
+                "Dict[str, Tensor]",
+                "Dict[str, int]",
+                "Dict[str, float]",
+                "Dict[str, bool]",
+                "Dict[str, str]",
+                "Dict[int, Tensor]",
+                "Optional[Tensor]"}) {
+            ScriptTypeParser parser;
+            if (auto type = parser.parseType(tag)) {
+              table.emplace(tag, std::move(type));
+            }
+          }
+          return table;
+        }();
+    auto it = kBuiltinTypeTags.find(str);
+    if (it != kBuiltinTypeTags.end()) {
+      return it->second;
+    }
     ScriptTypeParser parser;
     return parser.parseType(str);
   }
@@ -132,7 +175,8 @@ class TORCH_API Unpickler {
   void readGlobal(
       const std::string& module_name,
       const std::string& class_name);
-  void rebuildTensor(bool quantized);
+  void rebuildTensor(bool quantized, bool has_explicit_dtype = false);
+  void rebuildParameter();
   void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED

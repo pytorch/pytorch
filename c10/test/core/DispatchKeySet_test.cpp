@@ -2,12 +2,15 @@
 
 #include <cstddef>
 #include <iterator>
+#include <ranges>
 #include <unordered_set>
 
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
 
 using namespace c10;
+
+static_assert(std::ranges::input_range<DispatchKeySet>);
 
 // This test exists not to be comprehensive, but to more clearly show
 // what the semantics of DispatchKeySet are.
@@ -404,7 +407,7 @@ TEST(DispatchKeySet, TestBackendComponentToString) {
     auto k = static_cast<BackendComponent>(i);
     auto res = std::string(toString(k));
     ASSERT_FALSE(res == "UNKNOWN_BACKEND_BIT");
-    ASSERT_FALSE(seen_strings.count(res) > 0);
+    ASSERT_FALSE(seen_strings.contains(res));
     seen_strings.insert(res);
   }
 }
@@ -435,11 +438,21 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
     if (i > 0) {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos)
           << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
-          << ")";
+          << ')';
     } else {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
     }
-    ASSERT_TRUE(seen_strings.count(res) == 0);
+    ASSERT_TRUE(!seen_strings.contains(res));
     seen_strings.insert(res);
+  }
+}
+
+TEST(DispatchKeySet, TestGetRuntimeDispatchKeySet) {
+  // Check if getRuntimeDispatchKeySet and runtimeDispatchKeySetHas agree.
+  for (auto dk1 : DispatchKeySet(DispatchKeySet::FULL)) {
+    auto dks = getRuntimeDispatchKeySet(dk1);
+    for (auto dk2 : DispatchKeySet(DispatchKeySet::FULL)) {
+      ASSERT_EQ(dks.has(dk2), runtimeDispatchKeySetHas(dk1, dk2));
+    }
   }
 }

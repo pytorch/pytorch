@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -10,6 +10,7 @@ from .optimizer import (
     _differentiable_doc,
     _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _functional_api_doc,
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
@@ -30,34 +31,38 @@ class ASGD(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         lambd: float = 1e-4,
         alpha: float = 0.75,
         t0: float = 1e6,
         weight_decay: float = 0,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= lambd:
+            raise ValueError(f"Invalid lambd value: {lambd}")
+        if not 0.0 <= alpha:
+            raise ValueError(f"Invalid alpha value: {alpha}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            lambd=lambd,
-            alpha=alpha,
-            t0=t0,
-            weight_decay=weight_decay,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            capturable=capturable,
-        )
+        defaults = {
+            "lr": lr,
+            "lambd": lambd,
+            "alpha": alpha,
+            "t0": t0,
+            "weight_decay": weight_decay,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "capturable": capturable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -130,7 +135,7 @@ class ASGD(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -189,7 +194,7 @@ ASGD.__doc__ = rf"""Implements Averaged Stochastic Gradient Descent.
         {_capturable_doc}
 
     .. _Acceleration of stochastic approximation by averaging:
-        https://dl.acm.org/citation.cfm?id=131098
+        https://doi.org/10.1137/0330046
 
     """
 
@@ -203,7 +208,7 @@ def _single_tensor_asgd(
     state_steps: list[Tensor],
     *,
     lambd: float,
-    lr: float,
+    lr: float | Tensor,
     t0: float,
     alpha: float,
     weight_decay: float,
@@ -211,7 +216,7 @@ def _single_tensor_asgd(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -226,16 +231,17 @@ def _single_tensor_asgd(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type
                 == mu.device.type
                 == eta.device.type
                 == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params, mus, etas, and state_steps must be "
-                f"on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params, mus, etas, and state_steps must be "
+                    f"on supported devices: {capturable_supported_devices}."
+                )
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -254,7 +260,7 @@ def _single_tensor_asgd(
         else:
             eta_value = _get_value(eta)
             param.mul_(1 - lambd * eta_value)  # decay term
-            param.add_(grad, alpha=-eta_value)  # update parameter
+            param.add_(grad, alpha=-eta_value)  # type: ignore[arg-type]  # update parameter
 
         # averaging
         if capturable or mu.item() != 1:
@@ -282,7 +288,7 @@ def _multi_tensor_asgd(
     state_steps: list[Tensor],
     *,
     lambd: float,
-    lr: float,
+    lr: float | Tensor,
     t0: float,
     alpha: float,
     weight_decay: float,
@@ -290,22 +296,27 @@ def _multi_tensor_asgd(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == mu.device.type == eta.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, mu, eta, step in zip(params, mus, etas, state_steps)
-        ), f"If capturable=True, params, mus, etas, and state_steps must be on supported devices: {capturable_supported_devices}."
+            for p, mu, eta, step in zip(params, mus, etas, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params, mus, etas, and state_steps must be on "
+                f"supported devices: {capturable_supported_devices}."
+            )
 
     lr = _to_scalar(lr)
 
@@ -348,7 +359,7 @@ def _multi_tensor_asgd(
             torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
-        intermediate: Union[tuple[Tensor, ...], list[Tensor]]
+        intermediate: tuple[Tensor, ...] | list[Tensor]
         if weight_decay != 0:
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
@@ -383,8 +394,8 @@ def _multi_tensor_asgd(
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
         del intermediate
 
-        new_etas: Union[tuple[Tensor, ...], list[Tensor]]
-        new_mus: Union[tuple[Tensor, ...], list[Tensor]]
+        new_etas: tuple[Tensor, ...] | list[Tensor]
+        new_mus: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             # update grouped_mus
             new_mus = torch._foreach_sub(grouped_state_steps, t0)
@@ -424,22 +435,18 @@ def asgd(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,
     has_complex: bool = False,
     *,
     lambd: float,
-    lr: float,
+    lr: float | Tensor,
     t0: float,
     alpha: float,
     weight_decay: float,
-):
-    r"""Functional API that performs asgd algorithm computation.
-
-    See :class:`~torch.optim.ASGD` for details.
-    """
+) -> None:
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(
             params, differentiable, use_fused=False
@@ -470,3 +477,6 @@ def asgd(
         capturable=capturable,
         has_complex=has_complex,
     )
+
+
+asgd.__doc__ = _functional_api_doc.format(optimizer="ASGD")

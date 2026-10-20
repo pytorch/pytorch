@@ -11,7 +11,7 @@ You can determine if your change in the operator is BC breaking, if it fails `te
 
 ### Some examples BC breaking changes
 
-When making changes to the operators, the first thing to identify is if it's BC/FC breaking. Again, we only targetting for BC breaking changes on this guidance. Here are some examples to help understanding what a BC changes may look like:
+When making changes to the operators, the first thing to identify is if it's BC/FC breaking. Again, we only targeting for BC breaking changes on this guidance. Here are some examples to help understanding what a BC changes may look like:
 
 #### Backward Compatibility Breakage:
 
@@ -32,7 +32,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
 
 ### 1.Preparation
 
-[Build PyTorch from souce](https://github.com/pytorch/pytorch#from-source) and prepare a test model before making changes to the operator, following the process below. A test model before making the operator changes is needed to test the upgrader. Otherwise, after the change to operator, the new runtime will no longer be able to produce a model with the historic operator and can't test it anymore.
+[Build PyTorch from source](https://github.com/pytorch/pytorch#from-source) and prepare a test model before making changes to the operator, following the process below. A test model before making the operator changes is needed to test the upgrader. Otherwise, after the change to operator, the new runtime will no longer be able to produce a model with the historic operator and can't test it anymore.
 
     1. Add a test module in `test/jit/fixtures_srcs/fixtures_src.py`. In `test/jit/fixtures_srcs/generate_models.py`,
   ```
@@ -118,7 +118,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
   //     and aten::linspace.out to error out when steps is not
   //     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
   // 2) [01/30/2022]
-  //     Bump the version number to 9 to update aten::logspace and
+  //     Bump the version number to 9 to update aten::logspace
   //     and aten::logspace.out to error out when steps is not
   //     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
   constexpr uint64_t kProducedFileFormatVersion = 0x9L;
@@ -142,7 +142,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
       "aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"}}},
   ```
 
-    5. After [rebuilding PyTorch](https://github.com/pytorch/pytorch#from-source), run the following command to auto update the file [`torch/csrc/jit/mobile/upgrader_mobile.cpp`](https://github.com/pytorch/pytorch/blob/8757e21c6a4fc00e83539aa7f9c28eb11eff53c1/torch/csrc/jit/mobile/upgrader_mobile.cpp). After rebuild PyTorch from source (`python setup.py`), run
+    5. After [rebuilding PyTorch](https://github.com/pytorch/pytorch#from-source), run the following command to auto update the file [`torch/csrc/jit/mobile/upgrader_mobile.cpp`](https://github.com/pytorch/pytorch/blob/8757e21c6a4fc00e83539aa7f9c28eb11eff53c1/torch/csrc/jit/mobile/upgrader_mobile.cpp). After rebuild PyTorch from source (`pip install -e . --no-build-isolation`), run
 
   ```
   python pytorch/torchgen/operator_versions/gen_mobile_upgraders.py

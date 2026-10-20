@@ -2,9 +2,10 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
 #include <torch/custom_class.h>
+#include <array>
+#include <string_view>
 
 using torch::jit::valid_single_char_tokens;
 
@@ -19,11 +20,7 @@ static constexpr const char* kTypeTorchbindCustomClass =
 static constexpr const char* kTypeNamedTuple = "NamedTuple";
 
 bool isSpecialChar(char a) {
-  for (const char* c = valid_single_char_tokens; *c; c++) {
-    if (a == *c)
-      return true;
-  }
-  return false;
+  return std::strchr(valid_single_char_tokens, a);
 }
 } // namespace
 
@@ -36,11 +33,11 @@ TypeParser::TypeParser(std::vector<std::string>& pythonStrs)
     : start_(0), pythonStrs_(pythonStrs) {}
 
 // For the Python string list parsing, the order of the Python string matters.
-// In bytecode, the order of the type list correspondings to the order of
+// In bytecode, the order of the type list corresponds to the order of
 // instruction. In nested type, the lowest level type will be at the beginning
 // of the type list. It is possible to parse it without worrying about
 // ordering, but it also introduces 1) extra cost to process nested type to
-// the correct order 2) lost the benifit that the instruction order is likely
+// the correct order 2) lost the benefit that the instruction order is likely
 // problematic if type list parsing fails.
 std::vector<TypePtr> TypeParser::parseList() {
   std::vector<TypePtr> typePtrs;
@@ -136,7 +133,7 @@ TypePtr TypeParser::parse() {
     }
     contained_types_.insert(token);
     return simpleTypeIt->second;
-  } else if (getNonSimpleType().find(token) != getNonSimpleType().end()) {
+  } else if (getNonSimpleType().contains(token)) {
     contained_types_.insert(token);
     return parseNonSimple(token);
   } else if (token == "__torch__") {
@@ -162,7 +159,6 @@ TypePtr TypeParser::parse() {
         " is not supported in the parser, ",
         "or the token is in wrong format.");
   }
-  return nullptr;
 }
 
 // NamedTuple custom type will be following structure:
@@ -192,7 +188,7 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
     expect(",");
     TypePtr field_type = parse();
     field_names.emplace_back(field_name);
-    field_types.emplace_back(field_type);
+    field_types.emplace_back(std::move(field_type));
     expect("]");
     if (cur() == ",") {
       next();
@@ -247,13 +243,12 @@ TypePtr TypeParser::parseCustomType() {
       TORCH_CHECK(
           false, "Can't find definition for the type: ", qualified_name);
     }
-    return nullptr;
   }
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
-  static constexpr std::array<const char*, 4> expected_atoms = {
-      "torch", ".", "classes", "."};
+  static constexpr auto expected_atoms =
+      std::to_array<std::string_view>({"torch", ".", "classes", "."});
   for (const auto& atom : expected_atoms) {
     expect(atom);
   }
@@ -269,7 +264,7 @@ TypePtr TypeParser::parseTorchbindClassType() {
   return torch::getCustomClass(customClassName);
 }
 
-void TypeParser::expect(const char* s) {
+void TypeParser::expect(std::string_view s) {
   std::string_view token = cur();
   TORCH_CHECK(
       token == s,

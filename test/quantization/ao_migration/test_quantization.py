@@ -1,5 +1,10 @@
 # Owner(s): ["oncall: quantization"]
 
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
+
 from .common import AOMigrationTestCase
 
 
@@ -7,6 +12,8 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     r"""Modules and functions related to the
     `torch/quantization` migration to `torch/ao/quantization`.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_function_import_quantize(self):
         function_list = [
@@ -219,3 +226,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "weight_is_statically_quantized",
         ]
         self._test_function_import("utils", function_list)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

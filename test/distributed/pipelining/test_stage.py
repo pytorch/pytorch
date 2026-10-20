@@ -1,38 +1,379 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+
+import copy
 import os
-import sys
 import tempfile
+import weakref
+from contextlib import contextmanager, nullcontext
+from dataclasses import FrozenInstanceError
+from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
+import torch.distributed.pipelining._p2p as p2p_module
+import torch.distributed.pipelining.stage as stage_module
+from torch._dynamo.testing import CompileCounter
+from torch.autograd.graph import GradientEdge
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
     PipelineStage,
+    PipelineStageInfo,
+    Schedule1F1B,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningShapeError
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.distributed.pipelining._recv_buffers import _RecvInfo
+from torch.distributed.pipelining._utils import (
+    extract_tensor_meta,
+    InferenceMode,
+    PipeliningMetadataError,
+)
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
-    requires_nccl,
+    MultiProcContinuousTest,
+    requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
+    TestCase,
 )
 from torch.utils._pytree import tree_map_only
 
 
 d_hid = 512
 batch_size = 256
-chunks = 4
+chunks = 8
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = dist.get_default_backend_for_device(device_type)
 
 torch.manual_seed(0)
+
+
+@contextmanager
+def single_rank_process_group():
+    """Provide a temporary local process group for stage unit tests."""
+    init_pg = not dist.is_initialized()
+    if not init_pg and dist.get_world_size() != 1:
+        raise RuntimeError("pipeline stage unit tests require a single-rank group")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if init_pg:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+        try:
+            yield
+        finally:
+            if init_pg:
+                dist.destroy_process_group()
+
+
+class PipelineStageBackendWarningTest(TestCase):
+    @parametrize(
+        "backend,should_warn",
+        [("nccl", True), ("nccl2", True), ("nccl-lazy", False), ("gloo", False)],
+    )
+    def test_eager_nccl_warning(self, backend, should_warn):
+        with (
+            mock.patch.object(dist, "get_backend", return_value=backend),
+            mock.patch.object(p2p_module, "warning_once") as warning,
+        ):
+            p2p_module._warn_if_eager_nccl(None)
+
+        if should_warn:
+            warning.assert_called_once()
+        else:
+            warning.assert_not_called()
+
+
+instantiate_parametrized_tests(PipelineStageBackendWarningTest)
+
+
+class PipelineStageMetadataInferenceTest(TestCase):
+    def test_metadata_p2p_uses_directed_edge_groups(self):
+        with single_rank_process_group():
+            stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=2,
+                device=torch.device("cpu"),
+            )
+            send_group = mock.MagicMock()
+            recv_group = mock.MagicMock()
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = {0: 0, 1: 1}
+            stage._p2p_edge_groups = {
+                (0, 1): send_group,
+                (1, 0): recv_group,
+            }
+
+            with (
+                mock.patch.object(stage, "_resolve_peer_global_rank", return_value=1),
+                mock.patch.object(dist, "send_object_list") as send,
+                mock.patch.object(dist, "recv_object_list") as recv,
+            ):
+                stage._send_meta(object(), dst_stage=1)
+                stage._recv_meta(src_stage=1)
+
+            self.assertIs(send.call_args.kwargs["group"], send_group)
+            self.assertIs(recv.call_args.kwargs["group"], recv_group)
+
+    def test_recv_metadata_reinit_rejects_owned_buffers(self):
+        with single_rank_process_group():
+            activation = torch.ones(1, requires_grad=True)
+            forward_stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=1,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=activation,
+                output_args=activation,
+            )
+            forward_stage._inference_mode = InferenceMode.STATIC
+            forward_stage._prepare_forward_infra(1, None)
+            forward_stage.args_recv_info[0][0].allocate_buffer("cpu")
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "incomplete pipeline step"
+            ):
+                forward_stage._prepare_forward_infra(1, None)
+
+            backward_stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=activation,
+                output_args=activation,
+            )
+            backward_stage._inference_mode = InferenceMode.STATIC
+            backward_stage._prepare_forward_infra(1, (activation,))
+            backward_stage._prepare_backward_infra(1)
+            backward_stage.grad_recv_info[0][0].allocate_buffer("cpu")
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "incomplete pipeline step"
+            ):
+                backward_stage._prepare_backward_infra(1)
+
+    def test_dynamic_metadata_inference_restores_module_buffers(self):
+        class BufferMutatingModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("counter", torch.zeros(4))
+                self.register_buffer("scale", torch.ones(4))
+
+            def forward(self, x):
+                with torch.no_grad():
+                    self.counter.add_(1)
+                out = self.linear(x) * self.scale
+                if out.requires_grad:
+                    out.register_hook(self._backward_hook)
+                return out
+
+            def _backward_hook(self, grad):
+                with torch.no_grad():
+                    self.counter.add_(10)
+                return grad
+
+        device = torch.device("cpu")
+        with single_rank_process_group():
+            mod = BufferMutatingModule().to(device)
+            stage = PipelineStage(
+                mod,
+                stage_index=0,
+                num_stages=1,
+                device=device,
+            )
+            schedule = ScheduleGPipe(
+                stage,
+                n_microbatches=1,
+                loss_fn=lambda out, target: out.sum() + target.sum() * 0,
+            )
+
+            initial_counter = mod.counter.clone()
+            initial_scale = mod.scale.clone()
+            x = torch.randn(2, 4, device=device, requires_grad=True)
+            target = torch.zeros((), device=device)
+
+            # This exercises the full metadata-inference lifecycle. The
+            # scale buffer is saved by autograd, so restoring buffers before
+            # backward metadata inference would bump its version counter.
+            schedule._initialize_stage((x,), {}, target=target)
+
+            self.assertEqual(mod.counter, initial_counter)
+            self.assertEqual(mod.scale, initial_scale)
+
+
+class PipelineStageForwardContextTest(TestCase):
+    @parametrize(
+        "registered,static_metadata",
+        [(False, False), (False, True), (True, False), (True, True)],
+    )
+    def test_forward_context(self, registered, static_metadata):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x, *, scale):
+                return x * scale
+
+        with single_rank_process_group():
+            module = StrictModule()
+            x = torch.ones(2, requires_grad=True)
+            scale = torch.full((2,), 3.0, requires_grad=True)
+            stage_kwargs = (
+                {
+                    "input_args": torch.ones(1, requires_grad=True),
+                    "output_args": torch.ones(1, requires_grad=True),
+                }
+                if static_metadata
+                else {}
+            )
+            stage = PipelineStage(module, 0, 1, torch.device("cpu"), **stage_kwargs)
+            events: list[tuple[str, PipelineStageInfo]] = []
+
+            @contextmanager
+            def forward_context(info):
+                events.append(("enter", info))
+                try:
+                    yield
+                finally:
+                    events.append(("exit", info))
+
+            if registered:
+                stage.register_forward_context(forward_context)
+            schedule = ScheduleGPipe(
+                stage,
+                2,
+                loss_fn=lambda output, target: (output - target).square().sum(),
+                scale_grads=False,
+            )
+
+            info_patch = (
+                mock.patch.object(
+                    stage_module,
+                    "PipelineStageInfo",
+                    side_effect=AssertionError("unexpected stage info construction"),
+                )
+                if not registered
+                else nullcontext()
+            )
+            with info_patch:
+                output = schedule.step(x, scale=scale, target=torch.zeros(2))
+
+            self.assertEqual(output, x * scale)
+            self.assertEqual(x.grad, torch.full_like(x, 18))
+            self.assertEqual(scale.grad, torch.full_like(scale, 6))
+            if not registered:
+                self.assertEqual(events, [])
+                return
+
+            expected = [
+                PipelineStageInfo(stage_index=0, microbatch_index=0),
+                PipelineStageInfo(stage_index=0, microbatch_index=1),
+            ]
+            if not static_metadata:
+                expected.insert(
+                    0,
+                    PipelineStageInfo(
+                        stage_index=0,
+                        microbatch_index=0,
+                        is_metadata_inference=True,
+                    ),
+                )
+            self.assertEqual(
+                events,
+                [(phase, info) for info in expected for phase in ("enter", "exit")],
+            )
+            with self.assertRaises(FrozenInstanceError):
+                expected[0].__setattr__("stage_index", 1)
+            self.assertFalse(hasattr(expected[0], "__dict__"))
+
+    def test_forward_context_lifecycle_and_exceptions(self):
+        class RaisingModule(torch.nn.Module):
+            def forward(self, x):
+                raise ValueError("module failure")
+
+        with single_rank_process_group():
+            stage = PipelineStage(RaisingModule(), 0, 1, torch.device("cpu"))
+            events = []
+
+            @contextmanager
+            def forward_context(info):
+                events.append(("enter", info))
+                try:
+                    yield
+                finally:
+                    events.append(("exit", info))
+
+            handle = stage.register_forward_context(forward_context)
+            with self.assertRaisesRegex(RuntimeError, "already registered"):
+                stage.register_forward_context(forward_context)
+            with self.assertRaisesRegex(RuntimeError, "failed to run forward"):
+                stage.forward_one_chunk(0, (torch.ones(1),))
+            self.assertEqual([event[0] for event in events], ["enter", "exit"])
+
+            handle.remove()
+            replacement = stage.register_forward_context(forward_context)
+            replacement.remove()
+
+            @contextmanager
+            def suppressing_context(info):
+                try:
+                    yield
+                except ValueError:
+                    pass
+
+            stage.register_forward_context(suppressing_context)
+            with self.assertRaisesRegex(RuntimeError, "failed to run forward") as error:
+                stage.forward_one_chunk(1, (torch.ones(1),))
+            self.assertRegex(str(error.exception.__cause__), "must not suppress")
+
+    def test_forward_context_wraps_compiled_module(self):
+        class StrictModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with single_rank_process_group():
+            counter = CompileCounter()
+            self.addCleanup(torch._dynamo.reset)
+            module = torch.compile(StrictModule(), backend=counter, fullgraph=True)
+            stage = PipelineStage(
+                module,
+                0,
+                1,
+                torch.device("cpu"),
+                input_args=torch.ones(1),
+                output_args=torch.ones(1),
+            )
+            observed = []
+
+            @contextmanager
+            def forward_context(info):
+                observed.append(info)
+                yield
+
+            stage.register_forward_context(forward_context)
+            output = ScheduleGPipe(stage, 2).step(torch.ones(2))
+
+            self.assertEqual(output, torch.full((2,), 2.0))
+            self.assertEqual(counter.frame_count, 1)
+            self.assertEqual(
+                observed,
+                [
+                    PipelineStageInfo(stage_index=0, microbatch_index=0),
+                    PipelineStageInfo(stage_index=0, microbatch_index=1),
+                ],
+            )
+
+
+instantiate_parametrized_tests(PipelineStageForwardContextTest)
 
 
 def get_dtype_change_hook(new_dtype):
@@ -59,27 +400,197 @@ def get_flatten_hook():
     return flatten_hook
 
 
-class StageTest(MultiProcContinousTest):
+class OutputSlotReleaseTest(TestCase):
+    """Tests forward-cache output release."""
+
+    def setUp(self):
+        super().setUp()
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._owns_pg = not dist.is_initialized()
+        if self._owns_pg:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(self._tmpdir.name, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+
+    def tearDown(self):
+        if self._owns_pg and dist.is_initialized():
+            dist.destroy_process_group()
+        self._tmpdir.cleanup()
+        super().tearDown()
+
+    def _make_stage(self, *, stage_index=0, num_stages=2, dst_stages=None, **kwargs):
+        stage = PipelineStage(
+            torch.nn.Linear(d_hid, d_hid),
+            stage_index,
+            num_stages,
+            torch.device("cpu"),
+            **kwargs,
+        )
+        stage.has_backward = True
+        # Avoid peer-dependent forward setup.
+        stage.act_send_info = {0: dst_stages or [stage_index + 1]}
+        return stage
+
+    def _forward_and_send(self, stage, mb_index=0):
+        x = torch.randn(batch_size, d_hid)
+        stage.forward_one_chunk(mb_index, (x,))
+        return stage.get_fwd_send_ops(mb_index)
+
+    def test_output_released_when_send_retires(self):
+        stage = self._make_stage()
+        ops = self._forward_and_send(stage)
+        entry = stage._forward_chunk_states[0]
+
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(entry.send_pending, [True])
+        self.assertIsNotNone(entry.live_outputs[0])
+        self.assertIsInstance(entry.output_grad_edges[0], GradientEdge)
+
+        stage.release_fwd_send_outputs(0)
+
+        self.assertEqual(entry.send_pending, [False])
+        self.assertIsNone(entry.live_outputs[0])
+        self.assertIs(entry.stage_output_for_backward()[0], entry.output_grad_edges[0])
+
+    def test_output_released_after_batched_destination_sends(self):
+        stage = self._make_stage(num_stages=3, dst_stages=[1, 2])
+        ops = self._forward_and_send(stage)
+        entry = stage._forward_chunk_states[0]
+
+        # One pending send covers all destinations in the batch.
+        self.assertEqual(len(ops), 2)
+        self.assertIs(ops[0].tensor, ops[1].tensor)
+        self.assertEqual(entry.send_pending, [True])
+
+        stage.release_fwd_send_outputs(0)
+        self.assertIsNone(entry.live_outputs[0])
+
+    def test_last_stage_output_never_released(self):
+        stage = self._make_stage(stage_index=0, num_stages=1, dst_stages=[None])
+        ops = self._forward_and_send(stage)
+        entry = stage._forward_chunk_states[0]
+
+        self.assertEqual(ops, [])
+        self.assertEqual(entry.releasable, (False,))
+        self.assertIsNone(entry.output_grad_edges[0])
+        self.assertEqual(stage._retained_output_reason, "last-stage output")
+
+        stage.release_fwd_send_outputs(0)
+        self.assertIsNotNone(entry.live_outputs[0])
+
+    def test_forward_only_keeps_no_backward_root(self):
+        # An unused edge would retain the forward-only graph.
+        stage = self._make_stage()
+        stage.has_backward = False
+        self._forward_and_send(stage)
+        entry = stage._forward_chunk_states[0]
+
+        self.assertEqual(entry.output_grad_edges, (None,))
+        stage.release_fwd_send_outputs(0)
+        self.assertIsNone(entry.live_outputs[0])
+
+    def test_dw_builder_keeps_output(self):
+        stage = self._make_stage(dw_builder=lambda: (lambda: None))
+        self._forward_and_send(stage)
+        entry = stage._forward_chunk_states[0]
+
+        self.assertEqual(entry.releasable, (False,))
+        stage.release_fwd_send_outputs(0)
+        self.assertIsNotNone(entry.live_outputs[0])
+
+    def test_tensor_subclass_output_kept(self):
+        class TaggedTensor(torch.Tensor):
+            pass
+
+        class TaggedModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(d_hid, d_hid)
+
+            def forward(self, x):
+                return TaggedTensor(self.linear(x))
+
+        stage = PipelineStage(TaggedModule(), 0, 2, torch.device("cpu"))
+        stage.has_backward = True
+        stage.act_send_info = {0: [1]}
+        stage.forward_one_chunk(0, (torch.randn(batch_size, d_hid),))
+        entry = stage._forward_chunk_states[0]
+
+        self.assertEqual(entry.releasable, (False,))
+        self.assertIn("TaggedTensor", stage._retained_output_reason)
+
+    def test_retire_after_backward_consumed_the_entry(self):
+        # The final drain may run after backward pops the entry.
+        stage = self._make_stage()
+        self._forward_and_send(stage)
+        stage._forward_chunk_states.pop(0)
+        stage.release_fwd_send_outputs(0)
+
+    def test_split_backward_drops_edge_roots(self):
+        """Drop edge roots before split weight backward."""
+        # The first stage keeps its roots for weight backward.
+        stage = self._make_stage(stage_index=1, num_stages=3)
+        stage.chunks = 1
+        stage._stage_meta.inputs = (None,)
+
+        act_buffer = torch.randn(batch_size, d_hid, requires_grad=True)
+        act_recv_info = _RecvInfo("act_recv", 0, extract_tensor_meta(act_buffer))
+        act_recv_info.set_buffer(act_buffer)
+        stage.args_recv_info = {0: (act_recv_info,)}
+        stage.forward_one_chunk(0, ())
+        stage.get_fwd_send_ops(0)
+        stage.release_fwd_send_outputs(0)
+        self.assertIsNone(stage._forward_chunk_states[0].live_outputs[0])
+
+        grad_buffer = torch.randn(batch_size, d_hid)
+        grad_recv_info = _RecvInfo("grad_recv", 1, extract_tensor_meta(grad_buffer))
+        grad_recv_info.set_buffer(grad_buffer)
+        stage.grad_recv_info = {0: (grad_recv_info,)}
+        stage.backward_one_chunk(0, full_backward=False)
+
+        roots = stage.backward_state[0][2]
+        self.assertTrue(all(not isinstance(root, GradientEdge) for root in roots))
+
+    def test_send_after_release_is_rejected(self):
+        stage = self._make_stage()
+        self._forward_and_send(stage)
+        stage.release_fwd_send_outputs(0)
+
+        with self.assertRaisesRegex(AssertionError, "released before its send"):
+            stage.get_fwd_send_ops(0)
+
+    def test_duplicate_pending_send_is_rejected(self):
+        stage = self._make_stage()
+        self._forward_and_send(stage)
+
+        with self.assertRaisesRegex(AssertionError, "already has a pending send"):
+            stage.get_fwd_send_ops(0)
+
+
+class StageTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
-        return "nccl"
+        return backend
 
     @classmethod
-    def setUpClass(cls):
-        """
-        Class-scope test fixture. Run once for entire test class, before any test starts.
-        Set up the device.
-        """
-        super().setUpClass()
-        dev_id = cls.rank % torch.cuda.device_count()
-        cls.device = torch.device(f"cuda:{dev_id}")
+    def device_type(cls) -> str:
+        return device_type
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     @parametrize("ModelClass", [ExampleCode, MultiMLP])
     def test_tracer(self, ModelClass):
-        mod = ModelClass(d_hid)
+        mod = ModelClass(d_hid, self.world_size)
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
@@ -96,6 +607,14 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.device,
         )
+        observed = []
+
+        @contextmanager
+        def forward_context(info):
+            observed.append(info)
+            yield
+
+        stage.register_forward_context(forward_context)
 
         # Attach to a schedule
         schedule = ScheduleGPipe(stage, chunks)
@@ -112,39 +631,33 @@ class StageTest(MultiProcContinousTest):
         if self.rank == self.world_size - 1:
             ref_out = mod(x)
             torch.testing.assert_close(out, ref_out, atol=1e-3, rtol=5e-2)
+        self.assertEqual(
+            observed,
+            [
+                PipelineStageInfo(
+                    stage_index=self.rank,
+                    microbatch_index=microbatch_index,
+                )
+                for microbatch_index in range(chunks)
+            ],
+        )
 
         # Test qualname mapping
         submod_keys = stage.submod.state_dict().keys()
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
+        if not all(k in old_keys for k in submod_keys):
+            raise AssertionError(
+                f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
+            )
 
-        if self.rank == 0:
-            # intended to run this code on all ranks, but the problem is if rank0 throws,
-            # it won't perform the send that unblocks rank 1.
-
-            # TODO(whc) can't test this until fixing args/kwargs issue
-            # with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-            #     _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
-
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x.to(torch.int32))
-
-            # output of stage's mlp layer will be flattened by this hook, the stage should err
-            handle = stage.submod.register_forward_hook(get_flatten_hook())
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(x)
-            handle.remove()
-
-            stage.submod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x)
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     @parametrize("ModelClass", [ModelWithKwargs])
     def test_tracer_kwargs(self, ModelClass):
-        mod = ModelClass(d_hid)
+        mod = ModelClass(d_hid, self.world_size)
         mod.to(self.device)
 
         x = torch.randn(batch_size, d_hid, device=self.device)
@@ -187,10 +700,15 @@ class StageTest(MultiProcContinousTest):
         submod_keys = stage.submod.state_dict().keys()
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
+        if not all(k in old_keys for k in submod_keys):
+            raise AssertionError(
+                f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
+            )
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     def test_manual(self):
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
         full_mod.to(self.device)
@@ -221,25 +739,10 @@ class StageTest(MultiProcContinousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
-        if self.rank == 0:
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
-
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x.to(torch.int32))
-
-            # output of stage's mlp layer will be flattened by this hook, the stage should err
-            handle = stage_mod.register_forward_hook(get_flatten_hook())
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
-                _run_step(x)
-            handle.remove()
-
-            stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
-            with self.assertRaisesRegex(PipeliningShapeError, "dtype mismatch"):
-                _run_step(x)
-
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     def test_custom_dw_with_fb_schedule(self):
         """Tests that separate weight grad function 'dw_runner' gets run under a schedule that's only aware of F/B."""
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -298,12 +801,200 @@ class StageTest(MultiProcContinousTest):
             ref_out = full_mod(x)
             torch.testing.assert_close(out, ref_out)
 
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    def test_output_chunks_memory_usage(self):
+        """Test that output_chunks doesn't store memory for non-first stages."""
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+        stage = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+        )
+        self.assertEqual(
+            len(stage.output_chunks), 0, "output_chunks should be empty initially"
+        )
+
+        schedule = ScheduleGPipe(
+            stage, chunks, loss_fn=torch.nn.MSELoss(reduction="sum")
+        )
+
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                return schedule.step(target=target)
+            else:
+                return schedule.step()
+
+        _run_step(x)
+
+        self.assertEqual(len(stage._forward_chunk_states), 0)
+
+        # Check output_chunks state after step
+        if self.rank == self.world_size - 1:
+            self.assertEqual(
+                len(stage.output_chunks),
+                chunks,
+                "Last stage should store output chunks",
+            )
+        else:
+            self.assertEqual(
+                len(stage.output_chunks),
+                0,
+                lambda msg: f"{msg}\nNon-last stage (rank {self.rank}) should not store output chunks",
+            )
+
+        # Clear the schedule and stage caches
+        stage.clear_runtime_states()
+        if self.rank == self.world_size - 1:
+            # Last stage should have output_chunks populated
+            self.assertEqual(
+                len(stage.output_chunks), 0, "Last stage should store output chunks"
+            )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    def test_schedule_releases_output_before_backward(self, ScheduleClass):
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size).to(self.device)
+        ref_mod = copy.deepcopy(full_mod)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+        stage = PipelineStage(stage_mod, self.rank, self.world_size, self.device)
+        schedule = ScheduleClass(
+            stage,
+            chunks,
+            loss_fn=torch.nn.MSELoss(reduction="sum"),
+            scale_grads=False,
+        )
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+        send_storage_refs = {}
+        original_get_fwd_send_ops = stage.get_fwd_send_ops
+        original_backward = stage.backward_one_chunk
+
+        def get_fwd_send_ops(microbatch_index):
+            ops = original_get_fwd_send_ops(microbatch_index)
+            if ops:
+                send_storage_refs[microbatch_index] = [
+                    weakref.ref(op.tensor.untyped_storage()) for op in ops
+                ]
+            return ops
+
+        def backward_one_chunk(microbatch_index, *args, **kwargs):
+            if not stage.is_last:
+                state = stage._forward_chunk_states[microbatch_index]
+                self.assertTrue(all(output is None for output in state.live_outputs))
+                for storage_ref in send_storage_refs[microbatch_index]:
+                    self.assertIsNone(storage_ref())
+            return original_backward(microbatch_index, *args, **kwargs)
+
+        with (
+            mock.patch.object(stage, "get_fwd_send_ops", side_effect=get_fwd_send_ops),
+            mock.patch.object(
+                stage, "backward_one_chunk", side_effect=backward_one_chunk
+            ),
+        ):
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                schedule.step(target=target)
+            else:
+                schedule.step()
+
+        # Run the reference on the same microbatches as the schedule. A
+        # full-batch GEMM can round differently, and a single ReLU input that
+        # flips sign shifts many gradient elements past these tolerances.
+        for x_mb, target_mb in zip(x.chunk(chunks), target.chunk(chunks)):
+            torch.nn.MSELoss(reduction="sum")(ref_mod(x_mb), target_mb).backward()
+        ref_stage = ref_mod.get_submodule(f"layers.{self.rank}")
+        for name, parameter in stage_mod.named_parameters():
+            self.assertEqual(
+                parameter.grad,
+                ref_stage.get_parameter(name).grad,
+                rtol=1e-5,
+                atol=4e-5,
+            )
+
+
+instantiate_parametrized_tests(StageTest)
+
+
+class StageNegativeTest(MultiProcContinuousTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return backend
+
+    @classmethod
+    def device_type(cls) -> str:
+        return device_type
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    def test_shape_prop_mismatch(self):
+        """Tests shape prop errors are raised"""
+        full_mod = MultiMLP(d_hid, n_layers=self.world_size)
+        full_mod.to(self.device)
+        stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        stage = PipelineStage(
+            stage_mod,
+            self.rank,
+            self.world_size,
+            self.device,
+        )
+        stage._runtime_validate = True
+
+        # Attach to a schedule
+        schedule = ScheduleGPipe(stage, chunks)
+
+        # Run
+        def _run_step(x):
+            if self.rank == 0:
+                return schedule.step(x)
+            else:
+                return schedule.step()
+
+        _run_step(x)
+
         if self.rank == 0:
-            with self.assertRaisesRegex(PipeliningShapeError, "shape mismatch"):
+            with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
                 _run_step(torch.randn(batch_size + 1, d_hid, device=self.device))
 
-    @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+            with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
+                _run_step(x.to(torch.int32))
+
+            # output of stage's mlp layer will be flattened by this hook, the stage should err
+            handle = stage_mod.register_forward_hook(get_flatten_hook())
+            with self.assertRaisesRegex(PipeliningMetadataError, "shape mismatch"):
+                _run_step(x)
+            handle.remove()
+
+            stage_mod.register_forward_hook(get_dtype_change_hook(torch.bfloat16))
+            with self.assertRaisesRegex(PipeliningMetadataError, "dtype mismatch"):
+                _run_step(x)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     def test_custom_dw_errors(self):
         """Tests expected errors are raised"""
         full_mod = MultiMLP(d_hid, n_layers=self.world_size)
@@ -317,37 +1008,10 @@ class StageTest(MultiProcContinousTest):
             self.device,
             dw_builder=lambda: None,
         )
+        stage_with_dw_builder._has_backward = True
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):
             stage_with_dw_builder.backward_weight_one_chunk(bwd_chunk_id=0)
 
 
-instantiate_parametrized_tests(StageTest)
-
 if __name__ == "__main__":
-    # Check if GPU and NCCL are available
-    if not (
-        dist.is_available()
-        and dist.is_nccl_available()
-        and torch.cuda.device_count() > 1
-    ):
-        print(
-            "c10d NCCL not available or not enough GPUs, skipping tests",
-            file=sys.stderr,
-        )
-        sys.exit(0)
-
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", 2))
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        StageTest.run_rank(rank, world_size)
-    else:
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            StageTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()

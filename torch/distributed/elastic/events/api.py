@@ -10,12 +10,12 @@
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Optional, Union
+from typing import Union
 
 
 __all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
 
-EventMetadataValue = Union[str, int, float, bool, None]
+EventMetadataValue = str | int | float | bool | None
 
 
 class EventSource(str, Enum):
@@ -49,14 +49,17 @@ class Event:
 
     @staticmethod
     def deserialize(data: Union[str, "Event"]) -> "Event":
+        """Return a ``Event`` from a JSON string; ``Event`` inputs are returned as is."""
         if isinstance(data, Event):
             return data
         if isinstance(data, str):
             data_dict = json.loads(data)
         data_dict["source"] = EventSource[data_dict["source"]]  # type: ignore[possibly-undefined]
+        # pyrefly: ignore [unbound-name]
         return Event(**data_dict)
 
     def serialize(self) -> str:
+        """Return the event as a JSON string."""
         return json.dumps(asdict(self))
 
 
@@ -94,8 +97,8 @@ class RdzvEvent:
     pid: int
     node_state: NodeState
     master_endpoint: str = ""
-    rank: Optional[int] = None
-    local_id: Optional[int] = None
+    rank: int | None = None
+    local_id: int | None = None
     error_trace: str = ""
 
     def __str__(self):
@@ -103,12 +106,15 @@ class RdzvEvent:
 
     @staticmethod
     def deserialize(data: Union[str, "RdzvEvent"]) -> "RdzvEvent":
+        """Return a ``RdzvEvent`` from a JSON string; ``RdzvEvent`` inputs are returned as is."""
         if isinstance(data, RdzvEvent):
             return data
         if isinstance(data, str):
             data_dict = json.loads(data)
         data_dict["node_state"] = NodeState[data_dict["node_state"]]  # type: ignore[possibly-undefined]
+        # pyrefly: ignore [unbound-name]
         return RdzvEvent(**data_dict)
 
     def serialize(self) -> str:
+        """Return the event as a JSON string."""
         return json.dumps(asdict(self))

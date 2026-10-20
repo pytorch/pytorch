@@ -4,7 +4,10 @@ import os
 import sys
 
 import torch
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+)
 
 
 # Make the helper files in test/ importable
@@ -13,17 +16,14 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import FileCheck, JitTestCase, warmup_backward
 
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
-
 @skipIfTorchDynamo()
 class TestProfiler(JitTestCase):
     def setUp(self):
+        # Don't call super().setUp() — JitTestCase.setUp installs JIT emit
+        # hooks that cause segfaults during process cleanup. Record state
+        # baselines that tearDown checks for.
+        self._prev_torch_function_mode_stack_len = torch._C._len_torch_function_stack()
+        self._prev_torch_function_state = torch._C._get_torch_function_state()
         self.prev_exec = torch._C._jit_set_profiling_executor(True)
         self.prev_profiling = torch._C._get_graph_executor_optimize(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
@@ -264,6 +264,13 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
+    def test_invalid_fusion_strategy_raises_value_error(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"FusionBehavior.*(STATIC|DYNAMIC).*got:\s*COMPLEX",
+        ):
+            torch.jit.set_fusion_strategy([("STATIC", 2), ("COMPLEX", 3)])
+
     def test_iterative_fusion(self):
         @torch.jit.script
         def foo(a, b, c, d):
@@ -284,3 +291,7 @@ class TestProfiler(JitTestCase):
 
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TensorExprGroup"))), 2)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -11,7 +11,6 @@
 #include <thread>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Backend.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -26,6 +25,10 @@
 
 #include "caffe2/serialize/versions.h"
 #include "miniz.h"
+
+#ifdef _WIN32
+#include <Windows.h>
+#endif // _WIN32
 
 namespace caffe2 {
 namespace serialize {
@@ -196,8 +199,7 @@ void PyTorchStreamReader::init() {
 
   // version check
   at::DataPtr version_ptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t version_size;
+  size_t version_size = 0;
   if (hasRecord(".data/version")) {
     std::tie(version_ptr, version_size) = getRecord(".data/version");
   } else {
@@ -242,7 +244,11 @@ void PyTorchStreamReader::valid(const char* what, const char* info) {
       what,
       info,
       ": ",
-      mz_zip_get_error_string(err));
+      mz_zip_get_error_string(err),
+      ". This is an internal miniz error. If you are seeing this error, there "
+      "is a high likelihood that your checkpoint file is corrupted. "
+      "This can happen if the checkpoint was not saved properly, "
+      "was transferred incorrectly, or the file was modified after saving.");
 }
 
 constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
@@ -361,7 +367,8 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
-    const std::string& name) {
+    const std::string& name,
+    std::optional<at::Allocator*> allocator) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
@@ -371,7 +378,9 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
-  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
+  at::Allocator* allocatorPtr =
+      allocator.has_value() ? allocator.value() : c10::GetCPUAllocator();
+  at::DataPtr retval = allocatorPtr->allocate(stat.m_uncomp_size);
   mz_zip_reader_extract_to_mem(
       ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
@@ -414,7 +423,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
               recordOff + startPos, (char*)dst + startPos, threadReadSize);
         }
         readSizes[i] = size;
-        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
+        LOG(INFO) << "Thread " << i << " read [" << startPos << '-' << endPos
                   << "] " << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,
@@ -449,10 +458,11 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
 // read record with multi clients
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     const std::string& name,
-    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+    std::optional<at::Allocator*> allocator) {
   if (additionalReaders.empty()) {
     // No additional readers or record too small, use single threaded version
-    return getRecord(name);
+    return getRecord(name, allocator);
   }
 
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
@@ -469,7 +479,9 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
     return getRecord(name);
   }
 
-  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
+  at::Allocator* allocatorPtr =
+      allocator.has_value() ? allocator.value() : c10::GetCPUAllocator();
+  at::DataPtr retval = allocatorPtr->allocate(stat.m_uncomp_size);
   void* dst = retval.get();
   PyTorchStreamReader::getRecordMultiReaders(name, additionalReaders, dst, n);
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
@@ -706,21 +718,35 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   if (archive_name_.size() == 0) {
     CAFFE_THROW("invalid file name: ", file_name);
   }
-  if (!writer_func_) {
-    file_stream_.open(
-        file_name,
-        std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
-    valid("opening archive ", file_name.c_str());
 
-    const std::string dir_name = parentdir(file_name);
-    if (!dir_name.empty()) {
-      struct stat st;
-      bool dir_exists =
-          (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
-      TORCH_CHECK(
-          dir_exists, "Parent directory ", dir_name, " does not exist.");
+  const std::string dir_name = parentdir(file_name);
+  if (!dir_name.empty()) {
+    struct stat st;
+    bool dir_exists =
+        (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+    TORCH_CHECK(
+        dir_exists, "Parent directory ", dir_name, " does not exist.");
+  }
+  TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
+
+  if (!writer_func_) {
+    valid("opening archive ", file_name.c_str());
+    try {
+      file_stream_.exceptions(std::ios_base::failbit | std::ios_base::badbit);
+      file_stream_.open(
+          file_name,
+          std::ofstream::out | std::ofstream::trunc | std::ofstream::binary
+        );
+    } catch (const std::ios_base::failure&) {
+#ifdef _WIN32
+      // Windows have verbose error code, we prefer to use it than std errno.
+      uint32_t error_code = GetLastError();
+      CAFFE_THROW("open file failed with error code: ", error_code);
+#else // !_WIN32
+      CAFFE_THROW("open file failed with strerror: ", strerror(errno));
+#endif // _WIN32
     }
-    TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
+
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       if (!buf) {
         // See [Note: write_record_metadata]
@@ -750,8 +776,20 @@ void PyTorchStreamWriter::writeRecord(
     bool compress) {
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
-  TORCH_INTERNAL_ASSERT(
-      files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
+  if (files_written_.count(name) > 0) {
+    // Allow multiple writes for triton binaries
+    bool is_triton_extension =
+        c10::ends_with(name, ".so") ||
+        c10::ends_with(name, ".cubin") ||
+        c10::ends_with(name, ".hsaco");
+
+    if (is_triton_extension) {
+      LOG(WARNING) << "File '" << name << "' is being serialized multiple times";
+      return;
+    }
+
+    TORCH_INTERNAL_ASSERT(false, "Tried to serialize file twice: ", name);
+  }
   if (name == kSerializationIdRecordName && serialization_id_.empty()) {
     // In case of copying records from another file, skip writing a different
     // serialization_id than the one computed in this writer.
@@ -760,11 +798,7 @@ void PyTorchStreamWriter::writeRecord(
   }
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size = detail::getPadding(
-      ar_->m_archive_size,
-      full_name.size(),
-      size,
-      padding_,
-      alignment_);
+      ar_->m_archive_size, full_name.size(), size, padding_, alignment_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   if (!compute_crc32_) {
 #if (!defined(FBCODE_CAFFE2))
@@ -883,7 +917,7 @@ void PyTorchStreamWriter::writeSerializationId() {
     serialization_id_oss << std::setfill('0') << std::setw(20)
                          << combined_record_name_hash << std::setfill('0')
                          << std::setw(20) << combined_uncomp_crc32_;
-    serialization_id_ = serialization_id_oss.str();
+    serialization_id_ = std::move(serialization_id_oss).str();
     writeRecord(
         kSerializationIdRecordName,
         serialization_id_.c_str(),

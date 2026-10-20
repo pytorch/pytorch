@@ -37,8 +37,8 @@ static inline ExprPtr newBinaryOpOfType(
     case IRNodeType::kRshift:
       return alloc<Rshift>(lhs, rhs);
     default:
-      LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
+      TORCH_INTERNAL_ASSERT(
+          false, "unsupported expr_type: ", static_cast<int>(expr_type));
   }
 }
 
@@ -96,18 +96,16 @@ SimplifierHashType Term::hashVars() const {
 
 void Term::sort() {
   // order of ops important for float
-  if (dtype().is_floating_point()) {
-    throw std::logic_error("reordering FP ops");
-  }
+  TORCH_CHECK(!dtype().is_floating_point(), "reordering FP ops");
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -123,18 +121,16 @@ SimplifierHashType Polynomial::hashVars() const {
 }
 
 void Polynomial::sort() {
-  if (dtype().is_floating_point()) {
-    throw std::logic_error("reordering FP ops");
-  }
+  TORCH_CHECK(!dtype().is_floating_point(), "reordering FP ops");
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -162,10 +158,10 @@ void MaxTerm::uniquefy() {
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -193,10 +189,10 @@ void MinTerm::uniquefy() {
       variables_.begin(),
       variables_.end(),
       [&](const ExprPtr& a, const ExprPtr& b) {
-        if (!str_repr_cache.count(a)) {
+        if (!str_repr_cache.contains(a)) {
           str_repr_cache[a] = std::to_string(a);
         }
-        if (!str_repr_cache.count(b)) {
+        if (!str_repr_cache.contains(b)) {
           str_repr_cache[b] = std::to_string(b);
         }
         return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -208,9 +204,9 @@ template <class Op>
 static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
-      if (bc->lanes() != bcother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == bcother->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Broadcast>(
           alloc<Op>(bc->value(), bcother->value()), bc->lanes());
@@ -218,9 +214,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (RampPtr r = to<Ramp>(rhs)) {
-      if (bc->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == r->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(bc->value(), r->base()), r->stride(), r->lanes());
@@ -228,9 +224,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
   } else if (RampPtr ramp = to<Ramp>(lhs)) {
     if (RampPtr rother = to<Ramp>(rhs)) {
-      if (ramp->lanes() != rother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == rother->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(ramp->base(), rother->base()),
@@ -240,9 +236,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (BroadcastPtr bc = to<Broadcast>(rhs)) {
-      if (ramp->lanes() != bc->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == bc->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
       ExprPtr ret = alloc<Ramp>(
           alloc<Op>(ramp->base(), bc->value()), ramp->stride(), ramp->lanes());
       return ret;
@@ -256,9 +252,9 @@ static ExprPtr combineMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
 static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
-      if (bc->lanes() != bcother->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == bcother->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Broadcast>(
           alloc<Mul>(bc->value(), bcother->value()), bc->lanes());
@@ -266,9 +262,9 @@ static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (RampPtr r = to<Ramp>(rhs)) {
-      if (bc->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          bc->lanes() == r->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Mul>(bc->value(), r->base()),
@@ -278,9 +274,9 @@ static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
   } else if (RampPtr ramp = to<Ramp>(lhs)) {
     if (RampPtr r = to<Ramp>(rhs)) {
-      if (ramp->lanes() != r->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == r->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Mul>(ramp->base(), r->base()),
@@ -290,9 +286,9 @@ static ExprPtr mulMultilane(const ExprPtr& lhs, const ExprPtr& rhs) {
     }
 
     if (BroadcastPtr bc = to<Broadcast>(rhs)) {
-      if (ramp->lanes() != bc->lanes()) {
-        throw malformed_input("multilane lane mismatch");
-      }
+      TORCH_CHECK(
+          ramp->lanes() == bc->lanes(),
+          "MALFORMED INPUT: multilane lane mismatch");
 
       ExprPtr ret = alloc<Ramp>(
           alloc<Mul>(bc->value(), ramp->base()),
@@ -414,7 +410,7 @@ ExprPtr PolynomialTransformer::mutate(const AddPtr& v) {
   }
 
   // If this is a floating point Add then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Add>(lhs_new, rhs_new);
@@ -598,7 +594,7 @@ ExprPtr PolynomialTransformer::mutate(const SubPtr& v) {
   }
 
   // If this is a floating point Sub then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Sub>(lhs_new, rhs_new);
@@ -885,7 +881,7 @@ ExprPtr PolynomialTransformer::insertIntoTerm(
   bool merged{false};
   for (const auto& component : term->variables()) {
     if (auto roundoff = isRoundOff(component, expr)) {
-      vars.push_back(roundoff);
+      vars.push_back(std::move(roundoff));
       merged = true;
     } else {
       vars.push_back(component);
@@ -897,10 +893,10 @@ ExprPtr PolynomialTransformer::insertIntoTerm(
   }
 
   if (vars.size() == 1 && immediateEquals(term->scalar(), 1)) {
-    return vars[0];
+    return std::move(vars[0]);
   }
 
-  return alloc<Term>(hasher_, term->scalar(), vars);
+  return alloc<Term>(hasher_, term->scalar(), std::move(vars));
 }
 
 ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
@@ -930,7 +926,7 @@ ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
     variable = lhs_new;
   }
 
-  // Handle special case mul by 1 since thats safe for floating point, even if
+  // Handle special case mul by 1 since that's safe for floating point, even if
   // it's Nan/Inf.
   if (scalar && immediateEquals(scalar, 1)) {
     auto c = alloc<Cast>(v->dtype(), variable);
@@ -938,7 +934,7 @@ ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
   }
 
   // If this is a floating point Mul then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Mul>(lhs_new, rhs_new);
@@ -1089,7 +1085,7 @@ ExprPtr PolynomialTransformer::mutate(const DivPtr& v) {
   }
 
   // If this is a floating point Div then order of operations is important, we
-  // dont want to combine ops.
+  // don't want to combine ops.
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return alloc<Div>(lhs_new, rhs_new);
@@ -1105,8 +1101,8 @@ ExprPtr PolynomialTransformer::mutate(const DivPtr& v) {
     return lhs_new;
   }
 
-  // If numberator and denominator are equal the result is 1.
-  // Unless the demoninator could be zero.
+  // If numerator and denominator are equal the result is 1.
+  // Unless the denominator could be zero.
   // if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
   //   return getImmediateByType(v->dtype(), 1);
   // }
@@ -1745,7 +1741,7 @@ ExprPtr TermExpander::mutate(const TermPtr& v) {
   std::vector<ExprPtr> vars;
   std::vector<ExprPtr> multilaneVars;
 
-  // Assume we can reorder here because we wont merge floating terms.
+  // Assume we can reorder here because we won't merge floating terms.
   ExprPtr lastNode{nullptr};
   for (const auto& var : v->variables()) {
     ExprPtr node = var->accept_mutator(this);
@@ -1830,7 +1826,7 @@ static ExprPtr polyGCD(const PolynomialPtr& poly) {
   ExprPtr scalar = poly->scalar();
   const std::vector<TermPtr>& variables = poly->variables();
 
-  // We ony want to factorize if we're saving complete operations, i.e. no
+  // We only want to factorize if we're saving complete operations, i.e. no
   // value in factorizing 6x + 4y into 2 * (3x + 2y) since we don't save work.
   int opsSaved = 1; // default to saving the scalar.
   long GCD = std::abs(immediateAs<long>(scalar));
@@ -2088,7 +2084,7 @@ static ExprPtr simplifyRoundModPattern(const PolynomialPtr& poly) {
 
         // TODO: for now don't attempt partial factorization of this
         // optimization. E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x +
-        // (x/y) * y but unsure thats actually much better, particularly with
+        // (x/y) * y but unsure that's actually much better, particularly with
         // CSE.
         if (!immediateEquals(
                 evaluateOp(alloc<Sub>(r->scalar(), m->scalar())), 0)) {
@@ -2193,10 +2189,10 @@ ExprPtr TermExpander::mutate(const PolynomialPtr& v) {
   auto vars = v->variables();
   std::unordered_map<ExprPtr, std::string> str_repr_cache;
   std::sort(vars.begin(), vars.end(), [&](const ExprPtr& a, const ExprPtr& b) {
-    if (!str_repr_cache.count(a)) {
+    if (!str_repr_cache.contains(a)) {
       str_repr_cache[a] = std::to_string(a);
     }
-    if (!str_repr_cache.count(b)) {
+    if (!str_repr_cache.contains(b)) {
       str_repr_cache[b] = std::to_string(b);
     }
     return str_repr_cache.at(a) < str_repr_cache.at(b);
@@ -2290,11 +2286,9 @@ ExprPtr TermExpander::mutate(const PolynomialPtr& v) {
 ExprPtr TermExpander::mutate(const MaxTermPtr& v) {
   auto& variables = v->variables();
   if (variables.empty()) {
-    if (!v->scalar()) {
-      // This case should never happen because MaxTerm will be created only
-      // on valid Max expressions.
-      throw std::logic_error("empty maxterm op");
-    }
+    // This case should never happen because MaxTerm will be created only
+    // on valid Max expressions.
+    TORCH_CHECK(v->scalar(), "empty maxterm op");
     return v->scalar();
   }
   ExprPtr max;
@@ -2312,11 +2306,9 @@ ExprPtr TermExpander::mutate(const MaxTermPtr& v) {
 ExprPtr TermExpander::mutate(const MinTermPtr& v) {
   auto& variables = v->variables();
   if (variables.empty()) {
-    if (!v->scalar()) {
-      // This case should never happen because MinTerm will be created only
-      // on valid Min expressions.
-      throw std::logic_error("empty minterm op");
-    }
+    // This case should never happen because MinTerm will be created only
+    // on valid Min expressions.
+    TORCH_CHECK(v->scalar(), "empty minterm op");
     return v->scalar();
   }
   ExprPtr min;
@@ -2382,7 +2374,7 @@ StmtPtr TermExpander::mutate(const FreePtr& v) {
       buf_new,
       buildErrorMessage("TermExpander mutation produced null for Buf."));
 
-  if (eliminated_allocations_.count(buf_new->base_handle())) {
+  if (eliminated_allocations_.contains(buf_new->base_handle())) {
     eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
@@ -2548,7 +2540,7 @@ StmtPtr SimplifierUnderContext::mutate(const ForPtr& v) {
 
   // save bounds info before this for-stmt
   //
-  // The same variable could have appeared in a if-stmt which the for-stmt is
+  // The same variable could have appeared in an if-stmt which the for-stmt is
   // nested inside, and we need to restore its bounds info after the for-stmt.
   //
   // An example,
@@ -2612,7 +2604,7 @@ StmtPtr SimplifierUnderContext::mutate(const ForPtr& v) {
     }
 
     if (block->nstmts() == 1) {
-      // if the stmt in the loop body is a if-stmt, try to move the branching
+      // if the stmt in the loop body is an if-stmt, try to move the branching
       // out of the loop
       if (auto cond = to<Cond>(block->front())) {
         StmtPtr reordered = handleForCondReordering(v, cond);
@@ -3079,7 +3071,7 @@ bool exprEquals(const ExprPtr& A, const ExprPtr& B) {
       return false;
     }
     return immediateEquals(diff, 0);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     return false;
   }
 }
@@ -3095,9 +3087,9 @@ ExprPtr IRSimplifier::simplify(ExprPtr e) {
   // There may be terms left in the IR, expand them.
   TermExpander expander(&simplifier);
   e = e->accept_mutator(&expander);
-  if (!expander.check_safe()) {
-    throw malformed_input("eliminated null Allocation without free");
-  }
+  TORCH_CHECK(
+      expander.check_safe(),
+      "MALFORMED INPUT: eliminated null Allocation without free");
 
   GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(e));
   return e;
@@ -3118,9 +3110,9 @@ StmtPtr IRSimplifier::simplify(StmtPtr s) {
   // There may be terms left in the IR, expand them.
   TermExpander expander(&simplifier);
   s = s->accept_mutator(&expander);
-  if (!expander.check_safe()) {
-    throw malformed_input("eliminated null Allocation without free");
-  }
+  TORCH_CHECK(
+      expander.check_safe(),
+      "MALFORMED INPUT: eliminated null Allocation without free");
 
   GRAPH_DEBUG("(Simplifier) Simplified: ", std::to_string(s));
   return s;

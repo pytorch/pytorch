@@ -12,25 +12,61 @@ PyObject* torch_c_dynamo_guards_init();
 // not visible there.
 void* convert_to_root_guard_manager(py::object root);
 bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals);
+bool root_guard_manager_has_no_guards(void* root);
+
+extern thread_local bool tls_is_in_mode_without_ignore_compile_internals;
+
+void set_is_in_mode_without_ignore_compile_internals(bool value);
+
+// If we're in a mode with ignore_compile_internals=False, we WON'T mask
+// Python keys from guard checking (they should be visible, so eager fallback is
+// possible). Otherwise (invisible mode or no mode), we WILL mask Python keys to
+// avoid guard failures on the dispatch keyset at runtime.
+bool get_is_in_mode_without_ignore_compile_internals();
 
 struct LocalState {
   // TLS state that changes operators
   c10::impl::LocalDispatchKeySet dispatch_modifier;
   c10::DispatchKeySet override_dispatch_key_set;
   bool grad_mode_enabled;
+  bool should_mask_python_keys;
 
   at::DispatchKeySet apply(at::DispatchKeySet ks) const {
     if (override_dispatch_key_set.empty()) {
-      return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
+      auto result =
+          (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
+
+      if (should_mask_python_keys) {
+        result = result -
+            c10::DispatchKeySet(
+                     {c10::DispatchKey::Python,
+                      c10::DispatchKey::PythonTLSSnapshot,
+                      c10::DispatchKey::PythonDispatcher});
+      }
+
+      return result;
     } else {
       return override_dispatch_key_set;
     }
   }
 
+  // C++ FakeTensors carry Fake; masking it lets guards built from fakes match
+  // real tensors. Explicit DispatchKeySet values go through apply() instead,
+  // since programs can branch on whether they contain Fake.
+  at::DispatchKeySet apply_for_tensor(at::DispatchKeySet ks) const {
+    auto result = apply(ks);
+    if (override_dispatch_key_set.empty() && should_mask_python_keys) {
+      result = result - c10::DispatchKeySet(c10::DispatchKey::Fake);
+    }
+    return result;
+  }
+
   LocalState()
       : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
         override_dispatch_key_set(c10::BackendComponent::InvalidBit),
-        grad_mode_enabled(at::GradMode::is_enabled()) {}
+        grad_mode_enabled(at::GradMode::is_enabled()),
+        should_mask_python_keys(
+            !get_is_in_mode_without_ignore_compile_internals()) {}
 
   void overrideDispatchKeySet(c10::DispatchKeySet ks) {
     override_dispatch_key_set = ks;
@@ -43,8 +79,10 @@ class TensorCheck {
       const LocalState& state,
       PyTypeObject* pt,
       const at::Tensor& v,
+      c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      bool device_index_is_current = false);
 
   TensorCheck(
       const LocalState& state,
@@ -73,12 +111,30 @@ class TensorCheck {
   PyTypeObject* pytype;
 
  private:
+  // True when the tensor's device index is the one this guard accepts.
+  bool deviceIndexMatches(const c10::Device& device) const;
+
   uint64_t dispatch_key_; // DispatchKeySet includes device/layout
   at::ScalarType dtype_;
+  // The device index this guard accepts. nullopt means "the index this rank is
+  // currently on" -- it does NOT mean "any index". There is no unchecked state:
+  // both forms compare the tensor's index against something, and a tensor on
+  // some other device fails either way. Do not add an accept-anything case; the
+  // compiled artifact launches on the current device, so a tensor from another
+  // one would run against the wrong context.
+  //
   // Note(voz): While dispatch_key_ is sufficiently representative of a device
   // In that keys are more granular AND device specific - they do not
   // necessarily capture device indices correctly.
-  at::DeviceIndex device_index_;
+  //
+  // nullopt is compile_on_one_rank: the guarded tensor sat on the current
+  // accelerator when this guard was built, and CooR's single-accelerator
+  // invariant means it must sit there on every rank too. Recording the index
+  // would pin the guard -- and the compiled artifact behind it -- to whichever
+  // rank happened to compile. Only accelerator tensors are relaxed; cpu is
+  // portable and keeps its index. The device *type* is guarded either way,
+  // since that rides in dispatch_key_.
+  std::optional<c10::DeviceIndex> device_index_;
   bool requires_grad_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<c10::SymInt>> sizes_;

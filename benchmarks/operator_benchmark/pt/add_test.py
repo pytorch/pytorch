@@ -52,27 +52,6 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_test(add_long_configs + add_short_configs, AddBenchmark)
 op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenchmark)
 
-
-"""Mircobenchmark for addmm operator."""
-
-
-class AddmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, device):
-        self.inputs = {
-            "input_one": torch.rand(M, K, device=device, requires_grad=self.auto_set()),
-            "mat1": torch.rand(M, N, device=device, requires_grad=self.auto_set()),
-            "mat2": torch.rand(N, K, device=device, requires_grad=self.auto_set()),
-        }
-        self.set_module_name("addmm")
-
-    def forward(self, input_one, mat1, mat2):
-        return torch.addmm(input_one, mat1, mat2)
-
-
-op_bench.generate_pt_test(add_long_configs + add_short_configs, AddmmBenchmark)
-op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddmmBenchmark)
-
-
 """Mircobenchmark for addr operator."""
 
 
@@ -105,47 +84,6 @@ addr_configs = op_bench.cross_product_configs(
 
 op_bench.generate_pt_test(addr_configs, AddrBenchmark)
 op_bench.generate_pt_gradient_test(addr_configs, AddrBenchmark)
-
-
-"""Mircobenchmark for addbmm operator."""
-
-
-class AddbmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, B, M, N, K, device):
-        self.inputs = {
-            "input_one": torch.rand(
-                (M, N), device=device, requires_grad=self.auto_set()
-            ),
-            "batch1": torch.rand(
-                (B, M, K), device=device, requires_grad=self.auto_set()
-            ),
-            "batch2": torch.rand(
-                (
-                    B,
-                    K,
-                    N,
-                ),
-                device=device,
-                requires_grad=self.auto_set(),
-            ),
-        }
-        self.set_module_name("addbmm")
-
-    def forward(self, input_one, batch1, batch2):
-        return torch.addbmm(input_one, batch1, batch2)
-
-
-addbmm_configs = op_bench.cross_product_configs(
-    B=[2, 100],
-    M=[8, 256],
-    N=[256, 16],
-    K=[15, 16],
-    device=["cpu", "cuda"],
-    tags=["addbmm"],
-)
-
-op_bench.generate_pt_test(addbmm_configs, AddbmmBenchmark)
-op_bench.generate_pt_gradient_test(addbmm_configs, AddbmmBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

@@ -6,7 +6,9 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/Logging.h>
+#include "c10/core/CPUAllocator.h"
 #include "c10/util/irange.h"
+#include "caffe2/serialize/in_memory_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 
 namespace caffe2 {
@@ -48,7 +50,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -143,7 +145,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -174,10 +176,15 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
 
   // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
   additionalReader.clear();
+  // Each IStreamAdapter needs its own independent stream to avoid data races.
+  // IStreamAdapter does not synchronize access to the underlying istream.
+  std::vector<std::unique_ptr<std::istringstream>> additional_streams;
   std::vector<uint8_t> dst1(size1), dst2(size2);
   for (int i = 0; i < 10; ++i) {
     // Test various sizes of read threads
-    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+    additional_streams.push_back(std::make_unique<std::istringstream>(the_file));
+    additionalReader.push_back(
+        std::make_unique<IStreamAdapter>(additional_streams.back().get()));
 
     ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
     ASSERT_EQ(ret, size1);
@@ -225,7 +232,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output2.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -286,7 +293,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output3.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -378,7 +385,7 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
   auto writer_serialization_id = writer.serializationId();
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output4.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -419,7 +426,7 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
       {"pytorch.stream.writer.metadata",
        {{"serialization_id", writer.serializationId()},
         {"file_name", "archive"},
-        {"file_size", str(oss.str().length())}}},
+        {"file_size", str(std::move(oss).str().length())}}},
       {"pytorch.stream.reader.metadata",
        {{"serialization_id", writer.serializationId()},
         {"file_name", "archive"},
@@ -430,6 +437,204 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   SetAPIUsageMetadataLogger(
       [&](const std::string& context,
           const std::map<std::string, std::string>& metadata_map) {});
+}
+
+class TestAllocator : public at::Allocator {
+ public:
+
+  explicit TestAllocator(at::Allocator* allocator): baseAllocator_(allocator) {}
+  at::DataPtr allocate(size_t nbytes) override {
+  allocatedBytes_ += nbytes;
+  return baseAllocator_->allocate(nbytes);
+  }
+  at::DeleterFnPtr raw_deleter() const override {
+    return baseAllocator_->raw_deleter();
+  }
+  void copy_data(void* dest, const void* src, std::size_t count) const override {
+    default_copy_data(dest, src, count);
+  }
+  size_t getAllocatedBytes() {
+    return allocatedBytes_;
+  }
+ private:
+  at::Allocator* baseAllocator_;
+  size_t allocatedBytes_{0};
+};
+
+TEST(PyTorchStreamWriterAndReader, SaveAndLoadWithAllocator) {
+  // create two test allocators, ones is supposed to be the default allocator
+  // the other one is only used when user specifies it
+  auto defaultAllocator = at::GetCPUAllocator();
+  TestAllocator overrideAllocator(defaultAllocator);
+  TestAllocator baseAllocator(defaultAllocator);
+  c10::SetCPUAllocator(&baseAllocator, 10 /* priority */);
+
+  std::ostringstream oss;
+  // write records through writers
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+  const size_t kBytes1 = 127;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes1> data1;
+  // Inplace memory buffer
+  std::vector<uint8_t> buf(data1.size());
+
+  for (auto i : c10::irange(data1.size())) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1", data1.data(), data1.size());
+
+  const size_t kBytes2 = 64;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes2> data2;
+  for (auto i : c10::irange(data2.size())) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
+
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = std::move(oss).str();
+  const char* file_name = "output.zip";
+  std::ofstream foo(file_name);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  std::istringstream iss(the_file);
+
+  // read records through readers
+  PyTorchStreamReader reader(&iss);
+  ASSERT_TRUE(reader.hasRecord("key1"));
+  ASSERT_TRUE(reader.hasRecord("key2"));
+  ASSERT_FALSE(reader.hasRecord("key2000"));
+  // get the bytes allocated byfore read
+  const auto allocBytes = baseAllocator.getAllocatedBytes();
+  at::DataPtr data_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t size;
+  // allocated with override allocator
+  std::tie(data_ptr, size) = reader.getRecord("key1", &overrideAllocator);
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes);
+  // allocate with base allocator
+  std::tie(data_ptr, size) = reader.getRecord("key1");
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1);
+
+  std::tie(data_ptr, size) = reader.getRecord("key2", &overrideAllocator);
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1 + kBytes2);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1);
+  std::tie(data_ptr, size) = reader.getRecord("key2");
+  EXPECT_EQ(overrideAllocator.getAllocatedBytes(), kBytes1 + kBytes2);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1 + kBytes2);
+  std::tie(data_ptr, size) = reader.getRecord("key2", &baseAllocator);
+  EXPECT_EQ(baseAllocator.getAllocatedBytes(), allocBytes + kBytes1 + 2 * kBytes2);
+}
+
+
+TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreadsWithAllocator) {
+  auto defaultAllocator = at::GetCPUAllocator();
+  TestAllocator overrideAllocator(defaultAllocator);
+  TestAllocator baseAllocator(defaultAllocator);
+  c10::SetCPUAllocator(&baseAllocator, 10 /* priority */);
+  std::ostringstream oss;
+  // write records through writers
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+
+  const size_t kBytes1 = 127;
+  const size_t kBytes2 = 64;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes1> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, kBytes2> data2;
+  for (auto i : c10::irange(data1.size())) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1", data1.data(), data1.size());
+
+  for (auto i : c10::irange(data2.size())) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
+
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = std::move(oss).str();
+  const char* file_name = "output.zip";
+  std::ofstream foo(file_name);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  // read records through pytorchStreamReader
+  std::istringstream iss(the_file);
+  PyTorchStreamReader reader(&iss);
+  reader.setAdditionalReaderSizeThreshold(0);
+  // before testing, sanity check
+  int64_t size1, size2, ret;
+  at::DataPtr data_ptr;
+  std::tie(data_ptr, size1) = reader.getRecord("key1");
+  std::tie(data_ptr, size2) = reader.getRecord("key2");
+
+  // Test getRecord(name, additional_readers)
+  std::vector<std::shared_ptr<ReadAdapterInterface>> additionalReader;
+  size_t allocatedBytes = 0;
+  auto baseAllocBytes = baseAllocator.getAllocatedBytes();
+  for (int i = 0; i < 10; ++i) {
+    // Test various sized additional readers.
+    std::tie(data_ptr, ret) = reader.getRecord("key1", additionalReader, &overrideAllocator);
+    ASSERT_EQ(ret, size1);
+    allocatedBytes += size1;
+    EXPECT_EQ(overrideAllocator.getAllocatedBytes(), allocatedBytes);
+    EXPECT_EQ(baseAllocator.getAllocatedBytes(), baseAllocBytes);
+    ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), size1), 0);
+
+    baseAllocBytes += size2;
+    std::tie(data_ptr, ret) = reader.getRecord("key2", additionalReader);
+    ASSERT_EQ(ret, size2);
+    ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), size2), 0);
+    EXPECT_EQ(overrideAllocator.getAllocatedBytes(), allocatedBytes);
+    EXPECT_EQ(baseAllocator.getAllocatedBytes(), baseAllocBytes);
+  }
+
+  // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
+  additionalReader.clear();
+  // Each IStreamAdapter needs its own independent stream to avoid data races.
+  // IStreamAdapter does not synchronize access to the underlying istream.
+  std::vector<std::unique_ptr<std::istringstream>> additional_streams;
+  std::vector<uint8_t> dst1(size1), dst2(size2);
+  for (int i = 0; i < 10; ++i) {
+    // Test various sizes of read threads
+    additional_streams.push_back(std::make_unique<std::istringstream>(the_file));
+    additionalReader.push_back(
+        std::make_unique<IStreamAdapter>(additional_streams.back().get()));
+
+    ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
+    ASSERT_EQ(ret, size1);
+
+    ret = reader.getRecord("key2", dst2.data(), size2, additionalReader);
+    ASSERT_EQ(ret, size2);
+  }
+  // clean up
+  remove(file_name);
 }
 
 class ChunkRecordIteratorTest : public ::testing::TestWithParam<int64_t> {};
@@ -463,7 +668,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   std::ofstream foo(fileName, std::ios::binary);
   foo.write(the_file.c_str(), the_file.size());
   foo.close();
@@ -484,6 +689,34 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   ASSERT_EQ(totalReadSize, tensorDataSizeInBytes);
   // clean up
   remove(fileName);
+}
+
+TEST(MemoryReadAdapterTest, ClampsReadsToBufferSize) {
+  constexpr size_t kBufSize = 64;
+  std::vector<uint8_t> buf(kBufSize, 0xAA);
+  MemoryReadAdapter adapter(buf.data(), static_cast<off_t>(kBufSize));
+  ASSERT_EQ(adapter.size(), kBufSize);
+
+  std::array<uint8_t, 32> out{};
+
+  // pos straddles end: read starts at 48, only 16 bytes available.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(48, out.data(), out.size()), 16u);
+  for (size_t i = 0; i < 16; ++i) {
+    EXPECT_EQ(out[i], 0xAA);
+  }
+
+  // pos at end: zero bytes available.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(kBufSize, out.data(), out.size()), 0u);
+
+  // pos past end: still zero; no OOB memcpy.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(kBufSize + 1024, out.data(), out.size()), 0u);
+
+  // In-bounds read returns full count.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(0, out.data(), out.size()), out.size());
 }
 
 } // namespace

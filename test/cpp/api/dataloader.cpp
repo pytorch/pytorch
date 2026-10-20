@@ -87,7 +87,7 @@ struct DummyChunkDataReader : public datasets::ChunkDataReader<int> {
     return chunk_count_;
   };
 
-  void reset() override{};
+  void reset() override {};
 
   const static size_t chunk_count_ = 3;
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
@@ -1439,6 +1439,10 @@ TEST(DataLoaderTest, Reset) {
 TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   struct D : datasets::Dataset<DummyDataset, int> {
     int get(size_t index) override {
+      // Two assertions below depend on this: one rethrows e.original_exception
+      // and requires it to still be a std::invalid_argument, and one compares
+      // e.what() against an exact string a TORCH_CHECK message would not match.
+      // @allow-raw-throw: subject of the ASSERT_THROW below
       throw std::invalid_argument("badness");
     }
     std::optional<size_t> size() const override {
@@ -1479,7 +1483,7 @@ TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
@@ -1517,7 +1521,7 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
     std::mutex mutex;
@@ -1556,7 +1560,7 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
@@ -1605,7 +1609,7 @@ TEST(DataLoaderTest, StatefulDatasetWithCollate) {
     void reset() override {
       counter = 0;
     }
-    void save(torch::serialize::OutputArchive& archive) const override{};
+    void save(torch::serialize::OutputArchive& archive) const override {};
     void load(torch::serialize::InputArchive& archive) override {}
     int counter = 0;
   };
@@ -1747,7 +1751,7 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
       return 1;
     };
 
-    void reset() override{};
+    void reset() override {};
   };
 
   const size_t prefetch_count = 1;
@@ -1791,7 +1795,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
       return 2;
     };
 
-    void reset() override{};
+    void reset() override {};
   };
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -1936,7 +1940,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
       return chunk_count_;
     };
 
-    void reset() override{};
+    void reset() override {};
     BatchType batch_data_ = BatchType(chunk_size, 0);
   };
 
@@ -2115,7 +2119,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
 
   class S : public samplers::Sampler<> {
    public:
-    explicit S(size_t size) : size_(size), index_(0){};
+    explicit S(size_t size) : size_(size), index_(0) {};
 
     void reset(std::optional<size_t> new_size = std::nullopt) override {
       if (new_size.has_value()) {
@@ -2170,7 +2174,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       return chunk_count_;
     };
 
-    void reset() override{};
+    void reset() override {};
     size_t chunk_count_;
   };
 
@@ -2258,7 +2262,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
       return chunk_count_;
     };
 
-    void reset() override{};
+    void reset() override {};
     size_t chunk_count_;
   };
 

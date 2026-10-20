@@ -138,7 +138,7 @@ step6()
 # Step 7: Now, the flaw with step 6 is that we were training on the same exact
 # data. This can lead to all of the models in the ensemble overfitting in the
 # same way. The solution that http://willwhitney.com/parallel-training-jax.html
-# applies is to randomly subset the data in a way that the models do not recieve
+# applies is to randomly subset the data in a way that the models do not receive
 # exactly the same data in each training step!
 # Because the goal of this doc is to show that we can use eager-mode vmap to
 # achieve similar things as JAX, the rest of this is left as an exercise to the reader.

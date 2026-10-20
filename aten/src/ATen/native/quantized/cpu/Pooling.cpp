@@ -278,8 +278,8 @@ Tensor q_maxpool_2d(
               qx.q_scale(),
               qx.q_zero_point());
       auto qx_contig = qx.contiguous();
-      auto qxd = qx_contig.data_ptr<Q>();
-      auto qyd = qy.data_ptr<Q>();
+      auto qxd = qx_contig.const_data_ptr<Q>();
+      auto qyd = qy.mutable_data_ptr<Q>();
       if (ndim == 3 || nbatch == 1) {
         auto* iData = qxd;
         auto* oData = qyd;
@@ -360,7 +360,7 @@ Tensor q_maxpool_3d(
   TORCH_CHECK(kT > 0 && kH > 0 && kW > 0, "kernel_size should be greater than zero.");
   TORCH_CHECK(sT > 0 && sH > 0 && sW > 0, "strides should be greater than zero.");
   TORCH_CHECK(
-      dT && dH > 0 && dW > 0,
+      dT > 0 && dH > 0 && dW > 0,
       "dilation should be greater than zero. "
       "Got (",
       dT,
@@ -425,8 +425,8 @@ Tensor q_maxpool_3d(
       qx.q_scale(),
       qx.q_zero_point());
     auto qx_contig = qx.contiguous();
-    auto qxd = qx_contig.data_ptr<Q>();
-    auto qyd = qy.data_ptr<Q>();
+    auto qxd = qx_contig.const_data_ptr<Q>();
+    auto qyd = qy.mutable_data_ptr<Q>();
 
     spatial_dilated_max_pooling3d<Q>(
         qxd,
@@ -593,9 +593,9 @@ void check_maxpool3d_params(
            batch_size /* batch size */,
            inH /* input height */,
            inW /* input width */,
-           (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input */,
+           reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()) /* input */,
            inC /* input_pixel_stride */,
-           (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+           reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()) /* output data */,
            outC /* output_pixel_stride */,
            nullptr /* thread pool */);
    TORCH_INTERNAL_ASSERT(

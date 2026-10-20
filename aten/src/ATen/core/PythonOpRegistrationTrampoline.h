@@ -13,7 +13,7 @@ class TORCH_API PythonOpRegistrationTrampoline final {
 public:
   //  Returns true if you successfully registered yourself (that means
   //  you are in the hot seat for doing the operator registrations!)
-  static bool registerInterpreter(c10::impl::PyInterpreter*);
+  static bool registerInterpreter(c10::impl::PyInterpreter* /*interp*/);
 
   // Returns nullptr if no interpreter has been registered yet.
   static c10::impl::PyInterpreter* getInterpreter();

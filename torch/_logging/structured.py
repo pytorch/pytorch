@@ -1,11 +1,12 @@
 """
 Utilities for converting data types into structured JSON for dumping.
 """
+
 import inspect
 import os
 import traceback
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch._logging._internal
 
@@ -16,11 +17,11 @@ INTERN_TABLE: dict[str, int] = {}
 DUMPED_FILES: set[str] = set()
 
 
-def intern_string(s: Optional[str]) -> int:
+def intern_string(s: str | None) -> int:
     if s is None:
         return -1
 
-    r = INTERN_TABLE.get(s, None)
+    r = INTERN_TABLE.get(s)
     if r is None:
         r = len(INTERN_TABLE)
         INTERN_TABLE[s] = r

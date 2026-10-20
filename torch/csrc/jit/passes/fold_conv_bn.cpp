@@ -10,7 +10,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/zeros_like.h>
@@ -279,7 +278,7 @@ void FoldConvBatchNormHelper::analyze(
 
       GRAPH_DEBUG("number of Conv-BatchNorm matches: ", matches.size());
       Graph* g = method.graph().get();
-      if (!conv_bn_paths_.count(g)) {
+      if (!conv_bn_paths_.contains(g)) {
         // This is to make sure we don't visit one graph multiple times
         conv_bn_paths_[g] = {};
         for (const Match& match : matches) {

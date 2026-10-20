@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/TensorGeometry.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/flat_hash_map.h>
@@ -32,53 +33,55 @@ struct TORCH_API PyCompilerInterface {
 
   // Invokes py_compiler.bind_function
   virtual std::string bind_function(
-      PyObject* py_compiler,
-      const std::string& fn_name,
+      PyObject* /*py_compiler*/,
+      const std::string& /*fn_name*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      functional_apply_t fn,
+      functional_apply_t /*fn*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<at::TypePtr> packed_args_schema,
-      bool is_custom_function = false,
-      bool is_traceable = true) const {
+      std::vector<at::TypePtr> /*packed_args_schema*/,
+      bool /*is_custom_function*/ = false,
+      bool /*is_traceable*/ = true) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
   // Invokes py_compiler.method_name(fn_name, inputs, packed_args,
   // output_metadata)
   virtual variable_list call_function(
-      PyObject* py_compiler,
-      const char* method_name,
-      const std::string& fn_name,
-      const variable_list& inputs,
-      const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) const {
+      PyObject* /*py_compiler*/,
+      const char* /*method_name*/,
+      const std::string& /*fn_name*/,
+      const variable_list& /*inputs*/,
+      const ivalue_list& /*packed_args*/,
+      const c10::IValue& /*output_metadata*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
-      PyObject* py_compiler,
-      const variable_list& inputs,
-      const at::TensorGeometry& base,
-      const at::TensorGeometry& view) const {
+      PyObject* /*py_compiler*/,
+      const variable_list& /*inputs*/,
+      const at::TensorGeometry& /*base*/,
+      const at::TensorGeometry& /*view*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
-      PyObject* py_compiler,
-      const std::vector<bool>& needs_input_grad,
-      const at::Tensor& result,
-      const variable_list& res,
-      const at::Tensor& grad_slice) const {
+      PyObject* /*py_compiler*/,
+      const std::vector<bool>& /*needs_input_grad*/,
+      const at::Tensor& /*result*/,
+      const variable_list& /*res*/,
+      const at::Tensor& /*grad_slice*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
-      PyObject* py_compiler,
-      std::optional<size_t> hook_id,
-      size_t hook_input_id) const {
+      PyObject* /*py_compiler*/,
+      std::optional<size_t> /*hook_id*/,
+      size_t /*hook_input_id*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
-  virtual void call_accumulate_grad(
+  virtual at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
-      const at::Tensor& grad) const {
+      const at::Tensor& variable_grad,
+      const at::Tensor& grad,
+      bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
@@ -97,7 +100,7 @@ struct TORCH_API PyCompilerGuard {
 // including torch/csrc/autograd/engine.h breaks BC by somehow introducing
 // symbol resolution issues. Instead requiring downstream users to include
 // engine.h to access collect_input_metadata, we provide it here (with a
-// different name to avoid ambigous symbols...)
+// different name to avoid ambiguous symbols...)
 TORCH_API std::vector<std::optional<InputMetadata>> get_input_metadata(
     const edge_list& edges);
 
@@ -143,7 +146,7 @@ struct CacheKey {
         std::memcmp(key, other.key, key_size) == 0;
   }
 
-  size_t hash() const {
+  size_t hash() const noexcept {
     // don't bother hashing the key data, common case 1 cache entry per node
     return std::hash<std::type_index>()(node_type) ^ key_size;
   }
@@ -154,7 +157,7 @@ struct CacheKey {
 };
 
 struct NodeCall {
-  NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
+  NodeCall(uint32_t id_, c10::intrusive_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
 
   void mark_output(int input_nr, int output_idx) {
@@ -162,7 +165,7 @@ struct NodeCall {
   }
 
   uint32_t id;
-  std::shared_ptr<Node> node;
+  c10::intrusive_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
@@ -173,10 +176,10 @@ struct NodeCall {
 };
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
-  NodeCall& lookup(const std::shared_ptr<Node>& function) {
-    auto it = find(function.get());
-    if (it == end()) {
-      it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+  NodeCall& lookup(const c10::intrusive_ptr<Node>& function) {
+    auto [it, inserted] = try_emplace(function.get(), _next_id, function);
+    if (inserted) {
+      ++_next_id;
       nodes.emplace_back(function.get());
     }
     return it->second;
@@ -253,7 +256,9 @@ struct TensorArgs {
     return lookup(tensor, true);
   }
 
-  TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
+  TensorArg& add(
+      const SavedVariable& sv,
+      const c10::intrusive_ptr<Node>& node) {
     // no unpack hooks in this codepath
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
@@ -364,8 +369,10 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
-  // pynode -> backward and backward state idx
-  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
+  // pynode -> backward idx, backward state idx, opaque object indices
+  std::unordered_map<
+      const Node*,
+      std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>>
       pynode_objs;
 };
 
@@ -456,12 +463,8 @@ class CompiledNodeArgs {
   void collect(const ska::flat_hash_map<std::string, V>& m) {
     collect_size(m.size());
 
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (const auto& k : keys) {
       collect(k);
@@ -549,7 +552,7 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
-  void collect(const std::shared_ptr<Node>& t) {
+  void collect(const c10::intrusive_ptr<Node>& t) {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
@@ -571,7 +574,8 @@ class CompiledNodeArgs {
     }
   }
   void collect(const InputMetadata& t) {
-    TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !t.is_nested_tensor(), "NestedTensor support not implemented. ");
     collect(t.options());
     collect(t.is_tensor_subclass());
     collect(t.shape_as_dim_vector());
@@ -640,14 +644,20 @@ class CompiledNodeArgs {
   void collect_pynode_objs(
       const Node* pynode,
       c10::SafePyObject&& bwd,
-      std::optional<c10::SafePyObject>&& bwd_state) {
+      std::optional<c10::SafePyObject>&& bwd_state,
+      std::vector<c10::SafePyObject>&& opaque_objs) {
     size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
     std::optional<size_t> bwd_state_idx;
     if (auto state = std::move(bwd_state); state.has_value()) {
       bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
     }
+    std::vector<size_t> opaque_indices(opaque_objs.size());
+    for (size_t i = 0; i < opaque_objs.size(); i += 1) {
+      opaque_indices[i] = _compiler.emplace_hook(std::move(opaque_objs[i]));
+    }
     _compiler.pynode_objs.emplace(
-        pynode, std::make_pair(bwd_idx, bwd_state_idx));
+        pynode,
+        std::make_tuple(bwd_idx, bwd_state_idx, std::move(opaque_indices)));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -783,8 +793,8 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
-      Node* pynode) const {
+  std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>
+  retrieve_pynode_objs(Node* pynode) const {
     auto it = compiler.pynode_objs.find(pynode);
     TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
     return it->second;
@@ -952,12 +962,8 @@ class SwapSavedVariables {
 
   template <typename V>
   void before(ska::flat_hash_map<std::string, V>& m) {
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (auto& k : keys) {
       before(m.at(k));
@@ -1048,7 +1054,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
@@ -1066,7 +1072,7 @@ class SwapSavedVariables {
 // (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
 // capture wants to take a variant of this function and proxy it into the graph.
 // Every autograd node defines an apply_with_saved function, that when invoked,
-// proxys a call to a function into the Compiled Autograd graph.
+// proxies a call to a function into the Compiled Autograd graph.
 //
 // Some requirements that we have are:
 // - The proxy'ed function must have inputs that are FX-graphable types.
@@ -1104,12 +1110,14 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
-#ifdef _WIN32
+    // On windows CPU is support compiled autograd.
+#if defined(_WIN32) && (defined(USE_CUDA) || defined(USE_ROCM))
     // NB: the if-constexpr usage triggers compilation errors on Windows
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
     // It's not clear what the problem is, so we're going to ignore it for now.
-    TORCH_INTERNAL_ASSERT(false, "torch.compile not supported on Windows");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "torch.compile not supported on Windows");
 #else
     if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
@@ -1143,10 +1151,11 @@ struct IValuePacker {
       // Unfortunately, we don't know how to handle this type yet.
       // To get this new type to work with Compiled Autograd, please
       // either change it to be an IValue-constructible type, or
-      // define how to pack and unpack an object of this time into an IValue
+      // define how to pack and unpack an object of this type into an IValue
       // by creating a specialization of IValuePacker for this type.
       // See NOTE: [Compiled Autograd and backward functions] for context.
-      TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
 #endif
@@ -1269,11 +1278,11 @@ inline at::TensorOptions unpack_TensorOptions(
   at::TensorOptions result;
   auto maybe_requires_grad = std::get<0>(tuple);
   if (maybe_requires_grad.has_value()) {
-    result = result.requires_grad(maybe_requires_grad.value());
+    result = result.requires_grad(maybe_requires_grad);
   }
   auto maybe_memory_format = std::get<1>(tuple);
   if (maybe_memory_format.has_value()) {
-    result = result.memory_format(maybe_memory_format.value());
+    result = result.memory_format(maybe_memory_format);
   }
   auto maybe_device = std::get<2>(tuple);
   if (maybe_device.has_value()) {
@@ -1286,11 +1295,11 @@ inline at::TensorOptions unpack_TensorOptions(
   }
   auto maybe_layout = std::get<4>(tuple);
   if (maybe_layout.has_value()) {
-    result = result.layout(maybe_layout.value());
+    result = result.layout(maybe_layout);
   }
   auto maybe_pinned_memory = std::get<5>(tuple);
   if (maybe_pinned_memory.has_value()) {
-    result = result.pinned_memory(maybe_pinned_memory.value());
+    result = result.pinned_memory(maybe_pinned_memory);
   }
   return result;
 }
@@ -1322,11 +1331,11 @@ struct IValuePacker<TypeAndSize> {
     return tuple;
   }
   static TypeAndSize unpack(const at::IValue& t) {
-    auto tuple =
+    auto [sym_sizes, options] =
         t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
     TypeAndSize result;
-    result.sym_sizes = std::get<0>(tuple);
-    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    result.sym_sizes = std::move(sym_sizes);
+    result.options = unpack_TensorOptions(options);
     return result;
   }
   static at::TypePtr packed_type() {
@@ -1380,7 +1389,8 @@ struct IValuePacker<std::vector<T>> {
     }
     std::vector<T> result;
     auto lst = t.toList();
-    for (const at::IValue& elt : lst) {
+    for (size_t i = 0; i < lst.size(); ++i) {
+      const at::IValue& elt = lst.get(i);
       result.emplace_back(IValuePacker<T>::unpack(elt));
     }
     return result;
@@ -1452,24 +1462,30 @@ struct IValuePacker<InputMetadata> {
     auto tuple = std::make_tuple(
         pack_TensorOptions(t.options()),
         t.shape_as_dim_vector().vec(),
-        t.is_tensor_subclass());
+        t.is_tensor_subclass(),
+        t.grad_dtype());
     return tuple;
   }
   static InputMetadata unpack(const at::IValue& t) {
-    auto tuple = t.to<
-        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool>>();
+    auto tuple = t.to<std::tuple<
+        packed_tensoroptions_t,
+        std::vector<at::SymInt>,
+        bool,
+        std::optional<c10::ScalarType>>>();
 
     return InputMetadata(
         unpack_TensorOptions(std::get<0>(tuple)),
         SymIntSmallVec(std::get<1>(tuple)),
         std::get<2>(tuple),
-        false);
+        false,
+        std::get<3>(tuple));
   }
   static at::TypePtr packed_type() {
     return at::TupleType::create(
         {IValuePacker<at::TensorOptions>::packed_type(),
          IValuePacker<std::vector<at::SymInt>>::packed_type(),
-         at::BoolType::get()});
+         at::BoolType::get(),
+         IValuePacker<std::optional<at::ScalarType>>::packed_type()});
   }
 };
 
@@ -1543,7 +1559,7 @@ struct PackedArgs {
 
 template <>
 struct std::hash<torch::dynamo::autograd::CacheKey> {
-  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const {
+  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const noexcept {
     return k.hash();
   }
 };

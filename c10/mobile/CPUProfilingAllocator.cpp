@@ -34,7 +34,7 @@ struct MemEvent {
 bool overlaps(const MemBlock& a, const MemBlock& b) {
   // two blocks dont overlap if
   // |---a--------|--------------b--------|
-  // strat_a     end_a <= start_b       end_b
+  // start_a     end_a <= start_b       end_b
   return !(
       (a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
 }
@@ -70,12 +70,12 @@ bool validate_allocation_plan(
     } else if (event.type == EventType::Free) {
       auto it = allocations.find(mem_block);
       TORCH_CHECK(
-          (*it).end_offset == end_offset,
-          "Enf offset of allocation being freed must match the one recorded.");
-      TORCH_CHECK(
           it != allocations.end(),
           "ProfilingAllocator: Allocate event "
           "must have preceded deallocate event.");
+      TORCH_CHECK(
+          (*it).end_offset == end_offset,
+          "End offset of allocation being freed must match the one recorded.");
       allocations.erase(it);
     } else {
       TORCH_CHECK(false, "ProfilingAllocator: Invalid event type.");

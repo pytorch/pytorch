@@ -11,13 +11,13 @@ runs:
   using: composite
   steps:
     - name: Download TD Artifacts from S3
-      if: ${{ !inputs.use-gha }}
+      if: inputs.use-gha == '' || inputs.use-gha == 'false'
       uses: seemethere/download-artifact-s3@v4
       with:
         name: td_results
 
     - name: Download TD Artifacts from GHA
-      if: inputs.use-gha
+      if: inputs.use-gha != '' && inputs.use-gha != 'false'
       uses: actions/download-artifact@v4
       with:
         name: td_results.json

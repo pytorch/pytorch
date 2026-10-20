@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Generic, Optional, Protocol
-from typing_extensions import Concatenate, ParamSpec, TypeVar
+from typing import Concatenate, Generic, Protocol
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.nn as nn
@@ -106,6 +107,7 @@ def contract(
                 # If the user passes a sequence of modules, then we assume that
                 # we only need to insert the state object on the root modules
                 # (i.e. those without a parent) among the passed-in modules.
+                # pyrefly: ignore [no-matching-overload]
                 modules = _get_root_modules(list(module))
             state = state_cls()  # shared across all modules
             registry_item = RegistryItem()  # shared across all modules
@@ -239,7 +241,7 @@ def contract(
     return inner  # type: ignore[return-value]
 
 
-def _get_registry(module: nn.Module) -> Optional[dict[str, RegistryItem]]:
+def _get_registry(module: nn.Module) -> dict[str, RegistryItem] | None:
     r"""
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name. If no API has been applied, then this

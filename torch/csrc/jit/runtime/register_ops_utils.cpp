@@ -10,7 +10,9 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <limits>
+#include <numeric>
 
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 namespace torch::jit {
@@ -69,10 +71,8 @@ template <>
 void listSort<at::Tensor>(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<at::Tensor> list = pop(stack).toTensorList();
-  std::sort(
-      list.begin(),
-      list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+  std::ranges::sort(
+      list, [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
         // "strict weak ordering" issue - see other sort
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
@@ -85,12 +85,9 @@ template <>
 void listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   auto list_copied = list.copy();
-  std::sort(
-      list_copied.begin(),
-      list_copied.end(),
-      [](const at::Tensor& a, const at::Tensor& b) {
-        return at::native::is_nonzero(a.lt(b));
-      });
+  std::ranges::sort(list_copied, [](const at::Tensor& a, const at::Tensor& b) {
+    return at::native::is_nonzero(a.lt(b));
+  });
   push(stack, list_copied);
 }
 
@@ -112,29 +109,25 @@ void listRemove<at::Tensor>(Stack& stack) {
 }
 
 void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
-  if (t.requires_grad()) {
-    throw std::runtime_error(
-        "Cannot input a tensor that requires grad as a scalar argument");
-  }
-  if (!t.sizes().empty()) {
-    throw std::runtime_error(
-        "Cannot input a tensor of dimension other than 0 as a scalar argument");
-  }
-  if (toInt && !isIntegralType(t.scalar_type(), /*includeBool=*/false)) {
-    std::stringstream ss;
-    ss << "Cannot input a tensor of type " << t.scalar_type()
-       << " as an integral argument";
-    throw std::runtime_error(ss.str());
-  }
+  TORCH_CHECK(
+      !t.requires_grad(),
+      "Cannot input a tensor that requires grad as a scalar argument");
+  TORCH_CHECK(
+      t.sizes().empty(),
+      "Cannot input a tensor of dimension other than 0 as a scalar argument");
+  TORCH_CHECK(
+      !toInt || isIntegralType(t.scalar_type(), /*includeBool=*/false),
+      "Cannot input a tensor of type ",
+      t.scalar_type(),
+      " as an integral argument");
 }
 
 void checkDoubleInRange(double a) {
   if (std::isnan(a) || std::isinf(a) ||
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
-    throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer");
-    return;
+    TORCH_CHECK(
+        false, "Cannot convert float ", std::to_string(a), " to integer");
   }
 }
 
@@ -143,7 +136,7 @@ int64_t partProduct(int n, int m) {
     return (int64_t)n;
   if (m == (n + 2))
     return (int64_t)n * m;
-  auto k = n + (m - n) / 2; // Overflow-safe midpoint
+  auto k = std::midpoint(n, m);
   if ((k & 1) != 1)
     k = k - 1;
   return partProduct(n, k) * partProduct(k + 2, m);
@@ -168,9 +161,7 @@ int nminussumofbits(int v) {
 }
 
 int64_t factorial(int n) {
-  if (n < 0) {
-    throw std::runtime_error("factorial() not defined for negative values");
-  }
+  TORCH_CHECK(n >= 0, "factorial() not defined for negative values");
   int64_t p = 1, r = 1;
   loop(n, p, r);
   return r << nminussumofbits(n);
@@ -194,7 +185,7 @@ void listAppend(Stack& stack) {
 void listReverse(Stack& stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  std::reverse(list.begin(), list.end());
+  std::ranges::reverse(list);
 }
 
 void listPopImpl(Stack& stack, const char* empty_message) {

@@ -1,0 +1,5 @@
+ERROR
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/array_methods.py", line 467, in _compute_newshape
+    raise TypeError(f"cannot reshape array of shape {arr.shape} (size {arr.size}) "
+TypeError: cannot reshape array of shape (16, 64, 55, 55) (size 3097600) into shape (16384, -1) because the product of specified axis sizes (16384) does not evenly divide 3097600

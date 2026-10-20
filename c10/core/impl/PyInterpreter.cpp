@@ -1,7 +1,7 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/PyInterpreter.h>
-
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace c10::impl {
 
 struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
@@ -11,8 +11,12 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void incref(PyObject* pyobj) const override {} // do nothing
 
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
-  } // do nothing
+  void decref(PyObject* pyobj) const override {} // do nothing
+
+  bool try_incref(
+      const c10::impl::PyObjectSlot& /*pyobj_slot*/) const override {
+    return false;
+  }
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
@@ -20,82 +24,97 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       "attempted to call " #m \
       " on a Tensor with nontrivial PyObject after corresponding interpreter died")
 
-  c10::intrusive_ptr<TensorImpl> detach(const TensorImpl* self) const override {
+  size_t refcnt(PyObject* /*pyobj*/) const override {
+    PANIC(refcnt);
+  }
+
+  c10::intrusive_ptr<TensorImpl> detach(
+      const TensorImpl* /*self*/) const override {
     PANIC(detach);
   }
 
-  void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
+  void dispatch(const c10::OperatorHandle& /*op*/, torch::jit::Stack* /*stack*/)
       const override {
     PANIC(dispatch);
   }
 
-  void reportErrorCallback(PyObject* callback, DispatchKey key) const override {
+  void reportErrorCallback(PyObject* /*callback*/, DispatchKey /*key*/)
+      const override {
     PANIC(reportErrorCallback);
   }
 
   void python_op_registration_trampoline(
-      const c10::OperatorHandle& op,
-      c10::DispatchKey,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack,
-      bool with_keyset,
-      bool with_op) const override {
+      const c10::OperatorHandle& /*op*/,
+      c10::DispatchKey /*unused*/,
+      c10::DispatchKeySet /*keyset*/,
+      torch::jit::Stack* /*stack*/,
+      bool /*with_keyset*/,
+      bool /*with_op*/) const override {
     PANIC(python_op_registration_trampoline);
   }
 
   void throw_abstract_impl_not_imported_error(
-      std::string opname,
-      const char* pymodule,
-      const char* context) const override {
+      std::string /*opname*/,
+      const char* /*pymodule*/,
+      const char* /*context*/) const override {
     PANIC(throw_abstract_impl_not_imported_error);
   }
 
   void python_dispatcher(
-      const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
-      torch::jit::Stack* stack) const override {
+      const c10::OperatorHandle& /*op*/,
+      c10::DispatchKeySet /*unused*/,
+      torch::jit::Stack* /*stack*/) const override {
     PANIC(python_dispatcher);
   }
 
-  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
+  bool is_contiguous(const TensorImpl* /*self*/, at::MemoryFormat /*unused*/)
+      const override {
     PANIC(is_contiguous);
   }
-  bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+  c10::SymBool sym_is_contiguous(
+      const TensorImpl* /*self*/,
+      at::MemoryFormat /*unused*/) const override {
+    PANIC(sym_is_contiguous);
+  }
+  bool is_strides_like(const TensorImpl* /*self*/, at::MemoryFormat /*unused*/)
       const override {
     PANIC(is_strides_like);
   }
-  bool is_non_overlapping_and_dense(const TensorImpl* self) const override {
+  bool is_non_overlapping_and_dense(const TensorImpl* /*self*/) const override {
     PANIC(is_non_overlapping_and_dense);
   }
-  c10::Device device(const TensorImpl* self) const override {
+  c10::Device device(const TensorImpl* /*self*/) const override {
     PANIC(device);
   }
-  int64_t dim(const TensorImpl* self) const override {
+  int64_t dim(const TensorImpl* /*self*/) const override {
     PANIC(dim);
   }
-  c10::IntArrayRef strides(const TensorImpl* self) const override {
+  c10::IntArrayRef strides(const TensorImpl* /*self*/) const override {
     PANIC(strides);
   }
-  c10::IntArrayRef sizes(const TensorImpl* self) const override {
+  c10::IntArrayRef sizes(const TensorImpl* /*self*/) const override {
     PANIC(sizes);
   }
-  c10::SymIntArrayRef sym_sizes(const TensorImpl* self) const override {
+  c10::SymIntArrayRef sym_sizes(const TensorImpl* /*self*/) const override {
     PANIC(sym_sizes);
   }
-  c10::Layout layout(const TensorImpl* self) const override {
+  c10::Layout layout(const TensorImpl* /*self*/) const override {
     PANIC(layout);
   }
-  int64_t numel(const TensorImpl* self) const override {
+  int64_t numel(const TensorImpl* /*self*/) const override {
     PANIC(numel);
   }
-  c10::SymInt sym_numel(const TensorImpl* self) const override {
+  c10::SymInt sym_numel(const TensorImpl* /*self*/) const override {
     PANIC(sym_numel);
   }
-  c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override {
+  c10::SymIntArrayRef sym_strides(const TensorImpl* /*self*/) const override {
     PANIC(sym_strides);
   }
-  c10::SymInt sym_storage_offset(const TensorImpl* self) const override {
+  c10::SymInt sym_storage_offset(const TensorImpl* /*self*/) const override {
     PANIC(sym_storage_offset);
+  }
+  bool backed_size_oblivious() const override {
+    PANIC(backed_size_oblivious);
   }
 
   // Just swallow the event, don't do anything
@@ -126,8 +145,62 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
       c10::DeviceType device_type,
       uintptr_t event) const override {}
 
-  void reset_backward_hooks(const TensorImpl* self) const override {
+  void reset_backward_hooks(const TensorImpl* /*self*/) const override {
     PANIC(reset_backward_hooks);
+  }
+
+  bool fake_try_decomp(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      bool /*has_symbolic_sizes*/,
+      bool* /*has_python_cia*/) const override {
+    PANIC(fake_try_decomp);
+  }
+  bool fake_try_meta(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/) const override {
+    PANIC(fake_try_meta);
+  }
+  bool fake_try_custom_op_impl(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      PyObject* /*real*/) const override {
+    PANIC(fake_try_custom_op_impl);
+  }
+  bool fake_try_op_impl(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      c10::Device /*common_device*/) const override {
+    PANIC(fake_try_op_impl);
+  }
+  bool fake_try_prim_meta(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/) const override {
+    PANIC(fake_try_prim_meta);
+  }
+  bool fake_infer_from_real_out(
+      const c10::OperatorHandle& /*op*/,
+      torch::jit::Stack* /*stack*/,
+      PyObject* /*real*/) const override {
+    PANIC(fake_infer_from_real_out);
+  }
+  c10::intrusive_ptr<TensorImpl> to_meta_tensor(
+      const c10::intrusive_ptr<TensorImpl>& /*real*/) const override {
+    PANIC(to_meta_tensor);
+  }
+  bool allow_non_fake_inputs() const override {
+    PANIC(allow_non_fake_inputs);
+  }
+  PyObject* fake_run_real_op(
+      const c10::OperatorHandle& /*op*/,
+      const torch::jit::Stack& /*fake_args*/) const override {
+    PANIC(fake_run_real_op);
+  }
+  void propagate_real_tensors(
+      const c10::OperatorHandle& /*op*/,
+      PyObject* /*real*/,
+      torch::jit::Stack* /*stack*/) const override {
+    PANIC(propagate_real_tensors);
   }
 };
 
@@ -145,3 +218,4 @@ void PyInterpreter::disarm() noexcept {
 }
 
 } // namespace c10::impl
+C10_DIAGNOSTIC_POP()

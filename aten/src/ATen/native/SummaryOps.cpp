@@ -31,12 +31,12 @@ Tensor _bincount_cpu_template(
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros({minlength}, kLong);
   }
-  if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
+  if (self.dim() != 1 || *self.min().const_data_ptr<input_t>() < 0) {
     TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
   }
 
   // Ensure max_val < 2 ^ 63 - 1 (9223372036854775807)
-  auto max_val = *self.max().data_ptr<input_t>();
+  auto max_val = *self.max().const_data_ptr<input_t>();
   if (max_val >= std::numeric_limits<int64_t>::max()) {
     TORCH_CHECK(false,
         "maximum value of input overflowed, it should be < ",

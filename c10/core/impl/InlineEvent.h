@@ -7,6 +7,22 @@
 
 namespace c10::impl {
 
+/*
+ * Note [Event Semantics]
+ *
+ * `event_` is lazily initialized in one of three ways:
+ *   1. on the first record(),
+ *   2. via reconstructFromIPCHandle() (importer), or
+ *   3. via ipcHandle() (exporter).
+ *
+ * block(), query(), and synchronize() therefore guard on event_ != nullptr
+ * rather than on `was_marked_for_recording_`, which only tracks whether
+ * record() was called in the current process.
+ *
+ * `was_imported_from_ipc_` tracks whether the event was imported from other
+ * process via reconstructFromIPCHandle().
+ */
+
 template <typename T>
 struct InlineEvent final {
   InlineEvent() = delete;
@@ -26,7 +42,8 @@ struct InlineEvent final {
         device_type_(other.device_type_),
         device_index_(other.device_index_),
         flag_(other.flag_),
-        was_marked_for_recording_(other.was_marked_for_recording_) {
+        was_marked_for_recording_(other.was_marked_for_recording_),
+        was_imported_from_ipc_(other.was_imported_from_ipc_) {
     other.event_ = nullptr;
   }
   InlineEvent& operator=(InlineEvent&& other) noexcept {
@@ -41,6 +58,7 @@ struct InlineEvent final {
     std::swap(device_index_, other.device_index_);
     std::swap(flag_, other.flag_);
     std::swap(was_marked_for_recording_, other.was_marked_for_recording_);
+    std::swap(was_imported_from_ipc_, other.was_imported_from_ipc_);
   }
 
   ~InlineEvent() noexcept {
@@ -58,11 +76,11 @@ struct InlineEvent final {
     return flag_;
   }
   bool was_marked_for_recording() const noexcept {
-    return was_marked_for_recording_;
+    return was_marked_for_recording_ || was_imported_from_ipc_;
   }
 
   void recordOnce(const Stream& stream) {
-    if (!was_marked_for_recording_)
+    if (!was_marked_for_recording())
       record(stream);
   }
 
@@ -81,7 +99,8 @@ struct InlineEvent final {
   }
 
   void block(const Stream& stream) const {
-    if (!was_marked_for_recording_)
+    // See Note [Event Semantics]
+    if (!event_)
       return;
 
     TORCH_CHECK(
@@ -96,7 +115,8 @@ struct InlineEvent final {
   }
 
   bool query() const {
-    if (!was_marked_for_recording_)
+    // See Note [Event Semantics]
+    if (!event_)
       return true;
     return backend_.queryEvent(event_);
   }
@@ -107,24 +127,61 @@ struct InlineEvent final {
 
   double elapsedTime(const InlineEvent& other) const {
     TORCH_CHECK(
-        other.was_marked_for_recording(),
-        "other was not marked for recording.");
-    TORCH_CHECK(
-        was_marked_for_recording(), "self was not marked for recording.");
-    TORCH_CHECK(
         other.device_type() == device_type_,
         "Event device type ",
         DeviceTypeName(device_type_),
         " does not match other's device type ",
         DeviceTypeName(other.device_type()),
         ".");
+    TORCH_CHECK_VALUE(
+        (flag_ & EventFlag::TIMING) && (other.flag_ & EventFlag::TIMING),
+        "Both events must be created with argument 'enable_timing=True'.");
+    TORCH_CHECK_VALUE(
+        was_marked_for_recording() && other.was_marked_for_recording(),
+        "Both events must be recorded before calculating elapsed time.");
+    // elapsedTime in MPS can wait event to be completed if event is not ready,
+    // which is a little different from CUDA
+    TORCH_CHECK(
+        (query() && other.query()) || device_type_ == DeviceType::MPS,
+        "Both events must be completed before calculating elapsed time.");
+
     return backend_.elapsedTime(event_, other.event_, device_index_);
   }
 
   void synchronize() const {
-    if (!was_marked_for_recording_)
+    // See Note [Event Semantics]
+    if (!event_)
       return;
     backend_.synchronizeEvent(event_);
+  }
+
+  std::string ipcHandle() {
+    TORCH_CHECK(flag_ & EventFlag::INTERPROCESS, "Event is not an IPC event.");
+    TORCH_CHECK(
+        !was_imported_from_ipc_,
+        "Cannot get IPC handle for an imported event.");
+    // See Note [Event Semantics]: event_ may be lazily initialized on the
+    // current device if record() was never called.
+    if (device_index_ == -1) {
+      device_index_ = backend_.getDevice().index();
+    }
+    return backend_.getEventIPCHandle(&event_, device_index_, flag_);
+  }
+
+  void reconstructFromIPCHandle(
+      const DeviceIndex device_index,
+      const std::string& handle_string) {
+    TORCH_CHECK(
+        flag_ & EventFlag::INTERPROCESS,
+        "Event must be created with EventFlag::INTERPROCESS to reconstruct from an IPC handle.");
+    TORCH_CHECK(
+        !event_,
+        "Event has already been initialized; cannot reconstruct from an IPC handle.");
+    device_index_ =
+        device_index == -1 ? backend_.getDevice().index() : device_index;
+    backend_.reconstructEventFromIPCHandle(
+        &event_, device_index_, handle_string);
+    was_imported_from_ipc_ = true;
   }
 
  private:
@@ -134,6 +191,7 @@ struct InlineEvent final {
   DeviceIndex device_index_ = -1;
   EventFlag flag_ = EventFlag::PYTORCH_DEFAULT;
   bool was_marked_for_recording_ = false;
+  bool was_imported_from_ipc_ = false;
 };
 
 } // namespace c10::impl

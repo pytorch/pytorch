@@ -3,7 +3,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
@@ -17,16 +16,15 @@
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -59,7 +57,7 @@ namespace {
 std::string iValueToString(const c10::IValue& val) {
   std::ostringstream oss;
   oss << val;
-  return oss.str();
+  return std::move(oss).str();
 }
 #endif
 
@@ -71,6 +69,42 @@ bool allArgsAreTensors(const Node* node) {
 }
 
 } // namespace
+
+#ifdef FBCODE_CAFFE2
+
+C10_DEFINE_REGISTRY(SRNodeExecutorRegistry, NodeExecutorFunctor)
+
+namespace {
+
+static void sequentialExecute(
+    BlockRunner& block_runner,
+    ProcessedNode* nodes,
+    size_t num_nodes,
+    void* /*ctx*/) {
+  for (size_t i = 0; i < num_nodes; ++i) {
+    nodes[i].run();
+    // Check for incorrect schema alias info.
+    block_runner.verify_and_correct_memory_overlap(nodes[i]);
+  }
+}
+
+struct SequentialNodeExecutorFunctor : public NodeExecutorFunctor {
+  NodeExecutorFn Create(
+      const BlockInfo& /*block_info*/,
+      const StaticModuleOptions& /*opts*/,
+      void** /*context*/) override {
+    return &sequentialExecute;
+  }
+};
+
+} // namespace
+
+C10_REGISTER_CLASS(
+    SRNodeExecutorRegistry,
+    node_executor,
+    SequentialNodeExecutorFunctor)
+
+#endif // FBCODE_CAFFE2
 
 // A manually curated set of ops that are disallowed in static runtime.
 // These are rarely-used ops. Disallowing them typically eliminates
@@ -145,10 +179,10 @@ std::string dumpValueSet(
   std::ostringstream oss;
   oss << set_name << ": {";
   for (const auto* val : value_set) {
-    oss << "%" << val->debugName() << ", ";
+    oss << '%' << val->debugName() << ", ";
   }
-  oss << "}";
-  return oss.str();
+  oss << '}';
+  return std::move(oss).str();
 }
 
 namespace {
@@ -833,7 +867,7 @@ void BlockInfo::prepare_for_memory_planner(
       // Types are stored in the underlying TorchScript IR
       bool is_tensor_type = out_v->type()->castRaw<TensorType>();
       if (opts.manage_output_tensors && is_tensor_type &&
-          graph_output_values.find(out_v) == graph_output_values.end() &&
+          !graph_output_values.contains(out_v) &&
           value_group_.isOutputAlias(out_v)) {
         managed_output_tensor_values_.insert(out_v);
         continue;
@@ -950,6 +984,20 @@ BlockRunner::BlockRunner(
     }
     pnode.set_metadata(std::move(block_runners));
   }
+
+#ifdef FBCODE_CAFFE2
+  // Initialize the pluggable node executor from the registry. If no executor is
+  // registered, or the registered one opts out (returns nullptr), fall back to
+  // the default sequential execution to preserve baseline semantics.
+  node_executor_owner_ = SRNodeExecutorRegistry()->Create("node_executor");
+  if (node_executor_owner_ != nullptr) {
+    node_executor_fn_ = node_executor_owner_->Create(
+        block_info_, sm.opts(), &node_executor_ctx_);
+  }
+  if (node_executor_fn_ == nullptr) {
+    node_executor_fn_ = &sequentialExecute;
+  }
+#endif
 }
 
 BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
@@ -982,7 +1030,8 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
     return;
   }
   TORCH_CHECK(
-      arg.type()->isSubtypeOf(schema_arg.type()),
+      arg.type()->isSubtypeOf(schema_arg.type()) ||
+      arg.type()->isSubtypeOfExt(schema_arg.type(), /*why_not=*/nullptr),
       arg.type()->annotation_str(),
       " is not a subtype of ",
       schema_arg.type()->annotation_str(),
@@ -1097,7 +1146,7 @@ namespace {
 
 void destroyNodeOutputs(ProcessedNode& p_node) {
   const auto borrows_outputs = borrowsOutputs(p_node.node()->kind());
-  const auto num_outputs = static_cast<uint32_t>(p_node.num_outputs());
+  const auto num_outputs = p_node.num_outputs();
   for (const auto i : c10::irange<uint32_t>(num_outputs)) {
     auto& output = p_node.Output(i);
     if (doesNotHeapAllocateWhenStoredInIValue(*output.type())) {
@@ -1167,7 +1216,7 @@ c10::IValue BlockRunner::move_outputs_to_tuple(uint32_t num_outputs) {
 /// with its schema by cloning the alias. Because all managed tensors' data_ptrs
 /// are part of the internal buffer that the MemoryPlanner allocates, we can
 /// check aliases by checking the memory overlap with this internal buffer. But
-/// a tensor's storage can be resized during inferenceso we need another way to
+/// a tensor's storage can be resized during inference so we need another way to
 /// handle the resized case.
 ///
 /// There are two ways for incorrect schema to break memory planning. Let's look
@@ -1321,12 +1370,18 @@ c10::IValue BlockRunner::run_impl(
 
     set_inputs(std::forward<IValueList>(args), kwargs);
 
+#ifdef FBCODE_CAFFE2
+    DCHECK(node_executor_fn_ != nullptr);
+    node_executor_fn_(*this, nodes_.data(), nodes_.size(), node_executor_ctx_);
+#else
     for (auto& n : nodes_) {
       // LOG(INFO) << "Running node: " << PrintNode(n.node());
       n.run();
       // Check for incorrect schema alias info.
       verify_and_correct_memory_overlap(n);
     }
+#endif
+
     on_exit.setFinished();
   }
 
@@ -1515,12 +1570,12 @@ void BlockRunner::benchmark(
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
               << results.percent_per_node_type[kind] << "%. " << kind << " ("
               << results.instances_per_node_type[kind] << " nodes";
-    if (results.out_nodes.count(kind)) {
+    if (results.out_nodes.contains(kind)) {
       std::cout << ", out variant)" << '\n';
-    } else if (results.native_nodes.count(kind)) {
+    } else if (results.native_nodes.contains(kind)) {
       std::cout << ", native)" << '\n';
     } else {
-      std::cout << ")" << '\n';
+      std::cout << ')' << '\n';
     }
 
     if (generate_ai_pep_output) {
@@ -1565,13 +1620,13 @@ void BlockRunner::benchmark(
   auto unsupported_nodes_count = results.total_nodes_count -
       results.out_nodes_count - results.native_nodes.size();
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-            << results.out_nodes_count << "/" << results.total_nodes_count
+            << results.out_nodes_count << '/' << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(results.out_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << '\n';
   std::cout << "Total number of nodes not covered by SR/total number of nodes: "
-            << unsupported_nodes_count << "/" << results.total_nodes_count
+            << unsupported_nodes_count << '/' << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
@@ -1862,7 +1917,7 @@ bool BlockRunner::check_for_memory_leak(
   const auto num_nodes = static_cast<uint32_t>(nodes_.size());
   for (const auto n : c10::irange(num_nodes)) {
     auto& pnode = nodes_[n];
-    const auto num_outputs = static_cast<uint32_t>(pnode.num_outputs());
+    const auto num_outputs = pnode.num_outputs();
     for (const auto i : c10::irange(num_outputs)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
@@ -1881,7 +1936,7 @@ bool BlockRunner::check_for_memory_leak(
           val->debugName() + " of node " + std::to_string(n) +
           " which has kind " + pnode.node()->kind().toQualString() +
           " was not cleaned up";
-      if (output_ivalues.count(ival) == 0) {
+      if (!output_ivalues.contains(ival)) {
         // check for intermediates
         if (!ival->isNone()) {
           TORCH_CHECK(
@@ -1942,7 +1997,7 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
   const auto num_nodes = static_cast<uint32_t>(nodes_.size());
   for (const auto n : c10::irange(num_nodes)) {
     auto& pnode = nodes_[n];
-    const auto num_outputs = static_cast<uint32_t>(pnode.num_outputs());
+    const auto num_outputs = pnode.num_outputs();
     for (const auto i : c10::irange(num_outputs)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
@@ -1976,7 +2031,7 @@ bool BlockRunner::isManagedOutputTensorValue(const Value* value) const {
     return false;
   }
   const auto& managed_outputs = block_info_.managed_output_tensor_values();
-  return managed_outputs.find(value) != managed_outputs.end();
+  return managed_outputs.contains(value);
 }
 
 void BlockRunner::disableManageOutputTensors() {
@@ -2041,7 +2096,7 @@ ProcessedFunction::ProcessedFunction(
         stack.emplace_back(static_cast<int>(size));
       }
       node_op(stack);
-      const auto num_outputs = static_cast<uint32_t>(pnode->num_outputs());
+      const auto num_outputs = pnode->num_outputs();
       TORCH_DCHECK_EQ(stack.size(), num_outputs);
       for (const auto i : c10::irange(num_outputs)) {
         pnode->Output(i) = std::move(stack[i]);
@@ -2137,7 +2192,7 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 7> special_case_ops = {
+  const static auto special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("prim::IfThenElse"),
       fromQualString("static_runtime::select_tensor"),
@@ -2157,7 +2212,7 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  const auto n_outputs = num_outputs();
   for (const auto i : c10::irange(n_outputs)) {
     if (!Output(i).isTensor()) {
       continue;
@@ -2195,7 +2250,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
     return true;
   }
   const auto n_inputs = static_cast<uint32_t>(inputs_.size());
-  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  const auto n_outputs = num_outputs();
   for (const auto i : c10::irange<uint32_t>(n_inputs)) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
@@ -2234,7 +2289,7 @@ bool ProcessedNode::check_and_correct_overlap_with(
 
 void ProcessedNode::verify_and_correct_memory_overlap() {
   const auto n_inputs = static_cast<uint32_t>(inputs_.size());
-  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  const auto n_outputs = num_outputs();
   for (const auto i : c10::irange(n_inputs)) {
     const IValue& in = Input(i);
     if (!in.isTensor()) {

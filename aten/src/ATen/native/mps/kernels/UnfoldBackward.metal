@@ -21,7 +21,7 @@ using namespace c10::metal;
 // Accumulation step is skipped if in_last_idx is outside of [0, size] range
 template <typename T>
 kernel void unfold_backward(
-    constant T* grad_in,
+    device const T* grad_in,
     device T* grad_out,
     constant long* input_strides,
     constant long* output_sizes,
@@ -42,7 +42,7 @@ kernel void unfold_backward(
   // Shift grad_in to start of unfold windows
   pos[dim] = 0;
   grad_in += offset_from_coord(pos, input_strides, ndim);
-  float rc = 0;
+  opmath_t<T> rc = 0;
   const auto in_dim_stride = input_strides[dim];
   const auto in_last_dim_stride = input_strides[ndim];
   for (auto in_dim_idx = left_fold_idx; in_dim_idx <= right_fold_idx;
@@ -60,7 +60,7 @@ kernel void unfold_backward(
 #define INSTANTIATE_UNFOLD_BACKWARD(DTYPE)                      \
   template [[host_name("unfold_backward_" #DTYPE)]] kernel void \
   unfold_backward<DTYPE>(                                       \
-      constant DTYPE*,                                          \
+      device const DTYPE*,                                      \
       device DTYPE*,                                            \
       constant long*,                                           \
       constant long*,                                           \
@@ -70,6 +70,5 @@ kernel void unfold_backward(
 
 INSTANTIATE_UNFOLD_BACKWARD(float);
 INSTANTIATE_UNFOLD_BACKWARD(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_UNFOLD_BACKWARD(bfloat);
-#endif
+INSTANTIATE_UNFOLD_BACKWARD(float2);

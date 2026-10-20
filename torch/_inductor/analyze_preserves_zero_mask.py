@@ -1,6 +1,6 @@
 import dataclasses
 import itertools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -29,7 +29,7 @@ class PreservesZeros(SymPyOps, DefaultHandler):
 
     def __init__(self) -> None:
         self.count = itertools.count(0)
-        self.store_preserves_zeros: Optional[bool] = None
+        self.store_preserves_zeros: bool | None = None
         self.dtype_prop = DtypePropagationOpsHandler()
 
     def load(self, name: str, index: sympy.Expr) -> TypedExpr:
@@ -42,15 +42,35 @@ class PreservesZeros(SymPyOps, DefaultHandler):
     def store(
         self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
     ) -> None:
-        assert isinstance(self, PreservesZeros)
+        if not isinstance(self, PreservesZeros):
+            raise AssertionError(f"expected PreservesZeros, got {type(self)}")
         # should only have a single store in prologue
-        assert self.store_preserves_zeros is None
+        if self.store_preserves_zeros is not None:
+            raise AssertionError("prologue should only have a single store")
         self.store_preserves_zeros = value.is_constant() and value.expr == 0
 
-    def indirect_indexing(self, *args: Any, **kwargs: Any) -> sympy.Expr:
+    def indirect_indexing(self, *args: object, **kwargs: object) -> sympy.Expr:
         return construct_symbol(next(self.count), torch.int32)
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def to_dtype(
+        self,
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types: bool = True,
+    ) -> TypedExpr:
+        result = SymPyOps.to_dtype(value, dtype, src_dtype, use_compute_types)
+        if result is not NotImplemented:
+            return result
+        # SymPyOps keeps a rounding cast to float16 or bfloat16 unfolded. Rounding
+        # leaves a zero exact; anything else becomes unknown.
+        if value.is_constant() and value.expr == 0:
+            return TypedExpr(value.expr, dtype)
+        return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
+
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         from torch._inductor.codegen.common import OpDecompositions
 
         if hasattr(OpDecompositions, name):
@@ -69,7 +89,10 @@ def prologue_preserves_zero_mask(prologue: "SchedulerNode") -> bool:
         prologue._body(*prologue.get_ranges())
 
     store_preserves_zeros = preserves_zeros.store_preserves_zeros
-    assert isinstance(store_preserves_zeros, bool)
+    if not isinstance(store_preserves_zeros, bool):
+        raise AssertionError(
+            f"expected bool store_preserves_zeros, got {type(store_preserves_zeros)}"
+        )
 
     return store_preserves_zeros
 
@@ -106,10 +129,13 @@ class RecordLowPrecisionOps(DefaultHandler):
         pass
 
     @staticmethod
-    def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
+    # pyrefly: ignore [bad-override]
+    def indirect_indexing(*args: object, **kwargs: object) -> sympy.Expr:
         return sympy.S.Zero
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
         out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
         if name == "constant":

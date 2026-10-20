@@ -49,6 +49,11 @@ struct Event final {
       const EventFlag _flag = EventFlag::PYTORCH_DEFAULT)
       : impl_{_device_type, _flag} {}
 
+  Event(const Device _device, const std::string& handle_string)
+      : impl_{_device.type(), EventFlag::INTERPROCESS} {
+    impl_.reconstructFromIPCHandle(_device.index(), handle_string);
+  }
+
   // Copy constructor and copy assignment operator (deleted)
   Event(const Event&) = delete;
   Event& operator=(const Event&) = delete;
@@ -126,8 +131,15 @@ struct Event final {
     return impl_.eventId();
   }
 
+  // Returns an IPC handle string for sharing this event with another process.
+  // If the event was not initialized, it will be eagerly initialized on the
+  // current device.
+  std::string ipcHandle() {
+    return impl_.ipcHandle();
+  }
+
   void synchronize() const {
-    return impl_.synchronize();
+    impl_.synchronize();
   }
 
  private:

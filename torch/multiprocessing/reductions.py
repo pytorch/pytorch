@@ -4,10 +4,8 @@ import os
 import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
-from typing import Union
 
 import torch
-from torch._namedtensor_internals import check_serializing_named_tensor
 
 
 try:
@@ -98,13 +96,18 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
+# Kept for BC only.
 def rebuild_event(device, handle):
     return torch.cuda.Event.from_ipc_handle(device, handle)
 
 
-def reduce_event(event):
+def _rebuild_event(device, handle, event_cls):
+    return event_cls.from_ipc_handle(device, handle)
+
+
+def _reduce_event(event):
     handle = event.ipc_handle()
-    return (rebuild_event, (event.device, handle))
+    return (_rebuild_event, (event.device, handle, type(event)))
 
 
 def rebuild_tensor(cls, storage, metadata):
@@ -173,9 +176,8 @@ def rebuild_cuda_tensor(
     if storage_handle is None or storage_size_bytes == 0:
         storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
     else:
-        storage = storage_from_cache(
-            storage_cls, (storage_handle, storage_offset_bytes)
-        )
+        cache_key = (storage_device, storage_handle, storage_offset_bytes)
+        storage = storage_from_cache(storage_cls, cache_key)
         if storage is None:
             torch.cuda._lazy_init()
             storage = storage_cls._new_shared_cuda(
@@ -188,9 +190,7 @@ def rebuild_cuda_tensor(
                 event_handle,
                 event_sync_required,
             )
-            shared_cache[(storage_handle, storage_offset_bytes)] = StorageWeakRef(
-                storage
-            )
+            shared_cache[cache_key] = StorageWeakRef(storage)
         else:
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(
@@ -229,7 +229,6 @@ def reduce_tensor(tensor):
             "before serializing (e.g., putting it on the queue)."
         )
 
-    check_serializing_named_tensor(tensor)
     torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]
@@ -259,11 +258,11 @@ def reduce_tensor(tensor):
     # only be opened by one context per device per other process.
     # If we open and close a memory handle multiples times in a process, CUDA is allowed
     # to give it a different address; similarly, once we close the memory, we're not
-    # allowed to access it(and the storage/tensor built on top of it), even if it is
+    # allowed to access it (and the storage/tensor built on top of it), even if it is
     # still live in the original process. As we cannot make a cudaMalloc allocation
     # to a single storage in one go, this requires us to cache the device pointer for
-    # each cudaIpcMemHandle on C++ side to reconstruct types of storages, while keep
-    # the old ones alives.
+    # each cudaIpcMemHandle on C++ side to reconstruct types of storages, while keeping
+    # the old ones alive.
     # See [https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__DEVICE.html]
     #
     # This is fine, because all we need to do is to save our position in the allocation,
@@ -290,7 +289,7 @@ def reduce_tensor(tensor):
     # 0xE000 ->  --------CUDA allocation-----
     #
     # To send tensor1, the following info are required from sender to receiver for
-    # storage recontruction.
+    # storage reconstruction.
     #   1. cudaIpcMemHandle of 0xA000(which can be mapped to a basePtr in receiver process).
     #      basePtr may not be exactly 0xA000 since it's a different process.
     #   2. offset(0xA100) of storage1 in the CUDA allocation.
@@ -551,9 +550,7 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
-    storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(
-        cls, handle
-    )
+    storage: torch.TypedStorage | torch.UntypedStorage = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
     if dtype is None:
@@ -626,7 +623,9 @@ def reduce_storage(storage):
 
 
 def init_reductions():
-    reduction.register(torch.cuda.Event, reduce_event)
+    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event, torch.Event]
+    for event_cls in ipc_event_classes:
+        reduction.register(event_cls, _reduce_event)
 
     for t in torch._storage_classes:
         if t.__name__ == "UntypedStorage":

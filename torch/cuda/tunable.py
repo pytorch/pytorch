@@ -71,7 +71,7 @@ debugging purposes. This will produce a lot of diagnostic messages but may be
 useful to see if TunableOp is being used at all. Otherwise, TunableOp is
 completely silent, besides file output, unless there is a warning or error
 during its use. The verbose option is only available by setting the environment
-variable PYTORCH_TUNABLEOP_VEROBSE=1.
+variable PYTORCH_TUNABLEOP_VERBOSE=1.
 
 A Note on Tuning Behavior, Warmup, and Cache Effects
 ====================================================
@@ -93,19 +93,28 @@ among all that were successfully profiled will be chosen. A profile might fail
 if the given solution doesn't achieve the same accuracy as the default
 implementation or if the solution returns an error code.
 
+CUDA cuBLASLt support uses the TunableOp result cache and profiling machinery
+to time a configurable number of cuBLASLt heuristic candidates.
+
 Current Tunable Operators
 =========================
 
 TunableGemm for ROCm
 --------------------
 
-Currently only a TunableGemm for ROCm is implemented. Note that CUDA builds of
-PyTorch will function correctly when using TunableOp but the only solution
-available to CUDA builds is the 'Default' implementation i.e. the original
-cuBLAS default, now called through TunableOp. Any call to at::cuda::blas::gemm()
-or ::bgemm() will be routed through TunableOp when enabled. Calling gemm() for a
-given set of input arguments (transa, transb, m, n, k) will attempt to use the
-fastest available implementation across both rocblas and hipblaslt.
+Any call to at::cuda::blas::gemm() or ::bgemm() will be routed through TunableOp
+when enabled. Calling gemm() for a given set of input arguments
+(transa, transb, m, n, k) on ROCm will attempt to use the fastest available
+implementation across both rocblas and hipblaslt. On CUDA, TunableGemm registers
+cuBLASLt heuristic candidates for GEMM paths that already use cuBLASLt.
+
+cuBLASLt Heuristic Tuning for CUDA
+----------------------------------
+
+The number of cuBLASLt heuristic candidates is controlled by
+set_cublaslt_requested_algo_count() or
+PYTORCH_TUNABLEOP_CUBLASLT_REQUESTED_ALGO_COUNT, which defaults to 8. If this
+count is 1, only the top cuBLASLt heuristic candidate is available.
 
 Offline Tuning
 ==============
@@ -124,11 +133,11 @@ Workflow
 There are basically two steps:
 1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``:
 
-.. code-block:: python
+.. code-block:: bash
 
-   PYTORCH_TUNABLEOP_ENABLED=1
-   PYTORCH_TUNABLEOP_TUNING=0
-   PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+   export PYTORCH_TUNABLEOP_ENABLED=1
+   export PYTORCH_TUNABLEOP_TUNING=0
+   export PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
    ...
 
 2) Run a Python script that reads the ``tunableop_untuned0.csv`` and generates the ``tunableop_results0.csv``, like this:
@@ -138,9 +147,9 @@ There are basically two steps:
    import torch.cuda.tunable as tunable
    import os
 
-   os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
-   os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
-   os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
+   os.putenv("PYTORCH_TUNABLEOP_ENABLED", "1")
+   os.putenv("PYTORCH_TUNABLEOP_TUNING", "1")
+   os.putenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "0")
    tunable.tune_gemm_in_file("tunableop_untuned0.csv")
 
 
@@ -155,7 +164,7 @@ configuration on N GPUs.
 .. code-block:: python
 
    if __name__ == "__main__":
-       num_gpus = 8 # number of GPUs that will be used during the tuning process
+       num_gpus = 8  # number of GPUs that will be used during the tuning process
        tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
 
 Note that the usage of the ``mgpu_tune_gemm_in_file`` API is different from its single GPU counterpart
@@ -179,15 +188,23 @@ environment variable interface programmatically since the settings become fixed.
 Use the C++ or Python APIs instead.
 
 """
-import concurrent.futures
+
+import contextlib
 import glob
 import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional
+from collections.abc import Iterator
+from typing import NamedTuple
 
 import torch
+
+
+_DYN_M_BIT = 1 << 0
+_DYN_N_BIT = 1 << 1
+_DYN_K_BIT = 1 << 2
+_DYN_BATCH_BIT = 1 << 3
 
 
 __all__ = [
@@ -197,21 +214,25 @@ __all__ = [
     "tuning_is_enabled",
     "record_untuned_enable",
     "record_untuned_is_enabled",
+    "wildcard_fallback_enable",
+    "wildcard_fallback_is_enabled",
     "set_max_tuning_duration",
     "get_max_tuning_duration",
     "set_max_tuning_iterations",
     "get_max_tuning_iterations",
+    "set_cublaslt_requested_algo_count",
+    "get_cublaslt_requested_algo_count",
+    "dynamic_dims_mask",
     "set_filename",
     "get_filename",
     "get_results",
     "get_validators",
-    "write_file_on_exit",
-    "write_file",
     "read_file",
     "tune_gemm_in_file",
     "mgpu_tune_gemm_in_file",
     "set_rotating_buffer_size",
     "get_rotating_buffer_size",
+    "set_numerical_check_tolerances",
 ]
 
 
@@ -240,7 +261,7 @@ def tuning_is_enabled() -> bool:
 
 
 def record_untuned_enable(val: bool = True) -> None:
-    r"""Enable recording untuned of TunableOp perations for offline tuning.
+    r"""Enable recording untuned TunableOp operations for offline tuning.
 
     When enabled, if a tuned entry isn't found, write it to the untuned file.
     """
@@ -250,6 +271,23 @@ def record_untuned_enable(val: bool = True) -> None:
 def record_untuned_is_enabled() -> bool:
     r"""Returns whether TunableOp operations are recorded for offline tuning."""
     return torch._C._cuda_record_untuned_is_enabled()  # type: ignore[attr-defined]
+
+
+def wildcard_fallback_enable(val: bool = True) -> None:
+    r"""Enable wildcard fallback for TunableOp runtime dispatch.
+
+    When enabled and a concrete signature misses, the runtime scans persisted
+    wildcard entries for a token-pattern match. When disabled (the default),
+    only exact concrete lookups are performed, matching pre-wildcard behavior.
+
+    Also settable via ``PYTORCH_TUNABLEOP_WILDCARD_FALLBACK=1``.
+    """
+    torch._C._cuda_tunableop_wildcard_fallback_enable(val)  # type: ignore[attr-defined]
+
+
+def wildcard_fallback_is_enabled() -> bool:
+    r"""Returns whether wildcard fallback is enabled for TunableOp dispatch."""
+    return torch._C._cuda_tunableop_wildcard_fallback_is_enabled()  # type: ignore[attr-defined]
 
 
 def set_max_tuning_duration(duration: int) -> None:
@@ -280,12 +318,97 @@ def get_max_tuning_iterations() -> int:
     return torch._C._cuda_tunableop_get_max_tuning_iterations()  # type: ignore[attr-defined]
 
 
+def set_cublaslt_requested_algo_count(count: int) -> None:
+    r"""Set the number of cuBLASLt heuristic algorithms to request on CUDA.
+
+    Values less than 1 are clamped to 1.
+    """
+    torch._C._cuda_tunableop_set_cublaslt_requested_algo_count(count)  # type: ignore[attr-defined]
+
+
+def get_cublaslt_requested_algo_count() -> int:
+    r"""Get the number of cuBLASLt heuristic algorithms requested on CUDA."""
+    get_count = (
+        torch._C._cuda_tunableop_get_cublaslt_requested_algo_count  # type: ignore[attr-defined]
+    )
+    return get_count()
+
+
+def _pack_dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> int:
+    r"""Pack four per-dim flags into the single byte mask used by C++."""
+    bits = 0
+    if M:
+        bits |= _DYN_M_BIT
+    if N:
+        bits |= _DYN_N_BIT
+    if K:
+        bits |= _DYN_K_BIT
+    if BATCH:
+        bits |= _DYN_BATCH_BIT
+    return bits
+
+
+def _push_dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> object:
+    r"""Push a per-call dynamic-dims mask onto the thread-local TunableOp stack.
+
+    Returns an opaque handle (PyCapsule) that must be passed to
+    :func:`pop_dynamic_dims_mask`. Handles must be popped in reverse push order,
+    and on the same thread that pushed them. The stack is thread-local and
+    unsynchronized, so neither is checked: an out-of-order pop drops whichever
+    entry is on top rather than this one, and a handle released on another
+    thread (e.g. by the garbage collector) warns and skips its pop, leaving the
+    owner's entry in place. Prefer the :func:`dynamic_dims_mask` context
+    manager, which keeps push and pop paired and on one thread, unless you need
+    raw push/pop semantics.
+
+    The mask wildcards the named GEMM dims when computing the TunableOp
+    DynamicSignature; tuned entries seeded under the wildcard key will be
+    reused by subsequent shapes that differ only in the dynamic dim(s).
+    """
+    bits = _pack_dynamic_dims_mask(M=M, N=N, K=K, BATCH=BATCH)
+    return torch._C._cuda_tunableop_push_dynamic_dims_mask(bits)
+
+
+def _pop_dynamic_dims_mask(handle: object) -> None:
+    torch._C._cuda_tunableop_pop_dynamic_dims_mask(handle)
+
+
+@contextlib.contextmanager
+def dynamic_dims_mask(
+    M: bool = False,
+    N: bool = False,
+    K: bool = False,
+    BATCH: bool = False,
+) -> Iterator[None]:
+    r"""Context manager that wraps a scope with a per-call dynamic-dims mask.
+
+    Each TunableOp GEMM call inside the scope uses the given mask when
+    computing its wildcard signature; outside the scope the legacy
+    concrete-only behavior applies.
+    """
+    handle = _push_dynamic_dims_mask(M=M, N=N, K=K, BATCH=BATCH)
+    try:
+        yield
+    finally:
+        _pop_dynamic_dims_mask(handle)
+
+
 def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
     r"""Set the filename to use for input/output of tuning results.
 
     If :attr:`insert_device_ordinal` is ``True`` then the current device ordinal
     will be added to the given filename automatically. This can be used in a
-    1-process-per-gpu cenario to ensure all processes write to a separate file.
+    1-process-per-gpu scenario to ensure all processes write to a separate file.
     """
     torch._C._cuda_tunableop_set_filename(filename, insert_device_ordinal)  # type: ignore[attr-defined]
 
@@ -305,26 +428,7 @@ def get_validators() -> tuple[str, str]:
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
 
-def write_file_on_exit(val: bool) -> None:
-    r"""During Tuning Context destruction, write file to disk.
-
-    This is useful as a final flush of your results to disk if your application
-    terminates as result of normal operation or an error. Manual flushing of
-    your results can be achieved by manually calling ``write_file()``."""
-    torch._C._cuda_tunableop_write_file_on_exit(val)  # type: ignore[attr-defined]
-
-
-def write_file(filename: Optional[str] = None) -> bool:
-    r"""Write results to a CSV file.
-
-    If :attr:`filename` is not given, ``get_filename()`` is called.
-    """
-    if filename is None:
-        filename = get_filename()
-    return torch._C._cuda_tunableop_write_file(filename)  # type: ignore[attr-defined]
-
-
-def read_file(filename: Optional[str] = None) -> bool:
+def read_file(filename: str | None = None) -> bool:
     r"""Read results from a TunableOp CSV file.
 
     If :attr:`filename` is not given, ``get_filename()`` is called.
@@ -343,15 +447,34 @@ def set_rotating_buffer_size(buffer_size: int) -> None:
 
 
 def get_rotating_buffer_size() -> int:
-    r"""Get the rotating buffer size in kilobytes."""
+    r"""Get the rotating buffer size in bytes.
+
+    A negative value passed to :func:`set_rotating_buffer_size` resolves to the
+    L2 cache size, which is what this returns in that case.
+    """
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
+
+
+def set_numerical_check_tolerances(
+    enable: bool, atol: float = 1e-5, rtol: float = 1e-5
+) -> None:
+    r"""Set the atol and rtol values in numeric check"""
+    return torch._C._cuda_tunableop_set_numerical_check_tolerances(enable, atol, rtol)  # type: ignore[attr-defined]
+
+
+def _clear_all() -> None:
+    r"""Drop all in-memory tuning results. Testing only: lets a test start from
+    an empty results manager instead of relying on globally disjoint shapes."""
+    torch._C._cuda_tunableop_clear_all()  # type: ignore[attr-defined]
 
 
 def tune_gemm_in_file(filename: str) -> None:
     r"""tune GEMM in file."""
 
-    assert is_enabled()
-    assert tuning_is_enabled()
+    if not is_enabled():
+        raise AssertionError("TunableOp is not enabled")
+    if not tuning_is_enabled():
+        raise AssertionError("Tuning is not enabled")
 
     deviceid = torch.cuda.current_device()
 
@@ -406,7 +529,10 @@ def _gather_tunableop_results() -> None:
         else:
             filename_pattern = results_filename_env.replace(".", "?.")
 
-    assert "?" in filename_pattern
+    if "?" not in filename_pattern:
+        raise AssertionError(
+            f"filename_pattern must contain '?', got {filename_pattern!r}"
+        )
 
     FirstFile = False
     matching_files = glob.glob(filename_pattern)
@@ -437,12 +563,243 @@ def _gather_tunableop_results() -> None:
         shutil.copy(output_file, duplicate_file)
 
 
+def _create_matrices(
+    m: int,
+    n: int,
+    k: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtypeA: torch.dtype,
+    deviceid: str,
+    dtypeB: torch.dtype | None = None,
+    randn: bool = True,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Helper function for _process_single_offline_gemm.
+    Creates matrices that are then consumed by one of the Torch GEMM APIs.
+    """
+    # Fill parameters set for use with ScaledGEMM
+    fillA = 0.25
+    fillB = 0.75
+
+    if dtypeB is None:
+        dtypeB = dtypeA
+
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
+
+        if randn:
+            matA = torch.randn(rowsA, lda, dtype=dtypeA, device=deviceid)
+            matB = torch.randn(rowsB, ldb, dtype=dtypeA, device=deviceid)
+        else:
+            matA = torch.full((rowsA, lda), fillA, dtype=dtypeB, device=deviceid)
+            matB = torch.full((rowsB, ldb), fillB, dtype=dtypeB, device=deviceid)
+
+        subA = matA[:k, :m].t() if transA else matA[:m, :k]
+        subB = matB[:n, :k].t() if transB else matB[:k, :n]
+        return subA, subB
+    else:
+        if randn:
+            matA = (
+                torch.rand(k, m, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.rand(m, k, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.rand(n, k, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.rand(k, n, dtype=dtypeB, device=deviceid)
+            )
+        else:
+            matA = (
+                torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+                if transA
+                else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+            )
+            matB = (
+                torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+                if transB
+                else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+            )
+        return matA, matB
+
+
+def _create_batch_matrices(
+    m: int,
+    n: int,
+    k: int,
+    b: int,
+    lda: int,
+    ldb: int,
+    ldc: int,
+    transA: bool,
+    transB: bool,
+    dtype: torch.dtype,
+    deviceid: str,
+    subMatrix: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Helper function for _process_single_offline_gemm.
+    Creates batch matrices that are then consumed by one of the Torch GEMM APIs.
+    Similar to _create_matrices but for 3D batch matrices.
+    """
+    if subMatrix:
+        # User reference for understanding leading dimension:
+        # https://github.com/Reference-LAPACK/lapack/blob/master/BLAS/SRC/dgemm.f
+        # TO DO: According to lines 108 - 133, there is no lower bound on rowsA,
+        # but there is a restriction on rowsB. Using this formula for now as it
+        # seems to work for all UTs.
+        rowsA = rowsB = max(ldc, k)
+
+        matA = torch.randn(b, rowsA, lda, dtype=dtype, device=deviceid)
+        matB = torch.randn(b, rowsB, ldb, dtype=dtype, device=deviceid)
+
+        subA = matA[:b, :k, :m].transpose(1, 2) if transA else matA[:b, :m, :k]
+        subB = matB[:b, :n, :k].transpose(1, 2) if transB else matB[:b, :k, :n]
+        return subA, subB
+    else:
+        matA = (
+            torch.rand(b, k, m, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+        )
+        matB = (
+            torch.rand(b, n, k, dtype=dtype, device=deviceid)
+            if transB
+            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
+        )
+        matA = matA.transpose(1, 2) if transA else matA
+        matB = matB.transpose(1, 2) if transB else matB
+        return matA, matB
+
+
+def _get_dtype_from_string(
+    dtype_string: str, dtype_dict: dict[str, torch.dtype], field_name: str
+) -> torch.dtype:
+    dtype = dtype_dict.get(dtype_string)
+    if dtype is None:
+        raise TypeError(f"{field_name} must be a torch.dtype, but got {dtype_string}")
+    return dtype
+
+
+class _ScaledGemmOptions(NamedTuple):
+    dtypeA: torch.dtype
+    dtypeB: torch.dtype
+    dtypeC: torch.dtype
+    rowwise: bool
+    bias_dtype: torch.dtype | None
+    use_fast_accum: bool
+
+
+def _parse_cuda_scaled_gemm_fields(tokens: list[str]) -> dict[str, str]:
+    labels = ("a", "b", "c", "as", "bs", "ast", "bst", "dscale", "fast", "bias")
+    label_set = set(labels)
+    fields: dict[str, str] = {}
+
+    i = 8
+    for label in labels:
+        if i >= len(tokens) or tokens[i] != label:
+            got = tokens[i] if i < len(tokens) else None
+            raise AssertionError(f"expected {label!r} at index {i}, got {got!r}")
+        i += 1
+
+        value_start = i
+        while i < len(tokens) and tokens[i] not in label_set:
+            i += 1
+        if i == value_start:
+            raise AssertionError(f"expected value for {label!r}")
+        fields[label] = "_".join(tokens[value_start:i])
+
+    if i != len(tokens):
+        raise AssertionError(f"unexpected CUDA scaled GEMM fields: {tokens[i:]}")
+
+    return fields
+
+
+def _parse_cuda_scaled_gemm_options(
+    tokens: list[str], dtype_dict: dict[str, torch.dtype]
+) -> _ScaledGemmOptions:
+    fields = _parse_cuda_scaled_gemm_fields(tokens)
+
+    if fields["dscale"] != "0":
+        raise AssertionError(
+            "offline tuning for CUDA scaled GEMM with dscale is not supported"
+        )
+
+    if fields["ast"] != fields["bst"]:
+        raise AssertionError(
+            "offline tuning only supports matching CUDA scaled GEMM scaling types"
+        )
+    if fields["ast"] not in ("0", "1"):
+        raise AssertionError(
+            "offline tuning only supports CUDA tensorwise and rowwise scaled GEMM"
+        )
+    if fields["fast"] not in ("0", "1"):
+        raise AssertionError("expected CUDA scaled GEMM fast field to be 0 or 1")
+
+    bias_dtype = (
+        None
+        if fields["bias"] == "None"
+        else _get_dtype_from_string(fields["bias"], dtype_dict, "bias_dtype")
+    )
+    return _ScaledGemmOptions(
+        # cublasCommonArgs represents a row-major result as B.T @ A.T, so
+        # its A and B operands are the second and first _scaled_mm inputs.
+        dtypeA=_get_dtype_from_string(fields["b"], dtype_dict, "dtypeA"),
+        dtypeB=_get_dtype_from_string(fields["a"], dtype_dict, "dtypeB"),
+        dtypeC=_get_dtype_from_string(fields["c"], dtype_dict, "dtypeC"),
+        rowwise=fields["ast"] == "1",
+        bias_dtype=bias_dtype,
+        use_fast_accum=fields["fast"] == "1",
+    )
+
+
+def _parse_rocm_scaled_gemm_options(
+    tokens: list[str],
+    dtype_dict: dict[str, torch.dtype],
+    dtypeA: torch.dtype | None,
+    dtypeB: torch.dtype | None,
+    dtypeC: torch.dtype | None,
+) -> _ScaledGemmOptions:
+    if tokens[8] != "rw":
+        raise AssertionError(f"expected 'rw' at index 8, got {tokens[8]!r}")
+
+    if tokens[10] != "bias":
+        raise AssertionError(f"expected 'bias' at index 10, got {tokens[10]!r}")
+
+    # Make linter happy
+    if dtypeA is None or not isinstance(dtypeA, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeA}")
+    if dtypeB is None or not isinstance(dtypeB, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeB}")
+    if dtypeC is None or not isinstance(dtypeC, torch.dtype):
+        raise TypeError(f"dtype must be a torch.dtype, but got {dtypeC}")
+
+    bias_dtype = (
+        None
+        if tokens[11] == "None"
+        else _get_dtype_from_string(tokens[11], dtype_dict, "bias_dtype")
+    )
+    return _ScaledGemmOptions(
+        dtypeA, dtypeB, dtypeC, tokens[9] == "1", bias_dtype, False
+    )
+
+
 def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
     deviceid = "cuda:" + str(gpu_id)
+    torch.cuda.set_device(deviceid)
 
     dtype_dict = {
+        "Float": torch.float32,
         "float": torch.float32,
         "tf32": torch.float32,
         "double": torch.float64,
@@ -466,23 +823,24 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     dtypeB = None
     dtypeC = None
 
+    # Extract BLAS parameters
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-        transA = layout[0] == "T"
-        transB = layout[1] == "T"
+        transB = layout[0] == "T"
+        transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
         if data_type == "tf32":
-            # User must still set HIPBLASLT_ALLOW_TF32=1
             torch.backends.cuda.matmul.allow_tf32 = True
         else:
             torch.backends.cuda.matmul.allow_tf32 = False
 
     else:  # ScaledGEMM
         count = untuned_gemm[0].count("_")
-        assert count in [6, 7]
+        if count not in [6, 7]:
+            raise AssertionError(f"count must be 6 or 7, got {count}")
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
-        # of the the number of underscores
+        # of the number of underscores
         op_sig = untuned_gemm_temp[0]
         data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
         data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
@@ -490,8 +848,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
         else:
             data_typeC = untuned_gemm_temp[5]
-        transA = untuned_gemm_temp[count][0] == "T"
-        transB = untuned_gemm_temp[count][1] == "T"
+        transB = untuned_gemm_temp[count][0] == "T"
+        transA = untuned_gemm_temp[count][1] == "T"
         dtypeA = dtype_dict.get(data_typeA)
         dtypeB = dtype_dict.get(data_typeB)
         dtypeC = dtype_dict.get(data_typeC)
@@ -499,147 +857,197 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     untuned_gemm_temp = untuned_gemm[1].split("_")
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
     if op_sig == "GemmStridedBatchedTunableOp":
-        assert untuned_gemm_temp[6] == "ld"
+        if untuned_gemm_temp[6] != "ld":
+            raise AssertionError(
+                f"expected 'ld' at index 6, got {untuned_gemm_temp[6]!r}"
+            )
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
     else:
-        assert untuned_gemm_temp[4] == "ld"
+        if untuned_gemm_temp[4] != "ld":
+            raise AssertionError(
+                f"expected 'ld' at index 4, got {untuned_gemm_temp[4]!r}"
+            )
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
-    # We cannot handle submatrices in offline tuning
-    if all(item in [n, m, k] for item in [lda, ldb, ldc]):
-        pass
+    # Detect subMatrix case
+    # A GEMM is "tight" (not a sub-matrix) only when each leading dimension
+    # equals its expected contiguous value for the given transpose layout.
+    # Checking mere membership in {n, m, k} is wrong: a padded leading
+    # dimension can coincidentally equal one of n/m/k (e.g. lda == n), which
+    # silently rewrites the requested shape and tunes the wrong GEMM.
+    # See https://github.com/ROCm/TheRock/issues/5553
+    lda_tight = m if transA else k
+    ldb_tight = k if transB else n
+    ldc_tight = n
+    if lda == lda_tight and ldb == ldb_tight and ldc == ldc_tight:
+        subMatrix = False
     else:
-        warnings.warn(
-            "Offline tuning is not supported on submatrices. Use online tuning instead. "
-            + f"Skipped tuning for: {untuned_gemm[1]}"
-        )
-        return
+        subMatrix = True
 
     if op_sig == "GemmTunableOp":
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
             if (not transA) and (not transB):
                 pass  # case is supported
-            elif transB and n == 1:
+            elif transA and n == 1:
                 pass  # case is supported
             else:
                 warnings.warn(
                     "Offline tuning is not supported for this GEMM. Use online tuning instead. "
-                    + f"Skipped tuning for: {untuned_gemm[1]}"
+                    + f"Skipped tuning for: {untuned_gemm[1]}",
+                    stacklevel=2,
                 )
                 return
 
-        matA = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
-        )
-        matB = (
-            torch.rand(n, k, dtype=dtype, device=deviceid).t()
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid)
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        matA, matB = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
         torch.mm(matA, matB)
+
     elif op_sig == "GemmStridedBatchedTunableOp":
         # Warnings for unsupported cases:
         if m == 1 or n == 1 or k == 1:
             warnings.warn(
-                "Offline tuning is not support for this GEMM. Use online tuning instead. "
-                + f"Skipped tuning for: {untuned_gemm[1]}"
+                "Offline tuning is not supported for this GEMM. Use online tuning instead. "
+                + f"Skipped tuning for: {untuned_gemm[1]}",
+                stacklevel=2,
             )
             return
 
         [b] = [int(g) for g in untuned_gemm_temp[5:6]]
-        matA = (
-            torch.rand(b, k, m, dtype=dtype, device=deviceid)
-            if transB
-            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        matA, matB = _create_batch_matrices(
+            m,
+            n,
+            k,
+            b,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            dtype,
+            deviceid,
+            subMatrix=subMatrix,
         )
-        matB = (
-            torch.rand(b, n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
-        )
-        matA = matA.transpose(1, 2) if transB else matA
-        matB = matB.transpose(1, 2) if transA else matB
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
         # Only combination supported by PyTorch
-        assert transA is True
-        assert transB is False
+        if transB is not True:
+            raise AssertionError(
+                f"transB must be True for ScaledGemmTunableOp, got {transB}"
+            )
+        if transA is not False:
+            raise AssertionError(
+                f"transA must be False for ScaledGemmTunableOp, got {transA}"
+            )
 
-        fillA = 0.25
-        fillB = 0.75
-        matA = (
-            torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
-            if transB
-            else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
-        )
-        matB = (
-            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
-            if transA
-            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
-        )
-
-        assert untuned_gemm_temp[8] == "rw"
-        if untuned_gemm_temp[9] == "1":
-            rowwise = True
+        if torch.version.hip:
+            scaled_gemm_options = _parse_rocm_scaled_gemm_options(
+                untuned_gemm_temp, dtype_dict, dtypeA, dtypeB, dtypeC
+            )
         else:
-            rowwise = False
-        if rowwise:
+            scaled_gemm_options = _parse_cuda_scaled_gemm_options(
+                untuned_gemm_temp, dtype_dict
+            )
+
+        matA, matB = _create_matrices(
+            m,
+            n,
+            k,
+            lda,
+            ldb,
+            ldc,
+            transA,
+            transB,
+            scaled_gemm_options.dtypeA,
+            deviceid,
+            dtypeB=scaled_gemm_options.dtypeB,
+            randn=False,
+            subMatrix=subMatrix,
+        )
+
+        if scaled_gemm_options.rowwise:
             scaleA = (
                 torch.ones((1, m), device=deviceid)
-                if transB
+                if transA
                 else torch.ones((m, 1), device=deviceid)
             )
+            scalingTypeA = torch.nn.functional.ScalingType.RowWise
             scaleB = (
                 torch.ones((1, n), device=deviceid)
-                if transA
+                if transB
                 else torch.ones((n, 1), device=deviceid)
             )
+            scalingTypeB = torch.nn.functional.ScalingType.RowWise
         else:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
+            scalingTypeA = torch.nn.functional.ScalingType.TensorWise
+            scalingTypeB = torch.nn.functional.ScalingType.TensorWise
 
-        assert untuned_gemm_temp[10] == "bias"
-        if untuned_gemm_temp[11] == "None":  # no bias vector
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
-            )
-        else:  # bias vector present
+        kwargs = {
+            "scale_a": scaleA,
+            "scale_recipe_a": scalingTypeA,
+            "scale_b": scaleB,
+            "scale_recipe_b": scalingTypeB,
+            "output_dtype": scaled_gemm_options.dtypeC,
+            "use_fast_accum": scaled_gemm_options.use_fast_accum,
+        }
+        if scaled_gemm_options.bias_dtype is not None:
             fillbias = 0.10
-            bias_dtype = dtype_dict.get(untuned_gemm_temp[11])
-            bias = (
-                torch.full((n,), fillbias, dtype=bias_dtype, device=deviceid)
-                if transA
-                else torch.full((m,), fillbias, dtype=bias_dtype, device=deviceid)
+            kwargs["bias"] = (
+                torch.full(
+                    (n,),
+                    fillbias,
+                    dtype=scaled_gemm_options.bias_dtype,
+                    device=deviceid,
+                )
+                if transB
+                else torch.full(
+                    (m,),
+                    fillbias,
+                    dtype=scaled_gemm_options.bias_dtype,
+                    device=deviceid,
+                )
             )
-            torch._scaled_mm(
-                matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC, bias=bias
-            )
+        torch.nn.functional.scaled_mm(matA, matB, **kwargs)
 
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
-        assert transA != transB
+        if transA == transB:
+            raise AssertionError(
+                f"transA and transB must differ for GemmAndBiasTunableOp, got transA={transA}, transB={transB}"
+            )
 
-        X = (
-            torch.rand(k, m, dtype=dtype, device=deviceid).t()
-            if transB
-            else torch.rand(m, k, dtype=dtype, device=deviceid)
+        # Resolve linter issue
+        if dtype is None or not isinstance(dtype, torch.dtype):
+            raise TypeError(f"dtype must be a torch.dtype, but got {dtype}")
+
+        bias = torch.rand(n, dtype=dtype, device=deviceid)
+
+        X, matA = _create_matrices(
+            m, n, k, lda, ldb, ldc, transA, transB, dtype, deviceid, subMatrix=subMatrix
         )
-        matA = (
-            torch.rand(n, k, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(k, n, dtype=dtype, device=deviceid).t()
-        )
-        bias = (
-            torch.rand(n, dtype=dtype, device=deviceid)
-            if transA
-            else torch.rand(m, dtype=dtype, device=deviceid)
-        )
+        matA = matA.t()
         torch.nn.functional.linear(X, matA, bias)
     else:
-        warnings.warn(f"error: unknown op {op_sig}")
+        warnings.warn(f"error: unknown op {op_sig}", stacklevel=2)
+
+
+def _process_offline_gemms(untuned_gemm_lines: list[str], gpu_id: int) -> None:
+    r"""Process multiple untuned GEMMs on a single GPU."""
+    _check_tuning_assertions()
+    for line in untuned_gemm_lines:
+        _process_single_offline_gemm(line, gpu_id)
 
 
 def _check_tuning_assertions() -> None:
@@ -648,11 +1056,14 @@ def _check_tuning_assertions() -> None:
     """
 
     if is_enabled() is False:
-        warnings.warn("TunableOp was disabled. Trying to enable now.")
+        warnings.warn("TunableOp was disabled. Trying to enable now.", stacklevel=2)
         enable(True)
-    assert is_enabled() is True
-    assert tuning_is_enabled() is True
-    assert record_untuned_is_enabled() is False
+    if is_enabled() is not True:
+        raise AssertionError("is_enabled() must be True")
+    if tuning_is_enabled() is not True:
+        raise AssertionError("tuning_is_enabled() must be True")
+    if record_untuned_is_enabled() is not False:
+        raise AssertionError("record_untuned_is_enabled() must be False")
 
 
 def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
@@ -661,39 +1072,37 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     total_gpus = torch.cuda.device_count()
 
-    assert 1 <= num_gpus <= total_gpus
+    if not (1 <= num_gpus <= total_gpus):
+        raise AssertionError(
+            f"num_gpus must be between 1 and {total_gpus}, got {num_gpus}"
+        )
 
     mp_context = mp.get_context("spawn")
 
-    futures = []  # empty list to hold futures
-    flush_results = []  # empty list to hold futures
+    gemm_entries_by_gpu: list[list[str]] = [[] for _ in range(num_gpus)]
 
     # GEMM are assigned to GPUs in a round robin manner
-    h = 0
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=num_gpus,
-        mp_context=mp_context,
-        initializer=_check_tuning_assertions,
-    ) as executor:
-        # The workers are a separate process. TunableOp will be
-        # enabled in the child processes if PYTORCH_TUNABLEOP_ENABLED=1
-        # In the initializer, we also try to enable TunableOP if th
-        # environment variable was NOT set.
+    for h, line in enumerate(unique_gemm_entries):
+        gemm_entries_by_gpu[h % num_gpus].append(line)
 
-        for line in unique_gemm_entries:
-            future = executor.submit(_process_single_offline_gemm, line, h)
-            futures.append(future)
-            h = (h + 1) % num_gpus
+    processes = []
+    for h, entries in enumerate(gemm_entries_by_gpu):
+        if not entries:
+            continue
+        # TunableOp initializes its output filename once per process, so keep
+        # each spawned process bound to a single GPU.
+        process = mp_context.Process(target=_process_offline_gemms, args=(entries, h))
+        process.start()
+        processes.append((h, process))
 
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
+    failed_processes = []
+    for h, process in processes:
+        process.join()
+        if process.exitcode != 0:
+            failed_processes.append((h, process.exitcode))
 
-        for g in range(num_gpus):
-            flush_result = executor.submit(write_file)
-            flush_results.append(flush_result)
-
-        for flush_result in concurrent.futures.as_completed(flush_results):
-            flush_result.result()
+    if failed_processes:
+        raise RuntimeError(f"offline tuning processes failed: {failed_processes}")
 
     torch.cuda.synchronize()
 

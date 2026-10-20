@@ -37,7 +37,7 @@ class MobileDebugInfo : public c10::DebugInfoBase {
   std::string model_name_;
   std::string method_name_;
   // TODO: Kimish
-  // If we launch a thread such as for at::launch, interepter continuation
+  // If we launch a thread such as for at::launch, interpreter continuation
   // and if the caching allocator is enabled in the base thread
   // then, in order to propagate this information, that is caching allocator
   // is enabled, across thread boundaries we can use the mechanism provided
@@ -67,26 +67,28 @@ class MobileModuleObserver {
  public:
   virtual ~MobileModuleObserver() = default;
 
-  virtual void onEnterRunMethod(const int32_t) {}
+  virtual void onEnterRunMethod(const int32_t /*unused*/) {}
   virtual void onExitRunMethod(
-      const std::unordered_map<std::string, std::string>&,
-      const std::string&,
-      const int32_t) {}
+      const std::unordered_map<std::string, std::string>& /*unused*/,
+      const std::string& /*unused*/,
+      const int32_t /*unused*/) {}
   virtual void onFailRunMethod(
-      const std::unordered_map<std::string, std::string>&,
-      const std::string&,
-      const int32_t,
-      const char*) {}
-  virtual void onEnterLoadModel(const int32_t) {}
+      const std::unordered_map<std::string, std::string>& /*unused*/,
+      const std::string& /*unused*/,
+      const int32_t /*unused*/,
+      const char* /*unused*/) {}
+  virtual void onEnterLoadModel(const int32_t /*unused*/) {}
   virtual void onExitLoadModel(
-      const int32_t,
-      const std::unordered_map<std::string, std::string>&) {
+      const int32_t /*unused*/,
+      const std::unordered_map<std::string, std::string>& /*unused*/) {
   } // key: filename, value: file content
-  virtual void onFailLoadModel(const int32_t, const char*) {}
   virtual void onFailLoadModel(
-      const int32_t,
-      const char*,
-      const std::unordered_map<std::string, std::string>&) {}
+      const int32_t /*unused*/,
+      const char* /*unused*/) {}
+  virtual void onFailLoadModel(
+      const int32_t /*unused*/,
+      const char* /*unused*/,
+      const std::unordered_map<std::string, std::string>& /*unused*/) {}
   virtual std::vector<std::string> getDefaultExtraFiles() = 0;
   virtual std::unordered_map<std::string, std::string> processMetadataFromExtra(
       const std::unordered_map<std::string, std::string>&) = 0;

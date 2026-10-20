@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.common_types import (
@@ -57,7 +55,7 @@ class _MaxPoolNd(Module):
     def __init__(
         self,
         kernel_size: _size_any_t,
-        stride: Optional[_size_any_t] = None,
+        stride: _size_any_t | None = None,
         padding: _size_any_t = 0,
         dilation: _size_any_t = 1,
         return_indices: bool = False,
@@ -119,8 +117,8 @@ class MaxPool1d(_MaxPoolNd):
           where ``ceil_mode = True``
 
           .. math::
-              L_{out} = \left\lceil \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
-                    \times (\text{kernel\_size} - 1) - 1 + (stride - 1)}{\text{stride}}\right\rceil + 1
+              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1 + (\text{stride} - 1)}{\text{stride}}\right\rfloor + 1
 
         - Ensure that the last pooling starts inside the image, make :math:`L_{out} = L_{out} - 1`
           when :math:`(L_{out} - 1) * \text{stride} >= L_{in} + \text{padding}`.
@@ -142,6 +140,7 @@ class MaxPool1d(_MaxPoolNd):
     dilation: _size_1_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.max_pool1d(
             input,
             self.kernel_size,
@@ -221,6 +220,7 @@ class MaxPool2d(_MaxPoolNd):
     dilation: _size_2_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.max_pool2d(
             input,
             self.kernel_size,
@@ -296,7 +296,7 @@ class MaxPool3d(_MaxPoolNd):
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
-    """  # noqa: E501
+    """
 
     kernel_size: _size_3_t
     stride: _size_3_t
@@ -304,6 +304,7 @@ class MaxPool3d(_MaxPoolNd):
     dilation: _size_3_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.max_pool3d(
             input,
             self.kernel_size,
@@ -386,7 +387,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
     def __init__(
         self,
         kernel_size: _size_1_t,
-        stride: Optional[_size_1_t] = None,
+        stride: _size_1_t | None = None,
         padding: _size_1_t = 0,
     ) -> None:
         super().__init__()
@@ -395,8 +396,9 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.padding = _single(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: list[int] | None = None
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.max_unpool1d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
         )
@@ -481,7 +483,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
     def __init__(
         self,
         kernel_size: _size_2_t,
-        stride: Optional[_size_2_t] = None,
+        stride: _size_2_t | None = None,
         padding: _size_2_t = 0,
     ) -> None:
         super().__init__()
@@ -490,8 +492,9 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.padding = _pair(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: list[int] | None = None
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.max_unpool2d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
         )
@@ -559,7 +562,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
     def __init__(
         self,
         kernel_size: _size_3_t,
-        stride: Optional[_size_3_t] = None,
+        stride: _size_3_t | None = None,
         padding: _size_3_t = 0,
     ) -> None:
         super().__init__()
@@ -568,8 +571,9 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.padding = _triple(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
+        self, input: Tensor, indices: Tensor, output_size: list[int] | None = None
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.max_unpool3d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
         )
@@ -606,6 +610,9 @@ class AvgPool1d(_AvgPoolNd):
     Note:
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
+
+    .. note::
+        pad should be at most half of effective kernel size.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
     an ``int`` or a one-element tuple.
@@ -659,6 +666,7 @@ class AvgPool1d(_AvgPoolNd):
         self.count_include_pad = count_include_pad
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.avg_pool1d(
             input,
             self.kernel_size,
@@ -688,9 +696,12 @@ class AvgPool2d(_AvgPoolNd):
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
 
+    .. note::
+        pad should be at most half of effective kernel size.
+
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
-        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a single ``int`` or a single-element tuple -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
@@ -749,11 +760,11 @@ class AvgPool2d(_AvgPoolNd):
     def __init__(
         self,
         kernel_size: _size_2_t,
-        stride: Optional[_size_2_t] = None,
+        stride: _size_2_t | None = None,
         padding: _size_2_t = 0,
         ceil_mode: bool = False,
         count_include_pad: bool = True,
-        divisor_override: Optional[int] = None,
+        divisor_override: int | None = None,
     ) -> None:
         super().__init__()
         self.kernel_size = kernel_size
@@ -764,6 +775,7 @@ class AvgPool2d(_AvgPoolNd):
         self.divisor_override = divisor_override
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.avg_pool2d(
             input,
             self.kernel_size,
@@ -796,6 +808,9 @@ class AvgPool3d(_AvgPoolNd):
     Note:
         When ceil_mode=True, sliding windows are allowed to go off-bounds if they start within the left padding
         or the input. Sliding windows that would start in the right padded region are ignored.
+
+    .. note::
+        pad should be at most half of effective kernel size.
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -862,11 +877,11 @@ class AvgPool3d(_AvgPoolNd):
     def __init__(
         self,
         kernel_size: _size_3_t,
-        stride: Optional[_size_3_t] = None,
+        stride: _size_3_t | None = None,
         padding: _size_3_t = 0,
         ceil_mode: bool = False,
         count_include_pad: bool = True,
-        divisor_override: Optional[int] = None,
+        divisor_override: int | None = None,
     ) -> None:
         super().__init__()
         self.kernel_size = kernel_size
@@ -877,6 +892,7 @@ class AvgPool3d(_AvgPoolNd):
         self.divisor_override = divisor_override
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.avg_pool3d(
             input,
             self.kernel_size,
@@ -946,8 +962,8 @@ class FractionalMaxPool2d(Module):
     def __init__(
         self,
         kernel_size: _size_2_t,
-        output_size: Optional[_size_2_t] = None,
-        output_ratio: Optional[_ratio_2_t] = None,
+        output_size: _size_2_t | None = None,
+        output_ratio: _ratio_2_t | None = None,
         return_indices: bool = False,
         _random_samples=None,
     ) -> None:
@@ -996,7 +1012,8 @@ class FractionalMaxPool3d(Module):
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k x k) or a tuple `(kt x kh x kw)`
+                     Can be a single number `k` (for a square kernel of `k x k x k`) or a tuple `(kt x kh x kw)`,
+                     `k` must be greater than 0.
         output_size: the target output size of the image of the form `oT x oH x oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number oH for a square image `oH x oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -1031,12 +1048,19 @@ class FractionalMaxPool3d(Module):
     def __init__(
         self,
         kernel_size: _size_3_t,
-        output_size: Optional[_size_3_t] = None,
-        output_ratio: Optional[_ratio_3_t] = None,
+        output_size: _size_3_t | None = None,
+        output_ratio: _ratio_3_t | None = None,
         return_indices: bool = False,
         _random_samples=None,
     ) -> None:
         super().__init__()
+        if (isinstance(kernel_size, int) and kernel_size <= 0) or (
+            isinstance(kernel_size, (tuple, list))
+            and not all(k > 0 for k in kernel_size)
+        ):
+            raise ValueError(
+                f"kernel_size must be greater than 0, but got {kernel_size}"
+            )
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer("_random_samples", _random_samples)
@@ -1082,10 +1106,12 @@ class _LPPoolNd(Module):
         self,
         norm_type: float,
         kernel_size: _size_any_t,
-        stride: Optional[_size_any_t] = None,
+        stride: _size_any_t | None = None,
         ceil_mode: bool = False,
     ) -> None:
         super().__init__()
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
@@ -1106,16 +1132,24 @@ class LPPool1d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     .. note:: If the sum to the power of `p` is zero, the gradient of this function is
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: a single int, the size of the window
-        stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
+
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     Shape:
         - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
@@ -1135,6 +1169,7 @@ class LPPool1d(_LPPoolNd):
     stride: _size_1_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.lp_pool1d(
             input, float(self.norm_type), self.kernel_size, self.stride, self.ceil_mode
         )
@@ -1148,7 +1183,7 @@ class LPPool2d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
@@ -1161,9 +1196,17 @@ class LPPool2d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
+
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -1190,6 +1233,7 @@ class LPPool2d(_LPPoolNd):
     stride: _size_2_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.lp_pool2d(
             input, float(self.norm_type), self.kernel_size, self.stride, self.ceil_mode
         )
@@ -1203,7 +1247,7 @@ class LPPool3d(_LPPoolNd):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling over absolute values
     - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
@@ -1216,9 +1260,17 @@ class LPPool3d(_LPPoolNd):
               not defined. This implementation will set the gradient to zero in this case.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+        norm_type (int or float): the power :math:`p` used to compute pooling.
+            Must be non-zero; positive and negative infinity are supported.
+        kernel_size (int or tuple of int): the size of the window.
+        stride (int or tuple of int, optional): the stride of the window.
+            Default: :attr:`kernel_size`.
+        ceil_mode (bool, optional): when ``True``, use ``ceil`` instead of
+            ``floor`` to compute the output shape. Default: ``False``.
+
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
@@ -1249,6 +1301,7 @@ class LPPool3d(_LPPoolNd):
     stride: _size_3_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.lp_pool3d(
             input, float(self.norm_type), self.kernel_size, self.stride, self.ceil_mode
         )
@@ -1300,6 +1353,7 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
     output_size: _size_1_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 
@@ -1313,7 +1367,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
         output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
                      Can be a tuple :math:`(H_{out}, W_{out})` or a single :math:`H_{out}` for a
                      square image :math:`H_{out} \times H_{out}`. :math:`H_{out}` and :math:`W_{out}`
-                     can be either a ``int``, or ``None`` which means the size will be the same as that
+                     can be either an ``int``, or ``None`` which means the size will be the same as that
                      of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
@@ -1342,6 +1396,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
     output_size: _size_2_opt_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
@@ -1355,7 +1410,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
         output_size: the target output size of the image of the form :math:`D_{out} \times H_{out} \times W_{out}`.
                      Can be a tuple :math:`(D_{out}, H_{out}, W_{out})` or a single
                      :math:`D_{out}` for a cube :math:`D_{out} \times D_{out} \times D_{out}`.
-                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either a
+                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either an
                      ``int``, or ``None`` which means the size will be the same as that of the input.
 
         return_indices: if ``True``, will return the indices along with the outputs.
@@ -1385,6 +1440,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
     output_size: _size_3_opt_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 
@@ -1424,6 +1480,9 @@ class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     output_size: _size_1_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.adaptive_avg_pool1d(input, self.output_size)
 
 
@@ -1436,7 +1495,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size of the image of the form H x W.
                      Can be a tuple (H, W) or a single H for a square image H x H.
-                     H and W can be either a ``int``, or ``None`` which means the size will
+                     H and W can be either an ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Shape:
@@ -1463,6 +1522,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
     output_size: _size_2_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.adaptive_avg_pool2d(input, self.output_size)
 
 
@@ -1475,7 +1535,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     Args:
         output_size: the target output size of the form D x H x W.
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
-                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     D, H and W can be either an ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
     Shape:
@@ -1502,4 +1562,5 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     output_size: _size_3_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.adaptive_avg_pool3d(input, self.output_size)

@@ -76,7 +76,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 // 2) Writing with 1-pass sequential access
 //      -> We must take care not to require updating values that have already
 //         been written. We place the variable-length index at the end and do
-//         not put any indicies into the header to fulfill this constraint.
+//         not put any index into the header to fulfill this constraint.
 
 // The model.json, which contains all the metadata information,
 // should be written as the last file. One reason is that the size of tensor
@@ -90,8 +90,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 // model.json as the last file when writing after we have accumulated all
 // other information.
 
-namespace caffe2 {
-namespace serialize {
+
+namespace caffe2::serialize {
 
 static constexpr const char* kSerializationIdRecordName =
     ".data/serialization_id";
@@ -130,11 +130,15 @@ class TORCH_API PyTorchStreamReader final {
   explicit PyTorchStreamReader(std::shared_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size
-  std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
+  // set allocator to override default cpu allocator
+  std::tuple<at::DataPtr, size_t> getRecord(
+      const std::string& name,
+      std::optional<at::Allocator*> allocator = std::nullopt);
   // multi-thread getRecord
   std::tuple<at::DataPtr, size_t> getRecord(
       const std::string& name,
-      std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders);
+      std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+      std::optional<at::Allocator*> allocator = std::nullopt);
   // inplace memory writing
   size_t getRecord(const std::string& name, void* dst, size_t n);
   // inplace memory writing, multi-threads.
@@ -302,5 +306,4 @@ getOffset(size_t cursor, size_t filename_size, size_t size, uint64_t alignment);
 
 } // namespace detail
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

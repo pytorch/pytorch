@@ -4,6 +4,8 @@
 import itertools
 
 import torch
+
+# pyrefly: ignore [deprecated]
 from torch.autograd.profiler_legacy import profile
 
 from . import (

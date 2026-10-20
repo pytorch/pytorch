@@ -2,10 +2,6 @@
     ignore = dirty
     path = third_party/pybind11
     url = https://github.com/pybind/pybind11.git
-[submodule "third_party/eigen"]
-    ignore = dirty
-    path = third_party/eigen
-    url = https://gitlab.com/libeigen/eigen.git
 [submodule "third_party/googletest"]
     ignore = dirty
     path = third_party/googletest
@@ -25,11 +21,11 @@
 [submodule "third_party/gloo"]
     ignore = dirty
     path = third_party/gloo
-    url = https://github.com/facebookincubator/gloo
+    url = https://github.com/pytorch/gloo
 [submodule "third_party/NNPACK_deps/pthreadpool"]
     ignore = dirty
     path = third_party/pthreadpool
-    url = https://github.com/Maratyszcza/pthreadpool.git
+    url = https://github.com/google/pthreadpool.git
 [submodule "third_party/NNPACK_deps/FXdiv"]
     ignore = dirty
     path = third_party/FXdiv
@@ -89,9 +85,6 @@
 [submodule "third_party/cudnn_frontend"]
 	path = third_party/cudnn_frontend
 	url = https://github.com/NVIDIA/cudnn-frontend.git
-[submodule "third_party/kineto"]
-    path = third_party/kineto
-    url = https://github.com/pytorch/kineto
 [submodule "third_party/pocketfft"]
 	path = third_party/pocketfft
 	url = https://github.com/mreineck/pocketfft
@@ -113,9 +106,6 @@
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
-[submodule "third_party/opentelemetry-cpp"]
-	path = third_party/opentelemetry-cpp
-	url = https://github.com/open-telemetry/opentelemetry-cpp.git
 [submodule "third_party/cpp-httplib"]
 	path = third_party/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib.git
@@ -133,3 +123,9 @@
 [submodule "third_party/flash-attention"]
 	path = third_party/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
+[submodule "third_party/aiter"]
+	path = third_party/aiter
+	url = https://github.com/ROCm/aiter.git
+[submodule "third_party/mslk"]
+	path = third_party/mslk
+	url = https://github.com/meta-pytorch/MSLK.git

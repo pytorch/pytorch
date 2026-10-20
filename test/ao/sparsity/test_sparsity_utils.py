@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 
 import logging
@@ -18,7 +18,11 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
     TwoLayerLinearModel,
 )
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 logging.basicConfig(
@@ -37,6 +41,8 @@ model_list = [
 
 
 class TestSparsityUtilFunctions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_module_to_fqn(self):
         """
         Tests that module_to_fqn works as expected when compared to known good
@@ -147,3 +153,7 @@ class TestSparsityUtilFunctions(TestCase):
             self.assertEqual(arg_info["module_fqn"], "foo.bar")
             self.assertEqual(arg_info["tensor_name"], "baz")
             self.assertEqual(arg_info["tensor_fqn"], "foo.bar.baz")
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

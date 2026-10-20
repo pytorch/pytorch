@@ -16,8 +16,6 @@ using namespace torch;
 using namespace torch::jit;
 using namespace torch::jit::test;
 
-C10_DECLARE_bool(static_runtime_disable_debug_memory_overlap_check);
-
 namespace {
 
 StaticModule makeStaticModuleFromScript(const std::string& script) {

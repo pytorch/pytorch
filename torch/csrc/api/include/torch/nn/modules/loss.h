@@ -17,7 +17,7 @@ namespace torch::nn {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ L1Loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
-/// element in the input : math :`x` and target : `y`.
+/// element in the input :math:`x` and target :math:`y`.
 /// See https://pytorch.org/docs/main/nn.html#torch.nn.L1Loss to learn
 /// about the exact behavior of this module.
 ///
@@ -703,7 +703,7 @@ struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
   /// The options with which this `Module` was constructed.
   NLLLossOptions options;
 
-  /// A manual rescaling weight given to to each class.
+  /// A manual rescaling weight given to each class.
   Tensor weight;
 };
 
@@ -743,7 +743,7 @@ struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
   /// The options with which this `Module` was constructed.
   CrossEntropyLossOptions options;
 
-  /// A manual rescaling weight given to to each class.
+  /// A manual rescaling weight given to each class.
   Tensor weight;
 };
 

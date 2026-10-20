@@ -2,10 +2,11 @@
 
 import torch
 import torch.ao.quantization
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 class TestDefaultObservers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
     observers = [
         "default_affine_fixed_qparams_observer",
         "default_debug_observer",
@@ -63,6 +64,8 @@ class TestDefaultObservers(TestCase):
 
 class TestQConfig(TestCase):
 
+    hw_classification = HardwareClassification.GENERIC
+
     REDUCE_RANGE_DICT = {
         'fbgemm': (True, False),
         'qnnpack': (False, False),
@@ -91,3 +94,9 @@ class TestQConfig(TestCase):
 
                 fake_quantize_weight = qconfig.weight()
                 self.assertEqual(fake_quantize_weight.reduce_range, reduce_ranges[1])
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

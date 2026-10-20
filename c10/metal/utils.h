@@ -24,14 +24,12 @@ struct vectypes<half> {
   using type2 = half2;
 };
 
-#if __METAL_VERSION__ >= 310
 template <>
 struct vectypes<bfloat> {
   using type4 = bfloat4;
   using type3 = bfloat3;
   using type2 = bfloat2;
 };
-#endif
 
 template <>
 struct vectypes<short> {
@@ -49,47 +47,37 @@ struct vectypes<int> {
 
 template <>
 struct vectypes<long> {
-  using type4 = short4;
-  using type3 = short3;
-  using type2 = short2;
+  using type4 = long4;
+  using type3 = long3;
+  using type2 = long2;
 };
 
+// Type promotion structure for higher precision accumulation
 template <typename T>
-struct OpMathType {
+struct AccumulationType {
   using type = T;
 };
 
+// Specialization for half - promote to float for accumulation
 template <>
-struct OpMathType<half> {
+struct AccumulationType<half> {
   using type = float;
 };
 
+// Specialization for bfloat - promote to float for accumulation
 template <>
-struct OpMathType<short> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<char> {
-  using type = int;
-};
-
-template <>
-struct OpMathType<uchar> {
-  using type = int;
-};
-
-#if __METAL_VERSION__ >= 310
-template <>
-struct OpMathType<bfloat> {
+struct AccumulationType<bfloat> {
   using type = float;
 };
-#endif
+
 } // namespace detail
 
+// NaN-propagating max/min that, like std::max/std::min (and thus CPU), return
+// `a` on ties. ::metal::max/min return their second argument on ties, hence the
+// swapped order, which preserves the sign of e.g. max(-0.0, 0.0)
 template <typename T>
 ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> max(T a, T b) {
-  return ::metal::isunordered(a, b) ? NAN : ::metal::max(a, b);
+  return ::metal::isunordered(a, b) ? NAN : ::metal::max(b, a);
 }
 
 template <typename T, typename U>
@@ -100,7 +88,7 @@ max(T a, U b) {
 
 template <typename T>
 ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> min(T a, T b) {
-  return ::metal::isunordered(a, b) ? NAN : ::metal::min(a, b);
+  return ::metal::isunordered(a, b) ? NAN : ::metal::min(b, a);
 }
 
 template <typename T, typename U>
@@ -109,19 +97,37 @@ min(T a, U b) {
   return ::metal::min(a, static_cast<T>(b));
 }
 
-#if __METAL_VERSION__ >= 310
 template <>
 inline bfloat min(bfloat a, bfloat b) {
   return bfloat(
-      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(a), float(b)));
+      ::metal::isunordered(a, b) ? NAN : ::metal::min(float(b), float(a)));
 }
 
 template <>
 inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
-      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
+      ::metal::isunordered(a, b) ? NAN : ::metal::max(float(b), float(a)));
 }
-#endif
+
+// Less-than that sorts NaNs last. Uses a != a instead of metal::isnan,
+// which gave wrong results at large threadgroup sizes on M2.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  if (a != a)
+    return false;
+  if (b != b)
+    return true;
+  return a < b;
+}
+
+template <typename T>
+inline ::metal::enable_if_t<!::metal::is_floating_point_v<T>, bool> less(
+    T a,
+    T b) {
+  return a < b;
+}
 
 template <typename T>
 using vec2type_t = typename detail::vectypes<T>::type2;
@@ -130,7 +136,12 @@ template <typename T>
 using vec4type_t = typename detail::vectypes<T>::type4;
 
 template <typename T>
-using opmath_t = typename detail::OpMathType<T>::type;
+using accum_t = typename detail::AccumulationType<T>::type;
+
+template <typename T, int N>
+struct alignas(sizeof(T) * N) aligned_vector {
+  T v[N];
+};
 
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>
@@ -148,20 +159,514 @@ template <typename T>
 constexpr constant bool is_scalar_integral_v =
     ::metal::is_integral_v<T> && ::metal::is_scalar_v<T>;
 
-template <typename T, typename U>
-inline ::metal::enable_if_t<::metal::is_same_v<U, T>, T> cast_to(const U from) {
+template <typename U, typename V>
+using common_dtype = decltype(U(0) + V(0));
+
+// floor_divide
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> floor_divide(T x, U y) {
+  const auto quot = x / y;
+  return (x < 0) == (y < 0) ? quot : (x % y != 0) ? quot - 1 : quot;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> && is_scalar_floating_point_v<U>,
+        bool> = true>
+inline common_dtype<T, U> floor_divide(T x, U y) {
+  return ::metal::floor(x / y);
+}
+
+// Python floor-division semantics (torch `rounding_mode="floor"`), a port of
+// c10::div_floor_floating. Unlike floor_divide's naive floor(x/y), this handles
+// non-finite and signed-zero inputs (e.g. inf // 1 -> nan, 1 // -inf -> -1).
+template <
+    typename T,
+    ::metal::enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+inline T div_floor(const T a, const T b) {
+  if (b == 0) {
+    return a / b;
+  }
+  const auto mod = ::metal::fmod(a, b);
+  auto div = (a - mod) / b;
+  if (mod != 0 && (b < 0) != (mod < 0)) {
+    div -= T(1);
+  }
+  if (div == 0) {
+    return ::metal::copysign(T(0), a / b);
+  }
+  const auto floordiv = ::metal::floor(div);
+  return div - floordiv > T(0.5) ? floordiv + T(1) : floordiv;
+}
+
+// Workaround for Metal compiler bug: the compiler produces wrong results
+// when optimizing fused (x / A) % B expressions for integral types.
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> safe_mod(volatile T x, U y) {
+  return x % y;
+}
+
+// fmod
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> fmod(T x, U y) {
+  return x % y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> && is_scalar_floating_point_v<U>,
+        bool> = true>
+inline common_dtype<T, U> fmod(T x, U y) {
+  return ::metal::fmod(x, y);
+}
+
+// cast_to primitives
+//  - No-op if types as the same
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<::metal::is_same_v<U, T>, bool> = true>
+inline T cast_to(const U from) {
   return from;
 }
-
-template <typename T, typename U>
-inline ::metal::enable_if_t<is_complex_v<T>, T> cast_to(const U from) {
-  return T(float(from), 0.0);
+//  - Simple cast between scalar and complex dtypes
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>) &&
+            !is_float8_v<T> && !is_float8_v<U>,
+        bool> = true>
+inline T cast_to(const U from) {
+  return static_cast<T>(from);
 }
 
-template <typename T, typename U>
-inline ::metal::enable_if_t<!::metal::is_same_v<U, T> && !is_complex_v<T>, T>
-cast_to(const U from) {
-  return static_cast<T>(from);
+// Metal rejects static_cast<bfloat>(fp8)
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<U, T> && !is_complex_v<T> && !is_complex_v<U> &&
+            (is_float8_v<T> || is_float8_v<U>),
+        bool> = true>
+inline T cast_to(const U from) {
+  return T(float(from));
+}
+
+// - Scalar to complex
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && !is_complex_v<U>, bool> = true>
+inline T cast_to(const U from) {
+  return T(float(from), 0.0);
+}
+// - Complex to bool: nonzero test over both components (matches bool(complex)).
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<::metal::is_same_v<T, bool> && is_complex_v<U>, bool> =
+        true>
+inline T cast_to(const U from) {
+  return from.x != 0 || from.y != 0;
+}
+// - Complex to non-bool scalar (discards the imaginary part, matching CPU).
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !is_complex_v<T> && !::metal::is_same_v<T, bool> && is_complex_v<U>,
+        bool> = true>
+inline T cast_to(const U from) {
+  return static_cast<T>(from.x);
+}
+
+// Generalizable math operators (used for both scalar and complex)
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return x * y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> mul(const T x, const U y) {
+  return T(x.x * y.x - x.y * y.y, x.x * y.y + x.y * y.x);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> div(const T x, const U y) {
+  return x / y;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> div(const T x, const U y) {
+  // Purely real divisor: bypass the cross-term to avoid inf*0 / nan*0 = NaN
+  // tainting the imag part. Mathematically equivalent for finite y.x.
+  if (y.y == 0) {
+    return T(x.x / y.x, x.y / y.x);
+  }
+  if (::metal::abs(y.x) >= ::metal::abs(y.y)) {
+    const auto rat = y.y / y.x;
+    return T(x.x + x.y * rat, x.y - x.x * rat) / (y.x + y.y * rat);
+  }
+  const auto rat = y.x / y.y;
+  return T(x.x * rat + x.y, x.y * rat - x.x) / (y.y + y.x * rat);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return ::metal::fma(x, y, z);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return z + mul(x, y);
+}
+
+// Remainder operator
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> || is_scalar_floating_point_v<U>,
+        bool> = true>
+inline float remainder(const T x, const U y) {
+  const auto x_f = static_cast<float>(x);
+  const auto y_f = static_cast<float>(y);
+  auto mod = ::metal::fmod(x_f, y_f);
+  if (mod != 0 && (y_f < 0) != (mod < 0)) {
+    mod += y_f;
+  }
+  return mod;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> remainder(const T x, const U y) {
+  auto rc = x % y;
+  return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
+}
+
+// Based on aten/src/ATen/native/Pow.h
+template <
+    typename T,
+    ::metal::enable_if_t<is_scalar_integral_v<T>, bool> = true>
+inline T powi_impl(T a, T b) {
+  T result = 1;
+  while (b) {
+    if (b & 1) {
+      result *= a;
+    }
+    b /= 2;
+    a *= a;
+  }
+  return result;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> || is_scalar_floating_point_v<U>,
+        bool> = true>
+inline float pow(T a, U b) {
+  return ::metal::precise::pow(static_cast<float>(a), static_cast<float>(b));
+}
+
+// Complex pow - use polar form: a = r*e^(i*theta)
+// a^b = exp(b * log(a)) = exp(b * (log(r) + i*theta))
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline float2 pow(T a, U b) {
+  // Convert a to polar form
+  // Use explicit computation instead of length() due to numerical issues
+  const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
+
+  // Special case: 0^b is 0 if Re(b) > 0, undefined otherwise
+  if (r == 0.0) {
+    return b.x > 0 ? float2(0.0, 0.0) : float2(NAN, NAN);
+  }
+
+  const auto theta = ::metal::precise::atan2(a.y, a.x);
+  const auto log_r = ::metal::precise::log(r);
+
+  // Calculate a^b = r^b * e^(i*theta*b)
+  // new_r = exp(b.x * log(r) - b.y * theta)
+  // new_theta = b.x * theta + b.y * log(r)
+  const auto new_r = ::metal::precise::exp(b.x * log_r - b.y * theta);
+  const auto new_theta = b.x * theta + b.y * log_r;
+
+  return float2(
+      new_r * ::metal::precise::cos(new_theta),
+      new_r * ::metal::precise::sin(new_theta));
+}
+
+// Integral pow - unsigned types
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && !::metal::is_signed_v<T>,
+        bool> = true>
+inline T pow(T a, U b) {
+  return powi_impl(a, T(b));
+}
+
+// Integral pow - signed types
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T>&& ::metal::is_signed_v<T>,
+        bool> = true>
+inline T pow(T a, U b) {
+  if (b < 0) {
+    if (a == 1) {
+      return 1;
+    } else if (a == -1) {
+      auto negative = (-b) % static_cast<T>(2);
+      return negative ? -1 : 1;
+    } else {
+      return 0;
+    }
+  }
+  return powi_impl(a, T(b));
+}
+
+// Based on algorithm described in
+// https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html#1202
+inline float log1p(float x) {
+  const auto xp1 = 1.0f + x;
+  // First two elements of Taylor series for log(1+x) in Horner's form are:
+  // log(1+x) = x * (1 - x * (.5 ...)), but if 1 + x == x, then it's just x
+  if (xp1 == 1.0f) {
+    return x;
+  }
+  auto rc = ::metal::precise::log(xp1);
+  if (x > -.5 && x < .5) {
+    // Order of operations is important here for higher precision
+    rc *= x / (xp1 - 1.0f);
+  }
+  return rc;
+}
+
+template <typename T1, typename T2 = T1>
+struct pair {
+  T1 first;
+  T2 second;
+};
+
+template <typename T>
+inline T conj(T a) {
+  return a;
+}
+
+template <>
+inline half2 conj(half2 a) {
+  return half2(a.x, -a.y);
+}
+
+template <>
+inline float2 conj(float2 a) {
+  return float2(a.x, -a.y);
+}
+
+// The following implementation of hypot provides better numerical stability
+// than the naive implementation. It is based on:
+// https://github.com/pearu/functional_algorithms/blob/7dbbfd7db225b1c202e0e364fc435423ccf52dbe/functional_algorithms/algorithms.py#L168
+//
+// This implementation changes the naive formula for the hypotenuse of a right
+// triangle, `h = sqrt(a^2 + b^2)`, into three alternate forms to be used in
+// different cases. The reason why the naive formula is unstable is because of
+// the square terms. If `a` or `b` are very large or very small floating point
+// numbers, then their squares will resolve to inf or 0.
+//
+// Inputs are replaced by their absolute values, so assume `a >= b >= 0`.
+// We can first change the formula to:
+// `h = a sqrt(1 + (b / a)^2)`
+// `h = a sqrt(1 + r)`
+// where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
+//
+// Case 0: Either input is inf
+//  Return inf
+//
+// Case 1: `a == b`
+//   The formula simplifies to `h = a sqrt(2)`.
+//
+// Case 2: `1 >> r > 0`
+//   Due to floating point error, `sqrt(1 + r)` resolves to 1. So we use the
+//   binomial approximation `sqrt(1 + r) ≈ 1 + r / 2`, and the formula becomes
+//   `h ≈ a + a r / 2`.
+//
+// Case 3: All other cases.
+//   Use `h = a sqrt(1 + r)`.
+inline float hypot(float a_, float b_) {
+  if (::metal::isinf(a_) || ::metal::isinf(b_)) {
+    return INFINITY;
+  }
+  a_ = ::metal::abs(a_);
+  b_ = ::metal::abs(b_);
+  auto a = max(a_, b_);
+  auto b = min(a_, b_);
+
+  auto b_over_a = c10::metal::div(b, a);
+  auto r = c10::metal::mul(b_over_a, b_over_a);
+  auto sqrt_1_plus_r = ::metal::precise::sqrt(1 + r);
+
+  auto h1 = M_SQRT2_F * a;
+  auto h2 = a + a * r / 2;
+  auto h3 = a * sqrt_1_plus_r;
+  bool is_h1 = (a == b);
+  bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
+
+  return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
+}
+
+// Knuth's TwoSum: returns (s, e) with s = fl(a + b) and s + e == a + b exactly
+inline float2 sum_and_error(float a, float b) {
+  const float s = a + b;
+  const float bb = s - a;
+  return {s, (a - (s - bb)) + (b - bb)};
+}
+
+// log1p(z) = log|1 + z| + i arg(1 + z). When 1 + z is close to the unit circle,
+// log|1 + z| = log1p(r) / 2 with r = |1 + z|^2 - 1 = 2x + x^2 + y^2, which
+// cancels catastrophically. r is computed as the exact sum h + e + exx + eyy,
+// where exx, eyy are the rounding errors of the squares (via fma), e that of
+// their sum s, and h = 2x + s is exact whenever it cancels (Sterbenz lemma).
+// The four remaining terms can still cancel, so they are summed with
+// compensation (Ogita-Rump-Oishi Sum2). Overflow makes r NaN, which falls back
+// to log(hypot(1 + x, y))
+inline float2 log1p(float2 z) {
+  const float x = z.x, y = z.y;
+  const float xx = x * x, yy = y * y;
+  const auto s = sum_and_error(xx, yy);
+  const auto a = sum_and_error(2 * x + s.x, s.y);
+  const auto b = sum_and_error(a.x, ::metal::fma(x, x, -xx));
+  const auto c = sum_and_error(b.x, ::metal::fma(y, y, -yy));
+  const float r = c.x + (a.y + b.y + c.y);
+  const float theta = ::metal::precise::atan2(y, x + 1);
+  if (::metal::abs(r) < 0.5f) {
+    return {0.5f * log1p(r), theta};
+  }
+  return {::metal::precise::log(hypot(x + 1, y)), theta};
+}
+
+// Computes the larger component as sqrt((|re| + |z|) / 2) and derives the other
+// one by division, avoiding the cancellation in |z| - |re| when |im| << |re|
+template <typename T, ::metal::enable_if_t<is_complex_v<T>, bool> = true>
+inline T sqrt(const T x) {
+  const auto z = float2(x);
+  if (::metal::isinf(z.y)) {
+    return T(INFINITY, z.y);
+  }
+  const auto a = ::metal::abs(z);
+  const auto t = ::metal::precise::sqrt((a.x + hypot(a.x, a.y)) * .5);
+  if (t == 0) {
+    return T(0, z.y);
+  }
+  return z.x >= 0 ? T(t, z.y / (2 * t))
+                  : T(a.y / (2 * t), ::metal::copysign(t, z.y));
+}
+
+#define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
+  MACRO(float);                          \
+  MACRO(half);                           \
+  MACRO(bfloat);                         \
+  MACRO(float2);                         \
+  MACRO(long);                           \
+  MACRO(char);                           \
+  MACRO(uchar);                          \
+  MACRO(short);                          \
+  MACRO(int);
+
+#define INSTANTIATE_FOR_FLOAT_TYPES(MACRO) \
+  MACRO(float);                            \
+  MACRO(half);                             \
+  MACRO(bfloat);
+
+// Copy n bytes from src to dst using the widest vector their combined alignment
+// allows (uint4 -> uint2 -> uint -> ushort -> byte), with a scalar tail.
+inline void copy_bytes_aligned(
+    device uchar* dst,
+    device const uchar* src,
+    uint n) {
+  const uint align =
+      (reinterpret_cast<ulong>(dst) | reinterpret_cast<ulong>(src)) & 15;
+  uint i = 0;
+  if (align == 0) {
+    for (; i + 16 <= n; i += 16) {
+      *reinterpret_cast<device uint4*>(dst + i) =
+          *reinterpret_cast<device const uint4*>(src + i);
+    }
+  } else if ((align & 7) == 0) {
+    for (; i + 8 <= n; i += 8) {
+      *reinterpret_cast<device uint2*>(dst + i) =
+          *reinterpret_cast<device const uint2*>(src + i);
+    }
+  } else if ((align & 3) == 0) {
+    for (; i + 4 <= n; i += 4) {
+      *reinterpret_cast<device uint*>(dst + i) =
+          *reinterpret_cast<device const uint*>(src + i);
+    }
+  } else if ((align & 1) == 0) {
+    for (; i + 2 <= n; i += 2) {
+      *reinterpret_cast<device ushort*>(dst + i) =
+          *reinterpret_cast<device const ushort*>(src + i);
+    }
+  }
+  for (; i < n; ++i) {
+    dst[i] = src[i];
+  }
 }
 
 } // namespace metal

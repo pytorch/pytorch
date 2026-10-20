@@ -3,6 +3,7 @@ def define_targets(rules):
         name = "tests",
         tests = [
             ":core_tests",
+            ":cpu_caching_allocator_test",
             ":typeid_test",
             ":util_base_tests",
         ],
@@ -21,6 +22,16 @@ def define_targets(rules):
             "//c10/core:base",
             "//c10/util:base",
             "//c10/core:CPUAllocator",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "cpu_caching_allocator_test",
+        srcs = ["mobile/CPUCachingAllocator_test.cpp"],
+        deps = [
+            "//c10/core:CPUAllocator",
+            "//c10/mobile:CPUCachingAllocator",
             "@com_google_googletest//:gtest_main",
         ],
     )
@@ -46,7 +57,7 @@ def define_targets(rules):
                 "util/typeid_test.cpp",
             ],
         ),
-        copts = ["-Wno-deprecated-declarations"],
+        copts = ["-Wno-deprecated-declarations", "-Wno-ctad-maybe-unsupported"],
         deps = [
             ":Macros",
             ":complex_math_test_common",
@@ -62,6 +73,15 @@ def define_targets(rules):
         srcs = ["util/bit_cast_test.cpp"],
         deps = [
             "//c10/util:bit_cast",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util/nofatal_test",
+        srcs = ["util/nofatal_test.cpp"],
+        deps = [
+            "//c10/util:base",
             "@com_google_googletest//:gtest_main",
         ],
     )

@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable
+from collections.abc import Callable
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -43,7 +43,7 @@ class HealthCheckServer:
 
     def start(self) -> None:
         """
-        Unsupported functionality for Pytorch, doesn't start any health check server
+        Unsupported functionality for PyTorch, doesn't start any health check server
         """
         log.warning("No health check server started")
 
@@ -52,6 +52,10 @@ class HealthCheckServer:
         Function to stop health check server
         """
         log.info("Stopping noop health check server.")
+
+    @property
+    def alive_callback(self) -> Callable[[], int]:
+        return self._alive_callback
 
 
 def create_healthcheck_server(

@@ -25,9 +25,11 @@
 #include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmFP16.h>
 #include <fbgemm/QuantUtils.h>
+C10_DIAGNOSTIC_POP()
 #endif // USE_FBGEMM
 
 namespace caffe2 {
@@ -66,7 +68,6 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   const float* input_ptr = input_contig.const_data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t K = input.size(input.dim() - 1);
   TORCH_CHECK(weight.dim() == 2);
@@ -122,8 +123,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto& pack_b =
       cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
-  int32_t* col_offsets_data = col_offsets.data_ptr<int32_t>();
-  float* bias_contig_data = bias_contig.data_ptr<float>();
+  const int32_t* col_offsets_data = col_offsets.const_data_ptr<int32_t>();
+  const float* bias_contig_data = bias_contig.const_data_ptr<float>();
 
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -169,8 +170,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       fbgemm::fbgemmPacked(
           /*packA=*/pack_a,
           /*packB=*/pack_b,
-          /*C=*/output.data_ptr<float>(),
-          /*C_buffer=*/buffer.data_ptr<int32_t>(),
+          /*C=*/output.mutable_data_ptr<float>(),
+          /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
           /*ldc=*/N,
           /*outProcess=*/output_proc_obj,
           /*thread_id=*/task_id,
@@ -237,7 +238,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   float w_min = std::numeric_limits<float>::quiet_NaN();
   float w_max = std::numeric_limits<float>::quiet_NaN();
   fbgemm::FindMinMax(
-      /*m=*/weight_contig.data_ptr<float>(),
+      /*m=*/weight_contig.const_data_ptr<float>(),
       /*min=*/&w_min,
       /*max=*/&w_max,
       /*len=*/weight_contig.numel());
@@ -263,9 +264,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
-  fbgemm::Quantize<int8_t, false /*LEGACY*/>(
-      /*src=*/weight_contig.data_ptr<float>(),
-      /*dst=*/quantized.data_ptr<int8_t>(),
+  fbgemm::Quantize<int8_t>(
+      /*src=*/weight_contig.const_data_ptr<float>(),
+      /*dst=*/quantized.mutable_data_ptr<int8_t>(),
       /*len=*/weight_contig.numel(),
       /*qparams=*/q_params);
 
@@ -281,9 +282,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   CalcColOffsetsTranspose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),
-      /*Bint8=*/quantized.data_ptr<int8_t>(),
+      /*Bint8=*/quantized.const_data_ptr<int8_t>(),
       /*B_zero_point=*/q_params.zero_point,
-      /*col_offsets=*/col_offsets.data_ptr<int32_t>());
+      /*col_offsets=*/col_offsets.mutable_data_ptr<int32_t>());
 
   return std::make_tuple(
       quantized, col_offsets, q_params.scale, q_params.zero_point);
@@ -386,7 +387,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  float* weight_contig_ptr = weight_contig.mutable_data_ptr<float>();
   HandleWeightsSaturation(K * N, weight_contig_ptr);
 
   // TODO(mingzhe09088):
@@ -409,7 +410,8 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
 Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
-    const Tensor& bias) {
+    const std::optional<Tensor>& bias,
+    at::Tensor& output) {
   TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
                   "and will be removed in a future PyTorch release.")
 
@@ -430,14 +432,15 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
 
   TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
   TORCH_CHECK(input.dim() >= 2);
-  TORCH_CHECK(bias.dim() == 1);
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
+
   std::vector<int64_t> output_size = input.sizes().vec();
   output_size.back() = N;
-  Tensor output = at::empty(output_size, input.options().dtype(at::kFloat));
+  // Resize output Tensor
+  output.resize_(output_size);
 
   // Call the fp16 gemm interface
   fbgemm::cblas_gemm_compute(
@@ -446,13 +449,26 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
       input_ptr,
       packed_weight_fp16,
       0.0f,
-      output.data_ptr<float>());
+      output.mutable_data_ptr<float>());
 
   // Add bias term
-  output.add_(bias);
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias);
+  const Tensor& bias_ = *bias_maybe_owned;
+  if (bias_.defined()) {
+    TORCH_CHECK(bias_.dim() == 1);
+    output.add_(bias_);
+  }
 
   return output;
 }
+
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const std::optional<Tensor>& bias) {
+      at::Tensor output = at::empty({0}, input.options().dtype(at::kFloat));
+      return at::native::fbgemm_linear_fp16_weight_fp32_activation(input, packed_weight, bias, output);
+  }
 
 Tensor fbgemm_linear_fp16_weight(
     const Tensor& input,
@@ -460,6 +476,15 @@ Tensor fbgemm_linear_fp16_weight(
     const Tensor& bias) {
   return at::native::fbgemm_linear_fp16_weight_fp32_activation(
       input, packed_weight, bias);
+}
+
+Tensor fbgemm_linear_fp16_weight(
+  const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias,
+  at::Tensor& output) {
+  return at::native::fbgemm_linear_fp16_weight_fp32_activation(
+      input, packed_weight, bias, output);
 }
 
 #else // USE_FBGEMM
@@ -551,8 +576,38 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
 Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
-    const Tensor& bias) {
+    const std::optional<Tensor>& bias,
+    at::Tensor& output) {
   TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const std::optional<Tensor>& bias) {
+  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_linear_fp16_weight(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias,
+    at::Tensor& output) {
+  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight is deprecated "
                   "and will be removed in a future PyTorch release.")
 
   // We make a strong guarantee that models using these operators will have the
