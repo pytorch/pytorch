@@ -1211,11 +1211,17 @@ endif()
 # ---[ NCCL
 if(USE_NCCL)
   if(NOT (USE_CUDA OR USE_ROCM))
+    # if the user explicitly asked for NCCL, error out instead of
+    # falling back
+    pytorch_guard_explicit_request(USE_NCCL NCCL "requires a CUDA or ROCm build"
+      "Please enable USE_CUDA or USE_ROCM.")
     message(WARNING
         "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
         "-DUSE_NCCL=OFF.")
     caffe2_update_option(USE_NCCL OFF)
   elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    pytorch_guard_explicit_request(USE_NCCL NCCL
+      "is currently only supported under Linux" "Please build on Linux.")
     message(WARNING "NCCL is currently only supported under Linux.")
     caffe2_update_option(USE_NCCL OFF)
   elseif(USE_CUDA)

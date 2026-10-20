@@ -128,6 +128,48 @@ endmacro()
 
 
 ##############################################################################
+# Record whether <option> was set by the user and not just defaulted.
+#
+# call this right above the option's own option() / cmake_dependent_option()
+# line, passing the doc string that declaration uses. the cache entry found
+# there was set by the user (-D or an initial cache script), forwarded from
+# the env by cmake/EnvVarForwarding.cmake, or written by an earlier
+# configure's declaration or fallback, and only the last kind carries the
+# declaration's doc string: option() and cmake_dependent_option() stamp
+# their doc string over an entry they adopt, caffe2_update_option() keeps
+# it. only checking wether the entry exists gets this wrong: a configure
+# that dies before its fallback runs leaves the declaration default behind
+# and the next run reads it as a user request.
+function(pytorch_record_explicit_request option docstring)
+  set(_explicit FALSE)
+  if(DEFINED CACHE{${option}})
+    get_property(_help CACHE ${option} PROPERTY HELPSTRING)
+    if(NOT _help STREQUAL "${docstring}")
+      set(_explicit TRUE)
+    endif()
+  endif()
+  set(_${option}_EXPLICITLY_SET "${_explicit}" PARENT_SCOPE)
+endfunction()
+
+
+##############################################################################
+# error out when an option recorded with pytorch_record_explicit_request()
+# was asked for but cant be provided, instead of quietly building without
+# it. <feature> names the feature for the message, <reason> completes
+# "but <reason>", leftover args are the advice for fixing or taking back
+# the request
+function(pytorch_guard_explicit_request option feature reason)
+  if(_${option}_EXPLICITLY_SET AND ${option})
+    string(JOIN " " _advice ${ARGN})
+    message(FATAL_ERROR
+      "PyTorch: ${feature} was explicitly requested (${option}=1) but ${reason}. "
+      "${_advice} "
+      "If you want to build without ${feature}, please set ${option}=0.")
+  endif()
+endfunction()
+
+
+##############################################################################
 # Add an interface library definition that is dependent on the source.
 #
 # It's probably easiest to explain why this macro exists, by describing
