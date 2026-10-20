@@ -1298,6 +1298,7 @@ class MultiProcessTestCase(TestCase):
 # This abstracts the PG creation and deletion, the backends are selected based
 # on device type. The tests functions can be instantiated per device type using
 # common_device_type.instantiate_device_type_tests
+# other backends can add entry in backend() function
 class DistributedTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -1315,7 +1316,14 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        return c10d.get_default_backend_for_device(device)
+        if "cuda" in device:
+            return "nccl"
+        elif "hpu" in device:  # intel gaudi
+            return "hccl"
+        elif "xpu" in device:
+            return "xccl"
+        else:
+            return "gloo"
 
     def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
