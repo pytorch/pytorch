@@ -2070,7 +2070,7 @@ class TestMakeLaunchersMemory(TestCase):
 # Collection initializes device bases, but must not enter Dynamo class fixtures.
 with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
     instantiate_device_type_tests(
-        TestTritonHeuristicsRuntime, globals(), except_for=("hpu",), allow_xpu=True
+        TestTritonHeuristicsRuntime, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
         TestTritonHeuristicsBackendConfig,
@@ -2087,17 +2087,16 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
     instantiate_device_type_tests(
         TestCachingAutotunerPrecompileDriverSetup,
         globals(),
-        except_for=("hpu",),
         allow_xpu=True,
     )
     instantiate_device_type_tests(
-        TestCachingAutotunerPlugin, globals(), except_for=("hpu",), allow_xpu=True
+        TestCachingAutotunerPlugin, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
-        TestDumpLaunchTensors, globals(), except_for=("hpu",), allow_xpu=True
+        TestDumpLaunchTensors, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
-        TestRecheckAutotuneCache, globals(), except_for=("hpu",), allow_xpu=True
+        TestRecheckAutotuneCache, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
         TestHIPInvalidConfigHandling, globals(), only_for=("cuda",)
@@ -2105,11 +2104,10 @@ with patch.object(TestCase, "setUpClass", classmethod(lambda cls: None)):
     instantiate_device_type_tests(
         TestDynamicScaleRblockCacheInteraction,
         globals(),
-        except_for=("hpu",),
         allow_xpu=True,
     )
     instantiate_device_type_tests(
-        TestCheckLauncherCallArgs, globals(), except_for=("hpu",), allow_xpu=True
+        TestCheckLauncherCallArgs, globals(), allow_xpu=True
     )
     instantiate_device_type_tests(
         TestROCmExhaustiveConfigs, globals(), only_for=("cuda",)
