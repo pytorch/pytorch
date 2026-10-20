@@ -253,7 +253,7 @@ TORCH_META_FUNC2(copysign, Tensor) (
 TORCH_META_FUNC(heaviside) (
   const Tensor& self, const Tensor& other
 ) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex() &&
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex() && !other.is_complex() &&
               (maybe_get_output().defined() ? !maybe_get_output().is_complex() : true),
               "heaviside is not yet implemented for complex tensors.");
   TORCH_CHECK(self.dtype() == other.dtype() &&
@@ -331,22 +331,22 @@ CREATE_BINARY_META_FUNC(igammac)
 CREATE_BINARY_META_FUNC(nextafter)
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "maximum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(minimum) (const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
+  TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "minimum not implemented for complex tensors.");
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmax) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 
 TORCH_META_FUNC(fmin) (const Tensor& self, const Tensor& other) {
-    TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+    TORCH_CHECK_TYPE(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
     build_binary_op(maybe_get_output(), self, other);
 }
 

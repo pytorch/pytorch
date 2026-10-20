@@ -4,7 +4,10 @@ import argparse
 import os
 from itertools import cycle
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+
+
+# Native reductions register during import, so enable the rollout first.
+os.environ["PYTORCH_SUM_INNER_TREE"] = "1"
 
 from triton.testing import do_bench, do_bench_cudagraph
 
@@ -64,22 +67,22 @@ def measure(m: int, n: int, provider: str, cudagraph: bool) -> float:
     tensors = input_buffer.unbind()
     runner = _circular_runner(_sum_rows, tensors)
     benchmark = do_bench_cudagraph if cudagraph else do_bench
-    inner_tree = provider == "eager_inner_tree"
     try:
-        with patch.dict(
-            os.environ,
-            {"PYTORCH_SUM_INNER_TREE": "1" if inner_tree else "0"},
-        ):
-            if provider.startswith("eager"):
+        if provider.startswith("eager"):
+            if provider == "eager_inner_tree":
                 runner()
                 milliseconds = benchmark(runner)
             else:
-                torch._dynamo.reset()
-                with fresh_inductor_cache():
-                    compiled = torch.compile(_sum_rows)
-                    runner = _circular_runner(compiled, tensors)
+                with torch.backends.python_native.cutedsl.disabled():
                     runner()
                     milliseconds = benchmark(runner)
+        else:
+            torch._dynamo.reset()
+            with fresh_inductor_cache():
+                compiled = torch.compile(_sum_rows)
+                runner = _circular_runner(compiled, tensors)
+                runner()
+                milliseconds = benchmark(runner)
         return _gbps(m, n, milliseconds)
     finally:
         del runner
@@ -91,9 +94,8 @@ def measure(m: int, n: int, provider: str, cudagraph: bool) -> float:
 def _assert_inner_tree_route() -> None:
     tensor = torch.randn(1024, 300, device="cuda", dtype=DTYPE)
     try:
-        with patch.dict(os.environ, {"PYTORCH_SUM_INNER_TREE": "1"}):
-            inner_tree = torch.sum(tensor, 1)
-        with patch.dict(os.environ, {"PYTORCH_SUM_INNER_TREE": "0"}):
+        inner_tree = torch.sum(tensor, 1)
+        with torch.backends.python_native.cutedsl.disabled():
             aten = torch.sum(tensor, 1)
         assert not torch.equal(inner_tree, aten), (  # noqa: S101
             "eager_inner_tree did not route to CuTeDSL; refusing to label ATen "

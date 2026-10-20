@@ -19,7 +19,7 @@ import operator
 import sys
 from typing import Any, TYPE_CHECKING
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
     create_call_function,
     create_call_function_ex,
@@ -31,10 +31,11 @@ from ..exc import (
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
+    TorchDynamoException,
     unimplemented,
 )
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
-from .base import GetSet, Method, ValueMutationNew, VariableTracker
+from .base import Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, pyiter_next
@@ -82,7 +83,7 @@ class ItertoolsVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import python_constant_richcompare_impl
@@ -98,19 +99,25 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def _get_from_iterable(
-        self, tx: "InstructionTranslatorBase"
+    def _from_iterable(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list["VariableTracker"],
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker | None":
         # Only itertools.chain has from_iterable; declining (None) falls
         # through to the generic protocol for other itertools callables.
-        if self.value is itertools.chain:
-            return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-        return None
+        if self.value is not itertools.chain:
+            return None
+        return ItertoolsVariable(_CHAIN_FROM_ITERABLE).call_function(tx, args, kwargs)
 
-    tp_getset = {
-        "from_iterable": GetSet(_get_from_iterable),
+    tp_methods = {
+        "from_iterable": Method(_from_iterable),
     }
 
+    # Legacy itertools constructors are modeled in host Python and have no
+    # resumable frame. Polyfilled itertools bypass this class.
+    @config.patch(nested_graph_breaks=False)
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -244,6 +251,8 @@ class ItertoolsVariable(VariableTracker):
                             mutation_type=ValueMutationNew(),
                         )
                     )
+            except TorchDynamoException:
+                raise
             except Exception as e:
                 unimplemented(
                     gb_type="Unexpected failure during itertools.groupby() iteration",
@@ -306,7 +315,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def richcompare_impl(
+    def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
     ) -> VariableTracker:
         from .object_protocol import object_richcompare
@@ -360,13 +369,7 @@ class ChainVariable(IteratorVariable):
     def python_type(self) -> type:
         return itertools.chain
 
-    def _get_from_iterable(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
-        return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
-
-    tp_getset = {
-        "from_iterable": GetSet(_get_from_iterable),
-    }
-
+    @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         if not self.is_mutable():
             raise AssertionError("ChainVariable must be mutable for next()")
@@ -472,7 +475,7 @@ class RepeatIteratorVariable(IteratorVariable):
         "__length_hint__": Method(repeat_length_hint),
     }
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         item_repr = tracked_repr(tx, self.item)
         if self.times is None:
             return ConstantVariable.create(f"repeat({item_repr})")
@@ -522,6 +525,7 @@ class CountIteratorVariable(IteratorVariable):
         self.step = step
         self.advance_count = advance_count
 
+    @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4189-L4216
         if not self.is_mutable():
@@ -532,10 +536,10 @@ class CountIteratorVariable(IteratorVariable):
         self.advance_count += 1
         return old_item
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L4218-L4243
         if not (self.item.is_python_constant() and self.step.is_python_constant()):
-            return super().repr_impl(tx)
+            return super().tp_repr_impl(tx)
         cnt = self.item.as_python_constant()
         step = self.step.as_python_constant()
         # Suppress step in the repr when it is an integer equal to 1.
@@ -588,6 +592,7 @@ class ZipVariable(IteratorVariable):
     def python_type(self) -> type[zip]:  # type: ignore[type-arg]
         return zip
 
+    @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L2906-L2994
         if not self.is_mutable():
@@ -673,6 +678,7 @@ class ZipLongestVariable(IteratorVariable):
     def python_type(self) -> type:
         return itertools.zip_longest
 
+    @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         # ref: https://github.com/python/cpython/blob/3.13/Modules/itertoolsmodule.c#L2737-L2808
         if not self.is_mutable():
@@ -768,6 +774,7 @@ class MapVariable(IteratorVariable):
     def python_type(self) -> type:
         return map
 
+    @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L1409-L1450
         if not self.is_mutable():
@@ -848,6 +855,7 @@ class FilterVariable(IteratorVariable):
     def python_type(self) -> type:
         return filter
 
+    @config.patch(nested_graph_breaks=False)
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.3/Python/bltinmodule.c#L573-L606
         # A do-while loop to find elements that make fn return true

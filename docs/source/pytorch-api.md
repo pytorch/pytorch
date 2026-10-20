@@ -34,19 +34,10 @@ meta
 torch.backends <backends>
 torch.export <user_guide/torch_compiler/export>
 torch.distributed <distributed>
-torch.distributed.tensor <distributed.tensor>
-torch.distributed.algorithms.join <distributed.algorithms.join>
-torch.distributed.elastic <distributed.elastic>
-torch.distributed.fsdp <fsdp>
-torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>
-torch.distributed.tensor.parallel <distributed.tensor.parallel>
-torch.distributed.optim <distributed.optim>
-torch.distributed.pipelining <distributed.pipelining>
-torch.distributed._symmetric_memory <symmetric_memory>
-torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
 torch.compiler <torch.compiler_api>
 torch.fft <fft>
+torch.foreach <foreach>
 torch.func <func>
 futures
 fx
@@ -65,9 +56,7 @@ nn.attention
 onnx
 optim
 complex_numbers
-ddp_comm_hooks
 quantization
-rpc
 torch.random <random>
 masked
 torch.nested <nested>

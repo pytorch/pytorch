@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import copy
 import glob
+import importlib.util
 import json
 import os
 import platform
@@ -23,20 +24,22 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple
 
+from conftest import STEPCURRENT_CACHE_DIR
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    get_report_path,
+    _get_test_report_path,
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
     isRocmArchAnyOf,
     retry_shell,
+    sanitize_test_filename,
     set_cwd,
     shell,
     TEST_CUDA,
-    TEST_SAVE_XML,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
@@ -98,6 +101,10 @@ except ImportError:
         pass
 
 
+# The installed torch (sometimes a nightly) may predate the test run report writer.
+HAS_TORCHCI_REPORTS = bool(importlib.util.find_spec("torch.testing._internal.torchci"))
+
+
 from torch.testing._internal.common_utils import HardwareClassification
 
 
@@ -113,9 +120,16 @@ TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
+# Process-level counterpart to NUM_PYTEST_RERUNS: how many times a failing test
+# is retried in a fresh process before it is called a consistent failure.
+NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
+# The periodic config hosts slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+IS_SLOW = (
+    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+)
 IS_S390X = platform.machine() == "s390x"
 
 
@@ -203,7 +217,6 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "test_determination",
     "test_jit_legacy",
-    "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/pipelining/test_dtensor_pp_integration",
     "inductor/test_cpu_repro",  # excessive runtimes compared to CUDA
@@ -290,6 +303,7 @@ XPU_BLOCKLIST = [
 
 XPU_TEST = [
     "test_xpu",
+    "test_xpu_expandable_segments",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -307,7 +321,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
-    "test_cuda_trace",
+    "test_gpu_trace",
     "inductor/test_benchmark_fusion",
     "test_cuda_nvml_based_avail",
     # temporarily sets a global config
@@ -513,6 +527,30 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
+def _torchci_report_args(
+    test_file: str, is_cpp_test: bool, reports_dir: str | None
+) -> list[str]:
+    if not HAS_TORCHCI_REPORTS or not reports_dir:
+        return []
+    if not is_cpp_test:
+        return [f"--save-torchci-reports={reports_dir}"]
+    # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
+    from torch.testing._internal.torchci import plugin
+
+    prefix = Path(reports_dir) / sanitize_test_filename(test_file)
+    return ["-p", plugin.__name__, f"--torchci-report-prefix={prefix}"]
+
+
+def _torchci_reports_default() -> str | None:
+    # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
+    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
+    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    if not in_pytorch_ci or torch.version.xpu:
+        return None
+    return str(REPO_ROOT / "test/torchci-reports")
+
+
 def run_test(
     test_module: ShardedTest,
     test_directory,
@@ -581,6 +619,7 @@ def run_test(
         unittest_args.extend(
             get_pytest_args(
                 options,
+                test_file,
                 is_cpp_test=is_cpp_test,
                 is_distributed_test=is_distributed_test,
             )
@@ -588,6 +627,9 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
+
+    reports_dir = options.save_torchci_reports
+    unittest_args += _torchci_report_args(test_file, is_cpp_test, reports_dir)
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -712,13 +754,21 @@ def run_test(
                 label=test_label,
             )
 
-            # Pytest return code 5 means no test is collected. Exit code 4 is
-            # returned when the binary is not a C++ test executable, but 4 can
-            # also be returned if the file fails before running any tests. All
-            # binary files under build/bin that are not C++ test at the time of
-            # this writing have been excluded and new ones should be added to
-            # the list of exclusions in tools/testing/discover_tests.py
-            ret_code = 0 if ret_code == 5 else ret_code
+            # Pytest return code 5 means no test is collected, which is expected
+            # for a C++ test binary that defines no tests or whose tests are all
+            # deselected. pytest-cpp also collects nothing from a binary whose
+            # --help fails, e.g. on a missing shared library, so check for that.
+            if ret_code == 5:
+                ret_code = 0
+                if is_cpp_test:
+                    probe = subprocess.run(
+                        [argv[0], "--help"], env=env, capture_output=True, text=True
+                    )
+                    if probe.returncode != 0:
+                        print_to_stderr(
+                            f"{argv[0]} --help failed with exit code {probe.returncode}:\n{probe.stderr}"
+                        )
+                        ret_code = 1
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -805,16 +855,40 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+    # pytest keeps cache values under <cache_dir>/v/<key>.
+    cache_dir = REPO_ROOT / ".pytest_cache/v" / STEPCURRENT_CACHE_DIR / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
         try:
-            with open(cache_file) as f:
+            with open(cache_dir / key) as f:
                 return f.read()
         except FileNotFoundError:
             return None
+
+    def finish_torchci_report(ret_code: int, signal_name: str) -> None:
+        # The report writer publishes the run in flight next to lastrun; a process
+        # that died left it unrecorded (torchci/README.md).
+        if not HAS_TORCHCI_REPORTS:
+            return
+        try:
+            from torch.testing._internal.torchci import plugin
+
+            # An installed torch whose plugin predates the publication.
+            if not hasattr(plugin, "take_inflight"):
+                return
+            inflight = plugin.take_inflight(cache_dir)
+            # pytest's own exits (interrupted, internal error, usage error): the
+            # process didn't die, so the run is only consumed.
+            if inflight is None or ret_code in (2, 3, 4):
+                return
+            if ret_code == 124:
+                limit = f" after {timeout // 60}min" if timeout else ""
+                plugin.append_run(inflight, "timed_out", f"timed out{limit}")
+            else:
+                summary = f"exit code {ret_code}{signal_name}"
+                plugin.append_run(inflight, "crashed", summary)
+        except Exception as e:
+            print_to_file(f"Could not finish the test run report: {e}")
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -834,6 +908,8 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if ret_code != 0:
+            finish_torchci_report(ret_code, signal_name)
 
         # Read what just failed/ran
         try:
@@ -872,7 +948,7 @@ def run_test_retries(
             print_to_file(
                 "Test succeeded in new process, continuing with the rest of the tests"
             )
-        elif num_failures[current_failure] >= 3:
+        elif num_failures[current_failure] > NUM_PROCESS_RETRIES:
             # This is for log classifier so it can prioritize consistently
             # failing tests instead of reruns. [1:-1] to remove quotes
             print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
@@ -897,8 +973,12 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
+    consistent_failures = [
+        x[1:-1] for x in num_failures if num_failures[x] > NUM_PROCESS_RETRIES
+    ]
+    flaky_failures = [
+        x[1:-1] for x in num_failures if 0 < num_failures[x] <= NUM_PROCESS_RETRIES
+    ]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -908,6 +988,78 @@ def run_test_retries(
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
         return 1, True
     return ret_code, any(x > 0 for x in num_failures.values())
+
+
+def run_test_with_class_supervisors(test_module, test_directory, options, classes):
+    """Run each of ``classes`` in one process; other tests keep --subprocess."""
+    args = options.additional_args
+    # Only split plain full-file runs; other modes keep per-test isolation.
+    if (
+        not options.pytest
+        or not test_module.test.is_full_file()
+        or options.pytest_k_expr
+        or options.pytest_xdist_workers is not None
+        or options.continue_through_error
+        or options.coverage
+        or options.dynamo
+        or options.inductor
+        or RERUN_DISABLED_TESTS
+        or (args and not (len(args) == 2 and args[0] == "-m"))
+    ):
+        return run_test_with_subprocess(test_module, test_directory, options)
+
+    def subset(expression):
+        subset_options = copy.copy(options)
+        subset_options.pytest_k_expr = expression
+        return subset_options
+
+    for name in classes:
+        if result := run_test(test_module, test_directory, subset(name)):
+            return result
+    rest = subset(f"not ({' or '.join(classes)})")
+    return run_test_with_subprocess(test_module, test_directory, rest)
+
+
+def run_gloo_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "ProcessGroupGlooTest",
+            "ProcessGroupGlooLazyInitTest",
+            "ProcessGroupGlooFRTest",
+            "DistributedDataParallelTest",
+        ),
+    )
+
+
+def run_common_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "PythonProcessGroupExtensionTest",
+            "ProcessGroupWithDispatchedCollectivesTests",
+            "LocalRankTest",
+        ),
+    )
+
+
+def run_nccl_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        ("DistributedDataParallelTest", "CommTest", "NCCLTraceTest", "WorkHookTest"),
+    )
+
+
+def run_pg_wrapper_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module, test_directory, options, ("ProcessGroupGlooWrapperTest",)
+    )
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
@@ -1082,70 +1234,64 @@ def test_distributed(test_module, test_directory, options):
             continue
         if backend == "mpi" and not mpi_available:
             continue
-        for with_init_file in {True, False}:
-            if sys.platform == "win32" and not with_init_file:
-                continue
-            tmp_dir = tempfile.mkdtemp()
-            init_method = "file" if with_init_file else "env"
-            if options.verbose:
-                with_init = f"with {init_method} init_method"
-                print_to_stderr(
-                    f"Running distributed tests for the {backend} backend {with_init}"
+        # Both suites use FileStore; changing the report label does not test env://.
+        tmp_dir = tempfile.mkdtemp()
+        init_method = "file"
+        if options.verbose:
+            with_init = f"with {init_method} init_method"
+            print_to_stderr(
+                f"Running distributed tests for the {backend} backend {with_init}"
+            )
+        old_environ = dict(os.environ)
+        os.environ["TEMP_DIR"] = tmp_dir
+        os.environ["BACKEND"] = backend
+        os.environ.update(env_vars)
+        report_tag = f"dist-{backend}" if backend != "test" else ""
+        report_tag += f"-init-{init_method}"
+        os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
+        try:
+            os.mkdir(os.path.join(tmp_dir, "barrier"))
+            os.mkdir(os.path.join(tmp_dir, "test_dir"))
+            if backend == "mpi":
+                # test mpiexec for --noprefix option
+                with open(os.devnull, "w") as devnull:
+                    allowrunasroot_opt = (
+                        "--allow-run-as-root"
+                        if subprocess.call(
+                            'mpiexec --allow-run-as-root -n 1 bash -c ""',
+                            shell=True,
+                            stdout=devnull,
+                            stderr=subprocess.STDOUT,
+                        )
+                        == 0
+                        else ""
+                    )
+                    noprefix_opt = (
+                        "--noprefix"
+                        if subprocess.call(
+                            f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""',
+                            shell=True,
+                            stdout=devnull,
+                            stderr=subprocess.STDOUT,
+                        )
+                        == 0
+                        else ""
+                    )
+
+                mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
+
+                return_code = run_test(
+                    test_module, test_directory, options, launcher_cmd=mpiexec
                 )
-            old_environ = dict(os.environ)
-            os.environ["TEMP_DIR"] = tmp_dir
-            os.environ["BACKEND"] = backend
-            os.environ.update(env_vars)
-            report_tag = f"dist-{backend}" if backend != "test" else ""
-            report_tag += f"-init-{init_method}"
-            os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
-            try:
-                os.mkdir(os.path.join(tmp_dir, "barrier"))
-                os.mkdir(os.path.join(tmp_dir, "test_dir"))
-                if backend == "mpi":
-                    # test mpiexec for --noprefix option
-                    with open(os.devnull, "w") as devnull:
-                        allowrunasroot_opt = (
-                            "--allow-run-as-root"
-                            if subprocess.call(
-                                'mpiexec --allow-run-as-root -n 1 bash -c ""',
-                                shell=True,
-                                stdout=devnull,
-                                stderr=subprocess.STDOUT,
-                            )
-                            == 0
-                            else ""
-                        )
-                        noprefix_opt = (
-                            "--noprefix"
-                            if subprocess.call(
-                                f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""',
-                                shell=True,
-                                stdout=devnull,
-                                stderr=subprocess.STDOUT,
-                            )
-                            == 0
-                            else ""
-                        )
-
-                    mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-
-                    return_code = run_test(
-                        test_module, test_directory, options, launcher_cmd=mpiexec
-                    )
-                else:
-                    return_code = run_test(
-                        test_module,
-                        test_directory,
-                        options,
-                        extra_unittest_args=["--subprocess"],
-                    )
-                if return_code != 0:
-                    return return_code
-            finally:
-                shutil.rmtree(tmp_dir)
-                os.environ.clear()
-                os.environ.update(old_environ)
+            else:
+                # No --subprocess: each test already spawns fresh rank processes.
+                return_code = run_test(test_module, test_directory, options)
+            if return_code != 0:
+                return return_code
+        finally:
+            shutil.rmtree(tmp_dir)
+            os.environ.clear()
+            os.environ.update(old_environ)
     return 0
 
 
@@ -1328,7 +1474,7 @@ def handle_log_file(
     print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({new_file})\n")
 
 
-def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
+def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=False):
     if is_distributed_test:
         # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
         rerun_options = ["-x", "--reruns=0"]
@@ -1350,19 +1496,29 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         "-rfEX",
     ]
     if not is_cpp_test:
-        # C++ tests need to be run with pytest directly, not via python
-        # We have a custom pytest shard that conflicts with the normal plugin
-        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        # C++ tests need to be run with pytest directly, not via python.
+        if options.pytest_xdist_workers is None:
+            # The custom pytest shard conflicts with xdist.
+            pytest_args.extend(["-p", "no:xdist"])
+        else:
+            pytest_args.extend(["-n", str(options.pytest_xdist_workers)])
+        pytest_args.append("--use-pytest")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if TEST_SAVE_XML:
-            # Add the option to generate XML test report here as C++ tests
-            # won't go into common_utils
-            test_report_path = get_report_path(pytest=True)
-            pytest_args.extend(["--junit-xml-reruns", test_report_path])
+        if IS_CI:
+            # C++ tests don't go through common_utils.run_tests, which is what
+            # sets TEST_SAVE_XML, so build the pytest report path here.
+            # The path is relative to the test directory pytest runs in.
+            report_name = sanitize_test_filename(test_file)
+            report_path = os.path.join(
+                _get_test_report_path().replace("python-unittest", "python-pytest"),
+                report_name,
+                f"{report_name}-{os.urandom(8).hex()}.xml",
+            )
+            pytest_args.extend(["--junit-xml-reruns", report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])
@@ -1386,30 +1542,29 @@ def run_ci_sanity_check(test: ShardedTest, test_directory, options):
         os.remove(file)
     for dirname in glob.glob(f"{test_reports_dir}/**/{test.name}"):
         shutil.rmtree(dirname)
+    if options.save_torchci_reports:
+        name = sanitize_test_filename(test.name)
+        for file in glob.glob(f"{options.save_torchci_reports}/{name}-*.report.jsonl"):
+            os.remove(file)
     return 0
 
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
-    "test_cuda_trace": run_test_with_subprocess,
+    "test_gpu_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": run_test_with_subprocess,
-    "distributed/test_c10d_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_nccl": run_nccl_test,
+    "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
-    "distributed/test_c10d_common": run_test_with_subprocess,
+    "distributed/test_c10d_common": run_common_test,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
-    "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_store": run_test_with_subprocess,
-    "distributed/test_pg_wrapper": run_test_with_subprocess,
-    "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
-    "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
+    "distributed/test_pg_wrapper": run_pg_wrapper_test,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
-    "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
@@ -1457,6 +1612,17 @@ def parse_args():
         "GPUs; `not-multigpu` runs only single-GPU "
         "tests, which can run on a single-GPU runner. Combined (AND) with the "
         "existing serial/not-serial split.",
+    )
+    parser.add_argument(
+        "--multigpu-min-gpus",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Further restrict the `multigpu` tests to those needing at least N "
+        "GPUs (resolved at collection, see test/conftest.py); pass-through to "
+        "pytest's --multigpu-min-gpus. 0 (default) disables it. Use with "
+        "`--multigpu-filter multigpu` on a larger-than-2-GPU runner to run just "
+        "the >2-GPU distributed tests (e.g. N=3 on a 4-GPU runner).",
     )
     parser.add_argument(
         "--include-cpython-tests",
@@ -1560,6 +1726,14 @@ def parse_args():
         default=PYTORCH_COLLECT_COVERAGE,
     )
     parser.add_argument(
+        "--save-torchci-reports",
+        # Absolute, since tests run from test/.
+        type=os.path.abspath,
+        default=_torchci_reports_default(),
+        metavar="DIR",
+        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
+    )
+    parser.add_argument(
         "-i",
         "--include",
         nargs="+",
@@ -1639,6 +1813,13 @@ def parse_args():
         help="runs a shard of the tests (taking into account other selections), e.g., "
         "--shard 2 3 will break up the selected tests into 3 shards and run the tests "
         "in the 2nd shard (the first number should not exceed the second)",
+    )
+    parser.add_argument(
+        "--pytest-xdist-workers",
+        type=int,
+        choices=range(1, 65),
+        metavar="N",
+        help="run non-serial tests with N pytest-xdist workers",
     )
     parser.add_argument(
         "--exclude-jit-executor",
@@ -1818,6 +1999,8 @@ def get_selected_tests(options) -> list[str]:
             "test_mps",
             "test_metal",
             "test_modules",
+            "test_linalg",
+            "test_scaled_matmul_cuda",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -1829,10 +2012,6 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_aot_inductor",
             "inductor/test_torchinductor_dynamic_shapes",
         ]
-    else:
-        # Exclude mps-only tests otherwise
-        options.exclude.extend(["test_mps", "test_metal"])
-
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
@@ -1900,7 +2079,9 @@ def get_selected_tests(options) -> list[str]:
         ]
     )
 
-    selected_tests = exclude_tests(options.exclude, selected_tests)
+    # Exact match: a caller asking to exclude "inductor/test_torchinductor" means
+    # that file, not every file whose name starts with it.
+    selected_tests = exclude_tests(options.exclude, selected_tests, exact_match=True)
 
     if IS_WINDOWS and not options.ignore_win_blocklist:
         from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater
@@ -2070,14 +2251,17 @@ def do_sharding(
 ) -> tuple[float, list[ShardedTest]]:
     which_shard, num_shards = get_sharding_opts(options)
 
-    # Do sharding
+    uses_xdist = options.pytest_xdist_workers is not None
+
+    # Xdist owns test-level concurrency, while test files run sequentially.
     shards = calculate_shards(
         num_shards,
         selected_tests,
         test_file_times,
         test_class_times=test_class_times,
-        must_serial=must_serial,
+        must_serial=(lambda _: True) if uses_xdist else must_serial,
         sort_by_time=sort_by_time,
+        allow_pytest_sharding=not uses_xdist,
     )
     return shards[which_shard - 1]
 
@@ -2131,6 +2315,8 @@ def run_tests(
     if len(selected_tests) == 0:
         return
 
+    uses_xdist = options.pytest_xdist_workers is not None
+
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
     selected_tests_parallel = [x for x in selected_tests if not must_serial(x)]
@@ -2138,21 +2324,26 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # The multigpu marker (see test/conftest.py) is orthogonal to serial: it
-    # partitions distributed tests by whether they spawn multiple processes /
-    # need multiple GPUs. AND it into whatever serial expression a pass uses so
-    # a single-GPU config can select `not multigpu` without dropping the
-    # serial/not-serial split (a bare second `-m` would clobber the first).
+    # Additional markers are orthogonal to serial. AND them into whatever
+    # serial expression a pass uses because a second `-m` would clobber the
+    # first.
     multigpu_marker = {
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
+    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+
+    # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
+    # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
+    # larger-runner config passes --multigpu-min-gpus.
+    min_gpus = getattr(options, "multigpu_min_gpus", 0) or 0
 
     def marker_args(serial_expr: str | None) -> list[str]:
-        exprs = [e for e in (serial_expr, multigpu_marker) if e]
-        if not exprs:
-            return []
-        return ["-m", " and ".join(f"({e})" for e in exprs)]
+        exprs = [e for e in (serial_expr, multigpu_marker, periodic_marker) if e]
+        args = ["-m", " and ".join(f"({e})" for e in exprs)] if exprs else []
+        if min_gpus > 0:
+            args += ["--multigpu-min-gpus", str(min_gpus)]
+        return args
 
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
@@ -2193,6 +2384,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.pytest_xdist_workers = None
             options_clone.additional_args.extend(marker_args(None))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
@@ -2208,6 +2400,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.pytest_xdist_workers = None
             options_clone.additional_args.extend(marker_args("serial"))
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_complete(failure)
@@ -2219,12 +2412,16 @@ def run_tests(
                 raise RuntimeError(failure.message + keep_going_message)
 
         # This is used later to constrain memory per proc on the GPU. On ROCm
-        # the number of procs is the number of GPUs, so we don't need to do this
-        os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
+        # the number of procs is the number of GPUs, so we don't need to do this.
+        memory_processes = options.pytest_xdist_workers or NUM_PROCS
+        os.environ["NUM_PARALLEL_PROCS"] = str(
+            1 if torch.version.hip else memory_processes
+        )
 
         # See Note [ROCm parallel CI testing]
+        file_processes = 1 if uses_xdist else NUM_PROCS
         pool = get_context("spawn").Pool(
-            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+            file_processes, maxtasksperchild=None if torch.version.hip else 1
         )
 
         def parallel_test_completion_callback(failure):

@@ -2,8 +2,10 @@
 name: inductor-perf-nightly-macos
 
 on:
-  schedule:
-    - cron: 0 7 * * *
+  # TODO: re-enable the nightly schedule once the macos-m2-26 fleet grows from
+  # 8 to 28 runners (pytorch-gha-infra#1558), see https://github.com/pytorch/test-infra/issues/8964
+  # schedule:
+  #   - cron: 0 7 * * *
   workflow_dispatch:
     inputs:
       training:
@@ -33,7 +35,12 @@ concurrency:
 permissions: read-all
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   macos-perf-py3-arm64-build:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: macos-perf-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
@@ -46,12 +53,12 @@ jobs:
       python-version: 3.12.7
       test-matrix: |
         { include: [
-          { config: "perf_smoketest", shard: 1, num_shards: 3, runner: "macos-m2-15" },
-          { config: "perf_smoketest", shard: 2, num_shards: 3, runner: "macos-m2-15" },
-          { config: "perf_smoketest", shard: 3, num_shards: 3, runner: "macos-m2-15" },
-          { config: "aot_inductor_perf_smoketest", shard: 1, num_shards: 3, runner: "macos-m2-15" },
-          { config: "aot_inductor_perf_smoketest", shard: 2, num_shards: 3, runner: "macos-m2-15" },
-          { config: "aot_inductor_perf_smoketest", shard: 3, num_shards: 3, runner: "macos-m2-15" },
+          { config: "perf_smoketest", shard: 1, num_shards: 3, runner: "macos-m2-26" },
+          { config: "perf_smoketest", shard: 2, num_shards: 3, runner: "macos-m2-26" },
+          { config: "perf_smoketest", shard: 3, num_shards: 3, runner: "macos-m2-26" },
+          { config: "aot_inductor_perf_smoketest", shard: 1, num_shards: 3, runner: "macos-m2-26" },
+          { config: "aot_inductor_perf_smoketest", shard: 2, num_shards: 3, runner: "macos-m2-26" },
+          { config: "aot_inductor_perf_smoketest", shard: 3, num_shards: 3, runner: "macos-m2-26" },
         ]}
     secrets: inherit
 

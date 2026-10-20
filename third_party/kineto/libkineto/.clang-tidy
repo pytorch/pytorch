@@ -1,0 +1,13 @@
+# Style checks Kineto doesn't yet follow; analyzer checks that misfire in fmt
+---
+InheritParentConfig: true
+Checks: '
+-cppcoreguidelines-avoid-c-arrays,
+-modernize-avoid-c-arrays,
+-cppcoreguidelines-avoid-const-or-ref-data-members,
+-cppcoreguidelines-use-default-member-init,
+-modernize-use-default-member-init,
+-clang-analyzer-core.BitwiseShift,
+-clang-analyzer-security.ArrayBound,
+'
+...

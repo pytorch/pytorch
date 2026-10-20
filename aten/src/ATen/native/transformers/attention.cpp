@@ -13,7 +13,6 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <c10/util/typeid.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
@@ -35,16 +34,12 @@
 #include <ATen/ops/_nested_tensor_softmax_with_shape.h>
 #include <ATen/ops/_scaled_dot_product_attention_math.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps.h>
-#include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
 #include <ATen/ops/_scaled_dot_product_cudnn_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
-#include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable.h>
 #include <ATen/ops/_scaled_dot_product_fused_attention_overrideable_native.h>
@@ -70,7 +65,6 @@
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_safe_softmax.h>
 #include <ATen/ops/_safe_softmax_native.h>
 #include <ATen/ops/all.h>
@@ -651,6 +645,27 @@ at::Tensor pad_last_dim(const at::Tensor& attn_bias, int alignment_size) {
   return at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
 }
 
+// Flash and cuDNN attention kernels issue 16-byte vectorized global memory
+// accesses at every row. Copy misaligned inputs (e.g. views at odd storage
+// offsets) instead of falling back to a slower backend.
+at::Tensor align_for_fused_attention(const at::Tensor& tensor, bool check_strides = true) {
+  if (tensor.is_nested() || sdp::is_aligned_for_sdpa(tensor, 16, check_strides)) {
+    return tensor;
+  }
+  // Copy only the distinct elements of expanded dims, keeping the input's dim
+  // order so the output layout matches the aligned case. Tensors that require
+  // grad are copied in full so each element keeps its own gradient.
+  auto compact = tensor;
+  for (const auto dim : c10::irange(tensor.dim())) {
+    if (!tensor.requires_grad() && TORCH_GUARD_OR_FALSE(tensor.sym_stride(dim).sym_eq(0)) &&
+        TORCH_GUARD_OR_FALSE(tensor.sym_size(dim).sym_gt(1))) {
+      compact = compact.narrow_symint(dim, 0, 1);
+    }
+  }
+  auto copy = compact.clone(at::MemoryFormat::Preserve);
+  return compact.is_same(tensor) ? copy : copy.expand_symint(tensor.sym_sizes());
+}
+
 at::Tensor post_process_flash_output(
     at::Tensor out,
     c10::SymInt const& og_size) {
@@ -691,17 +706,25 @@ std::tuple<at::Tensor, at::Tensor> pre_process_group_query_attention_input(
   const auto k_num_heads = key.sym_size(-3);
   const auto v_num_heads = value.sym_size(-3);
 
-  bool all_equal = q_num_heads == k_num_heads && k_num_heads == v_num_heads;
-  bool key_divisible = q_num_heads % k_num_heads == 0;
-  bool value_divisible = q_num_heads % v_num_heads == 0;
-  TORCH_CHECK(all_equal || (key_divisible && value_divisible),
-              "Number of heads in key and value must divide the number of heads in ");
-
-  if (all_equal){
+  const auto all_equal = q_num_heads.sym_eq(k_num_heads).sym_and(
+      k_num_heads.sym_eq(v_num_heads));
+  if (TORCH_GUARD_OR_FALSE(all_equal)) {
     return std::make_tuple(key, value);
   }
-  auto repeat_key_shape = query.sym_size(-3) / key.sym_size(-3);
-  auto repeat_value_shape = query.sym_size(-3) / value.sym_size(-3);
+
+  // For unbacked head counts, take the general repeat path and defer the
+  // divisibility requirements to runtime instead of guarding on their values.
+  TORCH_SYM_CHECK(
+      k_num_heads.sym_gt(0).sym_and(v_num_heads.sym_gt(0)),
+      "Number of heads in key and value must be greater than 0");
+  TORCH_SYM_CHECK(
+      (q_num_heads % k_num_heads)
+          .sym_eq(0)
+          .sym_and((q_num_heads % v_num_heads).sym_eq(0)),
+      "Number of heads in key and value must divide the number of heads in query");
+
+  auto repeat_key_shape = q_num_heads / k_num_heads;
+  auto repeat_value_shape = q_num_heads / v_num_heads;
 
   at::Tensor key_repeated = key.repeat_interleave_symint(repeat_key_shape, -3);
   at::Tensor value_repeated = value.repeat_interleave_symint(repeat_value_shape, -3);
@@ -822,18 +845,27 @@ Tensor scaled_dot_product_attention(
     case SDPBackend::cudnn_attention: {
       // cuDNN SDPA backward does not support an attn_bias gradient.
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
+      if (attn_mask.has_value()) {
+        attn_mask = align_for_fused_attention(*attn_mask, /*check_strides=*/false);
+      }
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          align_for_fused_attention(query_), align_for_fused_attention(key), align_for_fused_attention(value),
+          attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(std::move(out_lse_softmax));
     }
     case SDPBackend::flash_attention: {
       if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
-        c10::SymInt og_size = query_.sym_size(-1);
+        c10::SymInt og_size = value.sym_size(-1);
         int alignment_size = (query_device_type == DeviceType::XPU) ? 1 : 8;
         Tensor query_padded = pad_last_dim(query_, alignment_size);
         Tensor key_padded = pad_last_dim(key, alignment_size);
         Tensor value_padded = pad_last_dim(value, alignment_size);
+        if (query_device_type == DeviceType::CUDA) {
+          query_padded = align_for_fused_attention(query_padded);
+          key_padded = align_for_fused_attention(key_padded);
+          value_padded = align_for_fused_attention(value_padded);
+        }
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(

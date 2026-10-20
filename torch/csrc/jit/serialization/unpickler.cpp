@@ -4,6 +4,7 @@
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
+#include <c10/util/FbcodeMaps.h>
 #include <c10/util/safe_numerics.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -40,7 +41,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     IValue value;
   };
   std::vector<Work> to_process = {{type_tag, root}};
-  std::unordered_set<const void*> scanned;
+  c10::FastSet<const void*> scanned;
   while (!to_process.empty()) {
     Work w = std::move(to_process.back());
     to_process.pop_back();
@@ -49,11 +50,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     // it would not terminate).
     if (w.value.isPtrType()) {
       const void* key = w.value.internalToPointer();
-      auto it = scanned.find(key);
-      if (it != scanned.end()) {
+      // insert() reports prior presence, so the key is hashed once.
+      if (!scanned.insert(key).second) {
         continue;
       }
-      scanned.emplace_hint(it, key);
     }
     auto kind = w.type->kind();
     if (auto dyn = w.type->castRaw<c10::DynamicType>()) {
@@ -467,7 +467,7 @@ PickleOpCode Unpickler::readInstruction() {
           start,
           ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict.insert_or_assign(stack_[i], stack_[i + 1]);
+        dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
       stack_.erase(
           stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
@@ -489,7 +489,7 @@ PickleOpCode Unpickler::readInstruction() {
           start,
           ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
-        dict.insert_or_assign(stack_[i], stack_[i + 1]);
+        dict.insert_or_assign(std::move(stack_[i]), std::move(stack_[i + 1]));
       }
       stack_.erase(
           stack_.begin() + static_cast<std::ptrdiff_t>(start), stack_.end());
@@ -649,7 +649,8 @@ PickleOpCode Unpickler::readInstruction() {
           "Parsing error: attempted out-of-bounds access while processing SETITEM opcode");
 
       auto dict = stack_.at(dict_pos).toGenericDict();
-      dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
+      dict.insert_or_assign(
+          std::move(stack_.at(key_pos)), std::move(stack_.at(val_pos)));
       stack_.erase(
           stack_.begin() + static_cast<std::ptrdiff_t>(key_pos), stack_.end());
     } break;
@@ -777,10 +778,12 @@ void Unpickler::readGlobal(
   } else if (
       module_name == "torch._utils" &&
       (class_name == "_rebuild_tensor_v2" ||
+       class_name == "_rebuild_tensor_v3" ||
        class_name == "_rebuild_qtensor")) {
     // Unpickle a tensor
-    bool quantized = class_name == "_rebuild_qtensor";
-    rebuildTensor(quantized);
+    const bool quantized = class_name == "_rebuild_qtensor";
+    const bool has_explicit_dtype = class_name == "_rebuild_tensor_v3";
+    rebuildTensor(quantized, has_explicit_dtype);
   } else if (
       module_name == "torch._tensor" &&
       (class_name == "_rebuild_from_type_v2")) {
@@ -829,6 +832,9 @@ void Unpickler::readGlobal(
         false,
         "RRef unpickling is only supported with the distributed package");
 #endif
+  } else if (module_name == "torch.storage" && class_name == "UntypedStorage") {
+    stack_.emplace_back(int64_t(c10::kByte));
+    return;
   } else if (module_name == "torch") {
     // Try to manually resolve several global enums
     // NOTE: this does not put a global into the global table,
@@ -844,6 +850,13 @@ void Unpickler::readGlobal(
 #undef CHECK_SCALAR
     if (scalar_type.has_value()) {
       stack_.emplace_back(int64_t(*scalar_type));
+      return;
+    }
+
+    const auto& dtype_map = c10::getStringToDtypeMap();
+    const auto dtype = dtype_map.find(class_name);
+    if (dtype != dtype_map.end()) {
+      stack_.emplace_back(int64_t(dtype->second));
       return;
     }
 
@@ -944,8 +957,8 @@ void Unpickler::rebuildSparseTensor() {
   });
 }
 
-void Unpickler::rebuildTensor(bool quantized) {
-  globals_.emplace_back([this, quantized] {
+void Unpickler::rebuildTensor(bool quantized, bool has_explicit_dtype) {
+  globals_.emplace_back([this, quantized, has_explicit_dtype] {
     auto tup = pop(stack_).toTuple();
     const auto& elements = tup->elements();
     size_t idx = 0;
@@ -980,11 +993,16 @@ void Unpickler::rebuildTensor(bool quantized) {
               toString(qscheme));
           break;
       }
-    } else {
-      result = at::empty({0}, storage_tensor.options());
     }
     bool requires_grad = elements.at(idx++).toBool();
     idx++; // backwards hooks is empty
+    auto scalar_type = storage_tensor.scalar_type();
+    if (has_explicit_dtype) {
+      scalar_type = elements.at(idx++).toScalarType();
+    }
+    if (!quantized) {
+      result = at::empty({0}, storage_tensor.options().dtype(scalar_type));
+    }
     // Validate size/stride/storage_offset against the storage extent before
     // installing them via the unchecked TensorImpl setters below. The Python
     // pickle path goes through Tensor.set_() which performs these checks; the
@@ -1004,7 +1022,7 @@ void Unpickler::rebuildTensor(bool quantized) {
       TORCH_CHECK(
           stride[i] >= 0, "Tensor: negative stride ", stride[i], " at dim ", i);
     }
-    const size_t itemsize = storage_tensor.dtype().itemsize();
+    const size_t itemsize = result.dtype().itemsize();
     const size_t storage_nbytes = storage_tensor.storage().nbytes();
     // Bound storage_offset independently: computeStorageNbytes returns 0 when
     // any dim is 0, so without this check a zero-numel tensor with a huge
@@ -1051,13 +1069,20 @@ void Unpickler::rebuildTensor(bool quantized) {
     // Tensors pickled before this patch didn't
     // have this argument for storing MathBits,
     // in that case, we do nothing.
-    // NOTE: `math_bits` is the 7th arg.
+    // NOTE: `math_bits` is the 7th arg for v2 and the 8th arg for v3.
     // NOTE: This is only meant for regular tensor and not quantized
     //       which also has 7 args serialized.
-    if (!quantized && elements.size() == 7) {
+    if (!quantized && idx < elements.size() &&
+        elements.at(idx).isGenericDict()) {
       auto math_bits = elements.at(idx++).toGenericDict();
       torch::jit::setTensorMetadata(result, math_bits);
     }
+    TORCH_CHECK(
+        idx == elements.size(),
+        "Tensor: unexpected number of rebuild arguments, got ",
+        elements.size(),
+        " args, consumed ",
+        idx);
 
     stack_.emplace_back(std::move(result));
   });
@@ -1080,7 +1105,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     //   arguments to construct base tensor, Python State (as dict))
     auto args = pop(stack_).toTuple();
     size_t tup_idx = 0;
-    const auto args_elems = args->elements();
+    const auto& args_elems = args->elements();
     auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
     auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
     if (!py_state.empty()) {
@@ -1089,7 +1114,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     }
     // This calls the function to rebuild the
     // base tensor.
-    // Eg. `rebuildTensor`, `rebuildSpareTensor`.
+    // Eg. `rebuildTensor`, `rebuildSparseTensor`.
     stack_.emplace_back(base_tensor_args);
     globals_[curr_globals_idx + 1]();
     stack_.emplace_back(pop(stack_));
@@ -1100,7 +1125,7 @@ void Unpickler::rebuildParameter() {
   globals_.emplace_back([this] {
     auto args = pop(stack_).toTuple();
     size_t tup_idx = 0;
-    const auto args_elems = args->elements();
+    const auto& args_elems = args->elements();
     auto result = args_elems.at(tup_idx++).toTensor();
     auto requires_grad = args_elems.at(tup_idx++).toBool();
     result.requires_grad_(requires_grad);

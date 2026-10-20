@@ -3,7 +3,10 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+)
 
 
 class ComplexDynamoTestCase(torch._dynamo.test_case.TestCase):
@@ -24,6 +27,8 @@ def sample_function(a: torch.Tensor, b: torch.Tensor, x: torch.Tensor) -> torch.
 
 
 class ComplexTests(ComplexDynamoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         fn_c = torch.compile(sample_function, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         a = torch.randn(2, 2, dtype=torch.complex64)

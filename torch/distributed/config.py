@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import Config, install_config_module
 
 
-__all__ = ["compile_on_one_rank", "use_torchcomms", "pipeline_per_direction_p2p"]
+__all__ = [
+    "compile_on_one_rank",
+    "use_torchcomms",
+    "pipeline_per_edge_p2p",
+]
 
 # Deprecated alias. The canonical flag now lives in torch.compiler.config -- it is read
 # across the compiler stack (make_fx, inductor) not just by distributed. Kept here for
@@ -28,21 +32,22 @@ use_torchcomms: bool = Config(
     env_name_default="TORCH_DISTRIBUTED_USE_TORCHCOMMS",
 )
 
-# When enabled, pipeline stages carry downstream (r -> r+1, forward activations)
-# and upstream (r -> r-1, backward gradients) P2P on two separate communicators
-# instead of sharing one. A single PP communicator serializes all send/recv in one
-# FIFO: coalescing makes a single mixed batch deadlock-free, but across batches
-# (pipeline skew, looped / V schedules, skip connections) the shared FIFO can
-# still form a dependency cycle and deadlock. Splitting by direction removes that
-# hazard and restores full-duplex bandwidth. Requires a device-bound default
-# process group.
+# When enabled, each adjacent directed physical-rank edge uses a separate
+# communicator. Opposite directions and distinct rank pairs are isolated;
+# logical-stage edges mapped to the same directed rank pair share one FIFO.
 #
 # This flag force-enables the behavior; it is auto-enabled when TorchComms is in
 # use regardless of this flag (see PipelineStage), so it mainly matters for the
-# non-TorchComms backends.
-pipeline_per_direction_p2p: bool = Config(
+# non-TorchComms backends. Schedule initialization creates one child
+# communicator per directed physical-rank edge, then preconnects its
+# send/receive path before execution or graph capture.
+# Setup cost is proportional to the stage assignment's disjoint edge rounds;
+# children are cached until full process-group teardown. A lazy NCCL parent still
+# creates eager two-rank split children; pipeline P2P submits their operations in
+# batches.
+pipeline_per_edge_p2p: bool = Config(
     default=False,
-    env_name_default="TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P",
+    env_name_default="TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P",
 )
 
 
