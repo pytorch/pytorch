@@ -130,7 +130,13 @@ class ModelPool {
             checked_out_models_.empty(),
         "Stream affinity can only be reconfigured while the model pool is "
         "quiescent");
+#if defined(USE_CUDA) || defined(USE_XPU)
     use_stream_affinity_ = use_stream_affinity;
+#else
+    AOTI_RUNTIME_CHECK(
+        !use_stream_affinity,
+        "Stream affinity is only supported for device runtimes");
+#endif
     stream_models_.clear();
     model_streams_.clear();
     reclaim_unused_stream_mutexes();
@@ -164,13 +170,18 @@ class ModelPool {
 
   Model* get_available_model(Stream stream) {
     std::unique_lock lk(models_mutex_);
+#if defined(USE_CUDA) || defined(USE_XPU)
     if (use_stream_affinity_ && stream != nullptr) {
       return get_stream_affine_model(stream, lk);
     }
+#else
+    (void)stream;
+#endif
     return checkout_available_model(lk);
   }
 
   StreamLock acquire_stream_lock(Stream stream) {
+#if defined(USE_CUDA) || defined(USE_XPU)
     std::shared_ptr<std::mutex> stream_mutex;
     {
       std::lock_guard lk(models_mutex_);
@@ -185,6 +196,10 @@ class ModelPool {
       stream_mutex = it->second;
     }
     return StreamLock(stream_mutex);
+#else
+    (void)stream;
+    return {};
+#endif
   }
 
   void return_model_to_available(Model* model) {
@@ -544,11 +559,6 @@ class AOTInductorModelContainer {
   }
 
   void set_use_stream_affinity(bool use_stream_affinity) {
-#if !defined(USE_CUDA) && !defined(USE_XPU)
-    AOTI_RUNTIME_CHECK(
-        !use_stream_affinity,
-        "Stream affinity is only supported for device runtimes");
-#endif
     pool_.set_use_stream_affinity(use_stream_affinity);
   }
 
