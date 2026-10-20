@@ -3226,14 +3226,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 if method is torch.nn.Module.__init__:
                     method = unpatched_nn_module_init
-                if source_fn is not None:
+                # An object constructed during tracing has no source of its own, so its
+                # methods are sourced through the class MRO (cls_source), which lets
+                # bind_args track their closure cells.  Guard such a function, so that
+                # rebinding it on the class recompiles instead of replaying the traced
+                # body.  An object with a source keeps the unguarded function source it
+                # had before (pytorch/pytorch#197860).
+                if source_fn is not None and self.source is None:
                     fn_vt = variables.UserFunctionVariable.create_with_source(
                         method, source_fn
                     )
                 else:
                     fn_vt = variables.UserFunctionVariable(
                         method,
-                        source=source and AttrSource(source, "__func__"),
+                        source=source_fn or (source and AttrSource(source, "__func__")),
                     )
                 return UserMethodVariable(
                     fn_vt,
@@ -4066,7 +4072,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return md_vt.tp_descr_get_impl(tx, self, class_vt)
         elif is_lru_cache_wrapped_function(type_attr):
             fn_source = source
-            if can_use_mro_source:
+            # An object constructed during tracing has no attribute source; give
+            # the wrapped function its MRO source (see call_method).
+            if can_use_mro_source and self.source is None:
                 fn_source = self.get_source_by_walking_mro(tx, name)
             fn_vt = variables.WrapperUserFunctionVariable(
                 type_attr, "__wrapped__", source=fn_source
@@ -4094,7 +4102,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             fn_source = var_source or (
                 self.source and AttrSource(TypeSource(self.source), name)
             )
-            if var_source is not None:
+            # Guard the MRO source only for an object constructed during tracing;
+            # see UserDefinedObjectVariable.call_method.
+            if var_source is not None and self.source is None:
                 fn_vt = variables.UserFunctionVariable.create_with_source(
                     type_attr, var_source
                 )
@@ -4145,15 +4155,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_var = UserDefinedObjectVariable(descriptor)
 
         owner_var = UserDefinedClassVariable(type(self.value))
+        # descriptor_get_source is type(descriptor).__get__, which is already
+        # the function; it has no __func__ to unwrap.
         fn = descriptor.__get__.__func__  # type: ignore[union-attr]
-        if descriptor_get_source is not None:
-            # descriptor_get_source is type(descriptor).__get__, which is
-            # already the function; it has no __func__ to unwrap.
+        # Guard the MRO source only for an object constructed during tracing;
+        # see UserDefinedObjectVariable.call_method.
+        if descriptor_get_source is not None and self.source is None:
             fn_vt = variables.UserFunctionVariable.create_with_source(
                 fn, descriptor_get_source
             )
         else:
-            fn_vt = variables.UserFunctionVariable(fn)
+            fn_vt = variables.UserFunctionVariable(fn, source=descriptor_get_source)
         return variables.UserMethodVariable(
             fn_vt,
             descriptor_var,
@@ -4213,9 +4225,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # therefore cannot be sourced by walking the MRO.  Only
                 # source (and guard) the function when a class in the MRO
                 # actually defines it.
-                if self.cls_source is not None and any(
-                    "__getattr__" in klass.__dict__
-                    for klass in type(self.value).__mro__
+                # Guard the MRO source only for an object constructed during tracing;
+                # see UserDefinedObjectVariable.call_method.
+                if (
+                    self.source is None
+                    and self.cls_source is not None
+                    and any(
+                        "__getattr__" in klass.__dict__
+                        for klass in type(self.value).__mro__
+                    )
                 ):
                     fn_source = self.get_source_by_walking_mro(tx, "__getattr__")
                     fn_vt = variables.UserFunctionVariable.create_with_source(
