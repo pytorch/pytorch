@@ -623,6 +623,54 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertNotIn("index=0", graph0)
         self.assertEqual(graph0, graph1)
 
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_constant_folding_and_sdpa_fusion_under_coor(self):
+        # The masked_fill fill value only matches the sfdp pattern once joint_graph's
+        # uniform-value constant folding has turned it into a full(); both the folding
+        # and the pattern's exact recheck have to accept a current_device() operand.
+        from torch._dynamo.utils import counters
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+        from torch._inductor.utils import fresh_cache
+
+        graphs = []
+
+        class Capture(CustomGraphPass):
+            def __call__(self, graph):
+                graphs.append(graph.python_code("self").src)
+
+            def uuid(self):
+                return None
+
+        def f(query, key, value):
+            q, k, v = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
+            bs, k_len = q.size(0), k.size(-2)
+            mask = torch.ones(bs, k_len, dtype=torch.bool, device=query.device).tril()
+            scores = torch.matmul(q, k.transpose(-2, -1)) / 3.0
+            mask = (mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+            scores = scores.masked_fill(mask, -float("inf"))
+            return torch.matmul(torch.softmax(scores, dim=-1), v)
+
+        def graphs_on(dev):
+            graphs.clear()
+            counters.clear()
+            torch._dynamo.reset()
+            cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Capture())
+            args = [
+                torch.randn(4, 2, 4, 16, device=f"cuda:{dev}", dtype=torch.half)
+                for _ in range(3)
+            ]
+            with torch.cuda.device(dev), cfg, fresh_cache(), torch.no_grad():
+                out = torch.compile(f, backend="inductor")(*args)
+            self.assertEqual(out, f(*args), atol=1e-2, rtol=1e-2)
+            self.assertEqual(counters["inductor"]["fuse_attention"], 1)
+            return "\n".join(graphs)
+
+        graph0, graph1 = graphs_on(0), graphs_on(1)
+        self.assertIn("coor.current_device", graph0)
+        self.assertNotIn("index=0", graph0)
+        self.assertEqual(graph0, graph1)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_post_grad_replacement_with_device_under_coor(self):
