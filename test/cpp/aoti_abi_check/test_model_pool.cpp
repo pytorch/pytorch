@@ -160,6 +160,85 @@ TEST(ModelPoolTest, DeviceFailureWhileWaitingReturnsModel) {
   EXPECT_EQ(&*checkout(t.pool), model);
 }
 
+TEST(ModelPoolTest, LeaseMarksPendingOnlyOnce) {
+  TestPool t(1);
+  auto lease = checkout(t.pool);
+  lease.mark_pending();
+  EXPECT_THROW(lease.mark_pending(), std::runtime_error);
+}
+
+TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
+  TestPool t(1);
+  std::optional<Pool::Lease> holder;
+  {
+    auto lease = checkout(t.pool);
+    holder.emplace(std::move(lease));
+  }
+  auto waiter =
+      std::async(std::launch::async, [&] { return t.pool.checkout(); });
+  EXPECT_EQ(waiter.wait_for(kBlocked), std::future_status::timeout);
+  holder.reset();
+  wait_or_abort(waiter);
+}
+
+// Every checkout must return a model that no other thread holds and whose
+// device work has finished.
+void run_concurrent_checkouts(bool use_stream_affinity) {
+  constexpr size_t kNumModels = 3;
+  constexpr int kNumThreads = 8;
+  constexpr int kNumIters = 500;
+  TestPool t(kNumModels);
+  t.pool.set_use_stream_affinity(use_stream_affinity);
+  std::vector<std::atomic<bool>> held(kNumModels);
+  std::atomic<int> violations{0};
+  std::atomic<bool> stop{false};
+
+  std::thread device([&] {
+    while (!stop.load()) {
+      for (auto& model : t.models) {
+        model.finish();
+      }
+      std::this_thread::yield();
+    }
+  });
+
+  std::vector<std::thread> workers;
+  for (int tid = 0; tid < kNumThreads; ++tid) {
+    workers.emplace_back([&, tid] {
+      Stream stream =
+          use_stream_affinity ? stream_handle(1 + tid % 4) : nullptr;
+      for (int i = 0; i < kNumIters; ++i) {
+        auto stream_lock = t.pool.acquire_stream_lock(stream);
+        auto lease = t.pool.checkout(stream);
+        auto idx = t.index_of(&*lease);
+        if (held[idx].exchange(true) || !lease->is_finished()) {
+          violations++;
+        }
+        held[idx] = false;
+        // Every seventh run fails before reaching the device.
+        if (i % 7 != 0) {
+          lease->start();
+          lease.mark_pending();
+        }
+      }
+    });
+  }
+  for (auto& worker : workers) {
+    worker.join();
+  }
+  stop = true;
+  device.join();
+  EXPECT_EQ(violations.load(), 0);
+}
+
+TEST(ModelPoolTest, ConcurrentCheckoutsNeverShareModel) {
+  run_concurrent_checkouts(/*use_stream_affinity=*/false);
+}
+
+// The pool supports stream affinity only on device runtimes, and
+// CMakeLists.txt compiles this file with the build's device macro.
+#if defined(USE_CUDA) || defined(USE_XPU)
+
 TEST(ModelPoolTest, StreamAffinityKeepsModelPerStream) {
   TestPool t(2);
   t.pool.set_use_stream_affinity(true);
@@ -237,84 +316,22 @@ TEST(ModelPoolTest, StreamAffinityReconfiguresOnlyWhileIdle) {
   EXPECT_TRUE(t.pool.use_stream_affinity());
 }
 
-TEST(ModelPoolTest, LeaseMarksPendingOnlyOnce) {
-  TestPool t(1);
-  auto lease = checkout(t.pool);
-  lease.mark_pending();
-  EXPECT_THROW(lease.mark_pending(), std::runtime_error);
-}
-
-TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
-  TestPool t(1);
-  std::optional<Pool::Lease> holder;
-  {
-    auto lease = checkout(t.pool);
-    holder.emplace(std::move(lease));
-  }
-  auto waiter =
-      std::async(std::launch::async, [&] { return t.pool.checkout(); });
-  EXPECT_EQ(waiter.wait_for(kBlocked), std::future_status::timeout);
-  holder.reset();
-  wait_or_abort(waiter);
-}
-
-// Every checkout must return a model that no other thread holds and whose
-// device work has finished.
-void run_concurrent_checkouts(bool use_stream_affinity) {
-  constexpr size_t kNumModels = 3;
-  constexpr int kNumThreads = 8;
-  constexpr int kNumIters = 500;
-  TestPool t(kNumModels);
-  t.pool.set_use_stream_affinity(use_stream_affinity);
-  std::vector<std::atomic<bool>> held(kNumModels);
-  std::atomic<int> violations{0};
-  std::atomic<bool> stop{false};
-
-  std::thread device([&] {
-    while (!stop.load()) {
-      for (auto& model : t.models) {
-        model.finish();
-      }
-      std::this_thread::yield();
-    }
-  });
-
-  std::vector<std::thread> workers;
-  for (int tid = 0; tid < kNumThreads; ++tid) {
-    workers.emplace_back([&, tid] {
-      Stream stream =
-          use_stream_affinity ? stream_handle(1 + tid % 4) : nullptr;
-      for (int i = 0; i < kNumIters; ++i) {
-        auto stream_lock = t.pool.acquire_stream_lock(stream);
-        auto lease = t.pool.checkout(stream);
-        auto idx = t.index_of(&*lease);
-        if (held[idx].exchange(true) || !lease->is_finished()) {
-          violations++;
-        }
-        held[idx] = false;
-        // Every seventh run fails before reaching the device.
-        if (i % 7 != 0) {
-          lease->start();
-          lease.mark_pending();
-        }
-      }
-    });
-  }
-  for (auto& worker : workers) {
-    worker.join();
-  }
-  stop = true;
-  device.join();
-  EXPECT_EQ(violations.load(), 0);
-}
-
-TEST(ModelPoolTest, ConcurrentCheckoutsNeverShareModel) {
-  run_concurrent_checkouts(/*use_stream_affinity=*/false);
-}
-
 TEST(ModelPoolTest, ConcurrentCheckoutsNeverShareModelWithStreamAffinity) {
   run_concurrent_checkouts(/*use_stream_affinity=*/true);
 }
+
+#else
+
+TEST(ModelPoolTest, StreamAffinityRequiresDeviceRuntime) {
+  TestPool t(1);
+  EXPECT_THROW(t.pool.set_use_stream_affinity(true), std::runtime_error);
+  EXPECT_NO_THROW(t.pool.set_use_stream_affinity(false));
+  EXPECT_EQ(
+      t.pool.get_stream_affinity_model_index(stream_handle(1)),
+      AOTI_STREAM_AFFINITY_DISABLED);
+}
+
+#endif
 
 } // namespace
 } // namespace torch::aot_inductor
