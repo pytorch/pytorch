@@ -52,6 +52,27 @@ def strip_annotation_desc(gm_str: str) -> str:
     return re.sub(r"(# Annotation: \{[^}]*\}).*", r"\1", gm_str)
 
 
+def compile_and_get_synchronize_device_args(sync, x):
+    """Compile a fn calling ``sync()`` and return its synchronize_device args."""
+
+    def fn(x):
+        y = x + 1
+        sync()
+        return y * 2
+
+    torch._dynamo.reset()
+    backend = torch._dynamo.testing.EagerAndRecordGraphs()
+    out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+    torch.testing.assert_close(out, (x + 1) * 2)
+    # fullgraph=True guarantees a single graph.
+    (graph,) = backend.graphs
+    return [
+        node.args
+        for node in graph.graph.nodes
+        if node.target is torch.ops.streams.synchronize_device
+    ]
+
+
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
@@ -338,6 +359,16 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         self._assert_empty_sync_anchors_record(
             torch.ops.streams.synchronize_device.default, ()
         )
+
+    def test_cpu_synchronize_explicit_none(self) -> None:
+        # Eager treats device=None as the current device; Dynamo used to crash
+        # calling torch.device(None).
+        x = torch.ones(2, 2)
+        for sync in (
+            lambda: torch.cpu.synchronize(None),
+            lambda: torch.cpu.synchronize(device=None),
+        ):
+            self.assertEqual(compile_and_get_synchronize_device_args(sync, x), [])
 
     def test_empty_wait_stream_anchors_record(self) -> None:
         self._assert_empty_sync_anchors_record(
@@ -2343,6 +2374,28 @@ class GraphModule(torch.nn.Module):
         e = device_mod.Event()
         s.record_event(e)
 
+    @parametrize("api", ["positional", "kwarg", "accelerator"])
+    def test_synchronize_explicit_none_matches_no_arg(self, device, api):
+        # Eager treats device=None as the current device, so it must trace to the
+        # same graph as the no-arg call instead of crashing in torch.device(None).
+        device_mod = getattr(torch, torch.device(device).type)
+        if api == "positional":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(None)  # noqa: E731
+        elif api == "kwarg":
+            sync_default = device_mod.synchronize
+            sync_none = lambda: device_mod.synchronize(device=None)  # noqa: E731
+        else:
+            sync_default = torch.accelerator.synchronize
+            sync_none = lambda: torch.accelerator.synchronize(None)  # noqa: E731
+
+        x = torch.ones(2, 2, device=device)
+        expected = compile_and_get_synchronize_device_args(sync_default, x)
+        self.assertEqual(len(expected), 1)
+        self.assertEqual(
+            compile_and_get_synchronize_device_args(sync_none, x), expected
+        )
+
     def test_event_synchronize_tracing(self, device):
         def fn(x):
             e = torch.Event(device=device)
@@ -2801,6 +2854,39 @@ class <lambda>(torch.nn.Module):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(x, s), fn(x, s))
 
+    def test_nested_compile_in_backend_preserves_user_objects(self, device):
+        """A compile run from inside another compile's backend must not clobber
+        the outer compile's external object registry before the outer pre-graph
+        bytecode is generated, and the inner call's runtime object table must
+        not leak into AOTAutograd tracing of the outer graph."""
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+
+        inner = torch.compile(
+            lambda t: t * torch.accelerator.current_stream(device).stream_id,
+            backend="eager",
+        )
+        aot_eager = aot_autograd(fw_compiler=nop)
+
+        def backend(gm, example_inputs):
+            inner(torch.ones(2, device=device))
+            return aot_eager(gm, example_inputs)
+
+        def fn(x, s):
+            with torch.accelerator.current_stream(device):
+                cur_id = torch.accelerator.current_stream(device).stream_id
+                y = x + 1
+            with s:
+                return y * 2, cur_id
+
+        x = torch.ones(2, device=device)
+        s = torch.Stream(device=device)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled(x, s), fn(x, s))
+        with torch.Stream(device=device) as other:
+            self.assertEqual(compiled(x, s), fn(x, s))
+            self.assertEqual(compiled(x, s)[1], other.stream_id)
+
     def test_recorded_events_append_runtime_objects(self, device):
         events = []
 
@@ -2896,10 +2982,10 @@ instantiate_device_type_tests(
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
     def test_synchronize_indexless_device_resolves_current_device(self) -> None:
-        # Single-GPU counterpart to the 2-GPU test below, which the dynamo shards
-        # never run. Patching current_device_index drives both the trace-time
-        # resolution and the guard that checks it, so a second current device must
-        # produce a second graph carrying the new index.
+        # Single-GPU counterpart to the 2-GPU test in test_compile_on_one_rank.py,
+        # since the dynamo shards are single-GPU. Patching current_device_index
+        # drives both the trace-time resolution and the guard that checks it, so a
+        # second current device must produce a second graph carrying the new index.
         def f():
             torch.cuda.synchronize(torch.device("cuda"))
             return 1
@@ -2922,31 +3008,6 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
                 compiled()
 
         self.assertEqual(emitted(), [("cuda", 3), ("cuda", 5)])
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
-    def test_synchronize_indexless_device_uses_caller_device(self) -> None:
-        from torch._inductor.utils import fresh_cache
-
-        def f(x):
-            y = x + 1
-            torch.cuda.synchronize(torch.device("cuda"))
-            return y + 2
-
-        torch._dynamo.reset()
-        with fresh_cache(), torch.cuda.device(0):
-            compiled = torch.compile(f, backend="inductor", fullgraph=True)
-            x = torch.zeros(1, device="cuda:1")
-            compiled_target = []
-            with patch.object(
-                torch._C,
-                "_accelerator_synchronizeDevice",
-                side_effect=compiled_target.append,
-            ):
-                compiled(x)
-                with torch.cuda.device(1):
-                    compiled(x)
-
-        self.assertEqual(compiled_target, [0, 1])
 
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
