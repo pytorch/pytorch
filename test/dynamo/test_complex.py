@@ -189,6 +189,19 @@ class ComplexTests(ComplexDynamoTestCase):
         self.assertEqual(a, b)
 
     @parametrize("backend", ["aot_eager", "inductor"])
+    def test_conj_output(self, backend):
+        def f(x):
+            a = x * 2
+            return a, a.conj(), (x + 1).conj()
+
+        x = torch.randn(5, dtype=torch.complex64)
+        a, c, d = torch.compile(f, backend=backend, fullgraph=True)(x)
+        self.assertTrue(c.is_conj())
+        self.assertTrue(d.is_conj())
+        self.assertEqual((a, c, d), f(x))
+        self.assertEqual(c.untyped_storage().data_ptr(), a.untyped_storage().data_ptr())
+
+    @parametrize("backend", ["aot_eager", "inductor"])
     def test_saved_conj_of_complex_input(self, backend):
         def f(a, y):
             return a * y
