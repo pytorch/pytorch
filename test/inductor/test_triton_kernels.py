@@ -7292,25 +7292,25 @@ if HAS_TRITON:
 instantiate_device_type_tests(
     KernelTests,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsCompilation,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsRuntime,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsPrecisionAndConstexpr,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
@@ -7342,25 +7342,25 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     CustomOpTests,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     CustomOpTestsRuntime,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     MutationTests,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     MutationTestsTritonLauncher,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
