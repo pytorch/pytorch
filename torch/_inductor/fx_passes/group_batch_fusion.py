@@ -791,38 +791,72 @@ _LAYOUT_INDEPENDENT_OPS = OrderedSet(
 )
 
 
-def _direct_layout_user_is_sensitive(user: torch.fx.Node) -> bool:
-    if user.op == "output":
-        return True
-    if user.op not in ("call_method", "call_function"):
-        return True
+def _classify_layout_user(
+    user: torch.fx.Node, current: torch.fx.Node, node: torch.fx.Node
+) -> str:
+    exposed = current is node
     if user.target is operator.getitem or (
         user.op == "call_method" and user.target in _CONVERSION_METHODS
     ):
-        return True
+        return "reject" if exposed else "walk"
     ops = _layout_user_overloads(user)
     if not ops or any(op._schema.is_mutable for op in ops):
-        return True
-    if any(op.namespace != "aten" for op in ops):
-        return True
+        return "reject"
+    non_aten = any(op.namespace != "aten" for op in ops)
+    if exposed and non_aten:
+        return "reject"
+    if non_aten:
+        pending = [n for n in user.all_input_nodes if n is not current]
+        visited = OrderedSet()
+        while pending:
+            candidate = pending.pop()
+            if candidate is node:
+                return "reject"
+            if candidate < node:
+                continue
+            if candidate not in visited:
+                visited.add(candidate)
+                pending.extend(candidate.all_input_nodes)
     names = OrderedSet(op.overloadpacket.__name__ for op in ops)
     if names == OrderedSet(["contiguous"]):
-        return get_arg_value(user, 1, "memory_format") not in (
+        if get_arg_value(user, 1, "memory_format") not in (
             None,
             torch.contiguous_format,
-        )
+        ):
+            return "reject"
+        if not exposed:
+            return "walk"
+        value = node.meta.get("example_value", node.meta.get("val"))
+        if value is not None and statically_known_true(value.shape[0] > 1):
+            return "walk"
+        return "reject"
     if names.intersection(_LAYOUT_SENSITIVE_OPS) or any(
         op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
     ):
-        return True
-    return not (
-        any(torch.Tag.pointwise in op.tags for op in ops)
-        or all(op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops)
-    )
+        return "reject" if exposed else "walk"
+    if any(torch.Tag.pointwise in op.tags for op in ops) or all(
+        op.namespace != "aten" or op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS
+        for op in ops
+    ):
+        return "terminal"
+    return "reject"
 
 
 def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
-    return any(_direct_layout_user_is_sensitive(user) for user in node.users)
+    queue = [node]
+    seen = OrderedSet(queue)
+    while queue:
+        current = queue.pop()
+        for user in current.users:
+            if user.op == "output" or user.op not in ("call_method", "call_function"):
+                return True
+            action = _classify_layout_user(user, current, node)
+            if action == "reject":
+                return True
+            if action == "walk" and user not in seen:
+                seen.add(user)
+                queue.append(user)
+    return False
 
 
 # Poor person's check for if a node in the graph mutates its input.

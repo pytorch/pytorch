@@ -49,6 +49,16 @@ def _(x: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(x)
 
 
+@torch.library.custom_op("_batch_linear_lhs_test::compare_alias", mutates_args=())
+def _compare_alias(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_tensor(int(a.is_set_to(b)), dtype=torch.int64)
+
+
+@_compare_alias.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((), dtype=torch.int64)
+
+
 @contextlib.contextmanager
 def _record_fusion_subsets():
     from unittest import mock
@@ -800,6 +810,94 @@ class TestGroupBatchFusion(TestCase):
             actual = torch.compile(module, fullgraph=True)(x)
         self.assertEqual(actual, expected)
         self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+
+    @parametrize("rows", [1, 2])
+    def test_batch_linear_lhs_contiguous_materialization(self, rows):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(rows, 6)
+        contiguous = graph.call_method("contiguous", args=(linear,))
+        graph.call_function(torch.ops.aten.sin.default, args=(contiguous,))
+        self.assertEqual(_has_layout_sensitive_user(linear), rows == 1)
+
+    @parametrize("consumer", ["output", "mutation", "unused_split"])
+    def test_batch_linear_lhs_walks_materialized_aliases(self, consumer):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(4, 6)
+        contiguous = graph.call_method("contiguous", args=(linear,))
+        if consumer == "output":
+            converted = graph.call_method("float", args=(contiguous,))
+            graph.output(converted)
+        elif consumer == "mutation":
+            transposed = graph.call_method("transpose", args=(contiguous, 0, 1))
+            graph.call_function(torch.ops.aten.add_.Tensor, args=(transposed, 1))
+        else:
+            split = graph.call_function(torch.ops.aten.split, args=(contiguous, 3, 1))
+            graph.call_function(operator.getitem, args=(split, 0))
+        self.assertEqual(_has_layout_sensitive_user(linear), consumer != "unused_split")
+
+    @parametrize("same_linear", [False, True])
+    def test_batch_linear_lhs_opaque_alias_ancestry(self, same_linear):
+        from torch._inductor.fx_passes.group_batch_fusion import (
+            _has_layout_sensitive_user,
+        )
+
+        graph = torch.fx.Graph()
+        linear = graph.placeholder("linear")
+        linear.meta["example_value"] = torch.randn(4, 6)
+        first = graph.call_method("contiguous", args=(linear,))
+        other = (
+            graph.call_method("contiguous", args=(linear,))
+            if same_linear
+            else graph.placeholder("other")
+        )
+        graph.call_function(
+            torch.ops._batch_linear_lhs_test.compare_alias.default,
+            args=(first, other),
+        )
+        self.assertEqual(_has_layout_sensitive_user(linear), same_linear)
+
+    @parametrize("same_linear", [False, True])
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_batch_linear_lhs_cpu_opaque_alias_ancestry(self, same_linear):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.large = torch.nn.Linear(64, 192, bias=False)
+                self.a = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                large = self.large(x)
+                other = large if same_linear else self.a(x)
+                return (
+                    _compare_alias(large.contiguous(), other.contiguous()),
+                    torch.sin(self.a(x)),
+                )
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(
+            counters["inductor"]["batch_linear_lhs"], 0 if same_linear else 1
+        )
 
     @parametrize("bias_shape", [(1, 6), (1,), (6,)])
     def test_batch_linear_lhs_rejects_broadcast_bias(self, bias_shape):
