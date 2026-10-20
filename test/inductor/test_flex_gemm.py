@@ -10013,6 +10013,33 @@ class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
         with self.assertRaisesRegex(Exception, "SM90 must be 16-bit"):
             torch.compile(fn, fullgraph=True)(a, b)
 
+    @recover_orig_fp32_precision
+    @parametrize(
+        "case",
+        (
+            ("tf32_operands", torch.float32, 256, r"TF32\) GEMMs are not supported"),
+            ("paired_small_n", torch.bfloat16, 96, "need GEMM N >= 128"),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_rejects_unsupported_sm90_forms(self, case):
+        _, dtype, n, error = case
+        torch.set_float32_matmul_precision("high")
+
+        def epilogue_fn(acc):
+            lanes = acc.view(acc.shape[0], -1, 2)
+            return (lanes[..., 0] * lanes[..., 1]).to(torch.bfloat16)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a = self.makeTensor(128, 64, dtype=dtype)
+        b = self.makeTensor(64, n, dtype=dtype)
+        with self.assertRaisesRegex(Exception, error):
+            torch.compile(fn, fullgraph=True)(a, b)
+
 
 @skipIfNoCuteDSL
 @unittest.skipIf(not SM100OrLater, "SM100+ required")
