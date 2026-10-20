@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     HardwareClassification,
     run_tests,
+    TEST_CUDA,
     TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -328,10 +329,10 @@ class TestFullyShardMemory(FSDPTest):
         self.assertEqual(mem_mb, base_mem_mb)
 
     @skip_if_lt_x_gpu(2)
-    def test_unsharded_grads_freed_after_copy_in(self):
+    def test_unsharded_grads_freed_after_copy_in(self, device):
         from torch.distributed.fsdp._fully_shard import _fsdp_collectives
 
-        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(self.device_type)
         fully_shard(model)
         copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
         cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
@@ -356,7 +357,7 @@ class TestFullyShardMemory(FSDPTest):
                 counting_cast_and_view,
             ),
         ):
-            model(torch.randn(4, 16, device=device_type)).sum().backward()
+            model(torch.randn(4, 16, device=self.device_type)).sum().backward()
         # Clearing foreach_reduce's list after the copy-in must free the
         # unsharded gradients before the reduce allocates its outputs
         self.assertEqual(num_alive_grads, [0])
@@ -408,6 +409,7 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
 
     # This test is CUDA-specific because it relies on torch.cuda._sleep.
     @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
     def test_ar_buffer_lifetime_mixed_dtype(self, device):
         """Regression guard for PR #140044 (`[FSDP2] Fix CUDA sync for bf16
         HSDP AR, fp32 params`).
@@ -538,7 +540,7 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
-    def test_partial_repack_after_slow_all_reduce(self):
+    def test_partial_repack_after_slow_all_reduce(self, device):
         # No input requires grad, so both post-backwards run in the final
         # callback. layer's finalize_backward releases its fp32 all-reduce
         # buffer (its bf16 sharded grads are casts), then aux repacks its
@@ -564,9 +566,9 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                 output = self.aux(inp, use_second=use_layer)
                 return output + self.layer(inp) if use_layer else output
 
-        model = Model().to(device_type, torch.bfloat16)
+        model = Model().to(self.device_type, torch.bfloat16)
         mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (2, self.world_size // 2),
             mesh_dim_names=("replicate", "shard"),
         )
@@ -584,7 +586,7 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
         with mock.patch.object(dist, "all_reduce", slow_all_reduce):
             for use_layer, value in ((False, 2.0), (True, 3.0)):
                 model.set_requires_all_reduce(use_layer)
-                inp = torch.full((1, 32), value, device=device_type).bfloat16()
+                inp = torch.full((1, 32), value, device=self.device_type).bfloat16()
                 model(inp, use_layer).sum().backward()
         for module, expected in ((model.layer, (3, 3)), (model.aux, (5, 3))):
             for param, value in zip(module.parameters(), expected):
@@ -593,14 +595,16 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
 
 
 class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def world_size(self) -> int:
-        return min(2, torch.get_device_module(device_type).device_count())
+        return min(2, torch.get_device_module(self.device_type).device_count())
 
     # This test is CUDA-specific because it relies on torch.cuda._sleep.
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not TEST_CUDA, "all-reduce hook sync test is CUDA-only")
-    def test_all_reduce_hook_buffer_lifetime_mixed_dtype(self):
+    def test_all_reduce_hook_buffer_lifetime_mixed_dtype(self, device):
         # Without native HSDP, the all-reduce hook and the cast to orig_dtype
         # read the RS output on the hook stream. If nothing holds it past the
         # cast, the next RS (for the first linear) can reuse its block before
@@ -611,7 +615,7 @@ class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
             nn.Linear(dim, dim, bias=False),
             nn.ReLU(),
             nn.Linear(dim, dim, bias=False),
-        ).to(device_type)
+        ).to(self.device_type)
         # bf16 reduce with fp32 params, so the cast drops the last RS output ref
         mp = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
@@ -621,7 +625,7 @@ class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
             fully_shard(linear, mp_policy=mp)
         fully_shard(model, mp_policy=mp)
         torch.manual_seed(42 + self.rank)
-        inp = torch.randn(4, dim, device=device_type)
+        inp = torch.randn(4, dim, device=self.device_type)
 
         model(inp).sum().backward()
         ref_grads = [param.grad.to_local().clone() for param in model.parameters()]
@@ -630,7 +634,7 @@ class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
         sleep_cycles = int(200 * get_cycles_per_ms())
 
         def slow_hook(output: torch.Tensor) -> None:
-            torch.get_device_module(device_type)._sleep(sleep_cycles)
+            torch.get_device_module(self.device_type)._sleep(sleep_cycles)
 
         for linear in linears:
             linear.set_all_reduce_hook(slow_hook)
@@ -647,6 +651,12 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestFullyShardHSDPSyncCorrectness,
+    globals(),
+    only_for=["cuda"],
+)
+
+instantiate_device_type_tests(
+    TestFullyShardAllReduceHookSyncCorrectness,
     globals(),
     only_for=["cuda"],
 )
