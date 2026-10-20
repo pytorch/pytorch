@@ -862,6 +862,9 @@ class SideEffects:
         their contents are replayed only after every other new object has a temp
         local, so a constructor that reads the container would observe an empty
         one. See ``check_ordered_dict_constructor_read`` for the other order.
+        This covers the attribute axis only: contents-only constructor reads
+        (e.g. ``t = T(d); d["k"] = 1`` on a fresh container) are pre-existing
+        generic Dynamo behavior, shared with plain dict/list, and out of scope.
         """
         if not self._num_attributed_ordered_dicts:
             return
