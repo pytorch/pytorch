@@ -764,6 +764,84 @@ class TestHipify(TestCase):
             )
             self.assertTrue(result[key].hipified_path.endswith(".hip"))
 
+    def test_hipify_keeps_std_math_functions(self):
+        # hipify used to rewrite std::exp( and friends to the global namespace, a
+        # workaround for the hcc compiler. hip-clang resolves std:: math in device
+        # code, and the rewrite also hit host code and string literals.
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void k(float* x) { x[0] = std::exp(x[0]) + std::pow(x[1], 2); }\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            with open(result[key].hipified_path) as f:
+                hipified = f.read()
+            self.assertIn("std::exp(x[0]) + std::pow(x[1], 2)", hipified)
+            self.assertIn("hipDeviceSynchronize", hipified)
+
+    def test_hipify_extension_sources(self):
+        from torch.utils.hipify import hipify_python
+
+        with (
+            tempfile.TemporaryDirectory() as src_dir,
+            tempfile.TemporaryDirectory() as build_dir,
+        ):
+            include_dir = os.path.join(src_dir, "includes")
+            os.makedirs(include_dir)
+            with open(os.path.join(include_dir, "helper.cuh"), "w") as f:
+                f.write("#include <cuda_runtime.h>\n")
+            source = os.path.join(src_dir, "kernel.cu")
+            with open(source, "w") as f:
+                f.write('#include <ATen/cuda/CUDAContext.h>\n#include "helper.cuh"\n')
+
+            # Mirrors the hipify call in torch.utils.cpp_extension._jit_compile.
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                header_include_dirs=[include_dir],
+                extra_files=[os.path.abspath(source)],
+                show_detailed=False,
+                show_progress=False,
+                is_pytorch_extension=True,
+            )
+
+            hipified = result[os.path.abspath(source)].hipified_path
+            self.assertEqual(hipified, os.path.join(src_dir, "kernel.hip"))
+            with open(hipified) as f:
+                out = f.read()
+            self.assertIn("ATen/hip/HIPContext.h", out)
+            self.assertIn('#include "helper_hip.cuh"', out)
+            self.assertTrue(os.path.exists(os.path.join(include_dir, "helper_hip.cuh")))
+
+    def test_hipify_rel_path_without_common_root(self):
+        from torch.utils.hipify import hipify_python
+
+        # Windows raises ValueError from relpath for paths on different drives.
+        path = os.path.abspath(os.path.join("cuda", "kernel.cu"))
+        with mock.patch.object(
+            hipify_python.os.path, "relpath", side_effect=ValueError
+        ):
+            base, rel = hipify_python._rel_path_for_hipify(path, "unused")
+        self.assertFalse(os.path.isabs(rel))
+        self.assertNotIn("\\", rel)
+        self.assertEqual(os.path.normpath(os.path.join(base, rel)), path)
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
@@ -1046,7 +1124,100 @@ class TestDeviceUtils(TestCase):
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
 
+class TestTorchPathResolution(TestCase):
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_torch_parent_follows_the_extension_module(self):
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        expected = os.path.dirname(os.path.dirname(spec.origin))
+        self.assertEqual(torch._utils_internal.torch_parent, expected)
+
+    @unittest.skipIf(IS_FBCODE, "fbcode lays torch out differently")
+    def test_installed_torch_dir_prefers_the_editable_loader_paths(self):
+        installed_torch_dir = torch._utils_internal._installed_torch_dir
+        spec = importlib.util.find_spec("torch._C")
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.origin)
+        spec_dir = os.path.dirname(spec.origin)
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "src", "torch")
+            installed = os.path.join(root, "site-packages", "torch")
+            # A checkout has a tracked torch/lib too, so lib/ alone cannot
+            # tell the trees apart; the checkout is excluded by identity.
+            os.makedirs(os.path.join(checkout, "lib"))
+            os.makedirs(os.path.join(installed, "lib"))
+            loader = types.SimpleNamespace(paths=[checkout, installed])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), installed)
+            if not IS_WINDOWS:
+                os.symlink(os.path.join(root, "src"), os.path.join(root, "alias"))
+                aliased = os.path.join(root, "alias", "torch")
+                loader = types.SimpleNamespace(paths=[aliased, installed])
+                with mock.patch.object(torch, "__loader__", loader):
+                    self.assertEqual(installed_torch_dir(checkout), installed)
+            # Only an entry holding lib/ is an install tree; otherwise the
+            # extension module's spec decides, as it does without any paths.
+            loader = types.SimpleNamespace(paths=[checkout, os.path.join(root, "x")])
+            with mock.patch.object(torch, "__loader__", loader):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()):
+                self.assertEqual(installed_torch_dir(checkout), spec_dir)
+            # A raising finder must not take `import torch` down with it.
+            err = mock.patch("importlib.util.find_spec", side_effect=ImportError)
+            with mock.patch.object(torch, "__loader__", types.SimpleNamespace()), err:
+                self.assertIsNone(installed_torch_dir(checkout))
+
+    def test_stale_checkout_artifacts(self):
+        with tempfile.TemporaryDirectory() as root:
+            checkout = os.path.join(root, "torch")
+            for d in ("csrc", "lib/libshm", "bin", "include"):
+                os.makedirs(os.path.join(checkout, d))
+            os.makedirs(os.path.join(root, "torch.egg-info"))
+            ext = "_C.cpython-310-x86_64-linux-gnu.so"
+            deps = os.path.join("lib", "libtorch_global_deps.so")
+            c10 = os.path.join("lib", "libc10.so.1")
+            for f in (ext, deps, c10):
+                open(os.path.join(checkout, f), "w").close()
+            found = torch._utils_internal._stale_checkout_artifacts(checkout)
+            names = [ext, "bin", "include", c10, deps]
+            expected = [os.path.join(checkout, f) for f in names]
+            self.assertEqual(found, expected + [os.path.join(root, "torch.egg-info")])
+            clean = os.path.join(root, "clean", "torch")
+            os.makedirs(os.path.join(clean, "lib", "libshm"))
+            self.assertEqual(torch._utils_internal._stale_checkout_artifacts(clean), [])
+
+    @unittest.skipIf(IS_WINDOWS, "_load_global_deps is a no-op on Windows")
+    def test_load_global_deps_reports_missing_library(self):
+        real_exists = os.path.exists
+
+        def exists(path):
+            return "libtorch_global_deps" not in path and real_exists(path)
+
+        with unittest.mock.patch("os.path.exists", side_effect=exists):
+            with self.assertRaisesRegex(OSError, "libtorch_global_deps"):
+                torch._load_global_deps()
+
+
 class TestCppExtensionUtils(TestCase):
+    @unittest.skipIf(IS_FBCODE, "CMake package files are not shipped in fbcode")
+    def test_cmake_prefix_path(self):
+        # TorchConfig.cmake ships only with libtorch; a BUILD_LIBTORCHLESS build
+        # (no CI job runs one) has no share/cmake and would fail here.
+        prefix = torch.utils.cmake_prefix_path
+        config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
+        self.assertTrue(os.path.isfile(config), f"{config} does not exist")
+
+    def test_cmake_prefix_path_falls_back_when_get_file_path_raises(self):
+        # Build systems that do not ship the CMake package files have a
+        # get_file_path that raises for them, with an exception type of their
+        # choosing; torch.utils must still import.
+        expected = os.path.join(os.path.dirname(torch.__file__), "share", "cmake")
+        for exc in (OSError("not shipped"), ValueError("not packaged")):
+            with self.subTest(exc=type(exc).__name__):
+                with mock.patch.object(torch.utils, "_get_file_path", side_effect=exc):
+                    self.assertEqual(torch.utils._resolve_cmake_prefix_path(), expected)
+
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
 

@@ -349,6 +349,9 @@ class _PipelineSchedule(ABC):
 
         # Holds the losses for each microbatch.
         self._internal_losses: list[torch.Tensor] = []
+        # Per-microbatch loss keyword arguments of the current step. Set by
+        # ``step``.
+        self._loss_kwarg_mbs: list[dict[str, Any]] | None = None
         self._loss_results: list[dict[str, Any]] | None = None
         logger.info("Using %s", self.__class__.__name__)
 
@@ -363,7 +366,17 @@ class _PipelineSchedule(ABC):
                         "drives backward"
                     )
                 return
-            result = self._loss_fn(output, target_mbs[mb_index], **(loss_kwargs or {}))
+            loss_kwarg_mb = (
+                self._loss_kwarg_mbs[mb_index]
+                if self._loss_kwarg_mbs is not None
+                else None
+            )
+            result = self._loss_fn(
+                output,
+                target_mbs[mb_index],  # type: ignore[index]
+                **(loss_kwargs or {}),
+                **(loss_kwarg_mb or {}),
+            )
             loss = _get_loss_from_result(result)
             self._internal_losses.append(loss)
             if self._loss_results is not None:
@@ -678,6 +691,13 @@ class _PipelineSchedule(ABC):
                     fwd_initialized = True
 
                 if needs_bwd:
+                    # Backward metadata inference runs the loss on the first
+                    # microbatch's target and loss keyword arguments.
+                    if self._loss_kwarg_mbs is not None:
+                        loss_kwargs = {
+                            **(loss_kwargs or {}),
+                            **self._loss_kwarg_mbs[0],
+                        }
                     prev_stage_grad_meta: Any = None
                     for stage in reversed(stages):
                         prev_stage_grad_meta = stage._prepare_backward_infra(
@@ -733,6 +753,7 @@ class _PipelineSchedule(ABC):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
+        loss_kwarg_mbs: list[dict[str, Any]] | None = None,
         finalize_gradients: bool = True,
         **kwargs,
     ):
@@ -836,6 +857,7 @@ class _PipelineSchedule(ABC):
         kwarg_mbs: list | None = None,
         target_mbs: list | None = None,
         losses: list | None = None,
+        loss_kwarg_mbs: list | None = None,
     ) -> tuple[list, list]:
         """
         Pre-process/check inputs
@@ -862,14 +884,19 @@ class _PipelineSchedule(ABC):
         if target_mbs is not None:
             check_type_and_len(target_mbs, "target_mbs")
 
+        if loss_kwarg_mbs is not None:
+            check_type_and_len(loss_kwarg_mbs, "loss_kwarg_mbs")
+
         if losses is not None:
             if not isinstance(losses, list):
                 raise TypeError(f"losses must be a list but got a {type(losses)}")
 
         return arg_mbs, kwarg_mbs
 
-    def _compute_loss(self, output, target, loss_kwargs=None):
-        result = self._loss_fn(output, target, **(loss_kwargs or {}))  # type: ignore[misc]
+    def _compute_loss(self, output, target, loss_kwargs=None, loss_kwarg_mb=None):
+        result = self._loss_fn(  # type: ignore[misc]
+            output, target, **(loss_kwargs or {}), **(loss_kwarg_mb or {})
+        )
         return _get_loss_from_result(result)
 
     def _split_inputs(
@@ -903,8 +930,11 @@ class _PipelineSchedule(ABC):
         arg_mbs: Any,
         kwarg_mbs: Any,
         target_mbs: Any,
+        loss_kwarg_mbs: Any = None,
     ) -> tuple[list | None, list | None, list | None]:
-        pre_split = any(mbs is not None for mbs in (arg_mbs, kwarg_mbs, target_mbs))
+        pre_split = any(
+            mbs is not None for mbs in (arg_mbs, kwarg_mbs, target_mbs, loss_kwarg_mbs)
+        )
         if not pre_split:
             args_split, kwargs_split = self._split_inputs(args, kwargs)
             targets_split = (
@@ -933,7 +963,9 @@ class _PipelineSchedule(ABC):
                 "target_mbs=... instead of target=..."
             )
 
-        arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs)
+        arg_mbs, kwarg_mbs = self._check_inputs(
+            arg_mbs, kwarg_mbs, target_mbs, loss_kwarg_mbs=loss_kwarg_mbs
+        )
 
         for mb_index, (arg_mb, kwarg_mb) in enumerate(
             zip(arg_mbs, kwarg_mbs, strict=True)
@@ -948,6 +980,13 @@ class _PipelineSchedule(ABC):
                 raise TypeError(
                     "kwarg_mbs must be a list of dicts, but "
                     f"kwarg_mbs[{mb_index}] is a {type(kwarg_mb)}"
+                )
+
+        for mb_index, loss_kwarg_mb in enumerate(loss_kwarg_mbs or ()):
+            if not isinstance(loss_kwarg_mb, dict):
+                raise TypeError(
+                    "loss_kwarg_mbs must be a list of dicts, but "
+                    f"loss_kwarg_mbs[{mb_index}] is a {type(loss_kwarg_mb)}"
                 )
 
         return arg_mbs, kwarg_mbs, target_mbs
@@ -1220,6 +1259,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
+        loss_kwarg_mbs: list[dict[str, Any]] | None = None,
         finalize_gradients: bool = True,
         **kwargs,
     ):
@@ -1246,14 +1286,25 @@ class PipelineScheduleSingle(_PipelineSchedule):
                 Default: ``None``.
             return_outputs (bool, optional): Whether to merge and return output
                 chunks on the last stage. Default: ``True``.
-            loss_kwargs (dict, optional): Extra keyword arguments forwarded to
-                the configured ``loss_fn``. Default: ``None``.
+            loss_kwargs (dict, optional): Keyword arguments passed unchanged
+                to the configured ``loss_fn`` for every microbatch. Unlike
+                ``kwargs``, they are not split. Default: ``None``.
             arg_mbs (list[tuple], optional): Pre-split positional inputs, one
                 tuple per microbatch. Default: ``None``.
             kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
                 dict per microbatch. Default: ``None``.
             target_mbs (list, optional): Pre-split targets, one entry per
                 microbatch. Default: ``None``.
+            loss_kwarg_mbs (list[dict], optional): Pre-split loss keyword
+                arguments, one dict per microbatch, such as per-token tensors.
+                Like the other pre-split inputs, pass targets through
+                ``target_mbs`` with it. Microbatch ``i`` computes
+                ``loss_fn(output, target_mbs[i], **loss_kwargs,
+                **loss_kwarg_mbs[i])``, so a key must not appear in both. While
+                inferring stage metadata (on the first step by default), the
+                schedule also calls ``loss_fn`` once with microbatch 0's
+                inputs, so ``loss_fn`` must not accumulate into objects passed
+                this way. Default: ``None``.
             finalize_gradients (bool, optional): Whether to reduce accumulated
                 FSDP gradients and reshard FSDP parameters at the end of this
                 call. If ``False``, FSDP parameters stay unsharded, and a later
@@ -1312,20 +1363,27 @@ class PipelineScheduleSingle(_PipelineSchedule):
             arg_mbs,
             kwarg_mbs,
             target_mbs,
+            loss_kwarg_mbs,
         )
 
-        # Run microbatches
-        with self._collect_loss_results([self._stage], loss_results):
-            self._step_microbatches(
-                args_split,
-                kwargs_split,
-                targets_split,
-                losses,
-                return_outputs,
-                loss_kwargs=loss_kwargs,
-            )
-            if not self._has_backward and isinstance(self._stage.submod, FSDPModule):
-                self._stage.submod.finalize_forward()
+        self._loss_kwarg_mbs = loss_kwarg_mbs
+        try:
+            # Run microbatches
+            with self._collect_loss_results([self._stage], loss_results):
+                self._step_microbatches(
+                    args_split,
+                    kwargs_split,
+                    targets_split,
+                    losses,
+                    return_outputs,
+                    loss_kwargs=loss_kwargs,
+                )
+                if not self._has_backward and isinstance(
+                    self._stage.submod, FSDPModule
+                ):
+                    self._stage.submod.finalize_forward()
+        finally:
+            self._loss_kwarg_mbs = None
 
         # Return merged results per original format
         if self._stage.is_last and return_outputs:
@@ -3038,6 +3096,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
         target_mbs: Any = None,
+        loss_kwarg_mbs: list[dict[str, Any]] | None = None,
         finalize_gradients: bool = True,
         **kwargs,
     ):
@@ -3065,14 +3124,25 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 Default: ``None``.
             return_outputs (bool, optional): Whether to merge and return output
                 chunks on the last stage. Default: ``True``.
-            loss_kwargs (dict, optional): Extra keyword arguments forwarded to
-                the configured ``loss_fn``. Default: ``None``.
+            loss_kwargs (dict, optional): Keyword arguments passed unchanged
+                to the configured ``loss_fn`` for every microbatch. Unlike
+                ``kwargs``, they are not split. Default: ``None``.
             arg_mbs (list[tuple], optional): Pre-split positional inputs, one
                 tuple per microbatch. Default: ``None``.
             kwarg_mbs (list[dict], optional): Pre-split keyword inputs, one
                 dict per microbatch. Default: ``None``.
             target_mbs (list, optional): Pre-split targets, one entry per
                 microbatch. Default: ``None``.
+            loss_kwarg_mbs (list[dict], optional): Pre-split loss keyword
+                arguments, one dict per microbatch, such as per-token tensors.
+                Like the other pre-split inputs, pass targets through
+                ``target_mbs`` with it. Microbatch ``i`` computes
+                ``loss_fn(output, target_mbs[i], **loss_kwargs,
+                **loss_kwarg_mbs[i])``, so a key must not appear in both. While
+                inferring stage metadata (on the first step by default), the
+                schedule also calls ``loss_fn`` once with microbatch 0's
+                inputs, so ``loss_fn`` must not accumulate into objects passed
+                this way. Default: ``None``.
             finalize_gradients (bool, optional): Whether to reduce accumulated
                 FSDP gradients and reshard FSDP parameters at the end of this
                 call. If ``False``, FSDP parameters stay unsharded, and a later
@@ -3138,18 +3208,23 @@ class PipelineScheduleMulti(_PipelineSchedule):
             arg_mbs,
             kwarg_mbs,
             target_mbs,
+            loss_kwarg_mbs,
         )
 
-        # Run microbatches
-        with self._collect_loss_results(self._stages, loss_results):
-            self._step_microbatches(
-                args_split,
-                kwargs_split,
-                targets_split,
-                losses,
-                return_outputs,
-                loss_kwargs=loss_kwargs,
-            )
+        self._loss_kwarg_mbs = loss_kwarg_mbs
+        try:
+            # Run microbatches
+            with self._collect_loss_results(self._stages, loss_results):
+                self._step_microbatches(
+                    args_split,
+                    kwargs_split,
+                    targets_split,
+                    losses,
+                    return_outputs,
+                    loss_kwargs=loss_kwargs,
+                )
+        finally:
+            self._loss_kwarg_mbs = None
 
         # Return merged results per original format
         for stage in self._stages:
