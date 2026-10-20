@@ -5283,8 +5283,8 @@ class TestStageBMapsPrReviewsReview(unittest.TestCase):
         self.assertEqual(set(item["properties"]["severity"]["enum"]), SEVERITIES)
 
     def test_the_prompt_asks_for_messages_shorter_than_the_cap(self):
-        # The budget must leave room for the escaping neutralize() adds, or a
-        # compliant message is cut anyway.
+        # 0.8 leaves 300 of 1500 for the escaping neutralize() adds; the prompt
+        # also tells stage B to count `&`, `<` and `>` as five characters.
         prompt = " ".join(prompt_scalar(self.stage_b).split())
         m = re.search(r"`message` to at most (\d+) characters", prompt)
         self.assertIsNotNone(m, "stage B no longer states a message budget")

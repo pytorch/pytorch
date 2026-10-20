@@ -1308,7 +1308,7 @@ class TestAnOverflowingMessageEndsInAMarker(unittest.TestCase):
         self.assertTrue(out.endswith("abc" + TRUNCATED), repr(out[-12:]))
         self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
 
-    def test_an_overlong_message_that_shrinks_when_neutralized_is_not_cut(self):
+    def test_an_overlong_message_that_shrinks_when_neutralized_is_still_marked(self):
         # Over MAX_MESSAGE on the way in, far under it once links are peeled.
         out = neutralize_message("[x](y) " * 215)
         self.assertTrue(out.endswith(TRUNCATED), repr(out[-12:]))
@@ -1316,6 +1316,24 @@ class TestAnOverflowingMessageEndsInAMarker(unittest.TestCase):
 
     def test_a_single_token_with_no_publishable_prefix_comes_back_empty(self):
         self.assertEqual(neutralize_message("&" * 274 + "ab12cd34" * 16 + ".bad"), "")
+
+    def test_a_blob_the_cut_did_not_cause_is_dropped_not_trimmed_away(self):
+        # neutralize() deletes the backslash, joining a 120-character blob.
+        blob = "A" * 60 + "\\" + "A" * 60
+        message = "word " * 50 + blob + " tail" * 300
+        kept, dropped, _ = sanitize_findings(
+            [
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "major",
+                    "message": message,
+                }
+            ],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped[0]["reason"], "failed_publish_check")
 
     def test_a_message_that_neutralizes_to_nothing_gets_no_marker(self):
         self.assertEqual(neutralize_message("\\" * (MAX_MESSAGE + 1)), "")

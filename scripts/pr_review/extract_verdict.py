@@ -448,9 +448,14 @@ def neutralize_message(message: str) -> str:
     128-hex digest is a blob, a cut entity mid-string is a bare `&`. So whole
     tokens are dropped from the end until the result passes the publish check,
     and a message with no passing prefix comes back empty, which `build` drops.
+    Only failures the cut causes are repaired this way: a message that fails the
+    check whole (a blob neutralize() joined, say) is returned whole, so `build`
+    drops it as `failed_publish_check`.
     """
     full = neutralize(message[:MAX_MESSAGE], 5 * MAX_MESSAGE).strip()
     if not full or (len(message.rstrip()) <= MAX_MESSAGE and len(full) <= MAX_MESSAGE):
+        return full
+    if not is_neutral_prose(full, len(full)):
         return full
     kept = full[: MAX_MESSAGE - len(TRUNCATED)]
     if len(kept) < len(full) and not full[len(kept)].isspace():
