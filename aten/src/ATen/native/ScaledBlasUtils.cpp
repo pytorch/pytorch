@@ -155,8 +155,8 @@ bool check_nvfp4_recipe_single_scale(
 
 /**
  * Both inputs must be fp8
- * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B:
- * {Blockwise_128x128 (float)
+ * A, B must only have 1 scale each, A: {Blockwise_1x128 (float/e8m0fnu), B:
+ * {Blockwise_128x128 (float/e8m0fnu)
  */
 bool check_deepseek_recipe(
     ScalingType expected_recipe_a,
@@ -177,11 +177,19 @@ bool check_deepseek_recipe(
     return false;
   }
 
-  // Need {Blockwise_1x128, float} for A, {Blockwise_128x128, float} for B
+  // Need expected recipe with float scales, or e8m0fnu scales (both must
+  // match). e8m0fnu scales are used by DeepSeek-V4-Flash but only enabled
+  // on XPU for now; TODO for CUDA/ROCm.
   if (recipe_a[0] != expected_recipe_a) return false;
-  if (scales_a[0].scalar_type() != ScalarType::Float) return false;
   if (recipe_b[0] != expected_recipe_b) return false;
-  if (scales_b[0].scalar_type() != ScalarType::Float) return false;
+  auto scale_dtype_a = scales_a[0].scalar_type();
+  bool e8m0_allowed = scales_a[0].is_xpu();
+  if (scale_dtype_a != ScalarType::Float &&
+      !(e8m0_allowed && scale_dtype_a == ScalarType::Float8_e8m0fnu)) {
+    return false;
+  }
+  // scale_dtype_b is implied to be valid once it matches scale_dtype_a.
+  if (scale_dtype_a != scales_b[0].scalar_type()) return false;
 
   return true;
 }
@@ -407,13 +415,13 @@ void validate_scaled_mm_v2_inputs(
     c10::SymInt expected_b_elems;
     // Layout the count belongs to. ROCm accepts two layouts that differ only
     // in padding, so the count alone is ambiguous without naming one.
-    const char* scale_layout = "";
+    [[maybe_unused]] const char* scale_layout = "";
     // The arch/version gate for SWIZZLE_32_8 lives in the kernel, which can
     // query the device, so a request for it on an unsupported arch reaches this
     // size check first whenever the two layouts' counts differ. Name the
     // requirement, in `check_mx_swizzle`'s words, so that case is not
     // misdiagnosed as a plain size mismatch.
-    const char* scale_layout_hint = is_mx_32_8
+    [[maybe_unused]] const char* scale_layout_hint = is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime

@@ -127,9 +127,7 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
  private:
   UniqueNameManager* name_manager() {
-    if (!printer_) {
-      throw std::runtime_error("Null IRPrinter is not expected");
-    }
+    TORCH_CHECK(printer_, "Null IRPrinter is not expected");
     return printer_->name_manager();
   }
 

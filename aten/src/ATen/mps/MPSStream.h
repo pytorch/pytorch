@@ -2,7 +2,11 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include <ATen/mps/MPSDevice.h>
@@ -75,9 +79,13 @@ class TORCH_API MPSStream {
   }
 
   MPSCommandBuffer_t commandBuffer();
+  // Must be called from a block running on queue(), and the returned encoder
+  // is only valid for the rest of that block.
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
+  // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
+  void commitIfNeeded();
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -128,14 +136,28 @@ class TORCH_API MPSStream {
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
+  uint32_t _kernelsSinceCommit = 0;
+  std::atomic<uint32_t> _commandBuffersInFlight{0};
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+  // First execution error reported by an asynchronously committed command buffer
+  // (e.g. out of memory), rethrown by checkLastError() at the next sync point
+  struct CommandBufferError {
+    bool is_oom;
+    int32_t code;
+    std::string message;
+  };
+  std::mutex _commandBufferErrorMutex;
+  std::optional<CommandBufferError> _commandBufferError;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
   void commitAndContinue();
   void flush();
+  // records execution errors of the current command buffer once it completes
+  void addErrorHandler();
+  void recordCommandBufferError(CommandBufferError error);
 };
 
 /**

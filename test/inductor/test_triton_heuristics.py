@@ -609,33 +609,56 @@ class TestTritonHeuristics(TestCase):
             self.assertEqual(configs[0].num_buffers_warp_spec, num_buffers_warp_spec)
 
     @parametrize(
-        "hip_version, tlx_options, expected_kwargs",
+        "hip_version, tlx_options, waves_per_eu, expected_kwargs",
         [
             (
                 "7.2",
-                ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                ("matrix_instr_nonkdim", "waves_per_eu", "kpack", "test_extra_option"),
+                0,
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "kpack": 1,
+                    "test_extra_option": 7,
+                },
+            ),
+            (
+                "7.2",
+                (),
+                0,
                 {
                     "matrix_instr_nonkdim": 16,
                     "waves_per_eu": 0,
                     "kpack": 1,
                 },
             ),
-            ("7.2", (), {}),
+            (
+                "7.2",
+                (),
+                2,
+                {
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 2,
+                    "kpack": 1,
+                },
+            ),
             (
                 None,
                 ("matrix_instr_nonkdim", "waves_per_eu", "kpack"),
+                0,
                 {},
             ),
         ],
     )
-    def test_template_function_preserves_tlx_hip_options(
-        self, hip_version, tlx_options, expected_kwargs
+    def test_template_function_preserves_hip_options(
+        self, hip_version, tlx_options, waves_per_eu, expected_kwargs
     ):
         triton_meta = {
             "device": MagicMock(),
             "matrix_instr_nonkdim": 16,
-            "waves_per_eu": 0,
+            "waves_per_eu": waves_per_eu,
             "kpack": 1,
+            "test_extra_option": 7,
         }
 
         def capture_configs(_size_hints, configs, **_kwargs):
@@ -644,7 +667,7 @@ class TestTritonHeuristics(TestCase):
         with (
             patch.object(torch.version, "hip", hip_version),
             patch(
-                "torch._inductor.runtime.triton_heuristics.tlx_only_hip_options",
+                "torch._inductor.utils.tlx_only_hip_options",
                 return_value=tlx_options,
             ),
             patch(
@@ -810,6 +833,70 @@ class TestTritonHeuristics(TestCase):
                     else:
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @parametrize(
+        "arch,f16_count,int8_count,int8_kpack",
+        [
+            ("gfx908", 0, 1, 2),
+            ("gfx90a", 0, 1, 2),
+            ("gfx942", 0, 0, 1),
+            ("gfx950", 1, 1, 1),
+        ],
+    )
+    def test_rocm_prune_block_k_underfills_mfma(
+        self, arch, f16_count, int8_count, int8_kpack
+    ):
+        if not torch.version.hip:
+            self.skipTest("ROCm-specific MFMA config pruning")
+        from torch._inductor.heuristics.template.triton import (
+            BaseHeuristicSingleton,
+            GemmConfig,
+            ROCmConfigHeuristic,
+            ROCmGemmConfig,
+        )
+        from torch._inductor.utils import kpack_supported
+
+        with (
+            patch("torch._inductor.utils.rocm_gfx_arch", return_value=arch),
+            patch.object(BaseHeuristicSingleton, "_instances", {}),
+        ):
+            heuristic = ROCmConfigHeuristic()
+            heuristic.should_scale_configs = False
+            self.assertEqual(kpack_supported(), arch != "gfx950")
+
+            def configs_for(mm_configs, dsize):
+                heuristic.mm_configs = mm_configs
+                return list(
+                    heuristic.get_mm_configs()(
+                        1, 256, 128, dtype_size=dsize, op_name="mm"
+                    )
+                )
+
+            underfilled = ROCmGemmConfig(
+                16, 64, 16, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+            )
+            valid = ROCmGemmConfig(
+                16, 64, 32, 2, 4, group_m=8, matrix_instr_nonkdim=16, kpack=2
+            )
+            # f16 has kdim=16 on CDNA1/2/3; gfx950 skips underfill pruning.
+            self.assertEqual(len(configs_for([underfilled], 2)), f16_count)
+            self.assertEqual(len(configs_for([valid], 2)), 1)
+
+            # int8 has kdim=16 on CDNA1/2, but kdim=32 on CDNA3.
+            self.assertEqual(len(configs_for([valid], 1)), int8_count)
+
+            # Unknown dtype kdim skips pruning on every target.
+            self.assertEqual(len(configs_for([underfilled], 8)), 1)
+
+            # Implicit kpack is clamped on CDNA3, preserving both int8 configs.
+            int8_configs = [
+                GemmConfig(64, 64, 32, 2, 4),
+                GemmConfig(128, 128, 32, 2, 8),
+            ]
+            configs = configs_for(int8_configs, 1)
+            self.assertEqual(len(configs), len(int8_configs))
+            self.assertEqual([c.kwargs["kpack"] for c in configs], [int8_kpack] * 2)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_compile_time_autotune_not_repeated_at_runtime(self):
@@ -1705,6 +1792,37 @@ class TestDynamicScaleRblockCacheInteraction(TestCase):
         self.assertIs(result, cfg_b)
 
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_autotune_cache_round_trips_maxnreg(self):
+        """
+        Two configs that differ only in maxnreg must survive save + load as
+        themselves: the cached winner must come back capped, not as the
+        uncapped config with the same warps/stages.
+        """
+        from torch._inductor.runtime.autotune_cache import (
+            _load_cached_autotuning,
+            AutotuneCache,
+            AutotuneCacheBundler,
+        )
+        from torch._inductor.runtime.triton_heuristics import hash_configs
+
+        uncapped = triton.Config({"x": 1}, num_warps=4, num_stages=2)
+        capped = triton.Config({"x": 1}, num_warps=4, num_stages=2, maxnreg=64)
+        original_configs = [uncapped, capped]
+        configs_hash = hash_configs(original_configs)
+
+        cache = AutotuneCache(configs_hash)
+        local = MagicMock()
+        cache.local_cache = (local, "key")
+        with patch.object(AutotuneCacheBundler, "put"):
+            cache.save(capped, time_taken_ns=1_000_000)
+        saved = dict(local.put.call_args[0][1])
+        self.assertEqual(saved.get("maxnreg"), 64)
+
+        result = _load_cached_autotuning(saved, configs_hash, original_configs, {})
+        self.assertIs(result, capped)
+        self.assertNotIn("maxnreg", result.kwargs)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     def test_load_cached_autotuning_rejects_hash_mismatch(self):
         """
         When configs_hash doesn't match, _load_cached_autotuning must
@@ -1944,7 +2062,7 @@ class TestMakeLaunchersMemory(TestCase):
             launchers=[],
             compile_results=results,
             triton_meta={"device": 0},
-            device_props=types.SimpleNamespace(type="cuda"),
+            device_props=types.SimpleNamespace(type="cuda", index=0),
             inductor_meta={},
             get_device_interface=lambda: None,
             _make_launcher=fake_make_launcher,

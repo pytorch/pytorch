@@ -4,15 +4,10 @@
 
 #pragma once
 
+#include <c10/macros/Macros.h>
+#include <cstddef>
 #include <iterator>
 #include <memory>
-
-#ifdef _WIN32
-#include <basetsd.h> // @manual
-using ssize_t = SSIZE_T;
-#endif
-
-#include <c10/macros/Macros.h>
 
 /**
  * Similar to Python's enumerate(), enumerate() can be used to
@@ -101,7 +96,7 @@ class Enumerator {
   using iterator_concept = std::input_iterator_tag;
   using iterator_category = std::input_iterator_tag;
   using value_type = Proxy;
-  using difference_type = ssize_t;
+  using difference_type = std::ptrdiff_t;
 
   Enumerator() = default;
 
