@@ -733,6 +733,30 @@ command = [
 ]
 
 [[linter]]
+code = 'LAMBDA_GUARD'
+include_patterns = ['torch/**/*.py']
+exclude_patterns = [
+    '**/fb/**',
+    'torch/testing/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=\b(add_lambda_guard|add_lambda_guard_no_args|add_epilogue_lambda_guard|LAMBDA_GUARD)\(',
+    '--line-allowlist-pattern=noqa: LAMBDA_GUARD',
+    '--linter-name=LAMBDA_GUARD',
+    '--error-name=new lambda guard',
+    """--error-description=\
+        Lambda guards call into Python on every guard evaluation, which is \
+        far slower than a C++ leaf guard. Add a C++ leaf guard in \
+        torch/csrc/dynamo/guards.cpp instead. If a lambda guard is truly \
+        unavoidable, add a `# noqa: LAMBDA_GUARD` comment to the line.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'ISINSTANCE_FAKE_TENSOR'
 include_patterns = ['torch/**/*.py']
 exclude_patterns = [

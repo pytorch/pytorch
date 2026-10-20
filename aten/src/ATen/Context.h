@@ -405,6 +405,11 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
+  // Returns a cached float32Precision(Float32Backend::CUDA, Float32Op::MATMUL),
+  // without the map lookups, for hot paths in Dynamo's global state guard.
+  Float32Precision float32PrecisionCudaMatmul() const {
+    return cuda_matmul_fp32_precision_;
+  }
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(
       bool allow_reduced_precision,
@@ -585,6 +590,9 @@ class TORCH_API Context {
            ? Float32Precision::NONE
            : Float32Precision::TF32},
   };
+  // float32Precision(CUDA, MATMUL), refreshed by setFloat32Precision.
+  Float32Precision cuda_matmul_fp32_precision_ =
+      float32Precision(Float32Backend::CUDA, Float32Op::MATMUL);
 
   Allocator* prev_allocator_ptr_{nullptr};
 };

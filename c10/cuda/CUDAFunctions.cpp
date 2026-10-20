@@ -5,6 +5,14 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/WaitCounter.h>
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) && \
+    defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)
+#include <c10/cuda/driver_api.h>
+#define C10_CUDA_HAS_CTX_GET_CURRENT
+#endif
+
+#include <array>
+#include <atomic>
 #include <limits>
 
 namespace c10::cuda {
@@ -383,5 +391,44 @@ void SetTargetDevice() {
   // no-op on CUDA version < 12.x
 }
 #endif
+
+#ifdef C10_CUDA_HAS_CTX_GET_CURRENT
+namespace {
+// Each device's primary context, recorded after the first forced cudaSetDevice
+// on it. Later calls compare the current context against it, which costs one
+// cheap cuCtxGetCurrent instead of a forced cudaSetDevice.
+std::array<std::atomic<CUcontext>, C10_COMPILE_TIME_MAX_GPUS>
+    primary_contexts{};
+
+CUcontext current_context() {
+  auto* get_current = DriverAPI::get()->cuCtxGetCurrent_;
+  CUcontext ctx = nullptr;
+  if (get_current == nullptr || get_current(&ctx) != CUDA_SUCCESS) {
+    return nullptr;
+  }
+  return ctx;
+}
+} // namespace
+#endif
+
+void MakePrimaryContextCurrent(DeviceIndex device) {
+#ifdef USE_ROCM
+  // HIP has no separate contexts: a HIP context is the thread's current
+  // device, which the caller has already set.
+  (void)device;
+#elif defined(C10_CUDA_HAS_CTX_GET_CURRENT)
+  auto& primary = primary_contexts.at(device);
+  auto ctx = current_context();
+  // Compare against the recorded primary context, not just nullptr: another
+  // context (e.g. one set with cuCtxSetCurrent) may be current.
+  if (ctx != nullptr && ctx == primary.load(std::memory_order_relaxed)) {
+    return;
+  }
+  C10_CUDA_CHECK(SetDevice(device, /*force=*/true));
+  primary.store(current_context(), std::memory_order_relaxed);
+#else
+  C10_CUDA_CHECK(SetDevice(device, /*force=*/true));
+#endif
+}
 
 } // namespace c10::cuda

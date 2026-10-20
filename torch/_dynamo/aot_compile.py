@@ -1899,13 +1899,13 @@ class AOTCompiledModel:
     the one-shot is spent only after the warning is out. One leaf keeps an
     interrupt from reaching dispatch at all, and every artifact's tree holds
     it:
-    ``LAMBDA_GUARD::check_nopybind`` (``guards.cpp:1918-1928``) clears whatever
-    its lambda raised, of whatever type, and answers false, so an interrupt
-    raised under a kept lambda guard is read as an ordinary mismatch and
-    ``check_verbose`` quotes its text as the guard's (``:1930-1936``) -- a
-    pre-existing C++ gap this Python-only stack leaves in place, beside the
-    dead ``result == -1`` branch in ``DICT_CONTAINS`` and ``SET_CONTAINS``
-    (``guards.cpp:2476``, ``:2507``), the leaves a ``DICT_NOT_CONTAINS`` or
+    ``LAMBDA_GUARD::check_nopybind`` in ``guards.cpp`` clears whatever its
+    lambda raised, of whatever type, and answers false, so an interrupt raised
+    under a kept lambda guard is read as an ordinary mismatch and
+    ``LAMBDA_GUARD::check_verbose_nopybind`` quotes its text as the guard's --
+    a pre-existing C++ gap this Python-only stack leaves in place, beside the
+    dead ``result == -1`` branch in ``DICT_CONTAINS::check_nopybind`` and
+    ``SET_CONTAINS::check_nopybind``, the leaves a ``DICT_NOT_CONTAINS`` or
     ``SET_NOT_CONTAINS`` guard installs.
 
     When no result matches -- or every result that opted out is withheld by a

@@ -2874,7 +2874,7 @@ class OutputGraph(OutputGraphCommon):
         is enabled, otherwise None.
         """
         with torch._guards.TracingContext.clear_frame():
-            from .decorators import disable
+            from .eval_frame import _disable_compiled_graph
 
             if not self.should_exit:
                 raise AssertionError(
@@ -3127,7 +3127,7 @@ class OutputGraph(OutputGraphCommon):
 
                 compiled_fn = _tf_subclass_disabled_wrapper
 
-            compiled_fn = disable(
+            compiled_fn = _disable_compiled_graph(
                 compiled_fn, reason="do not trace Dynamo-compiled graph"
             )
 
@@ -3143,7 +3143,7 @@ class OutputGraph(OutputGraphCommon):
                     check_fn_source = inspect.getsource(specialization.check_fn).strip()
                     # Required because the LABDA_GUARD API requires a root guard manager
                     unused_root_guard_manager = RootGuardManager()
-                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]
+                    check_fn = guards.LAMBDA_GUARD(  # type: ignore[attr-defined]  # noqa: LAMBDA_GUARD
                         unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],

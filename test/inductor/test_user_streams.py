@@ -237,6 +237,40 @@ with torch.xpu._DeviceGuard(0):
 
                 self.assertEqual(code.getvalue(), expected)
 
+    def test_device_exchange_codegen_uses_device_ops(self):
+        for device, device_ops in (
+            ("cuda", CUDADeviceOpOverrides()),
+            ("xpu", XPUDeviceOpOverrides()),
+        ):
+            with self.subTest(device=device):
+                graph = SimpleNamespace(
+                    cpp_wrapper=False, device_ops=device_ops, device_type=device
+                )
+                code = IndentedBuffer()
+                with V.set_graph_handler(graph):
+                    EnterDeviceContextManagerWithStreamInfoLine(
+                        device_idx=0,
+                        last_seen_device_guard_index=None,
+                        prev_device_var="_prev_device_0",
+                        num_streams=1,
+                    ).codegen(code)
+                    code.writeline("body()")
+                    ExitDeviceContextManagerWithStreamInfoLine(
+                        prev_device_var="_prev_device_0"
+                    ).codegen(code)
+
+                self.assertEqual(
+                    code.getvalue(),
+                    f"""\
+_prev_device_0 = _exchange_device(0)
+try:
+    default_stream = torch.{device}.current_stream()
+    body()
+finally:
+    _maybe_exchange_device(_prev_device_0)
+""",
+                )
+
     def test_subgraph_raw_stream_uses_device_ops_stream_handle(self):
         cases = [
             ("cuda", CUDADeviceOpOverrides(), "stream1_raw = stream1.native_handle\n"),

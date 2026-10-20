@@ -321,6 +321,15 @@ struct AllocatorRegisterer {
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
+  // Each constructor and the destructor maintain the count of live reporters
+  // that lets the allocators skip profiler lookups while there are none.
+  MemoryReportingInfoBase() noexcept;
+  MemoryReportingInfoBase(const MemoryReportingInfoBase& other) noexcept;
+  MemoryReportingInfoBase(MemoryReportingInfoBase&& other) noexcept;
+  MemoryReportingInfoBase& operator=(const MemoryReportingInfoBase&) = default;
+  MemoryReportingInfoBase& operator=(MemoryReportingInfoBase&&) = default;
+  ~MemoryReportingInfoBase() override;
+
   /**
    * alloc_size corresponds to the size of the ptr.
    *

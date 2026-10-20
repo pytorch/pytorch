@@ -232,6 +232,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_lambda_guard_no_args(
+        self,
+        user_lambda: Callable[[], Any],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_id_match_guard(
         self,
         id_val: int,
@@ -401,6 +407,12 @@ class GuardManager:
     ) -> None: ...
     def add_default_device_guard(
         self,
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
+    def add_fx_annotation_guard(
+        self,
+        expected: dict[str, Any] | None,
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
