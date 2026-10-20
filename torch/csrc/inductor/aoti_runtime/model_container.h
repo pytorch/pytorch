@@ -223,11 +223,6 @@ class AOTInductorModelContainer {
   }
 
   void set_use_stream_affinity(bool use_stream_affinity) {
-#if !defined(USE_CUDA) && !defined(USE_XPU)
-    AOTI_RUNTIME_CHECK(
-        !use_stream_affinity,
-        "Stream affinity is only supported for device runtimes");
-#endif
     pool_.set_use_stream_affinity(use_stream_affinity);
   }
 
