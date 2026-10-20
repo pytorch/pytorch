@@ -102,9 +102,14 @@ class PipelineStageMetadataInferenceTest(TestCase):
     def test_metadata_inference_preserves_nested_targets_and_kwargs(self):
         scale = torch.ones(2, requires_grad=True)
         targets = (torch.zeros(2), torch.ones(2))
+        tags = []
+        case = self
 
         class StructuredModule(torch.nn.Module):
             def forward(self, x, *, factors):
+                case.assertIs(type(factors), dict)
+                case.assertIs(type(factors["tags"]), list)
+                factors["tags"].append("metadata")
                 self_scale = factors["scale"]
                 if self_scale is scale:
                     raise AssertionError("metadata inference reused the user's leaf")
@@ -123,11 +128,12 @@ class PipelineStageMetadataInferenceTest(TestCase):
             schedule = ScheduleGPipe(stage, n_microbatches=1, loss_fn=loss_fn)
             inputs = torch.randn(2, requires_grad=True)
             schedule._initialize_stage(
-                (inputs,), {"factors": {"scale": scale}}, target=targets
+                (inputs,), {"factors": {"scale": scale, "tags": tags}}, target=targets
             )
             self.assertEqual(len(stage._stage_meta.outputs), 2)
             self.assertIsNone(inputs.grad)
             self.assertIsNone(scale.grad)
+            self.assertEqual(tags, [])
 
     def test_metadata_p2p_uses_directed_edge_groups(self):
         with single_rank_process_group():

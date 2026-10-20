@@ -43,6 +43,7 @@ from torch.distributed.pipelining._utils import (
 from torch.distributed.tensor import DTensor
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils._pytree import tree_map
 from torch.utils.hooks import RemovableHandle
 
 from ._backward import (
@@ -1895,7 +1896,8 @@ def build_stage(
         group (Optional[dist.ProcessGroup]): the process group to be used by this stage
 
     Returns:
-        _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
+        A pipeline stage that can run with the pipeline schedules, e.g.
+        :class:`~torch.distributed.pipelining.schedules.ScheduleGPipe`.
     """
     return _PipelineStage(
         stage_module,
@@ -2065,11 +2067,11 @@ class PipelineStage(_PipelineStageBase):
 
     def _to_inference_tensors(self, value: Any) -> Any:
         """Materialize tensor leaves while preserving the input's container structure."""
-        return map_aggregate(
-            value,
+        return tree_map(
             lambda arg: self._to_tensor(arg)
             if isinstance(arg, (torch.Tensor, TensorMeta))
             else arg,
+            value,
         )
 
     def _ones_from_metadata(self, meta: TensorMeta) -> torch.Tensor:
