@@ -537,6 +537,8 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
       "DEFAULT precision is internal and cannot be set explicitly");
 
   it->second = p;
+  cuda_matmul_fp32_precision_ =
+      float32Precision(Float32Backend::CUDA, Float32Op::MATMUL);
 }
 
 static void _warn_once_magma_deprecation() {

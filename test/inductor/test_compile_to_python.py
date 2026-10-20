@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._inductor import compile_to_python, config, load_from_python
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.standalone_compile import NoRunnableInductorModuleError
 from torch._inductor.utils import fresh_cache
@@ -210,6 +211,20 @@ class TestInductorCompileToPythonGPUCodegen(TestCase):
     # (no option overrides); ``_extract_call`` normalizes the entry-point signature so the
     # golden is independent of the graph_partition default (Runner method in OSS, flat
     # ``def call`` in fbcode).
+    def setUp(self):
+        super().setUp()
+        device_ops = get_device_op_overrides(GPU_TYPE)
+        # Devices with exchange functions guard the body with try/finally instead
+        # of a device_guard() context manager plus set_device().
+        if device_ops.device_exchange_functions() is None:
+            self.enter_device = f"with {device_ops.device_guard(0)}:\n        {device_ops.set_device(0)}"
+            self.exit_device = ""
+        else:
+            self.enter_device = "_prev_device_0 = _exchange_device(0)\n    try:"
+            self.exit_device = (
+                "\n    finally:\n        _maybe_exchange_device(_prev_device_0)"
+            )
+
     def _inner_call(self, m, x):
         gm = _capture(m, x)
         src, _cache = compile_to_python(gm, _flat_inputs(m, x))
@@ -226,14 +241,13 @@ def call(args):
     flat_1, = args
     args.clear()
     assert_size_stride(flat_1, (128, 64), (64, 1), 'input')
-    with torch.{GPU_TYPE}._DeviceGuard(0):
-        torch.{GPU_TYPE}.set_device(0)
+    {self.enter_device}
         flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_{GPU_TYPE}((128, 64), (64, 1), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
         triton_poi_fused_0.run(flat_1, buf0, 8192, stream=raw_stream0)
-        del flat_1
+        del flat_1{self.exit_device}
     return (buf0, )""",
         )
         # The pointwise fusion lowers to a single @triton.jit pointwise kernel; the
@@ -262,14 +276,13 @@ def call(args):
     flat_1, = args
     args.clear()
     assert_size_stride(flat_1, (64, 256), (256, 1), 'input')
-    with torch.{GPU_TYPE}._DeviceGuard(0):
-        torch.{GPU_TYPE}.set_device(0)
+    {self.enter_device}
         flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_{GPU_TYPE}((64, ), (1, ), torch.float32)
         # Topologically Sorted Source Nodes: [], Original ATen: []
         raw_stream0 = get_raw_stream(0)
         triton_per_fused_0.run(flat_1, buf0, 64, 256, stream=raw_stream0)
-        del flat_1
+        del flat_1{self.exit_device}
     return (buf0, )""",
         )
         # A row reduction lowers to a (persistent) reduction Triton kernel doing the
@@ -303,8 +316,7 @@ def call(args):
     flat_1, flat_2, flat_3 = args
     args.clear()
     assert_size_stride_grouped((flat_3, flat_1), ((5, 4), (3, 4)), ((4, 1), (4, 1)), 'input')
-    with torch.{GPU_TYPE}._DeviceGuard(0):
-        torch.{GPU_TYPE}.set_device(0)
+    {self.enter_device}
         flat_3 = copy_if_misaligned(flat_3)
         flat_1 = copy_if_misaligned(flat_1)
         buf0 = empty_strided_{GPU_TYPE}((5, 3), (3, 1), torch.float32)
@@ -318,7 +330,7 @@ def call(args):
         # Topologically Sorted Source Nodes: [], Original ATen: [aten.add]
         raw_stream0 = get_raw_stream(0)
         triton_poi_fused_add_0.run(buf1, flat_2, 15, stream=raw_stream0)
-        del flat_2
+        del flat_2{self.exit_device}
     return (buf1, )""",
         )
         self.assertIn("extern_kernels.mm", call_src)

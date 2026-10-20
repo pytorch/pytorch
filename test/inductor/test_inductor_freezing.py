@@ -531,7 +531,9 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
-                ).check_not("frozen_param").check_next("return").run(code[0])
+                ).check_not("frozen_param").check_not(".run(").check("return").run(
+                    code[0]
+                )
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
@@ -576,7 +578,9 @@ class OptimizeForInferenceTemplate(TestCase):
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
-                ).check_not("frozen_param").check_next("return").run(code[0])
+                ).check_not("frozen_param").check_not(".run(").check("return").run(
+                    code[0]
+                )
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
