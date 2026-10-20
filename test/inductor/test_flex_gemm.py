@@ -830,6 +830,50 @@ class TestFlexGemmRuntimeHelpers(TestCase):
             GroupedMainStore("main", 2, min_fragment_n=64).supports_config(sm90)
         )
 
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    def test_grouped_reduce_sm90_legality(self):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+            GroupedLocalReduce,
+            GroupedLocalReduceFeed,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        pingpong = GemmConfig(
+            tile_m=128, tile_n=128, cluster_m=2, pingpong=True, device_capacity=9
+        )
+        coop = dataclasses.replace(
+            pingpong, tile_n=256, cluster_m=1, cluster_n=2, pingpong=False
+        )
+
+        def feed(group):
+            return GroupedLocalReduceFeed("r", axis=0, group=group, combine="max")
+
+        def sink(axis, group, **kwargs):
+            return GroupedLocalReduce("r", axis=axis, group=group, **kwargs)
+
+        # A WGMMA thread owns rows r and r + 8, and the in-pass feed only
+        # shuffles across the 8 row lanes.
+        self.assertTrue(feed(8).supports_config(coop))
+        self.assertFalse(feed(16).supports_config(coop))
+        self.assertFalse(feed(32).supports_config(coop))
+        self.assertIn("axis-0 groups <= 8", feed(16).config_support_error([coop]))
+        sm120 = dataclasses.replace(coop, device_capacity=12)
+        self.assertFalse(feed(16).supports_config(sm120))
+        # Wide M sinks stitch warps inside one 64-row (pingpong) or 128-row
+        # (cooperative) epilogue subtile.
+        self.assertTrue(sink(0, 16).supports_config(pingpong))
+        self.assertTrue(sink(0, 64).supports_config(pingpong))
+        self.assertFalse(sink(0, 128).supports_config(pingpong))
+        self.assertTrue(sink(0, 128).supports_config(coop))
+        # N sinks fold interleaved column runs; TensorSSA fragment partials
+        # assume contiguous columns and stay unsupported.
+        self.assertTrue(sink(1, 4).supports_config(coop))
+        self.assertTrue(sink(1, 128).supports_config(coop))
+        self.assertFalse(sink(1, 16, fragment_reduced=True).supports_config(coop))
+        sm100 = dataclasses.replace(coop, tile_n=128, cluster_n=1, device_capacity=10)
+        self.assertTrue(feed(32).supports_config(sm100))
+
     def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
         from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
         from torch._inductor.fx_passes.post_grad import is_valid_addmm_fusion
@@ -10011,6 +10055,65 @@ class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
 
         a, b = self.makeTensor(128, 64), self.makeTensor(64, 256)
         with self.assertRaisesRegex(Exception, "SM90 must be 16-bit"):
+            torch.compile(fn, fullgraph=True)(a, b)
+
+    @parametrize(
+        "case",
+        (
+            # (name, axis, group, feeds_main, stores, tile_m, tile_n, pingpong)
+            ("m_feed_8", 0, 8, True, False, 128, 128, True),
+            ("m_store_16", 0, 16, False, True, 128, 128, True),
+            # Warp stitch inside a 64-row pingpong / 128-row cooperative subtile.
+            ("m_store_64_pingpong", 0, 64, False, True, 128, 128, True),
+            ("m_store_128_coop", 0, 128, False, True, 256, 128, False),
+            # Interleaved column runs: lane pair, full subtile, subtile combine.
+            ("n_store_4", 1, 4, False, True, 128, 128, True),
+            ("n_store_32", 1, 32, False, True, 256, 128, False),
+            ("n_store_128", 1, 128, False, True, 128, 256, False),
+            ("n_feed_store_16", 1, 16, True, True, 128, 128, True),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_grouped_reduce_matches_reference(self, case):
+        _, axis, group, feeds_main, stores, tile_m, tile_n, pingpong = case
+        config = {"tile_m": tile_m, "tile_n": tile_n, "pingpong": pingpong}
+        m, k, n = 512, 256, 1024
+        a, b = self.makeTensor(m, k), self.makeTensor(k, n)
+
+        def epilogue_fn(acc):
+            shape = (m // group, group, n) if axis == 0 else (m, n // group, group)
+            x = acc.float().view(shape)
+            r = x.amax(axis + 1, keepdim=True)
+            main = (x - r).view(m, n).to(acc.dtype) if feeds_main else acc
+            return (main, r.squeeze(axis + 1)) if stores else main
+
+        def fn(a, b):
+            options = {"backend": "QUACK", "config": config}
+            return flex_gemm(torch.mm, (a, b), epilogue_fn, kernel_options=options)
+
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), a, b)
+        actual = actual if stores else (actual,)
+        low = epilogue_fn(a @ b)
+        high = epilogue_fn(a.double() @ b.double())
+        low, high = (low, high) if stores else ((low,), (high,))
+        for out, lo, hi in zip(actual, low, high, strict=True):
+            self.assertMatchesLowPrecisionEager(out, lo, hi, k)
+        self.assertIn("flex_gemm_epilogue(", code)
+
+    def test_feed_main_rejects_m_group_spanning_thread_rows(self):
+        m, k, n = 256, 64, 256
+
+        def epilogue_fn(acc):
+            x = acc.float().view(m // 16, 16, n)
+            return (x - x.amax(1, keepdim=True)).view(m, n).to(acc.dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a, b = self.makeTensor(m, k), self.makeTensor(k, n)
+        with self.assertRaisesRegex(Exception, "axis-0 groups <= 8"):
             torch.compile(fn, fullgraph=True)(a, b)
 
 
