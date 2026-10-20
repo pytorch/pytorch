@@ -7,13 +7,28 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <memory>
+
+namespace {
+// Generated code launches kernels through the driver API, which needs a
+// current context. The guards' ExchangeDevice skips cudaSetDevice when the
+// device already matches, leaving a new thread without one.
+void make_primary_context_current(int32_t device_index) {
+  if (device_index >= 0) {
+    c10::cuda::MakePrimaryContextCurrent(
+        static_cast<c10::DeviceIndex>(device_index));
+  }
+}
+} // namespace
+
 AOTITorchError aoti_torch_create_cuda_guard(
     int32_t device_index,
     CUDAGuardHandle* ret_guard // returns new reference
 ) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::cuda::CUDAGuard* guard = new at::cuda::CUDAGuard(device_index);
-    *ret_guard = reinterpret_cast<CUDAGuardHandle>(guard);
+    auto guard = std::make_unique<at::cuda::CUDAGuard>(device_index);
+    make_primary_context_current(device_index);
+    *ret_guard = reinterpret_cast<CUDAGuardHandle>(guard.release());
   });
 }
 
@@ -27,6 +42,7 @@ AOTITorchError aoti_torch_cuda_guard_set_index(
     int32_t device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     reinterpret_cast<at::cuda::CUDAGuard*>(guard)->set_index(device_index);
+    make_primary_context_current(device_index);
   });
 }
 
@@ -35,10 +51,11 @@ AOTITorchError aoti_torch_create_cuda_stream_guard(
     int32_t device_index,
     CUDAStreamGuardHandle* ret_guard) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::cuda::CUDAStreamGuard* guard =
-        new at::cuda::CUDAStreamGuard(at::cuda::getStreamFromExternal(
+    auto guard = std::make_unique<at::cuda::CUDAStreamGuard>(
+        at::cuda::getStreamFromExternal(
             static_cast<cudaStream_t>(stream), device_index));
-    *ret_guard = reinterpret_cast<CUDAStreamGuardHandle>(guard);
+    make_primary_context_current(device_index);
+    *ret_guard = reinterpret_cast<CUDAStreamGuardHandle>(guard.release());
   });
 }
 

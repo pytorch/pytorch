@@ -110,7 +110,8 @@ TensorBase empty_strided_mps(
   if (at::hasMPS()) {
     auto device = device_or_default(device_opt);
     TORCH_INTERNAL_ASSERT(device.is_mps());
-    TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
+    TORCH_CHECK_TYPE(dtype != kDouble && dtype != kComplexDouble, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
+    TORCH_CHECK(size.size() <= c10::metal::max_ndim, "MPS supports tensors with dimensions <= ", c10::metal::max_ndim, ", but got ", size.size(), ".");
     const DeviceGuard device_guard(device);
     auto* allocator = at::mps::GetMPSAllocator();
     constexpr c10::DispatchKeySet mps_dks(c10::DispatchKey::MPS);

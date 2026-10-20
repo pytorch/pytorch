@@ -62,7 +62,11 @@ from torch._inductor.aoti_eager import (
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
-from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.codegen.common import (
+    DataTypePropagation,
+    get_device_op_overrides,
+    OptimizationContext,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -7183,6 +7187,27 @@ for dtype in (torch.int32, torch.int64):
             thread.start()
         for thread in threads:
             thread.join()
+
+    def test_call_from_new_thread(self):
+        # A new thread starts with no current CUDA context, even though its
+        # device matches; the compiled graph must still launch its kernels.
+        fn = torch.compile(lambda x: x.sin() + 1)
+        x = torch.randn(8, device=self.device)
+        expected = fn(x)
+        results = []
+
+        def run():
+            try:
+                results.append(fn(x))
+            except Exception as e:
+                results.append(e)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        thread.join()
+        if isinstance(results[0], Exception):
+            raise results[0]
+        self.assertEqual(results[0], expected)
 
     @skip_if_triton_cpu("Flaky on Triton CPU")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
@@ -22825,9 +22850,13 @@ if RUN_GPU:
                     "AOTICudaGuard device_guard(0)", 1, exactly=True
                 ).run(code)
             else:
-                FileCheck().check_count(
-                    f"with torch.{GPU_TYPE}._DeviceGuard(0)", 1, exactly=True
-                ).run(code)
+                device_ops = get_device_op_overrides(GPU_TYPE)
+                guard = (
+                    f"with {device_ops.device_guard(0)}"
+                    if device_ops.device_exchange_functions() is None
+                    else "= _exchange_device(0)"
+                )
+                FileCheck().check_count(guard, 1, exactly=True).run(code)
 
         @skipCUDAIf(
             not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"

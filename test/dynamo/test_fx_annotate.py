@@ -7,7 +7,11 @@ import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.test_case import run_tests
-from torch._dynamo.testing import AotEagerAndRecordGraphs, EagerAndRecordGraphs
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    EagerAndRecordGraphs,
+)
 from torch.nn.attention.flex_attention import (
     _dense_to_ordered,
     create_block_mask,
@@ -351,6 +355,40 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
             self._custom_meta_by_target(backend.graphs, (torch.sin,)),
             [{"tag": "inner"}],
         )
+
+    def test_empty_annotation_reuses_unannotated_frame(self):
+        def fn(x):
+            return torch.sin(x)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(10)
+        opt_fn(x)
+        with fx_traceback.annotate({}):
+            opt_fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_frame_guards_on_annotation_after_current_meta_rebind(self):
+        def fn(x):
+            return torch.sin(x)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(10)
+        with fx_traceback.annotate({"tag": "a"}):
+            opt_fn(x)
+
+        # Exiting preserve_node_meta rebinds current_meta to a new dict.
+        old_meta = fx_traceback.current_meta
+        with fx_traceback.preserve_node_meta():
+            pass
+        self.assertIsNot(fx_traceback.current_meta, old_meta)
+
+        with fx_traceback.annotate({"tag": "b"}):
+            opt_fn(x)  # recompiles
+        with fx_traceback.annotate({"tag": "a"}):
+            opt_fn(x)  # reuses the first graph, so the guard read the new dict
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_frame_guards_on_tensor_valued_annotation(self):
         def fn(x):

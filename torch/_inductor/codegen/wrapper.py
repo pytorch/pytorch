@@ -17,7 +17,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from enum import Enum
-from itertools import chain, count
+from itertools import chain, count, takewhile
 from typing import Any, cast, Literal, Protocol, TYPE_CHECKING
 
 import sympy
@@ -1101,10 +1101,20 @@ def _coor_device_idx_ref(device_idx: int) -> int | str:
     return _COOR_DEVICE_IDX_VAR if _coor_enabled() else device_idx
 
 
+# Module globals that the generated wrapper binds the functions from
+# DeviceOpOverrides.device_exchange_functions() to.
+EXCHANGE_DEVICE = "_exchange_device"
+MAYBE_EXCHANGE_DEVICE = "_maybe_exchange_device"
+
+
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
     last_seen_device_guard_index: int | None
+    # Set when the device has exchange functions, which replace device_guard():
+    # the variable holding the previous device, which the matching
+    # ExitDeviceContextManagerLine restores. None means device_guard() is used.
+    prev_device_var: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
@@ -1142,18 +1152,42 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 )
             else:
                 idx = self.device_idx
-            code.writeline(f"with {V.graph.device_ops.device_guard(idx)}:")
-            code.do_indent()
-            code.writeline(V.graph.device_ops.set_device(idx))
+            if self.prev_device_var is not None:
+                # The exchange function also does set_device()'s work, so no
+                # set_device() line follows.
+                code.writeline(f"{self.prev_device_var} = {EXCHANGE_DEVICE}({idx})")
+                code.writeline("try:")
+                code.do_indent()
+            else:
+                code.writeline(f"with {V.graph.device_ops.device_guard(idx)}:")
+                code.do_indent()
+                code.writeline(V.graph.device_ops.set_device(idx))
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_device_context_manager
 
 
+@dataclasses.dataclass
 class ExitDeviceContextManagerLine(WrapperLine):
+    # The matching EnterDeviceContextManagerLine.prev_device_var.
+    prev_device_var: str | None = None
+
     def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
             code.do_unindent()
+            if self.prev_device_var is not None:
+                # Unlike a device_guard() body, which always holds set_device(),
+                # the try body can be empty, e.g. when every kernel is elided.
+                # Deferred lines may render as nothing, so only plain lines count.
+                try_line = f"{code.prefix()}try:"
+                lines = reversed(code.get_lines_ref())
+                body = takewhile(lambda li: li != try_line, lines)
+                if not any(isinstance(li, str) and li for li in body):
+                    with code.indent():
+                        code.writeline("pass")
+                code.writeline("finally:")
+                with code.indent():
+                    code.writeline(f"{MAYBE_EXCHANGE_DEVICE}({self.prev_device_var})")
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_exit_device_context_manager
@@ -1490,11 +1524,6 @@ class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
     """
 
     num_streams: int = 1
-
-    def codegen(self, code: IndentedBuffer) -> None:
-        """Generate context exit code."""
-        if not V.graph.cpp_wrapper:
-            code.do_unindent()
 
 
 @dataclasses.dataclass
@@ -2218,6 +2247,9 @@ class PythonWrapperCodegen(CodeGen):
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: int | None = None
+        # Number of device guards currently open. Guards can nest, so each level
+        # gets its own EnterDeviceContextManagerLine.prev_device_var.
+        self._device_guard_depth = 0
         # [device-as-parameter] CooR harness render mode, resolved once and cached:
         # None = unresolved, False = compile-on-one-rank off, else the current accelerator.
         self._coor_current_accelerator: torch.device | Literal[False] | None = None
@@ -2360,8 +2392,9 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
                 empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
                 empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+                empty_strided_mps = torch._C._dynamo.guards._empty_strided_mps
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
+                alloc_from_pool = torch._C._dynamo.guards._alloc_from_pool
                 async_compile = AsyncCompile()
             """,
             strip=True,
@@ -2904,6 +2937,15 @@ class PythonWrapperCodegen(CodeGen):
         num_streams: int = 1,
         stream_idx_to_user_obj_idx: dict[int, int] | None = None,
     ) -> None:
+        exchange_fns = V.graph.device_ops.device_exchange_functions()
+        if exchange_fns is not None and not V.graph.cpp_wrapper:
+            # Bind the functions to module globals once, so call() does not look
+            # up torch._C attributes on every run.
+            for name, fn in zip((EXCHANGE_DEVICE, MAYBE_EXCHANGE_DEVICE), exchange_fns):
+                if not self.imports.contains(line := f"{name} = {fn}"):
+                    self.imports.writeline(line)
+        prev_device_var = self._device_guard_prev_var()
+        self._device_guard_depth += 1
         if num_streams > 1:
             if stream_idx_to_user_obj_idx is None:
                 raise AssertionError("expected stream_idx_to_user_obj_idx to be set")
@@ -2919,15 +2961,18 @@ class PythonWrapperCodegen(CodeGen):
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
-                    num_streams,
-                    stream_idx_to_user_obj_idx,
+                    prev_device_var=prev_device_var,
+                    num_streams=num_streams,
+                    stream_idx_to_user_obj_idx=stream_idx_to_user_obj_idx,
                     setup_stream_cache=setup_stream_cache,
                 ),
             )
         else:
             self.writeline(
                 EnterDeviceContextManagerLine(
-                    device_idx, self.last_seen_device_guard_index
+                    device_idx,
+                    self.last_seen_device_guard_index,
+                    prev_device_var=prev_device_var,
                 )
             )
         if config.triton.autotune_at_compile_time:
@@ -2953,13 +2998,29 @@ class PythonWrapperCodegen(CodeGen):
         self.last_seen_device_guard_index = device_idx
         self._num_streams: int = num_streams
 
+    def _device_guard_prev_var(self) -> str | None:
+        """Return the name of the variable that holds the previous device for
+        the innermost open device guard, or None if guards use device_guard()."""
+        if (
+            V.graph.cpp_wrapper
+            or V.graph.device_ops.device_exchange_functions() is None
+        ):
+            return None
+        return f"_prev_device_{self._device_guard_depth}"
+
     def codegen_device_guard_exit(self) -> None:
+        self._device_guard_depth -= 1
+        prev_device_var = self._device_guard_prev_var()
         if hasattr(self, "_num_streams") and self._num_streams > 1:
             self.writeline(
-                ExitDeviceContextManagerWithStreamInfoLine(self._num_streams)
+                ExitDeviceContextManagerWithStreamInfoLine(
+                    prev_device_var=prev_device_var, num_streams=self._num_streams
+                )
             )
         else:
-            self.writeline(ExitDeviceContextManagerLine())
+            self.writeline(
+                ExitDeviceContextManagerLine(prev_device_var=prev_device_var)
+            )
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.do_unindent()
 
@@ -5630,42 +5691,27 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
+        sizes = f"{codegen_allocation_shape_tuple}, {codegen_stride_tuple}"
+        # The fast paths allocate plain TensorImpls, which reinterpret_tensor can view
+        fast = False
         if torch._inductor.config.test_configs.track_memory_lifecycle:
-            out = (
-                f"{name} = tracked_empty_strided("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"dtype={dtype}, "
-                f"device='{device.type}', "
-                f"name='{name}')"
-            )
+            alloc = f"tracked_empty_strided({sizes}, dtype={dtype}, device='{device.type}', name='{name}')"
         elif device.type == "cpu" and is_pinned:
-            out = (
-                f"{name} = empty_strided_cpu_pinned("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"{dtype})"
-            )
-        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
+            alloc, fast = f"empty_strided_cpu_pinned({sizes}, {dtype})", True
+        elif device.type in ("cpu", "cuda", "xpu", "mtia", "mps"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
-            out = (
-                f"{name} = empty_strided_{device.type}("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"{dtype})"
-            )
+            alloc, fast = f"empty_strided_{device.type}({sizes}, {dtype})", True
         # all other devices:
         else:
-            out = (
-                f"{name} = empty_strided("
-                f"{codegen_allocation_shape_tuple}, "
-                f"{codegen_stride_tuple}, "
-                f"device='{device.type}', dtype={dtype})"
-            )
-        if codegen_shape_tuple != codegen_allocation_shape_tuple:
-            # need an extra as_strided call
-            out = out + f".as_strided({codegen_shape_tuple}, {codegen_stride_tuple})"
-        return out
+            alloc = f"empty_strided({sizes}, device='{device.type}', dtype={dtype})"
+        if codegen_shape_tuple == codegen_allocation_shape_tuple:
+            return f"{name} = {alloc}"
+        view = f"{codegen_shape_tuple}, {codegen_stride_tuple}"
+        if fast:
+            # A fresh tensor has offset 0, so this matches as_strided at far lower cost
+            return f"{name} = reinterpret_tensor({alloc}, {view})"
+        # as_strided preserves backend-specific TensorImpl subclasses
+        return f"{name} = {alloc}.as_strided({view})"
 
     def make_comment(self, line):
         self.writeline(CommentLine(line))
