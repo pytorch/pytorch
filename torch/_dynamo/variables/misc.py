@@ -1529,7 +1529,10 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
-            if self.obj.is_python_constant():
+            if self.obj.is_python_constant() and not (
+                isinstance(self.obj, variables.OrderedDictVariable)
+                and self.obj.eager_attr_fold_is_unsound(tx, self.name)
+            ):
                 val = getattr(self.obj.as_python_constant(), self.name)
                 resolved = VariableTracker.build(tx, val)
             else:

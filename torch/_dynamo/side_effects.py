@@ -33,7 +33,7 @@ import traceback
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
 from types import CellType, SimpleNamespace
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 
 import torch
 import torch.nn
@@ -57,6 +57,7 @@ from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
     is_pybind11_enum_member,
+    istype,
     nn_module_new,
     object_new,
 )
@@ -66,6 +67,7 @@ from .variables.base import (
     AttributeMutationNew,
     AttrMutationKind,
     is_side_effect_safe,
+    ValueAndAttributeMutationNew,
     ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
@@ -219,6 +221,13 @@ if sys.version_info < (3, 13):
     _MUTABLE_GETATTRIBUTES += (SimpleNamespace.__getattribute__,)
 
 
+def _walk_vts(value: Any) -> list[VariableTracker]:
+    """Every VariableTracker reachable from *value* (containers included)."""
+    out: list[VariableTracker] = []
+    VariableTracker.visit(out.append, value)
+    return out
+
+
 class SideEffects:
     """
     Maintain records of mutations and provide methods to apply them during code generation.
@@ -271,6 +280,8 @@ class SideEffects:
             ],
         ]
         | None = None,
+        num_attributed_ordered_dicts: int = 0,
+        num_new_objects_with_init_args: int = 0,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
@@ -281,6 +292,11 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
+        # Cheap guards for the attributed-OrderedDict constructor checks, which
+        # otherwise walk VTs on every in-frame user-object construction. Kept in
+        # sync with id_to_variable (see prune_dead_object_new / clear).
+        self._num_attributed_ordered_dicts = num_attributed_ordered_dicts
+        self._num_new_objects_with_init_args = num_new_objects_with_init_args
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -450,6 +466,8 @@ class SideEffects:
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
+            num_attributed_ordered_dicts=self._num_attributed_ordered_dicts,
+            num_new_objects_with_init_args=self._num_new_objects_with_init_args,
         )
 
     def __contains__(self, item: object) -> bool:
@@ -800,6 +818,81 @@ class SideEffects:
         self.id_to_variable[id(variable)] = variable
         self.keepalive.append(variable)
 
+    def track_ordered_dict_attr_mutation_new(self, variable: VariableTracker) -> None:
+        """Register a sourceless exact-OrderedDict VT on both mutation axes.
+
+        ``track_attribute_mutation_new`` would replace the value axis, dropping
+        the container contents from reconstruction. Keep both axes and preserve
+        the object's creation scope so that a write from inside a HigherOrderOp
+        body to an outer OrderedDict is still rejected by
+        ``is_side_effect_safe``. Keyed by the VT's id since a fresh OrderedDict
+        has no backing Python object.
+        """
+        if id(variable) in self.id_to_variable:
+            return
+        previous = variable.mutation_type
+        mutation = ValueAndAttributeMutationNew()
+        if previous is not None:
+            mutation.scope = previous.scope
+        variable.mutation_type = mutation
+        self.id_to_variable[id(variable)] = variable
+        self.keepalive.append(variable)
+        self._num_attributed_ordered_dicts += 1
+
+    def _reject_ordered_dict_ctor_read(
+        self, arg: VariableTracker, ordered_dict: VariableTracker
+    ) -> NoReturn:
+        unimplemented(
+            gb_type="attributed OrderedDict captured by a constructor",
+            context=f"constructor arg {arg}, OrderedDict {ordered_dict.debug_repr()}",
+            explanation="A new object's constructor observed the contents of an "
+            "OrderedDict that has instance attributes. The container is "
+            "reconstructed from an empty shell with its contents replayed "
+            "afterwards, so the constructor cannot be ordered soundly.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def check_attributed_ordered_dict_args(
+        self, init_args: list[VariableTracker]
+    ) -> None:
+        """Reject a new object whose constructor consumed an attributed
+        OrderedDict built in this frame (e.g. ``T(od)`` with ``class T(tuple)``).
+
+        Escaping attributed OrderedDicts are materialized as an empty shell and
+        their contents are replayed only after every other new object has a temp
+        local, so a constructor that reads the container would observe an empty
+        one. See ``check_ordered_dict_constructor_read`` for the other order.
+        """
+        if not self._num_attributed_ordered_dicts:
+            return
+        for arg in init_args:
+            for vt in _walk_vts(arg):
+                # istype, not isinstance: the latter consults
+                # VariableTrackerMeta.__instancecheck__, which realizes a lazy
+                # VT and can change which source a graph input is tracked under.
+                # A fresh OrderedDict is never lazy, so nothing is missed.
+                if (
+                    istype(vt, variables.OrderedDictVariable)
+                    and vt.fresh
+                    and self.has_pending_mutation(vt)
+                ):
+                    self._reject_ordered_dict_ctor_read(arg, vt)
+
+    def check_ordered_dict_constructor_read(self, variable: VariableTracker) -> None:
+        """Reject the symmetric order of ``check_attributed_ordered_dict_args``:
+        an OrderedDict that a new object's constructor already consumed is
+        gaining instance attributes now."""
+        # The variable itself is not registered yet, so the attributed-OrderedDict
+        # count does not guard this helper; only tracked constructor args do.
+        if not self._num_new_objects_with_init_args:
+            return
+        for tracked in self.id_to_variable.values():
+            # Plain dict lookup: `getattr` would realize a lazy VT.
+            init_args = tracked.__dict__.get("init_args")
+            for arg in init_args or ():
+                if any(vt is variable for vt in _walk_vts(arg)):
+                    self._reject_ordered_dict_ctor_read(arg, variable)
+
     def track_object_new(
         self,
         cls_source: Source | None,
@@ -955,6 +1048,7 @@ class SideEffects:
         reconstruction. Roughly, the reconstruction looks like this
             base_cls_vt.__new__(user_cls, *init_args)
         """
+        self.check_attributed_ordered_dict_args(init_args)
         cls_source = cls_vt.source
         user_cls = cls_vt.value  # type: ignore[attr-defined]
         variable_cls = self.get_variable_cls(user_cls)
@@ -973,6 +1067,8 @@ class SideEffects:
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
+        if init_args:
+            self._num_new_objects_with_init_args += 1
         return variable
 
     def track_cell_new(
@@ -1137,6 +1233,15 @@ class SideEffects:
             for k, v in self.attr_mutation_kinds.items()
             if is_live(k) or k in gen_reachable_new
         }
+        # Recompute the constructor-check counters from the surviving VTs.
+        self._num_attributed_ordered_dicts = sum(
+            1
+            for var in self.id_to_variable.values()
+            if isinstance(var.mutation_type, ValueAndAttributeMutationNew)
+        )
+        self._num_new_objects_with_init_args = sum(
+            1 for var in self.id_to_variable.values() if var.__dict__.get("init_args")
+        )
 
     def mutation(self, var: VariableTracker) -> None:
         if var in self.ignore_mutation_on_these_variables:
@@ -1166,7 +1271,33 @@ class SideEffects:
         # Since newly constructed objects don't have a source, we manually
         # codegen their construction and store them to a newly assigned local
         # source. Note that `ValueMutationNew` isn't tracked by SideEffects.
-        for var in self._get_modified_vars():
+        modified_vars = self._get_modified_vars()
+
+        # An attributed OrderedDict is materialized as an empty shell first, in
+        # its own pass: everything else (constructor args, contents, escaped
+        # views) must see the shell's temp local before the contents are
+        # replayed, otherwise a not-yet-cached child would be rebuilt as a
+        # duplicate instance (breaking aliasing) and the second PyCodegen pass
+        # could follow a stale TempLocalSource from the first pass. Contents and
+        # attribute stores are replayed afterwards, in codegen_update_mutated.
+        ordered_dict_shell_ids: set[int] = set()
+        for var in modified_vars:
+            if not (
+                isinstance(var.mutation_type, AttributeMutationNew)
+                # OrderedDict subclasses are UserDefinedObjectVariables with
+                # their own object reconstruction path. istype also avoids
+                # realizing lazy VTs via VariableTrackerMeta.__instancecheck__.
+                and istype(var, variables.OrderedDictVariable)
+            ):
+                continue
+            var.reconstruct_empty(cg)
+            cg.add_cache(var)
+            var.source = TempLocalSource(cg.tempvars[var])
+            ordered_dict_shell_ids.add(id(var))
+
+        for var in modified_vars:
+            if id(var) in ordered_dict_shell_ids:
+                continue
             if not isinstance(var.mutation_type, AttributeMutationNew):
                 if var.source is None:
                     raise AssertionError(
@@ -1573,6 +1704,8 @@ class SideEffects:
     def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
+        self._num_attributed_ordered_dicts = 0
+        self._num_new_objects_with_init_args = 0
 
 
 @register_side_effect_replay_handler(
@@ -1650,6 +1783,33 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
 
 
 @register_side_effect_replay_handler(
+    name="ordered_dict_instance_attr_mutation",
+    matcher=lambda ctx: istype(ctx.var, variables.OrderedDictVariable)
+    and isinstance(ctx.var.mutation_type, AttributeMutationNew),
+    priority=75,
+)
+def _codegen_ordered_dict_instance_attr_mutation(
+    ctx: SideEffectReplayContext,
+) -> None:
+    """Replay both axes of an attributed OrderedDict built in this frame.
+
+    ``codegen_save_tempvars`` already created the empty shell and gave it a temp
+    local, so aliasing is settled: fill the contents and let the composite
+    attribute handler store the instance attributes onto that same object.
+    """
+    cg = ctx.codegen
+    # The handler matcher is authoritative; cast only narrows the static type.
+    var = cast(variables.OrderedDictVariable, ctx.var)
+    if var.items:
+        cg(var)  # the shell, by temp local
+        cg.load_method("update")
+        cg(var, allow_cache=False)  # full contents, not via source
+        cg.extend_output([*create_call_method(1), create_instruction("POP_TOP")])
+        ctx.log(var)
+    _codegen_attribute_mutation(ctx)
+
+
+@register_side_effect_replay_handler(
     name="const_dict_or_set_mutation",
     matcher=lambda ctx: isinstance(
         ctx.var,
@@ -1658,6 +1818,14 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
             variables.SetVariable,
             variables.OrderedSetVariable,
         ),
+    )
+    # An OrderedDict built in this frame with modeled instance attributes is
+    # replayed over both axes by ordered_dict_instance_attr_mutation. Keep this
+    # predicate identical to that handler's matcher (istype): the two sides must
+    # agree on exactly which VTs are handled there.
+    and not (
+        istype(ctx.var, variables.OrderedDictVariable)
+        and isinstance(ctx.var.mutation_type, AttributeMutationNew)
     )
     # A UserDefined dict/set (is-a ConstDictVariable/SetVariable under MI) has
     # both a content and an attribute compartment; it is replayed by the

@@ -3702,6 +3702,14 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             # than propagating a graph break from tp_getattro_impl.
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
+            first = args[0]
+            drops_attrs = type(first) is variables.OrderedDictVariable and (
+                first.eager_attr_fold_is_unsound(tx, args[1].as_python_constant())
+            )
+            if drops_attrs:
+                # getattr() on the rebuilt container would answer from a copy
+                # whose instance __dict__ is empty.
+                raise
             try:
                 result = getattr(*[a.as_python_constant() for a in args])
             except AttributeError:
@@ -3842,6 +3850,7 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         if isinstance(
             obj,
             (
+                variables.OrderedDictVariable,
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
