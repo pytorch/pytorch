@@ -2802,6 +2802,25 @@ class _ConstRepr:
         return self.value
 
 
+def _normalize_packed_metadata(md):
+    # triton-ascend's C launcher stub reads packed metadata with
+    # PyDict_GetItemString (kernel_name / tensor_kinds) and therefore
+    # requires a real dict. torch_npu's own launch path normalizes the
+    # namedtuple via _asdict() (torch_npu/.../npu_triton_heuristics.py);
+    # apply the same normalization here so kernels compiled through the
+    # upstream path -- e.g. mix-order reduction kernels -- do not hand the
+    # stub a namedtuple and segfault. Only namedtuples that actually carry
+    # kernel_name are converted; all other backends are untouched.
+    if (
+        md is not None
+        and not isinstance(md, dict)
+        and hasattr(md, "_asdict")
+        and hasattr(md, "kernel_name")
+    ):
+        return md._asdict()
+    return md
+
+
 class CompileResult(Generic[_T]):
     """
     Base class representing compiled result.
@@ -3349,7 +3368,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "bin": binary,
             "launch_enter_hook": launch_enter,
             "launch_exit_hook": launch_exit,
-            "metadata": (
+            "metadata": _normalize_packed_metadata(
                 binary.packed_metadata
                 if hasattr(binary, "packed_metadata")
                 else binary.metadata
