@@ -48,6 +48,15 @@ if(USE_CUDA)
   )
 endif()
 
+# test_model_pool.cpp follows the build's device macro, like the pool's code.
+if(USE_CUDA)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_CUDA)
+elseif(USE_XPU)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_XPU)
+endif()
+
 add_executable(test_aoti_abi_check
   ${AOTI_ABI_CHECK_TEST_SRCS}
 )
