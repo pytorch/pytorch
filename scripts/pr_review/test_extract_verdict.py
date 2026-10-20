@@ -1335,6 +1335,22 @@ class TestAnOverflowingMessageEndsInAMarker(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertEqual(dropped[0]["reason"], "failed_publish_check")
 
+    def test_a_digest_cut_by_the_input_slice_is_truncated_not_dropped(self):
+        message = "x " * 687 + "ab12cd34" * 16 + " is wrong."
+        kept, dropped, _ = sanitize_findings(
+            [
+                {
+                    "path": "src/app.py",
+                    "line": 12,
+                    "severity": "major",
+                    "message": message,
+                }
+            ],
+            parse_diff(DIFF),
+        )
+        self.assertEqual(dropped, [])
+        self.assertTrue(kept[0]["message"].endswith("x" + TRUNCATED))
+
     def test_a_message_that_neutralizes_to_nothing_gets_no_marker(self):
         self.assertEqual(neutralize_message("\\" * (MAX_MESSAGE + 1)), "")
 

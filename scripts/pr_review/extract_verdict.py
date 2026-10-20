@@ -452,7 +452,11 @@ def neutralize_message(message: str) -> str:
     check whole (a blob neutralize() joined, say) is returned whole, so `build`
     drops it as `failed_publish_check`.
     """
-    full = neutralize(message[:MAX_MESSAGE], 5 * MAX_MESSAGE).strip()
+    src = message[:MAX_MESSAGE]
+    if len(src) < len(message) and not message[MAX_MESSAGE].isspace():
+        # The input slice is a cut too: drop the token it split.
+        src = _PARTIAL_TOKEN.sub("", src) or src
+    full = neutralize(src, 5 * MAX_MESSAGE).strip()
     if not full or (len(message.rstrip()) <= MAX_MESSAGE and len(full) <= MAX_MESSAGE):
         return full
     if not is_neutral_prose(full, len(full)):
