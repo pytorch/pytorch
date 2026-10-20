@@ -12,8 +12,6 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import sympy
 
 import torch
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
@@ -566,16 +564,6 @@ class _TritonDeviceTestCase(TestCase):
         device = self.get_primary_device()
         if not HAS_TRITON:
             raise unittest.SkipTest(f"triton is required for {device}")
-        try:
-            device_interface = get_interface_for_device(torch.device(device).type)
-        except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-        if not device_interface.is_triton_capable(device):
-            raise unittest.SkipTest(f"requires Triton support for {device}")
-        try:
-            device_interface.raise_if_triton_unavailable(device)
-        except TritonUnavailableError as exc:
-            raise unittest.SkipTest(str(exc)) from exc
         super().setUp()
 
 
