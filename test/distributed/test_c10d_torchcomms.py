@@ -427,7 +427,15 @@ class TestC10dTorchCommsInitAutoQualify(C10dTorchCommsTestBase):
 
 
 instantiate_device_type_tests(
-    TestC10dTorchCommsInitAutoQualify, globals(), allow_xpu=True
+    TestC10dTorchCommsInitAutoQualify,
+    globals(),
+    allow_xpu=True,
+    # The auto-qualify semantics under test require binding an accelerator
+    # device_id; on machines with an accelerator the CPU variant's bound
+    # device resolves to that accelerator (bound_device_id.type != "cpu"),
+    # failing test_bound_device_id_is_set. The variant is meaningless there,
+    # so do not generate it.
+    except_for=("cpu",),
 )
 
 
@@ -889,7 +897,13 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
 
 class TestC10dTorchCommsDynamicCreation(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     TIMEOUT = datetime.timedelta(seconds=30)
+
+    # Mock-based tests whose patched new_comm path still reaches the real
+    # backend availability check, so they need the CUDA variant gate like the
+    # other mock classes in this file.
 
     def _capture_new_comm_options(self, *, enable_reconfigure, timeout=TIMEOUT):
         captured = {}
@@ -1056,6 +1070,11 @@ class TestC10dTorchCommsDynamicCreation(TestCase):
 
 instantiate_device_type_tests(
     TestC10dTorchCommsNewGroupHelper, globals(), only_for=["cuda"]
+)
+
+
+instantiate_device_type_tests(
+    TestC10dTorchCommsDynamicCreation, globals(), only_for=["cuda"]
 )
 
 
