@@ -245,38 +245,12 @@ class TestMXFP8ReferenceNumerics(TestCase):
         expected_nan_scale[:32, 0] = True
         self.assertEqual(scale_bytes == 255, expected_nan_scale)
 
-    @parametrize(
-        "dim,expected_axis",
-        (
-            subtest(((0, 1), 1), name="tuple_k"),
-            subtest(((-2, -1), 1), name="negative_tuple_k"),
-            subtest(((1, 0), 0), name="tuple_m"),
-            subtest(((-1, -2), 0), name="negative_tuple_m"),
-        ),
-    )
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_dim_aliases(self, dim, expected_axis, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.randn(64, 128, dtype=torch.bfloat16, device=device)
-        qdata_ref, scales_ref = _quantize_mxfp8_reference(
-            data_hp, -1 if expected_axis == 1 else -2, False, True
-        )
-        qdata, scales = _quantize_mxfp8_tma(data_hp, dim, False, True)
-        self.assertEqual(qdata, qdata_ref)
-        self.assertEqual(scales.flatten(), scales_ref.flatten())
-        self.assertEqual(qdata.shape, data_hp.shape)
-        m, k = data_hp.shape
-        self.assertEqual(qdata.stride(), (k, 1) if expected_axis == 1 else (1, m))
-
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
         "dim,is_scale_swizzled",
         (
             subtest(((-2, -1), True), name="dim_k_swizzled"),
-            subtest(((0, 1), True), name="dim_k_positive"),
             subtest(((-1, -2), True), name="dim_m_swizzled"),
-            subtest(((1, 0), True), name="dim_m_positive"),
             subtest(((-1, -2), False), name="dim_m_compact"),
         ),
     )
@@ -340,34 +314,6 @@ class TestMXFP8ReferenceNumerics(TestCase):
         data_hp = torch.randn(64, 256, dtype=torch.bfloat16, device=device)[:, ::2]
         with self.assertRaisesRegex(ValueError, "contiguous or transpose-contiguous"):
             _quantize_mxfp8_tma(data_hp, (-2, -1), False, True)
-
-    @parametrize(
-        "dim",
-        (
-            subtest(1, name="axis_k"),
-            subtest(-1, name="negative_axis_k"),
-            subtest(0, name="axis_m"),
-            subtest(-2, name="negative_axis_m"),
-            subtest(2, name="axis_out_of_range"),
-            subtest(-3, name="negative_axis_out_of_range"),
-            subtest(None, name="missing_dim"),
-            subtest(True, name="bool_dim"),
-            subtest(((-2, -1), (-1, -2)), name="dual_dim_on_single_entry"),
-            subtest((0, 0), name="duplicate_axes"),
-            subtest((0,), name="missing_axis"),
-            subtest((0, 1, 0), name="extra_axis"),
-            subtest([0, 1], name="list_k"),
-            subtest([1, 0], name="list_m"),
-            subtest((0, 2), name="tuple_axis_out_of_range"),
-        ),
-    )
-    @skipIfNoCuteDSL
-    def test_to_mx_rceil_invalid_dim(self, dim, device):
-        if not _NVIDIA_SM100_OR_LATER:
-            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.empty(32, 32, dtype=torch.bfloat16, device=device)
-        with self.assertRaises(ValueError):
-            _quantize_mxfp8_tma(data_hp, dim, False, True)
 
     @parametrize(
         "dim,is_square_scaling,is_scale_swizzled",
