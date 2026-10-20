@@ -8,6 +8,7 @@
 #include <future>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -95,26 +96,26 @@ T wait_or_abort(std::future<T>& future) {
   return future.get();
 }
 
-FakeModel* checkout(Pool& pool, Stream stream = nullptr) {
-  auto future = std::async(
-      std::launch::async, [&] { return pool.get_available_model(stream); });
+Pool::Lease checkout(Pool& pool, Stream stream = nullptr) {
+  auto future =
+      std::async(std::launch::async, [&] { return pool.checkout(stream); });
   return wait_or_abort(future);
 }
 
 // Mirrors a run() that reached the device: the model goes back as pending.
 FakeModel* start_run(Pool& pool, Stream stream = nullptr) {
-  FakeModel* model = checkout(pool, stream);
-  model->start();
-  pool.return_model_to_pending(model);
+  auto lease = checkout(pool, stream);
+  lease->start();
+  FakeModel* model = &*lease;
+  lease.mark_pending();
   return model;
 }
 
 TEST(ModelPoolTest, ReusesMostRecentlyReturnedModel) {
   TestPool t(3);
-  FakeModel* model = checkout(t.pool);
+  FakeModel* model = &*checkout(t.pool);
   EXPECT_EQ(model, &t.models[2]);
-  t.pool.return_model_to_available(model);
-  EXPECT_EQ(checkout(t.pool), model);
+  EXPECT_EQ(&*checkout(t.pool), model);
 }
 
 TEST(ModelPoolTest, PrefersFinishedRunOverWaiting) {
@@ -122,40 +123,41 @@ TEST(ModelPoolTest, PrefersFinishedRunOverWaiting) {
   start_run(t.pool);
   FakeModel* finished = start_run(t.pool);
   finished->finish();
-  EXPECT_EQ(checkout(t.pool), finished);
+  EXPECT_EQ(&*checkout(t.pool), finished);
 }
 
 TEST(ModelPoolTest, WaitsForOldestPendingRun) {
   TestPool t(2);
   FakeModel* oldest = start_run(t.pool);
   FakeModel* newest = start_run(t.pool);
-  auto waiter = std::async(
-      std::launch::async, [&] { return t.pool.get_available_model(); });
+  auto waiter =
+      std::async(std::launch::async, [&] { return t.pool.checkout(); });
   EXPECT_EQ(waiter.wait_for(kBlocked), std::future_status::timeout);
   oldest->finish();
-  EXPECT_EQ(wait_or_abort(waiter), oldest);
+  EXPECT_EQ(&*wait_or_abort(waiter), oldest);
   newest->finish();
 }
 
 TEST(ModelPoolTest, FailedRunWakesWaitingCheckout) {
   TestPool t(1);
-  FakeModel* model = checkout(t.pool);
-  auto waiter = std::async(
-      std::launch::async, [&] { return t.pool.get_available_model(); });
+  std::optional<Pool::Lease> failed_run(checkout(t.pool));
+  FakeModel* model = &**failed_run;
+  auto waiter =
+      std::async(std::launch::async, [&] { return t.pool.checkout(); });
   EXPECT_EQ(waiter.wait_for(kBlocked), std::future_status::timeout);
-  t.pool.return_model_to_available(model);
-  EXPECT_EQ(wait_or_abort(waiter), model);
+  failed_run.reset();
+  EXPECT_EQ(&*wait_or_abort(waiter), model);
 }
 
 TEST(ModelPoolTest, DeviceFailureWhileWaitingReturnsModel) {
   TestPool t(1);
   FakeModel* model = start_run(t.pool);
-  auto waiter = std::async(
-      std::launch::async, [&] { return t.pool.get_available_model(); });
+  auto waiter =
+      std::async(std::launch::async, [&] { return t.pool.checkout(); });
   EXPECT_EQ(waiter.wait_for(kBlocked), std::future_status::timeout);
   model->fail();
   EXPECT_THROW(wait_or_abort(waiter), std::runtime_error);
-  EXPECT_EQ(checkout(t.pool), model);
+  EXPECT_EQ(&*checkout(t.pool), model);
 }
 
 TEST(ModelPoolTest, StreamAffinityKeepsModelPerStream) {
@@ -221,16 +223,39 @@ TEST(ModelPoolTest, StreamAffinityReportsIndexSentinels) {
 
 TEST(ModelPoolTest, StreamAffinityReconfiguresOnlyWhileIdle) {
   TestPool t(1);
-  FakeModel* model = checkout(t.pool);
+  {
+    auto lease = checkout(t.pool);
+    EXPECT_THROW(t.pool.set_use_stream_affinity(true), std::runtime_error);
+    lease->start();
+    lease.mark_pending();
+  }
   EXPECT_THROW(t.pool.set_use_stream_affinity(true), std::runtime_error);
-  model->start();
-  t.pool.return_model_to_pending(model);
-  EXPECT_THROW(t.pool.set_use_stream_affinity(true), std::runtime_error);
-  model->finish();
+  t.models[0].finish();
   // Reclaiming the finished run makes the pool idle again.
-  t.pool.return_model_to_available(checkout(t.pool));
+  checkout(t.pool);
   t.pool.set_use_stream_affinity(true);
   EXPECT_TRUE(t.pool.use_stream_affinity());
+}
+
+TEST(ModelPoolTest, LeaseMarksPendingOnlyOnce) {
+  TestPool t(1);
+  auto lease = checkout(t.pool);
+  lease.mark_pending();
+  EXPECT_THROW(lease.mark_pending(), std::runtime_error);
+}
+
+TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
+  TestPool t(1);
+  std::optional<Pool::Lease> holder;
+  {
+    auto lease = checkout(t.pool);
+    holder.emplace(std::move(lease));
+  }
+  auto waiter =
+      std::async(std::launch::async, [&] { return t.pool.checkout(); });
+  EXPECT_EQ(waiter.wait_for(kBlocked), std::future_status::timeout);
+  holder.reset();
+  wait_or_abort(waiter);
 }
 
 // Every checkout must return a model that no other thread holds and whose
@@ -261,17 +286,16 @@ void run_concurrent_checkouts(bool use_stream_affinity) {
           use_stream_affinity ? stream_handle(1 + tid % 4) : nullptr;
       for (int i = 0; i < kNumIters; ++i) {
         auto stream_lock = t.pool.acquire_stream_lock(stream);
-        FakeModel* model = t.pool.get_available_model(stream);
-        auto idx = t.index_of(model);
-        if (held[idx].exchange(true) || !model->is_finished()) {
+        auto lease = t.pool.checkout(stream);
+        auto idx = t.index_of(&*lease);
+        if (held[idx].exchange(true) || !lease->is_finished()) {
           violations++;
         }
         held[idx] = false;
-        if (i % 7 == 0) {
-          t.pool.return_model_to_available(model);
-        } else {
-          model->start();
-          t.pool.return_model_to_pending(model);
+        // Every seventh run fails before reaching the device.
+        if (i % 7 != 0) {
+          lease->start();
+          lease.mark_pending();
         }
       }
     });

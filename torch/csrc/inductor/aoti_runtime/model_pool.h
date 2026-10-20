@@ -32,6 +32,47 @@ class ModelPool {
     std::unique_lock<std::mutex> lock_;
   };
 
+  // Owns a checked-out model. Dropping the lease returns the model to the
+  // available pool, which is right for a run that never reached the device. A
+  // run that did reach the device ends with mark_pending() instead: its work
+  // may still be in flight, so the model is reused only once it has finished.
+  class Lease {
+   public:
+    Lease(ModelPool& pool, Model* model) : pool_(&pool), model_(model) {}
+
+    Lease(const Lease&) = delete;
+    Lease& operator=(const Lease&) = delete;
+    Lease(Lease&& other) noexcept : pool_(other.pool_), model_(other.model_) {
+      other.model_ = nullptr;
+    }
+    Lease& operator=(Lease&&) = delete;
+
+    ~Lease() {
+      if (model_ != nullptr) {
+        pool_->return_model_to_available(model_);
+      }
+    }
+
+    Model* operator->() const {
+      return model_;
+    }
+
+    Model& operator*() const {
+      return *model_;
+    }
+
+    void mark_pending() {
+      AOTI_RUNTIME_CHECK(
+          model_ != nullptr, "The lease no longer holds a model");
+      pool_->return_model_to_pending(model_);
+      model_ = nullptr;
+    }
+
+   private:
+    ModelPool* pool_;
+    Model* model_;
+  };
+
   void reserve(size_t num_models) {
     models_.reserve(num_models);
     available_models_.reserve(num_models);
@@ -80,17 +121,12 @@ class ModelPool {
     AOTI_RUNTIME_CHECK(false, "Stream affinity refers to an unknown model");
   }
 
-  Model* get_available_model() {
-    std::unique_lock lk(models_mutex_);
-    return checkout_available_model(lk);
+  Lease checkout() {
+    return Lease(*this, get_available_model());
   }
 
-  Model* get_available_model(Stream stream) {
-    std::unique_lock lk(models_mutex_);
-    if (use_stream_affinity_ && stream != nullptr) {
-      return get_stream_affine_model(stream, lk);
-    }
-    return checkout_available_model(lk);
+  Lease checkout(Stream stream) {
+    return Lease(*this, get_available_model(stream));
   }
 
   StreamLock acquire_stream_lock(Stream stream) {
@@ -108,6 +144,25 @@ class ModelPool {
       stream_mutex = it->second;
     }
     return StreamLock(stream_mutex);
+  }
+
+  // For run_single_threaded(), which bypasses the pool's locking entirely.
+  Model* first_available_model_unsynchronized() {
+    return available_models_[0];
+  }
+
+ private:
+  Model* get_available_model() {
+    std::unique_lock lk(models_mutex_);
+    return checkout_available_model(lk);
+  }
+
+  Model* get_available_model(Stream stream) {
+    std::unique_lock lk(models_mutex_);
+    if (use_stream_affinity_ && stream != nullptr) {
+      return get_stream_affine_model(stream, lk);
+    }
+    return checkout_available_model(lk);
   }
 
   void return_model_to_available(Model* model) {
@@ -131,12 +186,6 @@ class ModelPool {
     model_state_changed_.notify_all();
   }
 
-  // For run_single_threaded(), which bypasses the pool's locking entirely.
-  Model* first_available_model_unsynchronized() {
-    return available_models_[0];
-  }
-
- private:
   Model* checkout_available_model(std::unique_lock<std::mutex>& lk) {
     return take_available_model(lk, /*prefer_unbound=*/use_stream_affinity_);
   }
