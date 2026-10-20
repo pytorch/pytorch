@@ -12,13 +12,16 @@ barest form, this works as follows:
 ```python
   dev = torch.cuda.current_device()
   dom_id = 0
-  ctx = torch.cuda.green_contexts.GreenContext(dom_id, dev)
-  pool = torch.cuda.memory.LocalizedMemPool(dom_id, dev)
+  (ctx,) = torch.cuda.GreenContext.split(locality_domain_ids=(dom_id,), device_id=dev)
+  allocator = torch.cuda.LocalizedAllocator(dom_id, device=dev)
+  with torch.cuda.device(dev):
+    pool = torch.cuda.MemPool(allocator.allocator())
 
-  with torch.cuda.use_mem_pool(pool):
+  with torch.cuda.use_mem_pool(pool, device=dev):
     foo = torch.randn((64,8), device='cuda')
-  with ctx.Stream():
-    bar = torch.nn.functional.relu(foo)
+  (bar,) = torch.cuda.execute_on_streams(
+    (ctx.Stream(),), torch.nn.functional.relu, (foo,)
+  )
 ```
 
 This example allocates a localized tensor `foo` entirely on locality domain 0
@@ -28,12 +31,16 @@ execute only on locality domain 0, and thus all of its memory reads are local.
 Mixing up the data and compute localization is possible:
 
 ```python
-  pool2 = torch.cuda.memory.LocalizedMemPool(1, dev)
+  allocator2 = torch.cuda.LocalizedAllocator(1, device=dev)
+  with torch.cuda.device(dev):
+    pool2 = torch.cuda.MemPool(allocator2.allocator())
 
-  with torch.cuda.use_mem_pool(pool2):
+  with torch.cuda.use_mem_pool(pool2, device=dev):
     foo = torch.randn((64, 8), device='cuda')
-  with torch.cuda.green_contexts.GreenContext(0, dev):
-    bar = torch.nn.functional.relu(foo)
+  (ctx,) = torch.cuda.GreenContext.split(locality_domain_ids=(0,), device_id=dev)
+  (bar,) = torch.cuda.execute_on_streams(
+    (ctx.Stream(),), torch.nn.functional.relu, (foo,)
+  )
 ```
 
 This _succeeds_, but the kernel runs entirely on SMs associated with locality
