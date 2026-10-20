@@ -9746,7 +9746,7 @@ class TestQuantizeFxModelsAccelerator(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     @common_device_type.onlyAccelerator
-    def test_static_gpu_convert_basic(self, device):
+    def test_static_accelerator_convert_basic(self, device):
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
