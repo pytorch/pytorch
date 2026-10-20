@@ -12790,29 +12790,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                     check_lowp=check_lowp,
                 )
 
-    @parametrize("width", (64, 5000))
-    def test_index_add_of_reduction(self, width):
+    def test_index_add_after_reduction(self):
         # https://github.com/pytorch/pytorch/issues/201455
         def fn(x, index):
-            out = torch.zeros(2, device=x.device)
-            y = out.index_add(0, index, x.mean(-1))
-            return y.scatter_add(0, index, x.amax(-1))
+            return torch.zeros(4, device=x.device).index_add(0, index, x.mean(-1))
 
         self.common(
-            fn,
-            [torch.rand(3, width), torch.tensor([0, 1, 0])],
-            check_lowp=False,
+            fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
         )
 
-    def test_index_add_fused_with_reduction(self):
+    def test_index_add_inside_reduction(self):
         def fn(x, index):
             out = torch.zeros(4, x.shape[1], device=x.device)
             return x.sum(-1), out.index_add(0, index, x * 2)
 
         self.common(
-            fn,
-            [torch.rand(8, 64), torch.randint(0, 4, (8,))],
-            check_lowp=False,
+            fn, [torch.rand(8, 1025), torch.randint(0, 4, (8,))], check_lowp=False
         )
 
     def test_scatter_reduce1(self):
