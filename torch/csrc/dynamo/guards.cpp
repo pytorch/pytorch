@@ -4641,12 +4641,7 @@ class RootGuardManager : public GuardManager {
   // Fast check function.
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
-    // Check [Note on GIL interaction with mutex lock] for details on why we
-    // need mutex and its interactions with GIL.
-    PyThreadState* _save = nullptr;
-    Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
-    std::lock_guard<std::mutex> lock_guard(_lock);
-    Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+    auto lock_guard = acquire_lock();
 
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
@@ -4706,12 +4701,7 @@ class RootGuardManager : public GuardManager {
   // Fast check_verbose function.
   GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
-    // Check [Note on GIL interaction with mutex lock] for details on why we
-    // need mutex and its interactions with GIL.
-    PyThreadState* _save = nullptr;
-    Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
-    std::lock_guard<std::mutex> lock_guard(_lock);
-    Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+    auto lock_guard = acquire_lock();
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
@@ -4821,6 +4811,17 @@ class RootGuardManager : public GuardManager {
   // }
 
  private:
+  // Check [Note on GIL interaction with mutex lock] for details on why we
+  // need mutex and its interactions with GIL.
+  std::unique_lock<std::mutex> acquire_lock() {
+    std::unique_lock<std::mutex> lock(_lock, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      py::gil_scoped_release no_gil;
+      lock.lock();
+    }
+    return lock;
+  }
+
   // Reset the state of all the relational guards on failure.
   void _reset_relational_guard_state() {
     for (auto& guard : _relational_guard_resetters) {
@@ -4926,9 +4927,10 @@ class RootGuardManager : public GuardManager {
   // instructions). Thread 2 here can decide to release the GIL. Thread 1 can
   // acquire GIL and reach the mutex, where it will wait forever.
   //
-  // To avoid this, each thread releases the GIL before acquiring the mutex and
-  // then acquires the GIL again after acquiring the mutex lock by using
-  // Py_BLOCK_THREADS and Py_UNBLOCK_THREADS. This avoids the deadlock.
+  // To avoid this, a thread that finds the mutex held releases the GIL while
+  // waiting for it, and acquires the GIL again after acquiring the mutex. An
+  // uncontended try_lock never blocks, so it can keep the GIL. This avoids the
+  // deadlock without a GIL handoff on every check.
   std::mutex _lock;
 
   // We init LocalState only when this flag it set. This flag is set during

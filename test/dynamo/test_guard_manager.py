@@ -5,6 +5,8 @@ import gc
 import inspect
 import os
 import sys
+import threading
+import time
 import unittest
 import weakref
 from unittest import mock
@@ -363,6 +365,34 @@ user_stack=None)
         self.assertTrue(root.check({}))
         passes = False
         self.assertFalse(root.check({}))
+
+    def test_concurrent_checks_are_serialized(self):
+        running = overlapped = False
+
+        def slow_guard(x):
+            nonlocal running, overlapped
+            overlapped |= running
+            running = True
+            # Releases the GIL while this thread holds the root's lock, so the
+            # other thread must wait for the lock without holding the GIL.
+            time.sleep(0.05)
+            running = False
+            return True
+
+        root = RootGuardManager()
+        root.add_lambda_guard(slow_guard, ["slow"], None)
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(root.check({})))
+            for _ in range(2)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        self.assertFalse(any(t.is_alive() for t in threads), "guard check deadlocked")
+        self.assertEqual(results, [True, True])
+        self.assertFalse(overlapped)
 
     def test_length_check_guard(self):
         root = RootGuardManager()
