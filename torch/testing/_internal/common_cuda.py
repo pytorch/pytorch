@@ -7,7 +7,9 @@ import threading
 import torch
 import torch.cuda
 from torch.testing._internal.common_utils import (
-    _get_legacy_float32_matmul_precision, _set_legacy_float32_matmul_precision, LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
+    _get_legacy_cudnn_allow_tf32, _get_legacy_float32_matmul_precision, _get_legacy_onednn_allow_tf32,
+    _set_legacy_cudnn_allow_tf32, _set_legacy_float32_matmul_precision, _set_legacy_onednn_allow_tf32,
+    LazyVal, TEST_NUMBA, TEST_WITH_ROCM,
     TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU, TEST_MTIA)
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.utils._import_utils import _check_module_exists
@@ -423,36 +425,13 @@ _tf32_off_lock = threading.Lock()
 _tf32_off_depth = 0
 _tf32_off_saved_precision = None
 
-# allow_tf32_cudnn is a plain bool (no three-tier enum like matmul's), but it
-# has the same legacy/new-API pairing requirement: setAllowTF32CuDNN writes it
-# together with CUDA/CONV and CUDA/RNN, and the op-less getter raises if the
-# map and bool ever disagree. _set_float32_conv_precision() recovers it via
-# setAllowTF32CuDNN(), so it must be snapshotted and restored like the matmul
-# legacy enum rather than left for the per-op cudnn.conv/rnn.fp32_precision
-# setters to fix up (those only write the map, not this bool).
-_INCONSISTENT_CUDNN_ALLOW_TF32 = "<inconsistent legacy/new cudnn tf32>"
-
-
-def _get_legacy_cudnn_allow_tf32():
-    try:
-        return torch.backends.cudnn.allow_tf32
-    except RuntimeError:
-        return _INCONSISTENT_CUDNN_ALLOW_TF32
-
-
-def _set_legacy_cudnn_allow_tf32(value):
-    # Bypass the frozen-flags ContextProp check (same as the per-op
-    # fp32_precision setters, which call the raw _C binding directly) since
-    # this restore path must work even when direct attribute assignment to
-    # torch.backends.cudnn is disabled.
-    if value != _INCONSISTENT_CUDNN_ALLOW_TF32:
-        torch._C._set_cudnn_allow_tf32(value)
-
 
 # allow_tf32 (matmul) and _set_float32_conv_precision (conv/rnn) each write
 # both the legacy enum/bool and the new fp32_precision map entries. Restoring
 # only one of them leaves the two disagreeing, and every later read of
 # allow_tf32 in the process then raises "mix of the legacy and new APIs".
+# The oneDNN bool is independent (kernels OR it with the map) and is kept here
+# so tf32_off can also override a user-set mkldnn.allow_tf32=True.
 def _save_matmul_precision():
     return (_get_legacy_float32_matmul_precision(),
             torch.backends.cuda.matmul.fp32_precision,
@@ -460,16 +439,19 @@ def _save_matmul_precision():
             torch.backends.cudnn.conv.fp32_precision,
             torch.backends.cudnn.rnn.fp32_precision,
             torch.backends.mkldnn.matmul.fp32_precision,
-            torch.backends.mkldnn.conv.fp32_precision)
+            torch.backends.mkldnn.conv.fp32_precision,
+            _get_legacy_onednn_allow_tf32())
 
 
 def _restore_matmul_precision(saved):
     (legacy, cuda_precision, cudnn_allow_tf32, cudnn_conv_precision,
-     cudnn_rnn_precision, mkldnn_matmul_precision, mkldnn_conv_precision) = saved
+     cudnn_rnn_precision, mkldnn_matmul_precision, mkldnn_conv_precision,
+     onednn_allow_tf32) = saved
     # The legacy enum/bool restores go first: each overwrites its paired map
     # entries, so the precise fp32_precision values are pinned back afterward.
     _set_legacy_float32_matmul_precision(legacy)
     _set_legacy_cudnn_allow_tf32(cudnn_allow_tf32)
+    _set_legacy_onednn_allow_tf32(onednn_allow_tf32)
     torch.backends.cuda.matmul.fp32_precision = cuda_precision
     torch.backends.cudnn.conv.fp32_precision = cudnn_conv_precision
     torch.backends.cudnn.rnn.fp32_precision = cudnn_rnn_precision
@@ -494,6 +476,7 @@ def tf32_off():
             # Context::setFloat32MatmulPrecision/setFloat32ConvPrecision.
             torch.set_float32_matmul_precision("highest")
             torch._C._set_float32_conv_precision("highest")
+            _set_legacy_onednn_allow_tf32(False)
         _tf32_off_depth += 1
     try:
         yield

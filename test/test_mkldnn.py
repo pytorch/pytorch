@@ -1753,6 +1753,38 @@ class TestMkldnn(TestCase):
             with torch.backends.flags(fp32_precision="tf32"):
                 self.assertEqual(torch.backends.mkldnn.matmul.fp32_precision, "tf32")
 
+    @recover_orig_fp32_precision
+    def test_set_float32_conv_precision(self):
+        for level, allow_tf32, mkldnn in (
+            ("highest", False, "ieee"),
+            ("high", True, "tf32"),
+            ("medium", True, "bf16"),
+        ):
+            torch._C._set_float32_conv_precision(level)
+            self.assertEqual(torch.backends.cudnn.allow_tf32, allow_tf32)
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision == "tf32", allow_tf32)
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision == "tf32", allow_tf32)
+            self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, mkldnn)
+        torch._C._set_float32_conv_precision("HIGH")
+        self.assertEqual(torch.backends.mkldnn.conv.fp32_precision, "tf32")
+        with self.assertWarnsRegex(UserWarning, "has no effect"):
+            torch._C._set_float32_conv_precision("bogus")
+
+    @unittest.skipIf(not torch.xpu.is_available(), "legacy oneDNN allow_tf32 is XPU-only")
+    @recover_orig_fp32_precision
+    def test_legacy_onednn_allow_tf32_is_independent(self):
+        before = (torch.get_float32_matmul_precision(),
+                  torch.backends.mkldnn.matmul.fp32_precision,
+                  torch.backends.mkldnn.conv.fp32_precision)
+        with torch.backends.mkldnn.flags(enabled=None, allow_tf32=True, fp32_precision=None):
+            self.assertTrue(torch.backends.mkldnn.allow_tf32)
+            # must not trip the legacy/new consistency check
+            self.assertEqual(torch.get_float32_matmul_precision(), before[0])
+        self.assertFalse(torch.backends.mkldnn.allow_tf32)
+        self.assertEqual((torch.get_float32_matmul_precision(),
+                          torch.backends.mkldnn.matmul.fp32_precision,
+                          torch.backends.mkldnn.conv.fp32_precision), before)
+
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
         for dtype in [torch.double, torch.uint8, torch.int8,

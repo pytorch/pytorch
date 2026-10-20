@@ -3800,7 +3800,10 @@ def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
     if device.type == "cuda":
         is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
     elif device.type == "xpu":
-        is_tf32 = bool(torch.backends.mkldnn.allow_tf32)
+        is_tf32 = (
+            bool(torch.backends.mkldnn.allow_tf32)
+            or torch.backends.mkldnn.matmul.fp32_precision == "tf32"
+        )
     device_info_key = _get_device_info_key(device)
     ds_tops = (
         datasheet_tops(dtype, is_tf32=is_tf32, device_name=device_info_key)

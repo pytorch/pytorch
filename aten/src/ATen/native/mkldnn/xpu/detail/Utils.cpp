@@ -582,9 +582,9 @@ dnnl::memory::format_tag conv_weight_fmt(
 
 void apply_tf32_if_allowed(dnnl::primitive_attr& pattr, at::Float32Op op) {
   auto& ctx = at::globalContext();
-  bool allow_tf32 =
+  bool allow_tf32 = ctx.allowTF32OneDNN() ||
       ctx.float32Precision(at::Float32Backend::MKLDNN, op) ==
-      at::Float32Precision::TF32;
+          at::Float32Precision::TF32;
   if (allow_tf32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }

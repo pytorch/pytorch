@@ -6682,6 +6682,34 @@ def _set_legacy_float32_matmul_precision(value):
         torch.set_float32_matmul_precision(value)
 
 
+# allow_tf32_cudnn is a plain bool but setAllowTF32CuDNN writes it together
+# with CUDA conv/rnn, and the op-less getter raises when they disagree.
+_INCONSISTENT_CUDNN_ALLOW_TF32 = "<inconsistent legacy/new cudnn tf32>"
+
+
+def _get_legacy_cudnn_allow_tf32():
+    try:
+        return torch.backends.cudnn.allow_tf32
+    except RuntimeError:
+        return _INCONSISTENT_CUDNN_ALLOW_TF32
+
+
+def _set_legacy_cudnn_allow_tf32(value):
+    # Raw binding: the ContextProp setter raises once global flags are frozen.
+    if value != _INCONSISTENT_CUDNN_ALLOW_TF32:
+        torch._C._set_cudnn_allow_tf32(value)
+
+
+def _get_legacy_onednn_allow_tf32():
+    return torch._C._get_onednn_allow_tf32()
+
+
+def _set_legacy_onednn_allow_tf32(value):
+    # The setter only warns on builds without XPU, so skip when unchanged.
+    if value != torch._C._get_onednn_allow_tf32():
+        torch._C._set_onednn_allow_tf32(value)
+
+
 # Single source of truth for which globals count as "fp32 precision state".
 # Add a new flag here and both recover_orig_fp32_precision and the TestCase
 # leak detector pick it up automatically.
@@ -6692,6 +6720,10 @@ def _fp32_precision_flag_specs():
         ("torch.get_float32_matmul_precision()",
             _get_legacy_float32_matmul_precision,
             _set_legacy_float32_matmul_precision),
+        # Must precede the cudnn conv/rnn entries: setAllowTF32CuDNN rewrites them.
+        ("torch.backends.cudnn.allow_tf32",
+            _get_legacy_cudnn_allow_tf32,
+            _set_legacy_cudnn_allow_tf32),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
@@ -6710,6 +6742,9 @@ def _fp32_precision_flag_specs():
         ("torch.backends.mkldnn.rnn.fp32_precision",
             lambda: torch.backends.mkldnn.rnn.fp32_precision,  # type: ignore[attr-defined]
             lambda v: setattr(torch.backends.mkldnn.rnn, "fp32_precision", v)),
+        ("torch.backends.mkldnn.allow_tf32",
+            _get_legacy_onednn_allow_tf32,
+            _set_legacy_onednn_allow_tf32),
     )
 
 

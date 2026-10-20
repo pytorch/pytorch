@@ -294,14 +294,10 @@ bool Context::allowTF32OneDNN() const {
   // NOLINTNEXTLINE(clang-diagnostic-unused-parameter)
   void Context::setAllowTF32OneDNN(bool b){
   #ifdef USE_XPU
+  // Legacy bool only: kernels OR it with float32Precision(MKLDNN, op). Writing
+  // the shared legacy matmul enum or the map here would make mkldnn.flags()
+  // leak state and trip the legacy/new consistency checks.
   allow_tf32_onednn = b;
-  // oneDNN/XPU is independent of CUDA: only write the MKLDNN map entries that
-  // the oneDNN kernels read. Do NOT touch the legacy float32_matmul_precision
-  // enum here -- it is shared with CUDA, and writing it without also syncing
-  // CUDA/MATMUL would make an unrelated CUDA allow_tf32/getter call crash
-  // later with "mix of the legacy and new APIs".
-  setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, b ? Float32Precision::TF32 : Float32Precision::IEEE);
-  setFloat32Precision(Float32Backend::MKLDNN, Float32Op::CONV, b ? Float32Precision::TF32 : Float32Precision::NONE);
   #else
   TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
   #endif
@@ -538,11 +534,11 @@ void Context::setFloat32ConvPrecision(const std::string &s) {
     return false;
   };
   if (match(s)) { return; }
-  std::string sl;
+  std::string sl(s.size(), '\0');
   std::transform(s.begin(), s.end(), sl.begin(),
-                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
+                 [](unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
   if (match(sl)) { return; }
-  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current "
     "setFloat32ConvPrecision call has no effect.");
 }
 
