@@ -164,6 +164,33 @@ launcher service to launch multiple processes:
 torchrun --nproc_per_node=2 example.py
 ```
 
+## Forward-Only Evaluation
+
+Use `schedule.eval()` to execute forward microbatches without backward. The
+runtime schedules retain their training order and prepare a separate forward-only
+order for evaluation. Targets are optional: omitting them skips loss computation even
+when the schedule was constructed with a training loss function.
+
+Set the stage modules to evaluation mode separately. Use `torch.no_grad()` for
+ordinary evaluation to avoid constructing autograd graphs. Pass
+`return_outputs=False` when only losses or metrics are needed; the last stage
+then releases each completed output instead of keeping every output for merging.
+Forward sends retain their tensors until their matching waits complete, and all
+terminal sends finish before evaluation returns.
+
+```python
+stage_module.eval()
+with torch.no_grad():
+    output = schedule.eval(x)  # Lossless evaluation on the input-owning rank.
+    losses = []
+    schedule.eval(x, target=target, losses=losses, return_outputs=False)
+```
+
+Other ranks call `eval()` with their own root keyword inputs and targets where
+appropriate. Pre-split `arg_mbs`, `kwarg_mbs`, and `target_mbs` follow the same
+contract as `step()`. Nested target containers are preserved during metadata
+inference, which supports models with several prediction outputs.
+
 ## Options for Splitting a Model
 
 (option_1_manual)=

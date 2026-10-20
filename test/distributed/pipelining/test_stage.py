@@ -99,6 +99,42 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    def test_metadata_inference_preserves_nested_targets_and_kwargs(self):
+        scale = torch.ones(2, requires_grad=True)
+        targets = (torch.zeros(2), torch.ones(2))
+        tags = []
+        case = self
+
+        class StructuredModule(torch.nn.Module):
+            def forward(self, x, *, factors):
+                case.assertIs(type(factors), dict)
+                case.assertIs(type(factors["tags"]), list)
+                factors["tags"].append("metadata")
+                self_scale = factors["scale"]
+                if self_scale is scale:
+                    raise AssertionError("metadata inference reused the user's leaf")
+                return x * self_scale, x + 1
+
+        def loss_fn(outputs, target):
+            self.assertIsInstance(target, tuple)
+            self.assertIsNot(target[0], targets[0])
+            return sum(
+                (output - label).square().sum()
+                for output, label in zip(outputs, target)
+            )
+
+        with single_rank_process_group():
+            stage = PipelineStage(StructuredModule(), 0, 1, torch.device("cpu"))
+            schedule = ScheduleGPipe(stage, n_microbatches=1, loss_fn=loss_fn)
+            inputs = torch.randn(2, requires_grad=True)
+            schedule._initialize_stage(
+                (inputs,), {"factors": {"scale": scale, "tags": tags}}, target=targets
+            )
+            self.assertEqual(len(stage._stage_meta.outputs), 2)
+            self.assertIsNone(inputs.grad)
+            self.assertIsNone(scale.grad)
+            self.assertEqual(tags, [])
+
     def test_metadata_p2p_uses_directed_edge_groups(self):
         with single_rank_process_group():
             stage = PipelineStage(
@@ -490,7 +526,15 @@ class OutputSlotReleaseTest(TestCase):
 
         self.assertEqual(entry.output_grad_edges, (None,))
         stage.release_fwd_send_outputs(0)
-        self.assertIsNone(entry.live_outputs[0])
+        self.assertNotIn(0, stage._forward_chunk_states)
+
+    def test_forward_only_state_rejects_pending_send(self):
+        stage = self._make_stage()
+        stage.has_backward = False
+        self._forward_and_send(stage)
+
+        with self.assertRaisesRegex(RuntimeError, "pending consumers"):
+            stage._release_forward_state(0)
 
     def test_dw_builder_keeps_output(self):
         stage = self._make_stage(dw_builder=lambda: (lambda: None))

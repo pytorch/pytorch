@@ -40,6 +40,7 @@ from torch.distributed.pipelining._utils import (
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
+    _add_eval_wait_send,
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
@@ -1605,6 +1606,84 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    @parametrize(
+        "schedule_class", [ScheduleGPipe, Schedule1F1B, ScheduleInterleaved1F1B]
+    )
+    @parametrize("alias_output", [False, True])
+    def test_eval_does_not_cache_last_stage_outputs(self, schedule_class, alias_output):
+        """Evaluation must not retain completed last-stage outputs."""
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        module = torch.nn.Identity() if alias_output else torch.nn.Linear(8, 8)
+        stage = PipelineStage(module, 0, 1, "cpu")
+
+        def loss_fn(output, target):
+            self.assertTrue(
+                all(
+                    not state.input_values
+                    for state in stage._forward_chunk_states.values()
+                ),
+                "forward-only cache retained backward inputs",
+            )
+            self.assertFalse(
+                any(
+                    value is not None
+                    for state in stage._forward_chunk_states.values()
+                    for value in state.live_outputs
+                ),
+                "evaluation retained a prior microbatch output",
+            )
+            return torch.nn.functional.mse_loss(output, target)
+
+        stages = (
+            stage if issubclass(schedule_class, PipelineScheduleSingle) else [stage]
+        )
+        schedule = schedule_class(stages, n_microbatches=4, loss_fn=loss_fn)
+        inputs = torch.randn(8, 8)
+        targets = torch.randn(8, 8)
+        losses = []
+
+        try:
+            with torch.no_grad():
+                schedule.eval(
+                    inputs,
+                    target=targets,
+                    losses=losses,
+                    return_outputs=False,
+                )
+            self.assertFalse(stage._forward_chunk_states)
+            self.assertFalse(stage.output_chunks)
+            self.assertEqual(len(losses), 4)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_runtime_eval_without_targets_skips_configured_loss(self):
+        """A configured training loss must not make lossless eval require targets."""
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        stage = PipelineStage(torch.nn.Linear(8, 8), 0, 1, "cpu")
+        loss_fn = MagicMock()
+        schedule = ScheduleInterleaved1F1B([stage], n_microbatches=2, loss_fn=loss_fn)
+
+        try:
+            losses = [torch.tensor(float("nan"))]
+            with torch.no_grad():
+                result = schedule.eval(
+                    torch.randn(4, 8),
+                    losses=losses,
+                    return_outputs=False,
+                )
+            self.assertIsNone(result)
+            self.assertEqual(losses, [])
+            loss_fn.assert_not_called()
+            self.assertFalse(stage._forward_chunk_states)
+        finally:
+            torch.distributed.destroy_process_group()
+
     @parametrize("rank", [0, 1])
     @parametrize("per_edge", [False, True])
     def test_fake_pg_cross_rank_uses_static_metadata(self, rank, per_edge):
@@ -1640,6 +1719,45 @@ class ScheduleTest(TestCase):
                 schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
                 with self.assertRaisesRegex(RuntimeError, "fake process group"):
                     schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_p2p_metadata_vote_is_cached_per_backward_mode(self):
+        """Repeated train/eval switches must not repeat the global vote."""
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store
+        )
+        sample = torch.randn(4, 8)
+        stage = PipelineStage(
+            torch.nn.Linear(8, 8),
+            0,
+            2,
+            "cpu",
+            input_args=sample,
+            output_args=sample,
+            input_grads=sample,
+            output_grads=sample,
+        )
+        schedule = ScheduleGPipe(stage, n_microbatches=2)
+
+        try:
+            with (
+                patch.object(torch.distributed, "get_backend", return_value="nccl"),
+                patch.object(torch.distributed, "all_reduce") as all_reduce,
+            ):
+                for has_backward in (True, False, True, False):
+                    schedule._initialize_pipeline_distributed_state(
+                        [stage],
+                        has_backward=has_backward,
+                        initialize_p2p=False,
+                    )
+
+            self.assertEqual(all_reduce.call_count, 2)
+            self.assertEqual(
+                schedule._inference_mode_by_backward,
+                {True: InferenceMode.STATIC, False: InferenceMode.STATIC},
+            )
         finally:
             torch.distributed.destroy_process_group()
 
@@ -2107,6 +2225,75 @@ class TestSchedulePlan(TestCase):
             },
         )
 
+    def test_eval_wait_send_follows_two_forward_computes(self):
+        compute = {rank: [_Action(rank, F, mb) for mb in range(4)] for rank in range(4)}
+        lowered = _add_eval_wait_send(
+            _add_send_recv(compute, lambda stage: stage, num_stages=4)
+        )
+
+        for actions in lowered.values():
+            for send_index, send in enumerate(actions):
+                if send.computation_type != SEND_F:
+                    continue
+                wait = _Action(send.stage_index, WAIT_SEND_F, send.microbatch_index)
+                wait_index = actions.index(wait)
+                forward_indices = [
+                    index
+                    for index in range(send_index + 1, len(actions))
+                    if actions[index].computation_type == F
+                ]
+                if len(forward_indices) < 2:
+                    self.assertTrue(
+                        all(
+                            action.computation_type == WAIT_SEND_F
+                            for action in actions[wait_index:]
+                        )
+                    )
+                else:
+                    self.assertEqual(wait_index, forward_indices[1] + 1)
+
+        _simulate_comms_compute(lowered, lambda stage: stage, num_stages=4)
+
+    def test_eval_wait_send_counts_compound_forward_as_compute(self):
+        first_overlap = _Action(
+            -1,
+            OVERLAP_F_B,
+            sub_actions=(_Action(0, F, 1), _Action(0, B, 0)),
+        )
+        second_overlap = _Action(
+            -1,
+            OVERLAP_F_B,
+            sub_actions=(_Action(0, F, 2), _Action(0, B, 1)),
+        )
+        lowered = _add_eval_wait_send(
+            {
+                0: [_Action(0, SEND_F, 0), first_overlap, second_overlap],
+                1: [_Action(1, RECV_F, 0), _Action(1, F, 0)],
+            }
+        )
+        self.assertEqual(lowered[0][3], _Action(0, WAIT_SEND_F, 0))
+
+    def test_eval_wait_send_rejects_communication_cycle(self):
+        lowered = _add_eval_wait_send(
+            {
+                0: [
+                    _Action(0, F, 0),
+                    _Action(0, SEND_F, 0),
+                    _Action(0, F, 1),
+                    _Action(0, F, 2),
+                    _Action(0, SEND_F, 1),
+                ],
+                1: [
+                    _Action(1, RECV_F, 1),
+                    _Action(1, F, 1),
+                    _Action(1, RECV_F, 0),
+                    _Action(1, F, 0),
+                ],
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "not progressing"):
+            _simulate_comms_compute(lowered, lambda stage: stage, num_stages=2)
+
     @parametrize(
         "actions,error",
         [
@@ -2263,7 +2450,9 @@ class TestSchedulePlan(TestCase):
         stage.get_fwd_send_ops = MagicMock(return_value=[])
         stage.release_fwd_send_outputs = MagicMock()
         work = MagicMock()
-        schedule = _PipelineScheduleRuntime([stage], n_microbatches=1)
+        schedule = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=MagicMock()
+        )
         schedule.pipeline_order_with_comms = {
             0: [_Action(0, SEND_F, 0), _Action(0, F, 0)]
         }
@@ -2315,10 +2504,11 @@ class TestSchedulePlan(TestCase):
                 pending.remove((send_type, action.stage_index, action.microbatch_index))
         return peak, len(pending)
 
-    def test_send_budget_caps_forward_and_backward_sends(self):
+    @parametrize("budget", [1, 2, 4])
+    def test_send_budget_caps_forward_and_backward_sends(self, budget):
         uncapped = self._wait_send_schedule()
         capped = _add_wait_send_budget(
-            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=4
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=budget
         )
 
         self.assertTrue(
@@ -2331,8 +2521,24 @@ class TestSchedulePlan(TestCase):
         for rank, actions in capped.items():
             peak, remaining = self._outstanding_sends(actions)
             _, uncapped_remaining = self._outstanding_sends(uncapped[rank])
-            self.assertLessEqual(peak, 4)
+            self.assertLessEqual(peak, budget)
             self.assertLessEqual(remaining, uncapped_remaining)
+        _simulate_comms_compute(capped, lambda stage: stage, num_stages=4)
+
+    def test_send_budget_handles_noncontiguous_rank_ids(self):
+        ranks = (5, 13, 29, 47)
+        uncapped = self._wait_send_schedule()
+        expected = _add_wait_send_budget(
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=2
+        )
+        actual = _add_wait_send_budget(
+            {ranks[rank]: actions for rank, actions in uncapped.items()},
+            stage_to_rank=lambda stage: ranks[stage],
+            max_outstanding_sends=2,
+        )
+        self.assertEqual(
+            actual, {ranks[rank]: actions for rank, actions in expected.items()}
+        )
 
     def test_send_budget_preserves_non_wait_actions(self):
         uncapped = self._wait_send_schedule()
@@ -2476,6 +2682,47 @@ class TestSchedulePlan(TestCase):
                 lambda stage: schedule.stage_index_to_group_rank[stage],
                 schedule._num_stages,
             )
+
+    def test_interleaved_schedule_prepares_forward_only_eval_ir(self):
+        def stage(index):
+            result = MagicMock()
+            result.stage_index = index
+            result.num_stages = 8
+            result.group_rank = 0
+            result.group_size = 4
+            result.submod = None
+            return result
+
+        schedule = ScheduleInterleaved1F1B(
+            [stage(0), stage(4)], n_microbatches=8, max_outstanding_sends=4
+        )
+        training_order = copy.deepcopy(schedule.pipeline_order_with_comms)
+        forbidden = {
+            B,
+            I,
+            W,
+            SEND_B,
+            RECV_B,
+            WAIT_SEND_B,
+            REDUCE_GRAD,
+            WAIT_REDUCE_GRAD,
+        }
+
+        self.assertTrue(
+            any(
+                action.computation_type in forbidden
+                for actions in training_order.values()
+                for action in actions
+            )
+        )
+        self.assertFalse(
+            any(
+                action.computation_type in forbidden
+                for actions in schedule.eval_pipeline_order_with_comms.values()
+                for action in actions
+            )
+        )
+        self.assertEqual(schedule.pipeline_order_with_comms, training_order)
 
     def test_defer_reduce_grad_wait_lowering(self):
         actions = [

@@ -423,6 +423,18 @@ class FSDPModule:
         return None
 
     @_dynamo_disable
+    def finalize_forward(self) -> None:
+        """Finalize an externally scheduled forward-only iteration.
+
+        Execution engines that explicitly schedule FSDP unshards across
+        multiple modules must call this after the last forward completes. It
+        releases the final all-gather result retained for communication
+        overlap. Ordinary module execution performs this cleanup in FSDP's
+        root post-forward hook.
+        """
+        self._get_fsdp_state()._finalize_forward()
+
+    @_dynamo_disable
     def reset_iter_state(self) -> None:
         """
         Resets FSDP's per-iteration state after an exception aborted a
