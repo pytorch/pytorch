@@ -3505,16 +3505,21 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {length}")
 
         self._set_guard_export_info(guard, code)
+        reason = (
+            f"Container {ref} must have length {length} to reuse this compiled "
+            "version; Dynamo specialized on its number of items."
+        )
+        verbose_code_parts = get_verbose_code_parts(code, guard, recompile_hint=reason)
         if isinstance(value, dict):
             self.get_guard_manager(guard).add_dict_length_check_guard(
                 length,
-                get_verbose_code_parts(code, guard),
+                verbose_code_parts,
                 guard.user_stack,
             )
         else:
             self.get_guard_manager(guard).add_length_check_guard(
                 length,
-                get_verbose_code_parts(code, guard),
+                verbose_code_parts,
                 guard.user_stack,
             )
 

@@ -323,6 +323,27 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             for line in ["len(x) == 2", "len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
 
+    def test_sequence_length_recompile_hint(self):
+        reasons = []
+
+        def fn(x, values):
+            result = x.sin()
+            for value in values:
+                result = result + value
+            return result
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(fn)
+        x = torch.tensor(1.0)
+        compiled(x, [1, 2])
+        compiled(x, [1, 2, 3])
+
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("len(values) == 2", reasons[0])
+        expected_hint = "(HINT: Container values must have length 2 to reuse this compiled version; Dynamo specialized on its number of items.)"
+        self.assertIn(expected_hint, reasons[0])
+
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_recompile_child_run_only(self):
         def f(x, n):
