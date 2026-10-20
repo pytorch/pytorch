@@ -5887,6 +5887,50 @@ class SIMDScheduling(BaseScheduling):
                     )
                 )
 
+        # Without tiling, a read broadcast along the innermost dim (e.g. per-row
+        # statistics) is a per-element gather addressed via `index // inner`;
+        # [outer, inner] tiling loads it once per block row. The coalescing score
+        # does not capture this, so prefer that split over no tiling when the
+        # innermost dim is long and such per-row operands are at least as many
+        # as the inputs streamed along the row. With fewer of them, the saved
+        # gathers do not pay for the partially masked tile at the end of each
+        # row. A per-row read of a buffer that is also streamed does not count.
+        row_split = None
+        iter_vars = list(all_iter_vars)
+        if (
+            reduction_numel == 1
+            and get_max_tiles(default=3) >= 2
+            and len(iter_vars) >= 2
+            and get_hint(ranges[iter_vars[-1]]) >= 1024
+        ):
+            inner_var = iter_vars[-1]
+            reads = coalesce_analysis.norm_read_writes.reads
+            writes = coalesce_analysis.norm_read_writes.writes
+            streamed: OrderedSet[str] = OrderedSet()
+            per_row: OrderedSet[str] = OrderedSet()
+            for index, names in reads.items():
+                if inner_var in index.free_symbols:
+                    streamed.update(names)
+                elif any(v in index.free_symbols for v in iter_vars):
+                    per_row.update(names)
+            per_row -= streamed
+            # 2D tiles address each row by its stride, so rows that are not a
+            # multiple of 16 bytes lose the 128-bit loads and stores the flat
+            # kernel gets.
+            rows_aligned = all(
+                V.graph.sizevars.statically_known_multiple_of(
+                    index.coeff(iter_vars[-2]) * V.graph.get_dtype(name).itemsize, 16
+                )
+                for index, names in itertools.chain(reads.items(), writes.items())
+                if inner_var in index.free_symbols
+                for name in names
+            )
+            if per_row and len(per_row) >= len(streamed) and rows_aligned:
+                row_split = (
+                    process_node_vars(tuple(iter_vars[-2:]), is_pointwise=True),
+                    process_node_vars(is_pointwise=False),
+                )
+
         tilings: list[tuple[CandidateTiling, immutable_dict[str, sympy.Expr], int]] = []
         for pw, red in score_split:
             candidate = CandidateTiling(
@@ -5958,6 +6002,18 @@ class SIMDScheduling(BaseScheduling):
                         torch._inductor.config.triton.max_tiles,
                     )
                     continue
+
+                if cand.tiling == default_tiling and row_split is not None:
+                    pw, red = row_split
+                    row_tiling = cls.create_tiling(pw.splits, red.splits)
+                    if cls.tiling_is_compatible(
+                        node_schedule, pointwise_numel, reduction_numel, row_tiling
+                    ):
+                        return make_selection(
+                            row_tiling,
+                            cls.create_tiling(pw.split_scores, red.split_scores),
+                            pw.coalesced_memory + red.coalesced_memory,
+                        )
 
                 return make_selection(cand.tiling, tiling_score, coalesced_memory)
 
