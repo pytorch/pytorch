@@ -5,7 +5,7 @@ from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
-from torch.distributed import distributed_c10d as c10d, rpc
+from torch.distributed import rpc
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS,
@@ -22,7 +22,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         return TEST_GPU_NUM
 
     def backend(self, device) -> str:
-        return c10d.get_default_backend_for_device(device)
+        return dist.get_default_backend_for_device(device)
 
     def init_pg(self, backend="nccl"):
         # Ask the distributed framework rather than matching a fixed list, so a
@@ -109,8 +109,11 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
         device_type = getattr(self, "device_type", None)
         # Avoid shadowing the outer backend parameter used by legacy callers.
         backend_name = self.backend(device_type) if device_type is not None else backend
-        if torch.accelerator.is_available() and backend_name != dist.Backend.GLOO:
-            if torch.accelerator.device_count() < self.world_size:
+        if backend_name != dist.Backend.GLOO:
+            if (
+                not torch.accelerator.is_available()
+                or torch.accelerator.device_count() < self.world_size
+            ):
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend_name)
         func(self, *args, **kwargs)
