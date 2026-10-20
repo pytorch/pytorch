@@ -314,11 +314,11 @@ _device_mapping: dict[str, DeviceInfo] = {
             # Matrix engine
             torch.float16: 355.5,
             torch.bfloat16: 355.5,
-            # not supported, fall back to float32 numbers
-            torch.float8_e8m0fnu: 22.2,
-            torch.float8_e4m3fnuz: 22.2,
-            torch.float8_e5m2: 22.2,
-            torch.float8_e5m2fnuz: 22.2,
+            # no native fp8, fp8 matmuls run at the fp16 rate
+            torch.float8_e8m0fnu: 355.5,
+            torch.float8_e4m3fnuz: 355.5,
+            torch.float8_e5m2: 355.5,
+            torch.float8_e5m2fnuz: 355.5,
             torch.int8: 711.1,
         },
         dram_bw_gbs=1228.8,
