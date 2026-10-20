@@ -3,8 +3,6 @@
 import io
 from numbers import Number
 
-import pytest
-
 import torch
 from torch.autograd import grad
 from torch.autograd.functional import jacobian
@@ -16,7 +14,6 @@ from torch.distributions import (
     TransformedDistribution,
 )
 from torch.distributions.transforms import (
-    _InverseTransform,
     AbsTransform,
     AffineTransform,
     ComposeTransform,
@@ -130,18 +127,6 @@ def reshape_transform(transform, shape):
     if isinstance(transform.inv, ComposeTransform):
         return reshape_transform(transform.inv, shape).inv
     return transform
-
-
-# Generate pytest ids
-def transform_id(x):
-    if not isinstance(x, Transform):
-        raise AssertionError(f"Expected Transform, got {type(x)}")
-    name = (
-        f"Inv({type(x._inv).__name__})"
-        if isinstance(x, _InverseTransform)
-        else f"{type(x).__name__}"
-    )
-    return f"{name}(cache_size={x._cache_size})"
 
 
 def generate_data(transform):
@@ -633,64 +618,66 @@ class TestTransformedDistribution(TestCase):
             raise AssertionError("Loaded distribution log_prob does not match original")
 
 
-@pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_fwd(transform):
-    x = generate_data(transform).requires_grad_()
+class TestJitTransforms(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
-    def f(x):
-        return transform(x)
+    @parametrize("transform", TRANSFORMS_CACHE_INACTIVE)
+    def test_jit_fwd(self, transform):
+        x = generate_data(transform).requires_grad_()
 
-    try:
-        traced_f = torch.jit.trace(f, (x,))
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
+        def f(x):
+            return transform(x)
 
-    # check on different inputs
-    x = generate_data(transform).requires_grad_()
-    if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
-        raise AssertionError("JIT forward output does not match")
+        try:
+            traced_f = torch.jit.trace(f, (x,))
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
 
+        # check on different inputs
+        x = generate_data(transform).requires_grad_()
+        if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
+            raise AssertionError("JIT forward output does not match")
 
-@pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_inv(transform):
-    y = generate_data(transform.inv).requires_grad_()
+    @parametrize("transform", TRANSFORMS_CACHE_INACTIVE)
+    def test_jit_inv(self, transform):
+        y = generate_data(transform.inv).requires_grad_()
 
-    def f(y):
-        return transform.inv(y)
+        def f(y):
+            return transform.inv(y)
 
-    try:
-        traced_f = torch.jit.trace(f, (y,))
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
+        try:
+            traced_f = torch.jit.trace(f, (y,))
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
 
-    # check on different inputs
-    y = generate_data(transform.inv).requires_grad_()
-    if not torch.allclose(f(y), traced_f(y), atol=1e-5, equal_nan=True):
-        raise AssertionError("JIT inverse output does not match")
+        # check on different inputs
+        y = generate_data(transform.inv).requires_grad_()
+        if not torch.allclose(f(y), traced_f(y), atol=1e-5, equal_nan=True):
+            raise AssertionError("JIT inverse output does not match")
 
+    @parametrize("transform", TRANSFORMS_CACHE_INACTIVE)
+    def test_jit_jacobian(self, transform):
+        x = generate_data(transform).requires_grad_()
 
-@pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_jit_jacobian(transform):
-    x = generate_data(transform).requires_grad_()
+        def f(x):
+            y = transform(x)
+            return transform.log_abs_det_jacobian(x, y)
 
-    def f(x):
-        y = transform(x)
-        return transform.log_abs_det_jacobian(x, y)
+        try:
+            traced_f = torch.jit.trace(f, (x,))
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
 
-    try:
-        traced_f = torch.jit.trace(f, (x,))
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-
-    # check on different inputs
-    x = generate_data(transform).requires_grad_()
-    if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
-        raise AssertionError("JIT jacobian output does not match")
+        # check on different inputs
+        x = generate_data(transform).requires_grad_()
+        if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
+            raise AssertionError("JIT jacobian output does not match")
 
 
 instantiate_parametrized_tests(TestTransforms)
 instantiate_parametrized_tests(TestComposeTransform)
 instantiate_parametrized_tests(TestTransformedDistribution)
+instantiate_parametrized_tests(TestJitTransforms)
 
 
 if __name__ == "__main__":
