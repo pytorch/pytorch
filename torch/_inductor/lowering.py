@@ -7544,7 +7544,16 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     if return_mean:
         x_mean.realize()
 
-    diffs = square(sub(x, x_mean))
+    # Take the residuals against an element of the reduction (its maximum)
+    # rather than against `x_mean`: subtracting an input value keeps the
+    # residuals exact when all inputs are equal, so the variance is exactly
+    # zero like with Welford's algorithm. Residuals against `x_mean` square
+    # the rounding error of the mean into the result; three float32 values of
+    # 7.5e10 reported a variance of 2^26 instead of 0.
+    x_shift = reduce_amax(x, axis, keepdims=True)
+    dx = sub(x, x_shift)
+    dx_mean = mean(dx, axis, keepdim=True)
+    diffs = square(sub(dx, dx_mean))
     sum_result = sum_(diffs, axis, keepdim)
 
     denom = sympy_product(size[i] for i in axis)
