@@ -2516,7 +2516,7 @@ test_torchinductor.instantiate_device_type_tests_from_templates(
     globals(),
     templates=(CommonTemplate,),
     test_decorator=onlyAccelerator,
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -2540,7 +2540,7 @@ test_torchinductor.instantiate_device_type_tests_from_templates(
 instantiate_device_type_tests(
     TestTilingExtra,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
