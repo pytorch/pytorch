@@ -305,6 +305,12 @@ def autotune_hints_to_configs(
                 )
                 for xyz in xyz_options
             )
+        elif hint == AutotuneHint.ONE_WARP_WIDE_TILE:
+            # 64 elements per thread; triton_config would raise this to 4 warps.
+            if len(size_hints) == 2 and size_hints["x"] >= 2048:
+                configs.append(
+                    Config({"XBLOCK": 2048, "YBLOCK": 1}, num_warps=1, num_stages=1)
+                )
 
     return configs
 

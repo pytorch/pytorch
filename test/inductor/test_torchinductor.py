@@ -22975,6 +22975,98 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        @unittest.skipIf(
+            not (
+                torch.cuda.is_available()
+                and torch.version.hip is None
+                and torch.cuda.get_device_capability()[0] == 10
+            ),
+            "exp_f32x2 needs sm_10x",
+        )
+        def test_exp_f32x2_matches_libdevice_exp(self):
+            import torch._inductor.codegen.triton as triton_codegen
+
+            def exp(x):
+                return torch.exp(x)
+
+            def exp_neg(x):
+                return torch.exp(-x)
+
+            x = torch.randn(1024, device=GPU_TYPE)
+            _, code = run_and_get_code(torch.compile(exp), x)
+            self.assertIn("triton_helpers.exp_f32x2(", " ".join(code))
+            # 2D pointwise kernels using the paired exp also try the one-warp
+            # wide config.
+            self.assertNotIn("ONE_WARP_WIDE_TILE", " ".join(code))
+            torch._dynamo.reset()
+            _, code = run_and_get_code(
+                torch.compile(lambda x, m: torch.exp(x - m)),
+                torch.randn(64, 4096, device=GPU_TYPE),
+                torch.randn(64, 1, device=GPU_TYPE),
+            )
+            self.assertIn("ynumel", " ".join(code))
+            self.assertIn("AutotuneHint.ONE_WARP_WIDE_TILE", " ".join(code))
+            # exp(-x) folds the negation into the helper.
+            torch._dynamo.reset()
+            _, code = run_and_get_code(torch.compile(exp_neg), x)
+            self.assertRegex(" ".join(code), r"exp_f32x2\(tmp\d+, True\)")
+            with config.patch({"eager_numerics.disable_ftz": True}):
+                torch._dynamo.reset()
+                _, code = run_and_get_code(torch.compile(exp), x)
+                self.assertNotIn("exp_f32x2", " ".join(code))
+
+            # Bitwise equal to libdevice.exp for every float32 bit pattern.
+            chunk = 1 << 26
+            bits = torch.arange(chunk, device=GPU_TYPE, dtype=torch.int64)
+            for fn in (exp, exp_neg):
+                torch._dynamo.reset()
+                paired = torch.compile(fn, dynamic=False)
+                x = bits.to(torch.int32).view(torch.float32)
+                _, code = run_and_get_code(paired, x)
+                self.assertIn("exp_f32x2", " ".join(code))
+                reference = torch.compile(lambda x: fn(x), dynamic=False)
+                # Compile the reference without caches: its graph equals
+                # `paired`'s, and the cache key does not see the patched choice.
+                with (
+                    unittest.mock.patch.object(
+                        triton_codegen, "_use_exp_f32x2", lambda: False
+                    ),
+                    config.patch(force_disable_caches=True),
+                ):
+                    _, code = run_and_get_code(reference, x)
+                self.assertNotIn("exp_f32x2", " ".join(code))
+                for start in range(0, 1 << 32, chunk):
+                    x = (bits + start).to(torch.int32).view(torch.float32)
+                    self.assertTrue(
+                        torch.equal(
+                            paired(x).view(torch.int32), reference(x).view(torch.int32)
+                        )
+                    )
+
+            # Scalars use the helper's libdevice.exp branch; float64 is not paired.
+            for fn in (exp, exp_neg):
+                for inp in (
+                    torch.tensor(0.5, device=GPU_TYPE),
+                    torch.tensor([0.5, -3.0, 20.0], device=GPU_TYPE).double(),
+                ):
+                    torch._dynamo.reset()
+                    result, code = run_and_get_code(torch.compile(fn), inp)
+                    self.assertEqual(result, fn(inp), atol=0, rtol=0)
+                    if inp.dtype == torch.float64:
+                        self.assertNotIn("exp_f32x2", " ".join(code))
+
+            # Persistent reductions that also generate random numbers keep
+            # libdevice.exp (the paired asm makes them spill).
+            def softmax_dropout(x):
+                return torch.nn.functional.dropout(torch.softmax(x, -1), 0.1)
+
+            torch._dynamo.reset()
+            _, code = run_and_get_code(
+                torch.compile(softmax_dropout), torch.randn(64, 512, device=GPU_TYPE)
+            )
+            self.assertIn("persistent_reduction", " ".join(code))
+            self.assertNotIn("exp_f32x2", " ".join(code))
+
         def test_cross_entropy_backward_has_no_class_reduction(self):
             # nll_loss_backward's one-hot gradient is summed over the classes by
             # log_softmax_backward; that sum must fold to the selected term.
