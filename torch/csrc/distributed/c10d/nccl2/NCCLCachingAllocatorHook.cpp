@@ -96,7 +96,7 @@ void NCCLCachingAllocatorHook::regDeregMem(
         !registeredMemMap_.count(addr), "Memory already registered with NCCL");
     registeredMemMap_.emplace(addr, MemInfo{len, te.device_});
     for (auto* comm : commsForDevice(registeredComms_, te.device_)) {
-      comm->register_address(addr, len);
+      comm->register_address(addr, len, te.mempool_);
     }
   } else if (
       te.action_ ==
