@@ -17,8 +17,6 @@ import torch._inductor.test_case
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._dynamo import config as dynamo_config
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
     triton_kernel_wrapper_functional,
@@ -248,20 +246,6 @@ class _TritonDeviceTestCase(torch._inductor.test_case.TestCase):
     def setUp(self):
         if not HAS_TRITON:
             self.skipTest("requires triton")
-
-        device = self.get_primary_device()
-        try:
-            device_interface = get_interface_for_device(torch.device(device).type)
-        except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-
-        if not device_interface.is_triton_capable(device):
-            raise unittest.SkipTest(f"requires Triton support for {device}")
-
-        try:
-            device_interface.raise_if_triton_unavailable(device)
-        except TritonUnavailableError as exc:
-            raise unittest.SkipTest(str(exc)) from exc
 
         super().setUp()
 
