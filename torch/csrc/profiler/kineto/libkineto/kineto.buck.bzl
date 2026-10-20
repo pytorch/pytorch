@@ -36,7 +36,7 @@ def define_kineto():
             ":base_logger",
             ":libkineto_api",
             ":thread_util",
-            ":fmt",
+            "//third_party:fmt",
         ],
     )
 
@@ -59,7 +59,7 @@ def define_kineto():
             ":base_logger",
             ":config_loader",
             ":thread_util",
-            ":fmt",
+            "//third_party:fmt",
         ],
     )
 
@@ -100,7 +100,7 @@ def define_kineto():
         exported_deps = [
             ":logger",
             ":thread_util",
-            ":fmt",
+            "//third_party:fmt",
         ],
     )
 
@@ -123,7 +123,7 @@ def define_kineto():
         ],
         exported_deps = [
             ":thread_util",
-            ":fmt",
+            "//third_party:fmt",
         ],
     )
 
@@ -162,7 +162,7 @@ def define_kineto():
             "kineto/libkineto/include/ThreadUtil.h",
         ],
         exported_deps = [
-            ":fmt",
+            "//third_party:fmt",
         ],
     )
 
