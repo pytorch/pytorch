@@ -30,6 +30,8 @@ class TritonBundleEntry:
     kernel_hash: str
     device: int
     directory: str
+    # id() of the CachingAutotuner that compiled this kernel
+    owner: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +110,8 @@ class TritonBundler:
     _entries: list[TritonBundleEntry] | None = None
     _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
     _winners: OrderedSet[str] | None = None
+    # Owners (see TritonBundleEntry.owner) that recorded at least one winner
+    _tuned_owners: OrderedSet[int] | None = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -147,6 +151,7 @@ class TritonBundler:
         cls._entries = []
         cls._static_autotuners = []
         cls._winners = OrderedSet()
+        cls._tuned_owners = OrderedSet()
 
     @classmethod
     def end_compile(cls) -> None:
@@ -158,28 +163,26 @@ class TritonBundler:
         cls._entries = None
         cls._static_autotuners = None
         cls._winners = None
+        cls._tuned_owners = None
 
     @classmethod
-    def put(cls, kernel_hash: str, device: int) -> None:
+    def put(cls, kernel_hash: str, device: int, owner: int | None = None) -> None:
         """
         Lazily observes that we have seen a Triton kernel compilation. Remembers
         it for when collect is later called.
         """
         if (entries := cls._entries) is not None:
             entries.append(
-                TritonBundleEntry(kernel_hash, device, triton_cache_dir(device))
+                TritonBundleEntry(kernel_hash, device, triton_cache_dir(device), owner)
             )
 
     @classmethod
-    def put_winner(cls, kernel_hash: str) -> None:
-        """
-        Marks a kernel hash as a winning autotuning config. Only winning
-        kernels are included in the bundle by collect(). If no winners are
-        recorded (e.g. single-config kernels that skip autotuning), all
-        entries are bundled.
-        """
-        if cls._winners is not None:
+    def put_winner(cls, kernel_hash: str, owner: int | None = None) -> None:
+        """Marks kernel_hash as owner's winner; collect() drops its other configs."""
+        if cls._winners is not None and cls._tuned_owners is not None:
             cls._winners.add(kernel_hash)
+            if owner is not None:
+                cls._tuned_owners.add(owner)
 
     @classmethod
     def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
@@ -261,6 +264,31 @@ class TritonBundler:
                 kernel_names.append(result.kernel_name)
         return kernel_names
 
+    @staticmethod
+    def _prune_to_winner(
+        autotuner: StaticallyLaunchedAutotuner, winners: OrderedSet[str]
+    ) -> StaticallyLaunchedAutotuner:
+        """Return a copy of the pre-autotuning snapshot holding only the winner."""
+        compile_results = autotuner.kernel.compile_results
+        kept = [
+            compile_result
+            for compile_result in compile_results
+            if triton_hash_to_path_key(compile_result.kernel.hash) in winners
+        ]
+        if not kept:
+            # No winner yet, or it was found later (coordesc, rblock scaling)
+            log.debug("Not pruning static autotuner %s", autotuner.kernel_name)
+            return autotuner
+        if len(kept) == len(compile_results):
+            return autotuner
+        kernel = copy.copy(autotuner.kernel)
+        # The autotune cache entry is keyed on the full config list
+        kernel.autotune_cache_configs = [
+            compile_result.config for compile_result in compile_results
+        ]
+        kernel.compile_results = kept
+        return dataclasses.replace(autotuner, kernel=kernel)
+
     @classmethod
     def collect(
         cls,
@@ -282,8 +310,7 @@ class TritonBundler:
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
             if entries is not None:
-                # Collect the statically launchable autotuners first: what
-                # they reference decides what the bundle has to contain.
+                # What the static autotuners reference must be bundled
                 if config.use_static_triton_launcher:
                     static_autotuners, static_kernel_names = (
                         cls.collect_static_autotuners()
@@ -291,33 +318,24 @@ class TritonBundler:
                 else:
                     static_autotuners = []
                     static_kernel_names = []
-                winners = cls._winners
-                # load_autotuners() will ask for everything saved; prune to winner
-                required: OrderedSet[str] = OrderedSet()
-                for autotuner in static_autotuners:
-                    if winners:
-                        kept = [
-                            compile_result
-                            for compile_result in autotuner.kernel.compile_results
-                            if triton_hash_to_path_key(compile_result.kernel.hash)
-                            in winners
-                        ]
-                        if kept:
-                            autotuner.kernel.compile_results = kept
-                    for compile_result in autotuner.kernel.compile_results:
-                        required.add(
-                            triton_hash_to_path_key(compile_result.kernel.hash)
-                        )
-                # Only bundle winning autotuning configs. If _winners is
-                # non-empty, skip entries whose kernel_hash is neither a winner
-                # nor referenced by a saved autotuner. When _winners is empty
-                # (single-config kernels, or no autotuning ran), bundle
-                # everything.
+                winners = cls._winners or OrderedSet()
+                tuned_owners = cls._tuned_owners or OrderedSet()
+                static_autotuners = [
+                    cls._prune_to_winner(autotuner, winners)
+                    for autotuner in static_autotuners
+                ]
+                # load_autotuners() discards an autotuner missing any binary
+                required: OrderedSet[str] = OrderedSet(
+                    triton_hash_to_path_key(compile_result.kernel.hash)
+                    for autotuner in static_autotuners
+                    for compile_result in autotuner.kernel.compile_results
+                )
+                # Skip an entry only if its own kernel recorded a different winner
                 result: list[TritonKernelArtifacts] = []
                 kernel_names: list[str] = []
                 for entry in entries:
                     if (
-                        winners
+                        entry.owner in tuned_owners
                         and entry.kernel_hash not in winners
                         and entry.kernel_hash not in required
                     ):
