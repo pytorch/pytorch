@@ -2,7 +2,9 @@
 // Adapted from kernels-community/metal-flash-sdpa, which is itself
 // adapted from MLX.
 // Uses simdgroup-matrix MMA for high throughput; supports causal mask,
-// optional additive/bool mask, GQA/MQA and softcapping.
+// optional additive/bool mask, GQA/MQA and any head dim: BD is the padded
+// tile width, the QK dim is accumulated in BD-wide chunks and V/O carry a
+// real width Dv <= BD.
 // Operates on PyTorch's dense [B, H, L, D] layout via per-tensor strides.
 //
 // Included from Attention.metal — no top-level includes / `using` here so the
@@ -10,7 +12,7 @@
 // one bundled section), so Attention.mm only needs a single library handle.
 #pragma once
 
-#include <c10/metal/common.h>
+#include <ATen/native/mps/kernels/Attention.h>
 
 #define PREFILL_CONST static constant constexpr const
 #define PREFILL_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
@@ -45,7 +47,6 @@ template <
     short BCOLS,
     short kDstStrRow,
     short kDstStrCol,
-    short reduction_dim,
     short tgp_size,
     short n_reads = (BCOLS * BROWS) / (tgp_size),
     short TCOLS = BCOLS / n_reads,
@@ -55,7 +56,6 @@ struct BlockLoaderT {
   PREFILL_CONST short vec_size = n_reads;
 
   const int src_ld;
-  const int tile_stride;
 
   const short thread_idx;
   const short bi;
@@ -65,18 +65,29 @@ struct BlockLoaderT {
   const device T* src;
 
   METAL_FUNC BlockLoaderT(
-      const device T* src_,
       const int src_ld_,
       threadgroup T* dst_,
       ushort simd_group_id [[simdgroup_index_in_threadgroup]],
       ushort simd_lane_id [[thread_index_in_simdgroup]])
       : src_ld(src_ld_),
-        tile_stride(reduction_dim ? BCOLS : BROWS * src_ld),
         thread_idx(simd_group_id * 32 + simd_lane_id),
         bi(thread_idx / TCOLS),
         bj(vec_size * (thread_idx % TCOLS)),
         dst(dst_ + bi * kDstStrRow + bj * kDstStrCol),
-        src(src_ + bi * src_ld + bj) {}
+        src(nullptr) {}
+
+  METAL_FUNC void seek(const device T* src_) {
+    src = src_ + bi * src_ld + bj;
+  }
+
+  // Loads the tile, zero-filling past src_tile_dim (cols, rows) when partial.
+  METAL_FUNC void load(short2 src_tile_dim) const {
+    if (src_tile_dim.x < BCOLS || src_tile_dim.y < BROWS) {
+      load_safe(src_tile_dim);
+    } else {
+      load_unsafe();
+    }
+  }
 
   METAL_FUNC void load_unsafe() const {
     PREFILL_PRAGMA_UNROLL
@@ -124,10 +135,6 @@ struct BlockLoaderT {
         dst[i * kDstStrRow + j * kDstStrCol] = tmp_val[j];
       }
     }
-  }
-
-  METAL_FUNC void next() {
-    src += tile_stride;
   }
 };
 
@@ -243,7 +250,8 @@ struct BaseMMAFrag<T, 8, 8> {
       LimX lim_x,
       LimY lim_y,
       OffX off_x = Int<0>{},
-      OffY off_y = Int<0>{}) {
+      OffY off_y = Int<0>{},
+      T fill = T(0)) {
     PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kElemRows; i++) {
       PREFILL_PRAGMA_UNROLL
@@ -252,7 +260,7 @@ struct BaseMMAFrag<T, 8, 8> {
           dst[i * kElemCols + j] = static_cast<T>(
               src[(off_x + i) * str_x + (off_y + j) * str_y.value]);
         } else {
-          dst[i * kElemCols + j] = T(0);
+          dst[i * kElemCols + j] = fill;
         }
       }
     }
@@ -518,514 +526,620 @@ METAL_FUNC void tile_matmad(
   }
 }
 
-struct PrefillAttnParams {
-  int B; // batch size
-  int H; // number of query heads
-  int D; // head dim
-  int qL; // query sequence length
-  int kL; // key sequence length
-  int gqa_factor; // num_q_heads / num_kv_heads
-  float scale;
-  float softcapping;
-  // Strides (B, H, L) - element stride in last dim is assumed to be 1.
-  // 64-bit: a batch/head stride is a product of the other dimensions and
-  // overflows 32 bits on large inputs, and the mask qL stride is multiplied
-  // by an absolute query position, reaching qL * kL.
-  int64_t Q_strides[3];
-  int64_t K_strides[3];
-  int64_t V_strides[3];
-  int64_t O_strides[3];
-};
+PREFILL_CONST int kFragSize = 8;
+PREFILL_CONST int kPrefillThreads = kPrefillSimdgroups * 32;
+PREFILL_CONST int kThreadgroupMemoryBytes = 32768; // per threadgroup
 
-struct PrefillAttnMaskParams {
-  int64_t M_strides[4]; // (B, H, qL, kL)
-};
+// Output element type: the input dtype, or fp32 partial rows under split-K.
+template <typename T, bool SPLIT>
+using PrefillOutT = metal::conditional_t<SPLIT, float, T>;
 
+// State of one prefill threadgroup: the Q block of a (batch, head) at `tid`,
+// its share of the K blocks under split-K, and the running softmax of this
+// simdgroup's kFragSize rows. The kernels below compose the fused pass and
+// the staged score-writing / P @ V passes from its steps.
 template <
     typename T,
-    int BQ,
     int BK,
     int BD,
-    int WM,
-    int WN,
     bool HAS_MASK,
     bool DO_CAUSAL,
-    typename MaskType = float>
-[[kernel, max_total_threads_per_threadgroup(WM* WN * 32)]] void
-prefill_attention(
-    const device T* Q [[buffer(0)]],
-    const device T* K [[buffer(1)]],
-    const device T* V [[buffer(2)]],
-    device T* O [[buffer(3)]],
-    const constant PrefillAttnParams* params [[buffer(4)]],
-    const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
-    const device MaskType* mask [[buffer(6)]],
-    uint simd_lane_id [[thread_index_in_simdgroup]],
-    uint simd_group_id [[simdgroup_index_in_threadgroup]],
-    uint3 tid [[threadgroup_position_in_grid]],
-    uint3 lid [[thread_position_in_threadgroup]]) {
-  (void)lid;
+    bool CHUNKED, // QK dim wider than BD, accumulated in BD-wide chunks
+    bool SPLIT, // split-K launch: O holds fp32 partial rows [row][split][BD]
+    bool PV, // P @ V pass: no Q tile, V/O slabs along the grid's z dim
+    typename MaskType>
+struct PrefillBlock {
   using AccumType = c10::metal::accum_t<T>;
-  constexpr bool has_mask = HAS_MASK;
-  constexpr bool do_causal = DO_CAUSAL;
-
-  const int batch_idx = tid.z;
-  const int head_idx = tid.y;
-  const int block_idx = tid.x;
-
-  const int q_seq_len = params->qL;
-  const int k_seq_len = params->kL;
-
-  if (block_idx * BQ >= q_seq_len) {
-    return;
-  }
-
-  const ulong kv_head_idx = head_idx / params->gqa_factor;
-
-  // Stride-based pointer offsets for [B, H, L, D] layout.
-  Q += batch_idx * params->Q_strides[0] + head_idx * params->Q_strides[1] +
-      (block_idx * BQ) * params->Q_strides[2];
-  K += batch_idx * params->K_strides[0] + kv_head_idx * params->K_strides[1];
-  V += batch_idx * params->V_strides[0] + kv_head_idx * params->V_strides[1];
-  O += batch_idx * params->O_strides[0] + head_idx * params->O_strides[1] +
-      (block_idx * BQ) * params->O_strides[2];
-
-  if IF_CONSTEXPR (has_mask) {
-    mask += batch_idx * mask_params->M_strides[0] +
-        head_idx * mask_params->M_strides[1];
-  }
-
-  // Threadgroup memory (with padding to avoid bank conflicts).
-  constexpr short padQ = 16 / sizeof(T);
-  constexpr short padK = 16 / sizeof(T);
-  constexpr short padV = 16 / sizeof(T);
-
-  constexpr short LDQ_tgp = BD + padQ;
-  constexpr short LDK_tgp = BK + padK;
-  constexpr short LDV_tgp = BD + padV;
-
-  constexpr short tgp_mem_0 = (BK + padK) * (BD);
-  constexpr short tgp_mem_1 = BK * (BD + padV);
-  constexpr short tgp_mem_s = tgp_mem_0 > tgp_mem_1 ? tgp_mem_0 : tgp_mem_1;
-
-  threadgroup T Q_smem[BQ * (BD + padQ)];
-  threadgroup T KV_smem[tgp_mem_s];
-
-  threadgroup T* Qs = Q_smem;
-  threadgroup T* Ks = KV_smem;
-  threadgroup T* Vs = KV_smem;
-
-  // Q / K / V loaders. K is loaded transposed.
-  using QBlockLoader = BlockLoaderT<T, BQ, BD, LDQ_tgp, 1, 1, WM * WN * 32>;
-  using KBlockLoader = BlockLoaderT<T, BK, BD, 1, LDK_tgp, 0, WM * WN * 32>;
-  using VBlockLoader = BlockLoaderT<T, BK, BD, LDV_tgp, 1, 0, WM * WN * 32>;
-
-  // Stride between consecutive sequence rows for Q/K/V/O.
-  // Narrowed back to 32-bit: these only ever multiply in-tile offsets, the
-  // base pointers having already been advanced.
-  const int q_seq_stride = int(params->Q_strides[2]);
-  const int k_seq_stride = int(params->K_strides[2]);
-  const int v_seq_stride = int(params->V_strides[2]);
-  const int o_seq_stride = int(params->O_strides[2]);
-
-  QBlockLoader loader_q(Q, q_seq_stride, Qs, simd_group_id, simd_lane_id);
-  KBlockLoader loader_k(K, k_seq_stride, Ks, simd_group_id, simd_lane_id);
-  VBlockLoader loader_v(V, v_seq_stride, Vs, simd_group_id, simd_lane_id);
-
-  // Apply softcapping by scaling the inputs before tanh.
-  float adjusted_scale = params->scale;
-  if (params->softcapping != 1.0f) {
-    adjusted_scale = params->scale / params->softcapping;
-  }
-  // 1.44269504089 = 1 / ln(2) so we can use exp2 instead of exp. Scale the
-  // scores in AccumType, not Q in T: rounding the scale and the scaled Q to
-  // the input dtype compounds into a visible error at large scales.
-  const AccumType scale2 = adjusted_scale * 1.44269504089f;
-
-  constexpr short kFragSize = 8;
+  using OutT = PrefillOutT<T, SPLIT>;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
+  using MaskElem =
+      metal::conditional_t<is_same_v<MaskType, bool>, bool, AccumType>;
+  using MaskFrag = BaseMMAFrag<MaskElem, kFragSize, kFragSize>;
+  PREFILL_CONST int BQ = kPrefillBQ;
+  PREFILL_CONST int TK = BK / kFragSize;
+  PREFILL_CONST int TD = BD / kFragSize;
+  using STile = MMATile<AccumType, 1, TK, MMAFrag_acc_t>;
+  using OTile = MMATile<AccumType, 1, TD, MMAFrag_acc_t>;
+  PREFILL_CONST short kRowsPT = STile::kRowsPerThread;
 
-  constexpr int kNWarps = WM * WN;
-  static_assert(
-      BQ >= (kNWarps * kFragSize) && BQ % (kNWarps * kFragSize) == 0,
-      "Each simdgroup must host at least 1 simdgroup matrix along Q sequence.");
+  // Threadgroup tiles, padded against bank conflicts when that still fits
+  // the memory limit (it does not for the fp32 192 tile). K is staged
+  // transposed; V reuses its tile, the two are never resident together.
+  PREFILL_CONST short pad0 = 16 / sizeof(T);
+  PREFILL_CONST int kv_padded = (BK + pad0) * BD > (BD + pad0) * BK
+      ? (BK + pad0) * BD
+      : (BD + pad0) * BK;
+  PREFILL_CONST short pad =
+      sizeof(T) * ((PV ? 0 : BQ * (BD + pad0)) + kv_padded) <=
+          kThreadgroupMemoryBytes
+      ? pad0
+      : 0;
+  PREFILL_CONST short LDQ = BD + pad;
+  PREFILL_CONST short LDK = BK + pad;
+  PREFILL_CONST short LDV = BD + pad;
+  PREFILL_CONST int kQSmem = PV ? 1 : BQ * LDQ;
+  PREFILL_CONST int kKVSmem = LDK * BD > LDV* BK ? LDK* BD : LDV* BK;
+  using QLoader = BlockLoaderT<T, BQ, BD, LDQ, 1, kPrefillThreads>;
+  using KLoader = BlockLoaderT<T, BK, BD, 1, LDK, kPrefillThreads>;
+  using VLoader = BlockLoaderT<T, BK, BD, LDV, 1, kPrefillThreads>;
 
-  constexpr int TQ = BQ / (kNWarps * kFragSize);
-  constexpr int TK = BK / kFragSize;
-  constexpr int TD = BD / kFragSize;
-
-  static_assert(TQ == 1, "Check TQ");
-
-  MMATile<AccumType, TQ, 1, MMAFrag_acc_t> Qtile;
-  MMATile<AccumType, 1, TK, MMAFrag_acc_t> Ktile;
-  MMATile<AccumType, TQ, TK, MMAFrag_acc_t> Stile;
-  MMATile<AccumType, 1, 1, MMAFrag_acc_t> Vtile;
-  MMATile<AccumType, TQ, TD, MMAFrag_acc_t> Otile;
-
-  Otile.clear();
-
-  const short2 simd_coord = MMAFrag_acc_t::get_coord(simd_lane_id);
-  const short sm = simd_coord.y;
-  const short sn = simd_coord.x;
-  const short tm = kFragSize * TQ * simd_group_id;
-
-  const short Qs_offset = (tm + sm) * LDQ_tgp + sn;
-  const short Ks_offset = sm * LDK_tgp + sn;
-  const short Vs_offset = sm * LDV_tgp + sn;
-
-  constexpr short Qs_tile_stride = kFragSize;
-  constexpr short Ks_tile_stride = kFragSize * LDK_tgp;
-
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // Load Q block (with safe load if last block is partial).
-  const int q_block_end = min(block_idx * BQ + BQ, q_seq_len);
-  const int q_block_size = q_block_end - block_idx * BQ;
-
-  if (q_block_size < BQ) {
-    loader_q.load_safe(short2(BD, q_block_size));
-  } else {
-    loader_q.load_unsafe();
-  }
-
-  constexpr short kRowsPT = decltype(Stile)::kRowsPerThread;
-
+  const device T* Q;
+  const device T* K;
+  const device T* V;
+  device OutT* O;
+  const device MaskType* mask;
+  const constant PrefillAttnMaskParams* mask_params;
+  threadgroup T* Qs;
+  threadgroup T* KVs;
+  QLoader loader_q;
+  KLoader loader_k;
+  VLoader loader_v;
+  STile Stile;
+  OTile Otile;
   AccumType max_score[kRowsPT];
-  AccumType sum_score[kRowsPT] = {0};
+  AccumType sum_score[kRowsPT];
+  AccumType scale2; // scale * log2(e): the softmax runs on exp2
+  int block_idx, n_splits, q_seq_len, k_seq_len, D, Dv;
+  int q_block_size; // valid rows of this Q block
+  int kb0, kb1; // K blocks of this split
+  int k_seq_stride, v_seq_stride, o_seq_stride, o_cols;
+  short tm, sm, sn; // this simdgroup's first row; this thread's fragment coords
+  short qs_off, ks_off, vs_off; // this thread's fragment origin in the tiles
+  int rows_left; // valid rows from this thread's fragment row
+  int row0; // this simdgroup's first row, flat over batch, head and query
+  int part0; // (row0, split) in the split-K row stats
 
-  PREFILL_PRAGMA_UNROLL
-  for (short i = 0; i < kRowsPT; ++i) {
-    max_score[i] = -INFINITY;
-  }
-
-  // Causal masking can shorten the K range. PyTorch convention is upper-left
-  // alignment: query at row r attends to keys at cols 0..r, regardless of qL
-  // vs kL. So the last query in this block (row block_idx*BQ + q_block_size-1)
-  // attends to cols 0..(block_idx*BQ + q_block_size - 1).
-  int kb_lim = c10::metal::ceil_div(k_seq_len, BK);
-  if IF_CONSTEXPR (do_causal) {
-    int max_col = block_idx * BQ + q_block_size; // exclusive upper bound
-    kb_lim = min(kb_lim, c10::metal::ceil_div(max_col, BK));
-  }
-
-  for (int kb = 0; kb < kb_lim; kb++) {
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    const int k_block_end = min(kb * BK + BK, k_seq_len);
-    const int k_block_size = k_block_end - kb * BK;
-
-    if (k_block_size < BK) {
-      loader_k.load_safe(short2(BD, k_block_size));
-    } else {
-      loader_k.load_unsafe();
+  METAL_FUNC PrefillBlock(
+      const device T* Q_,
+      const device T* K_,
+      const device T* V_,
+      device OutT* O_,
+      const constant PrefillAttnParams* params,
+      const constant PrefillAttnMaskParams* mask_params_,
+      const device MaskType* mask_,
+      threadgroup T* Qs_,
+      threadgroup T* KVs_,
+      uint simd_lane_id,
+      uint simd_group_id,
+      uint3 tid)
+      : mask_params(mask_params_),
+        Qs(Qs_),
+        KVs(KVs_),
+        loader_q(int(params->Q_strides[2]), Qs_, simd_group_id, simd_lane_id),
+        loader_k(int(params->K_strides[2]), KVs_, simd_group_id, simd_lane_id),
+        loader_v(int(params->V_strides[2]), KVs_, simd_group_id, simd_lane_id) {
+    n_splits = params->n_splits;
+    int slab = 0;
+    int batch_split = tid.z;
+    if IF_CONSTEXPR (PV) {
+      const int batch_splits = params->B * n_splits;
+      slab = tid.z / batch_splits;
+      batch_split = tid.z - slab * batch_splits;
     }
+    const int batch_idx = batch_split / n_splits;
+    const int split = batch_split - batch_idx * n_splits;
+    const int head_idx = tid.y;
+    const int kv_head_idx = head_idx / params->gqa_factor;
+    block_idx = tid.x;
+    q_seq_len = params->qL;
+    k_seq_len = params->kL;
+    D = params->D;
+    Dv = params->Dv;
+    Q = Q_ + batch_idx * params->Q_strides[0] +
+        head_idx * params->Q_strides[1] + block_idx * BQ * params->Q_strides[2];
+    mask = mask_;
+    if IF_CONSTEXPR (HAS_MASK) {
+      mask += batch_idx * mask_params->M_strides[0] +
+          head_idx * mask_params->M_strides[1];
+    }
+    // Narrowed to 32-bit: these only ever multiply in-tile offsets, the base
+    // pointers having already been advanced.
+    k_seq_stride = int(params->K_strides[2]);
+    v_seq_stride = int(params->V_strides[2]);
+    o_seq_stride = int(params->O_strides[2]);
+    // Scale the scores in AccumType, not Q in T: rounding the scale and the
+    // scaled Q to the input dtype compounds into a visible error at large
+    // scales.
+    scale2 = params->scale * M_LOG2E_F;
+    const short2 coord = MMAFrag_acc_t::get_coord(simd_lane_id);
+    sm = coord.y;
+    sn = coord.x;
+    tm = kFragSize * simd_group_id;
+    qs_off = (tm + sm) * LDQ + sn;
+    ks_off = sm * LDK + sn;
+    vs_off = sm * LDV + sn;
+    q_block_size = min(q_seq_len - block_idx * BQ, BQ);
+    rows_left = q_block_size - (tm + sm);
+    // Causal masking can shorten the K range. PyTorch convention is upper-left
+    // alignment: query row r attends to keys 0..r regardless of qL vs kL, so
+    // this block needs the keys below block_idx * BQ + q_block_size.
+    int kb_lim = c10::metal::ceil_div(k_seq_len, BK);
+    if IF_CONSTEXPR (DO_CAUSAL) {
+      kb_lim =
+          min(kb_lim, c10::metal::ceil_div(block_idx * BQ + q_block_size, BK));
+    }
+    kb0 = split * kb_lim / n_splits;
+    kb1 = (split + 1) * kb_lim / n_splits;
+    // K / V start at this split's first block and advance a block at a time.
+    K = K_ + batch_idx * params->K_strides[0] +
+        kv_head_idx * params->K_strides[1] + kb0 * BK * params->K_strides[2];
+    V = V_ + batch_idx * params->V_strides[0] +
+        kv_head_idx * params->V_strides[1] + kb0 * BK * params->V_strides[2] +
+        slab * Dv;
+    row0 = (batch_idx * params->H + head_idx) * q_seq_len + block_idx * BQ + tm;
+    part0 = row0 * n_splits + split;
+    o_cols = Dv;
+    if IF_CONSTEXPR (PV) {
+      if (n_splits > 1) {
+        O = O_ + (long(part0 - tm * n_splits) * params->n_slabs + slab) * Dv;
+        o_seq_stride = n_splits * params->n_slabs * Dv;
+      } else {
+        O = O_ + batch_idx * params->O_strides[0] +
+            head_idx * params->O_strides[1] +
+            block_idx * BQ * params->O_strides[2] + slab * Dv;
+      }
+    } else if (n_splits > 1) {
+      O = O_ + long(part0 - tm * n_splits) * BD;
+      o_seq_stride = n_splits * BD;
+      o_cols = BD;
+    } else {
+      O = O_ + batch_idx * params->O_strides[0] +
+          head_idx * params->O_strides[1] +
+          block_idx * BQ * params->O_strides[2];
+    }
+    Otile.clear();
+    PREFILL_PRAGMA_UNROLL
+    for (short i = 0; i < kRowsPT; ++i) {
+      max_score[i] = -INFINITY;
+      sum_score[i] = 0;
+    }
+  }
 
-    Stile.clear();
+  // Stages the Q block's columns [d0, d0 + BD).
+  METAL_FUNC void stage_q(int d0) {
+    loader_q.seek(Q + d0);
+    loader_q.load(short2(min(D - d0, BD), q_block_size));
+  }
 
+  // S += Q K^T over the QK columns [d0, d0 + BD) of the current K block,
+  // re-staging Q when CHUNKED.
+  METAL_FUNC void qk_chunk(int d0, int k_rows) {
     threadgroup_barrier(mem_flags::mem_threadgroup);
-
+    if IF_CONSTEXPR (CHUNKED) {
+      stage_q(d0);
+    }
+    loader_k.seek(K + d0);
+    loader_k.load(short2(min(D - d0, BD), k_rows));
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    MMATile<AccumType, 1, 1, MMAFrag_acc_t> Qtile;
+    MMATile<AccumType, 1, TK, MMAFrag_acc_t> Ktile;
     PREFILL_PRAGMA_UNROLL
     for (short dd = 0; dd < TD; dd++) {
       simdgroup_barrier(mem_flags::mem_none);
-
-      Qtile.template load<T, 1, 1, LDQ_tgp, 1>(
-          &Qs[Qs_offset + dd * Qs_tile_stride]);
-      Ktile.template load<T, 1, 1, LDK_tgp, 1>(
-          &Ks[Ks_offset + dd * Ks_tile_stride]);
-
+      Qtile.template load<T, 1, 1, LDQ, 1>(&Qs[qs_off + dd * kFragSize]);
+      Ktile.template load<T, 1, 1, LDK, 1>(
+          &KVs[ks_off + dd * (kFragSize * LDK)]);
       simdgroup_barrier(mem_flags::mem_none);
-
       tile_matmad(Stile, Qtile, Ktile, Stile);
     }
+  }
 
-    {
-      using stile_t = decltype(Stile);
+  // Masks the columns of S from `bound` on.
+  METAL_FUNC void mask_cols_from(int col0, int bound) {
+    PREFILL_PRAGMA_UNROLL
+    for (short j = 0; j < TK; j++) {
       PREFILL_PRAGMA_UNROLL
-      for (short i = 0; i < stile_t::kTileRows; i++) {
-        PREFILL_PRAGMA_UNROLL
-        for (short j = 0; j < stile_t::kTileCols; j++) {
-          PREFILL_PRAGMA_UNROLL
-          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
-            Stile.frag_at(i, j)[jj] *= scale2;
-          }
+      for (short jj = 0; jj < MMAFrag_acc_t::kElemCols; jj++) {
+        if (col0 + j * kFragSize + jj >= bound) {
+          Stile.frag_at(0, j)[jj] = AccumType(-INFINITY);
         }
       }
     }
+  }
 
-    // Mask out partial K block.
-    if (k_block_size < BK) {
-      using stile_t = decltype(Stile);
-      constexpr auto neg_inf = -INFINITY;
-
-      PREFILL_PRAGMA_UNROLL
-      for (short i = 0; i < stile_t::kTileRows; i++) {
-        PREFILL_PRAGMA_UNROLL
-        for (short j = 0; j < stile_t::kTileCols; j++) {
-          short col_pos = sn + (j * stile_t::kFragCols);
-          PREFILL_PRAGMA_UNROLL
-          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemCols; jj++) {
-            if ((col_pos + jj) >= k_block_size) {
-              Stile.frag_at(i, j)[jj] = neg_inf;
-            }
-          }
-        }
+  // S = scale * Q K^T for K block kb, masked: the columns past the K block,
+  // above the causal diagonal (row r sees cols 0..r) and from the optional
+  // additive / boolean mask.
+  METAL_FUNC void scores(int kb) {
+    const int k_end = min(kb * BK + BK, k_seq_len);
+    Stile.clear();
+    if IF_CONSTEXPR (CHUNKED) {
+      for (int d0 = 0; d0 < D; d0 += BD) {
+        qk_chunk(d0, k_end - kb * BK);
       }
-    }
-
-    // Causal mask (PyTorch upper-left convention: row r sees cols 0..r).
-    if IF_CONSTEXPR (do_causal) {
-      using stile_t = decltype(Stile);
-      constexpr auto neg_inf = -INFINITY;
-
-      PREFILL_PRAGMA_UNROLL
-      for (short i = 0; i < stile_t::kTileRows; i++) {
-        int row_pos = block_idx * BQ + tm + sm + (i * stile_t::kFragRows);
-        PREFILL_PRAGMA_UNROLL
-        for (short j = 0; j < stile_t::kTileCols; j++) {
-          const int col_pos = kb * BK + sn + (j * stile_t::kFragCols);
-          PREFILL_PRAGMA_UNROLL
-          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemCols; jj++) {
-            if (row_pos < (col_pos + jj)) {
-              Stile.frag_at(i, j)[jj] = neg_inf;
-            }
-          }
-        }
-      }
-    }
-
-    // Optional additive / boolean mask.
-    if IF_CONSTEXPR (has_mask) {
-      using stile_t = decltype(Stile);
-      using selem_t = typename stile_t::elem_type;
-      constexpr auto neg_inf = -INFINITY;
-
-      constexpr bool is_bool = is_same_v<MaskType, bool>;
-      using melem_t = typename metal::conditional_t<is_bool, bool, selem_t>;
-
-      using MMAFrag_mask_t = BaseMMAFrag<melem_t, kFragSize, kFragSize>;
-      using frag_t = typename MMAFrag_mask_t::frag_type;
-
-      PREFILL_PRAGMA_UNROLL
-      for (short i = 0; i < stile_t::kTileRows; i++) {
-        const int row_pos_in_seq =
-            block_idx * BQ + tm + sm + (i * stile_t::kFragRows);
-        PREFILL_PRAGMA_UNROLL
-        for (short j = 0; j < stile_t::kTileCols; j++) {
-          const int col_pos_in_seq = kb * BK + sn + (j * stile_t::kFragCols);
-
-          frag_t mfrag;
-
-          MMAFrag_mask_t::load_safe(
-              mfrag,
-              mask,
-              mask_params->M_strides[2],
-              Int<1>{},
-              q_seq_len,
-              k_seq_len,
-              row_pos_in_seq,
-              col_pos_in_seq);
-
-          constexpr selem_t kLog2E = selem_t(1.44269504089f);
-          PREFILL_PRAGMA_UNROLL
-          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
-            if IF_CONSTEXPR (is_bool) {
-              Stile.frag_at(i, j)[jj] =
-                  mfrag[jj] ? Stile.frag_at(i, j)[jj] : neg_inf;
-            } else {
-              Stile.frag_at(i, j)[jj] += selem_t(mfrag[jj]) * kLog2E;
-            }
-          }
-        }
-      }
-    }
-
-    // Softcapping (tanh-based).
-    if (params->softcapping != 1.0f) {
-      using stile_t = decltype(Stile);
-      using selem_t = typename stile_t::elem_type;
-      const selem_t softcapping_val = static_cast<selem_t>(params->softcapping);
-
-      PREFILL_PRAGMA_UNROLL
-      for (short i = 0; i < stile_t::kTileRows; i++) {
-        PREFILL_PRAGMA_UNROLL
-        for (short j = 0; j < stile_t::kTileCols; j++) {
-          PREFILL_PRAGMA_UNROLL
-          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
-            Stile.frag_at(i, j)[jj] =
-                metal::tanh(Stile.frag_at(i, j)[jj]) * softcapping_val;
-          }
-        }
-      }
-    }
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    if (k_block_size < BK) {
-      loader_v.load_safe(short2(BD, k_block_size));
     } else {
-      loader_v.load_unsafe();
+      qk_chunk(0, k_end - kb * BK);
     }
+    K += BK * k_seq_stride;
+    const int row = block_idx * BQ + tm + sm;
+    const int col0 = kb * BK + sn;
+    PREFILL_PRAGMA_UNROLL
+    for (short j = 0; j < TK; j++) {
+      PREFILL_PRAGMA_UNROLL
+      for (short jj = 0; jj < MMAFrag_acc_t::kElemCols; jj++) {
+        Stile.frag_at(0, j)[jj] *= scale2;
+      }
+    }
+    if (k_end < kb * BK + BK) {
+      mask_cols_from(col0, k_end);
+    }
+    if IF_CONSTEXPR (DO_CAUSAL) {
+      mask_cols_from(col0, row + 1);
+    }
+    if IF_CONSTEXPR (HAS_MASK) {
+      PREFILL_PRAGMA_UNROLL
+      for (short j = 0; j < TK; j++) {
+        typename MaskFrag::frag_type mfrag;
+        MaskFrag::load_safe(
+            mfrag,
+            mask,
+            mask_params->M_strides[2],
+            Int<1>{},
+            q_seq_len,
+            k_seq_len,
+            row,
+            col0 + j * kFragSize);
+        PREFILL_PRAGMA_UNROLL
+        for (short jj = 0; jj < MMAFrag_acc_t::kElemCols; jj++) {
+          if IF_CONSTEXPR (is_same_v<MaskType, bool>) {
+            Stile.frag_at(0, j)[jj] =
+                mfrag[jj] ? Stile.frag_at(0, j)[jj] : AccumType(-INFINITY);
+          } else {
+            Stile.frag_at(0, j)[jj] += AccumType(mfrag[jj]) * M_LOG2E_F;
+          }
+        }
+      }
+    }
+  }
 
-    // Online softmax update.
+  // Stages V block kb over the K tile, once no simdgroup still reads it.
+  METAL_FUNC void stage_v(int kb) {
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    loader_v.seek(V);
+    loader_v.load(short2(Dv, min(k_seq_len - kb * BK, BK)));
+    V += BK * v_seq_stride;
+  }
+
+  // Online softmax step: folds the block's row max into the running max and
+  // sum, rescales O and turns S into P = exp2(S - max).
+  METAL_FUNC void softmax_update() {
     AccumType new_max[kRowsPT];
     AccumType factor[kRowsPT];
     PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
       new_max[i] = max_score[i];
     }
-
     Stile.template row_reduce<MaxOp>(new_max);
     Stile.template row_bin_op<ExpSubOp>(new_max);
-
-    // If new_max is -inf, both old/new max are -inf (nothing valid yet).
-    // Use factor=1 so we keep the running state unchanged for that row.
-    // exp(-inf - -inf) would otherwise produce NaN.
+    // A row with no valid key so far has both maxes -inf; factor 1 keeps its
+    // state instead of exp2(-inf - -inf) = NaN.
     PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
-      factor[i] = (new_max[i] == -INFINITY)
+      factor[i] = new_max[i] == -INFINITY
           ? AccumType(1)
           : fast::exp2(max_score[i] - new_max[i]);
-    }
-
-    PREFILL_PRAGMA_UNROLL
-    for (short i = 0; i < kRowsPT; ++i) {
       max_score[i] = new_max[i];
+      sum_score[i] *= factor[i];
     }
+    Stile.template row_reduce<SumOp>(sum_score);
+    Otile.template row_bin_op<MulOp>(factor);
+  }
 
-    AccumType sum_score_tmp[kRowsPT] = {0};
-    Stile.template row_reduce<SumOp>(sum_score_tmp);
+  // P = exp2(S - max) against the final row max (P @ V pass), summed into
+  // the row sum.
+  METAL_FUNC void exp_scores() {
+    Stile.template row_bin_op<ExpSubOp>(max_score);
+    Stile.template row_reduce<SumOp>(sum_score);
+  }
 
+  // O += P @ V.
+  METAL_FUNC void pv() {
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    MMATile<AccumType, 1, 1, MMAFrag_acc_t> Vtile;
+    PREFILL_PRAGMA_UNROLL
+    for (short id = 0; id < TD; id++) {
+      PREFILL_PRAGMA_UNROLL
+      for (short ik = 0; ik < TK; ik++) {
+        if IF_CONSTEXPR (BD == 128) {
+          simdgroup_barrier(mem_flags::mem_none);
+        }
+        Vtile.template load<T, 1, 1, LDV, 1>(
+            &KVs[vs_off + ik * (kFragSize * LDV) + id * kFragSize]);
+        if IF_CONSTEXPR (BD == 128) {
+          simdgroup_barrier(mem_flags::mem_none);
+        }
+        MMAFrag_acc_t::mma(
+            Otile.frag_at(0, id),
+            Stile.frag_at(0, ik),
+            Vtile.frag_at(0, 0),
+            Otile.frag_at(0, id));
+      }
+    }
+  }
+
+  // Row stats, laid out [row][split]: the sum and the max in log2 units.
+  METAL_FUNC void store_stats(device float* sums, device float* maxs) const {
     PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < kRowsPT; ++i) {
-      sum_score[i] = sum_score[i] * factor[i] + sum_score_tmp[i];
+      const int row = sm + i * kFragSize;
+      if (sn == 0 && tm + row < q_block_size) {
+        sums[part0 + row * n_splits] = sum_score[i];
+        maxs[part0 + row * n_splits] = max_score[i];
+      }
     }
+  }
 
-    Otile.template row_bin_op<MulOp>(factor);
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
+  // The final row max over the scores pass's splits (P @ V pass); the row
+  // sum is accumulated from the P this pass uses.
+  METAL_FUNC void load_max(const device float* score_maxs, int n_score_splits) {
     PREFILL_PRAGMA_UNROLL
-    for (short iq = 0; iq < TQ; iq++) {
-      PREFILL_PRAGMA_UNROLL
-      for (short id = 0; id < TD; id++) {
-        PREFILL_PRAGMA_UNROLL
-        for (short ik = 0; ik < TK; ik++) {
-          if IF_CONSTEXPR (BD == 128) {
-            simdgroup_barrier(mem_flags::mem_none);
-          }
-
-          const short kk = ik * kFragSize;
-          const short dd = id * kFragSize;
-
-          Vtile.template load<T, 1, 1, LDV_tgp, 1>(
-              &Vs[Vs_offset + kk * LDV_tgp + dd]);
-
-          if IF_CONSTEXPR (BD == 128) {
-            simdgroup_barrier(mem_flags::mem_none);
-          }
-
-          MMAFrag_acc_t::mma(
-              Otile.frag_at(iq, id),
-              Stile.frag_at(iq, ik),
-              Vtile.frag_at(0, 0),
-              Otile.frag_at(iq, id));
+    for (short i = 0; i < kRowsPT; ++i) {
+      const int row = sm + i * kFragSize;
+      if (tm + row < q_block_size) {
+        const device float* m = score_maxs + long(row0 + row) * n_score_splits;
+        for (int s = 0; s < n_score_splits; ++s) {
+          max_score[i] = c10::metal::max(max_score[i], m[s]);
         }
       }
     }
-
-    loader_k.next();
-    loader_v.next();
   }
-  PREFILL_PRAGMA_UNROLL
-  for (short i = 0; i < kRowsPT; ++i) {
-    if (max_score[i] == -INFINITY) {
-      sum_score[i] = AccumType(1);
+
+  // The scaled, masked scores S[row][kL] (rows flat over batch, head, query)
+  // that prefill_attention_scores hands prefill_attention_pv, at this
+  // thread's fragment origin in K block kb.
+  METAL_FUNC device float* score_tile(device float* scores, int kb) const {
+    return scores + long(row0 + sm) * k_seq_len + kb * BK + sn;
+  }
+
+  METAL_FUNC void store_scores(device float* scores, int kb) const {
+    store_tile(
+        Stile, score_tile(scores, kb), k_seq_len, min(k_seq_len - kb * BK, BK));
+  }
+
+  METAL_FUNC void load_scores(device float* scores, int kb) {
+    const int cols_left = min(k_seq_len - kb * BK, BK) - sn;
+    PREFILL_PRAGMA_UNROLL
+    for (short j = 0; j < TK; j++) {
+      MMAFrag_acc_t::load_safe(
+          Stile.frag_at(0, j),
+          score_tile(scores, kb),
+          k_seq_len,
+          Int<1>{},
+          rows_left,
+          cols_left,
+          0,
+          j * kFragSize,
+          AccumType(-INFINITY));
     }
   }
 
-  // Normalize and store output.
-  Otile.template row_bin_op<DivOp>(sum_score);
-  threadgroup_barrier(mem_flags::mem_none);
-
-  device T* O_tile = O + (tm + sm) * o_seq_stride + sn;
-
-  if (q_block_size < BQ) {
-    if ((tm + sm) < q_block_size && sn < BD) {
-      auto dst_tile_dims = short2(BD - sn, q_block_size - (tm + sm));
-      Otile.template store_safe<T, 1, 1>(O_tile, o_seq_stride, dst_tile_dims);
+  // Stores a tile at dst (this thread's fragment origin), clipped to the
+  // block's valid rows and the first `cols` columns.
+  template <typename U, typename Tile>
+  METAL_FUNC void store_tile(
+      const thread Tile& tile,
+      device U* dst,
+      int ld,
+      int cols) const {
+    if (q_block_size == BQ && cols == Tile::kCols) {
+      tile.template store<U, 1, 1>(dst, ld);
+    } else if (rows_left > 0 && sn < cols) {
+      tile.template store_safe<U, 1, 1>(dst, ld, short2(cols - sn, rows_left));
     }
-  } else {
-    Otile.template store<T, 1, 1>(O_tile, o_seq_stride);
   }
+
+  // Writes the normalized O block, or under split-K this split's unnormalized
+  // partial rows plus the row stats for sdpa_merge_partials (every P @ V
+  // slab computes the same stats and writes the same values).
+  METAL_FUNC void store(device float* sums, device float* maxs) {
+    if (n_splits > 1) {
+      store_stats(sums, maxs);
+    } else {
+      // A fully masked row has sum 0 and all-zero O; keep it 0 instead of NaN.
+      PREFILL_PRAGMA_UNROLL
+      for (short i = 0; i < kRowsPT; ++i) {
+        if (max_score[i] == -INFINITY) {
+          sum_score[i] = AccumType(1);
+        }
+      }
+      Otile.template row_bin_op<DivOp>(sum_score);
+    }
+    threadgroup_barrier(mem_flags::mem_none);
+    store_tile(Otile, O + (tm + sm) * o_seq_stride + sn, o_seq_stride, o_cols);
+  }
+};
+
+#define PREFILL_ATTN_ARGS                                                 \
+  const device T *Q [[buffer(0)]], const device T *K [[buffer(1)]],       \
+      const device T *V [[buffer(2)]],                                    \
+      device PrefillOutT<T, SPLIT>*O [[buffer(3)]],                       \
+      const constant PrefillAttnParams *params [[buffer(4)]],             \
+      const constant PrefillAttnMaskParams *mask_params [[buffer(5)]],    \
+      const device MaskType *mask [[buffer(6)]],                          \
+      device float *sums [[buffer(7)]], device float *maxs [[buffer(8)]], \
+      uint simd_lane_id [[thread_index_in_simdgroup]],                    \
+      uint simd_group_id [[simdgroup_index_in_threadgroup]],              \
+      uint3 tid [[threadgroup_position_in_grid]]
+
+#define PREFILL_BLOCK(block, pv)     \
+  using Block = PrefillBlock<        \
+      T,                             \
+      BK,                            \
+      BD,                            \
+      HAS_MASK,                      \
+      DO_CAUSAL,                     \
+      CHUNKED,                       \
+      SPLIT,                         \
+      pv,                            \
+      MaskType>;                     \
+  threadgroup T Qs[Block::kQSmem];   \
+  threadgroup T KVs[Block::kKVSmem]; \
+  Block block(                       \
+      Q,                             \
+      K,                             \
+      V,                             \
+      O,                             \
+      params,                        \
+      mask_params,                   \
+      mask,                          \
+      Qs,                            \
+      KVs,                           \
+      simd_lane_id,                  \
+      simd_group_id,                 \
+      tid);                          \
+  if (block.q_block_size <= 0) {     \
+    return;                          \
+  }
+
+// Flash attention: one threadgroup per (Q block, head, batch, split).
+template <
+    typename T,
+    int BK,
+    int BD,
+    bool HAS_MASK,
+    bool DO_CAUSAL,
+    bool CHUNKED,
+    bool SPLIT,
+    typename MaskType>
+[[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
+prefill_attention(PREFILL_ATTN_ARGS) {
+  PREFILL_BLOCK(block, false);
+  if IF_CONSTEXPR (!CHUNKED) {
+    block.stage_q(0);
+  }
+  for (int kb = block.kb0; kb < block.kb1; kb++) {
+    block.scores(kb);
+    block.stage_v(kb);
+    block.softmax_update();
+    block.pv();
+  }
+  block.store(sums, maxs);
 }
 
-#define instantiate_kernel(name, func, ...) \
-  template [[host_name(                     \
-      name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>;
+// Staged pass 1 for a V/O wider than the tile: writes the scaled, masked
+// scores and the row stats once, so each V slab only runs P @ V (pass 2)
+// instead of recomputing the scores. It has no partials to merge, so it may
+// split the keys further than pass 2 does.
+template <
+    typename T,
+    int BK,
+    int BD,
+    bool HAS_MASK,
+    bool DO_CAUSAL,
+    bool CHUNKED,
+    bool SPLIT,
+    typename MaskType>
+[[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
+prefill_attention_scores(
+    PREFILL_ATTN_ARGS,
+    device float* scores [[buffer(9)]]) {
+  PREFILL_BLOCK(block, false);
+  if IF_CONSTEXPR (!CHUNKED) {
+    block.stage_q(0);
+  }
+  for (int kb = block.kb0; kb < block.kb1; kb++) {
+    block.scores(kb);
+    block.store_scores(scores, kb);
+    block.softmax_update();
+  }
+  block.store_stats(sums, maxs);
+}
 
-#define instantiate_attn(                                                 \
-    tname, dtype, bq, bk, bd, wm, wn, hm, dc, mname, mtype)               \
-  instantiate_kernel(                                                     \
-      "prefill_attention_" #tname "_bq" #bq "_bk" #bk "_bd" #bd "_wm" #wm \
-      "_wn" #wn "_hm" #hm "_dc" #dc "_mask" #mname,                       \
-      prefill_attention,                                                  \
-      dtype,                                                              \
-      bq,                                                                 \
-      bk,                                                                 \
-      bd,                                                                 \
-      wm,                                                                 \
-      wn,                                                                 \
-      hm,                                                                 \
-      dc,                                                                 \
+template <
+    typename T,
+    int BK,
+    int BD,
+    bool HAS_MASK,
+    bool DO_CAUSAL,
+    bool CHUNKED,
+    bool SPLIT,
+    typename MaskType>
+[[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
+prefill_attention_pv(
+    PREFILL_ATTN_ARGS,
+    device float* scores [[buffer(9)]],
+    const device float* score_maxs [[buffer(10)]]) {
+  PREFILL_BLOCK(block, true);
+  block.load_max(score_maxs, params->n_score_splits);
+  for (int kb = block.kb0; kb < block.kb1; kb++) {
+    block.load_scores(scores, kb);
+    block.stage_v(kb);
+    block.exp_scores();
+    block.pv();
+  }
+  block.store(sums, maxs);
+}
+
+#define instantiate_attn(func, dtype, bd, hm, dc, ck, sp, mtype)            \
+  instantiate_kernel(                                                       \
+      #func "_" #dtype "_bd" #bd "_hm" #hm "_dc" #dc "_ck" #ck "_split" #sp \
+            "_mask" #mtype,                                                 \
+      func,                                                                 \
+      dtype,                                                                \
+      prefill_bk(bd),                                                       \
+      bd,                                                                   \
+      hm,                                                                   \
+      dc,                                                                   \
+      ck,                                                                   \
+      sp,                                                                   \
       mtype)
 
-#define instantiate_attn_shapes_helper(iname, itype, hm, dc, mname, mtype)    \
-  instantiate_attn(iname, itype, 16, 8, 256, 2, 1, hm, dc, mname, mtype)      \
-      instantiate_attn(iname, itype, 32, 16, 128, 4, 1, hm, dc, mname, mtype) \
-          instantiate_attn(                                                   \
-              iname, itype, 32, 32, 96, 4, 1, hm, dc, mname, mtype)           \
-              instantiate_attn(                                               \
-                  iname, itype, 32, 32, 80, 4, 1, hm, dc, mname, mtype)       \
-                  instantiate_attn(                                           \
-                      iname, itype, 32, 32, 72, 4, 1, hm, dc, mname, mtype)   \
-                      instantiate_attn(                                       \
-                          iname,                                              \
-                          itype,                                              \
-                          32,                                                 \
-                          32,                                                 \
-                          64,                                                 \
-                          4,                                                  \
-                          1,                                                  \
-                          hm,                                                 \
-                          dc,                                                 \
-                          mname,                                              \
-                          mtype)                                              \
-                          instantiate_attn(                                   \
-                              iname,                                          \
-                              itype,                                          \
-                              32,                                             \
-                              32,                                             \
-                              32,                                             \
-                              4,                                              \
-                              1,                                              \
-                              hm,                                             \
-                              dc,                                             \
-                              mname,                                          \
-                              mtype)
+// The fused kernel also comes in a split-K variant writing fp32 partials.
+#define instantiate_attn_fused(dtype, bd, hm, dc, ck, mtype)            \
+  instantiate_attn(prefill_attention, dtype, bd, hm, dc, ck, 0, mtype); \
+  instantiate_attn(prefill_attention, dtype, bd, hm, dc, ck, 1, mtype)
 
-#define instantiate_attn_causal_helper(iname, itype, mname, mtype) \
-  instantiate_attn_shapes_helper(iname, itype, 0, 0, mname, mtype) \
-      instantiate_attn_shapes_helper(iname, itype, 0, 1, mname, mtype)
+// Head dims above 192 are chunked / sliced on the 128 tile, so only it gets
+// the chunked and the staged (wide V/O) variants. Keep the tiles in sync with
+// kPrefillTiles in Attention.mm.
+#define instantiate_attn_tiles(dtype, hm, dc, mtype)                           \
+  instantiate_attn_fused(dtype, 192, hm, dc, 0, mtype);                        \
+  instantiate_attn_fused(dtype, 160, hm, dc, 0, mtype);                        \
+  instantiate_attn_fused(dtype, 128, hm, dc, 1, mtype);                        \
+  instantiate_attn_fused(dtype, 128, hm, dc, 0, mtype);                        \
+  instantiate_attn(prefill_attention_scores, dtype, 128, hm, dc, 1, 0, mtype); \
+  instantiate_attn(prefill_attention_scores, dtype, 128, hm, dc, 0, 0, mtype); \
+  instantiate_attn_fused(dtype, 96, hm, dc, 0, mtype);                         \
+  instantiate_attn_fused(dtype, 80, hm, dc, 0, mtype);                         \
+  instantiate_attn_fused(dtype, 72, hm, dc, 0, mtype);                         \
+  instantiate_attn_fused(dtype, 64, hm, dc, 0, mtype);                         \
+  instantiate_attn_fused(dtype, 32, hm, dc, 0, mtype)
 
-#define instantiate_attn_causal_with_mask_helper(iname, itype, mname, mtype) \
-  instantiate_attn_shapes_helper(iname, itype, 1, 0, mname, mtype)           \
-      instantiate_attn_shapes_helper(iname, itype, 1, 1, mname, mtype)
+// P @ V reads scores the scores pass already masked, so it has no mask
+// variants; without a mask the mask name is the query dtype. Under split-K
+// it writes fp32 partials like the fused kernel.
+#define instantiate_attn_masks(dtype)                                    \
+  instantiate_attn_tiles(dtype, 0, 0, dtype);                            \
+  instantiate_attn_tiles(dtype, 0, 1, dtype);                            \
+  instantiate_attn_tiles(dtype, 1, 0, dtype);                            \
+  instantiate_attn_tiles(dtype, 1, 1, dtype);                            \
+  instantiate_attn_tiles(dtype, 1, 0, bool);                             \
+  instantiate_attn_tiles(dtype, 1, 1, bool);                             \
+  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 0, 0, 0, dtype); \
+  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 1, 0, 0, dtype); \
+  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 0, 0, 1, dtype); \
+  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 1, 0, 1, dtype)
 
-#define instantiate_attn_mask_helper(iname, itype)                         \
-  instantiate_attn_causal_helper(iname, itype, iname, itype)               \
-      instantiate_attn_causal_with_mask_helper(iname, itype, iname, itype) \
-          instantiate_attn_causal_with_mask_helper(iname, itype, bool_, bool)
-
-instantiate_attn_mask_helper(float16, half)
-    instantiate_attn_mask_helper(bfloat16, bfloat)
-        instantiate_attn_mask_helper(float32, float)
+instantiate_attn_masks(half);
+instantiate_attn_masks(bfloat);
+instantiate_attn_masks(float);

@@ -1,257 +1,115 @@
-// SDPA decode kernels (short Q sequence). Three variants:
-//   sdpa_vector            - one-pass, for short qL with moderate kL
-//   sdpa_vector_2pass_1    - two-pass pass 1, splits the K loop across blocks
-//   sdpa_vector_2pass_2    - two-pass pass 2, aggregates per-block partials
+// SDPA decode kernel, one query row per (batch, head). sdpa_vector<.., BLOCKS
+// = 1> writes the normalized output in one pass; the kDecodeBlocks variant
+// splits the keys across kDecodeBlocks threadgroups that write unnormalized
+// fp32 partial rows for sdpa_merge_partials. Head dims are padded to BD: a
+// lane's
+// window of BD / 32 columns is clamped inside the real dims so its loads stay
+// unconditional, and the columns a clamped window shares with the previous
+// lane are zeroed in q and skipped at the store.
 //
 // Adapted from MLX:
 //   https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/scaled_dot_product_attention.metal
 #pragma once
+#include <ATen/native/mps/kernels/Attention.h>
 
-template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = false, typename MaskType = float>
-[[kernel]] void sdpa_vector(const device T* queries [[buffer(0)]],
-                            const device T* keys [[buffer(1)]],
-                            const device T* values [[buffer(2)]],
-                            device T* out [[buffer(3)]],
-                            const constant uint& gqa_factor [[buffer(4)]],
-                            const constant uint& N [[buffer(5)]],
-                            const constant uint3& qkv_head_strides [[buffer(6)]],
-                            const constant uint3& qkv_seq_strides [[buffer(7)]],
-                            const constant float& scale [[buffer(8)]],
-                            const device MaskType* mask [[buffer(9)]],
-                            const constant uint4& mask_strides [[buffer(10)]],
-                            const constant uint4& qkv_batch_strides_heads [[buffer(11)]],
-                            uint3 tid [[threadgroup_position_in_grid]],
-                            uint3 tpg [[threadgroups_per_grid]],
-                            uint simd_gid [[simdgroup_index_in_threadgroup]],
-                            uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr uint BN = 32;
-  constexpr uint BD = 32;
-  constexpr uint qk_per_thread = D / BD;
-  constexpr uint v_per_thread = V / BD;
-  constexpr bool is_bool_mask = HAS_MASK && is_same_v<MaskType, bool>;
-  constexpr bool is_additive_mask = HAS_MASK && !is_bool_mask;
-  const uint q_head_stride = qkv_head_strides.x;
-  const uint q_seq_stride = qkv_seq_strides.x;
-  const uint q_batch_stride = qkv_batch_strides_heads.x;
-  const uint k_head_stride = qkv_head_strides.y;
-  const uint k_seq_stride = qkv_seq_strides.y;
-  const uint k_batch_stride = qkv_batch_strides_heads.y;
-  const uint v_head_stride = qkv_head_strides.z;
-  const uint v_seq_stride = qkv_seq_strides.z;
-  const uint v_batch_stride = qkv_batch_strides_heads.z;
-  const uint num_heads = qkv_batch_strides_heads.w;
-  const uint mask_kv_seq_stride = mask_strides.x;
-  const uint mask_q_seq_stride = mask_strides.y;
-  const uint mask_head_stride = mask_strides.z;
-  const uint mask_batch_stride = mask_strides.w;
-  uint inner_k_stride = BN * int(k_seq_stride);
-  uint inner_v_stride = BN * int(v_seq_stride);
-
-  typedef float U;
-
-  thread U q[qk_per_thread];
-  thread U k[qk_per_thread];
-  thread U o[v_per_thread];
-
-  threadgroup U outputs[BN * BD];
-  threadgroup U max_scores[BN];
-  threadgroup U sum_exp_scores[BN];
-
-  const int bh_idx = tid.x;
-  const int batch_idx = bh_idx / int(num_heads);
-  const int head_idx = bh_idx - batch_idx * int(num_heads);
-  const int q_seq_idx = tid.y;
-  const int kv_head_idx = head_idx / gqa_factor;
-  const int Q = tpg.y;
-  const int group_offset = bh_idx * Q + q_seq_idx;
-  const int o_offset = group_offset;
-  queries +=
-      batch_idx * q_batch_stride + head_idx * q_head_stride + q_seq_idx * q_seq_stride + simd_lid * qk_per_thread;
-  keys += batch_idx * k_batch_stride + kv_head_idx * k_head_stride + simd_gid * k_seq_stride + simd_lid * qk_per_thread;
-  values +=
-      batch_idx * v_batch_stride + kv_head_idx * v_head_stride + simd_gid * v_seq_stride + simd_lid * v_per_thread;
-  if IF_CONSTEXPR (HAS_MASK) {
-    mask += batch_idx * mask_batch_stride + head_idx * mask_head_stride + simd_gid * mask_kv_seq_stride +
-        q_seq_idx * mask_q_seq_stride;
-  }
-
-  out += o_offset * V + simd_gid * v_per_thread;
-
-  // Read the query and 0 the output accumulator
-  for (uint i = 0; i < qk_per_thread; i++) {
-    q[i] = scale * static_cast<U>(queries[i]);
-  }
-  for (uint i = 0; i < v_per_thread; i++) {
-    o[i] = 0;
-  }
-
-  U max_score = -INFINITY;
-  U sum_exp_score = 0;
-
-  // For each key
-  for (uint i = simd_gid; i < N; i += BN) {
-    bool use_key = true;
-    if (is_causal) {
-      use_key = int(i) <= q_seq_idx;
-    } else if IF_CONSTEXPR (is_bool_mask) {
-      use_key = mask[0];
-    }
-    if (use_key) {
-      // Read the key
-      for (uint j = 0; j < qk_per_thread; j++) {
-        k[j] = static_cast<U>(keys[j]);
-      }
-
-      // Compute the i-th score
-      U score = 0;
-      for (uint j = 0; j < qk_per_thread; j++) {
-        score += q[j] * k[j];
-      }
-      score = simd_sum(score);
-
-      if IF_CONSTEXPR (is_additive_mask) {
-        score += static_cast<U>(mask[0]);
-      }
-
-      // c10::metal::max propagates NaN (plain max drops it -> row max -inf -> 0).
-      U new_max = c10::metal::max(max_score, score);
-      U factor;
-      U exp_score;
-      if (new_max == -INFINITY) {
-        factor = U(1);
-        exp_score = U(0);
-      } else {
-        factor = metal::fast::exp(max_score - new_max);
-        exp_score = metal::fast::exp(score - new_max);
-      }
-
-      max_score = new_max;
-      sum_exp_score = sum_exp_score * factor + exp_score;
-
-      // Update the output accumulator
-      for (uint j = 0; j < v_per_thread; j++) {
-        o[j] = o[j] * factor + exp_score * static_cast<U>(values[j]);
-      }
-    }
-
-    // Move the pointers to the next kv
-    keys += inner_k_stride;
-    values += inner_v_stride;
-    if IF_CONSTEXPR (HAS_MASK) {
-      mask += BN * mask_kv_seq_stride;
-    }
-  }
-
-  // Each thread has a partial part of the output so we need to combine them.
-
-  // First let's communicate the max and sum_exp
-  if (simd_lid == 0) {
-    max_scores[simd_gid] = max_score;
-    sum_exp_scores[simd_gid] = sum_exp_score;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  max_score = max_scores[simd_lid];
-  U new_max = simd_max(max_score);
-  U factor = (new_max == -INFINITY) ? U(1) : metal::fast::exp(max_score - new_max);
-  sum_exp_score = simd_sum(sum_exp_scores[simd_lid] * factor);
-
-  // Now we need to aggregate all the outputs
-  for (uint i = 0; i < v_per_thread; i++) {
-    outputs[simd_lid * BD + simd_gid] = o[i];
+// Sums the simdgroups' partial rows into dst (scaled by inv_sum). Per column,
+// the exchange through `outputs` puts simdgroup s's value of lane window w in
+// slot [w][s]; thread t = (w, s) = (t / BN, t % BN) picks it up, the BN
+// threads of a window reduce with xor shuffles and the s == 0 one stores.
+template <int per_lane, int BN, typename U, typename DstT>
+METAL_FUNC void decode_store(
+    device DstT* dst,
+    const thread U* o,
+    threadgroup U* outputs,
+    U lane_factor,
+    U inv_sum,
+    int Dv,
+    uint simd_gid,
+    uint simd_lid) {
+  const int t = simd_gid * 32 + simd_lid;
+  const int w = t / BN;
+  const int s = t % BN;
+  const int w_off = min(w * per_lane, Dv - per_lane);
+  const U factor = simd_shuffle(lane_factor, ushort(s));
+  for (int i = 0; i < per_lane; i++) {
+    outputs[simd_lid * BN + simd_gid] = o[i];
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    const U safe_sum = (sum_exp_score == 0 ? 1e-6f : sum_exp_score);
-    o[i] = simd_sum(outputs[simd_gid * BD + simd_lid] * factor) / safe_sum;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
-
-  // And write the output
-  if (simd_lid == 0) {
-    for (uint i = 0; i < v_per_thread; i++) {
-      out[i] = static_cast<T>(o[i]);
+    U val = outputs[w * BN + s] * factor;
+    for (int k = 1; k < BN; k <<= 1) {
+      val += simd_shuffle_xor(val, ushort(k));
     }
+    if (s == 0 && i >= w * per_lane - w_off) {
+      dst[w_off + i] = static_cast<DstT>(val * inv_sum);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 
-template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = false, typename MaskType = float>
-[[kernel]] void sdpa_vector_2pass_1(const device T* queries [[buffer(0)]],
-                                    const device T* keys [[buffer(1)]],
-                                    const device T* values [[buffer(2)]],
-                                    device T* out [[buffer(3)]],
-                                    device float* sums [[buffer(4)]],
-                                    device float* maxs [[buffer(5)]],
-                                    const constant uint& gqa_factor [[buffer(6)]],
-                                    const constant uint& N [[buffer(7)]],
-                                    const constant uint3& qkv_head_strides [[buffer(8)]],
-                                    const constant uint3& qkv_seq_strides [[buffer(9)]],
-                                    const constant float& scale [[buffer(10)]],
-                                    const device MaskType* mask [[buffer(11)]],
-                                    const constant uint4& mask_strides [[buffer(12)]],
-                                    const constant uint4& qkv_batch_strides_heads [[buffer(13)]],
-                                    uint3 tid [[threadgroup_position_in_grid]],
-                                    uint3 tpg [[threadgroups_per_grid]],
-                                    uint simd_gid [[simdgroup_index_in_threadgroup]],
-                                    uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr int BN = 8;
-  constexpr int BD = 32;
-  constexpr int qk_per_thread = D / BD;
-  constexpr int v_per_thread = V / BD;
+template <
+    typename T,
+    int BD,
+    bool is_causal,
+    bool HAS_MASK,
+    typename MaskType,
+    int BLOCKS,
+    int BN>
+[[kernel, max_total_threads_per_threadgroup(BN * 32)]] void sdpa_vector(
+    const device T* queries [[buffer(0)]],
+    const device T* keys [[buffer(1)]],
+    const device T* values [[buffer(2)]],
+    device T* out [[buffer(3)]],
+    const constant DecodeAttnParams& params [[buffer(4)]],
+    const device MaskType* mask [[buffer(5)]],
+    device float* partials [[buffer(6)]],
+    device float* sums [[buffer(7)]],
+    device float* maxs [[buffer(8)]],
+    uint2 tid [[threadgroup_position_in_grid]],
+    uint simd_gid [[simdgroup_index_in_threadgroup]],
+    uint simd_lid [[thread_index_in_simdgroup]]) {
+  constexpr int per_lane = BD / 32;
   constexpr bool is_bool_mask = HAS_MASK && is_same_v<MaskType, bool>;
   constexpr bool is_additive_mask = HAS_MASK && !is_bool_mask;
-  const int q_head_stride = qkv_head_strides.x;
-  const int q_seq_stride = qkv_seq_strides.x;
-  const int q_batch_stride = qkv_batch_strides_heads.x;
-  const int k_head_stride = qkv_head_strides.y;
-  const int k_seq_stride = qkv_seq_strides.y;
-  const int k_batch_stride = qkv_batch_strides_heads.y;
-  const int v_head_stride = qkv_head_strides.z;
-  const int v_seq_stride = qkv_seq_strides.z;
-  const int v_batch_stride = qkv_batch_strides_heads.z;
-  const int num_heads = qkv_batch_strides_heads.w;
-  const int mask_kv_seq_stride = mask_strides.x;
-  const int mask_q_seq_stride = mask_strides.y;
-  const int mask_head_stride = mask_strides.z;
-  const uint mask_batch_stride = mask_strides.w;
-  int inner_k_stride = BN * int(k_seq_stride);
-  int inner_v_stride = BN * int(v_seq_stride);
-  constexpr int blocks = 32;
-
   typedef float U;
 
-  thread U q[qk_per_thread];
-  thread U k[qk_per_thread];
-  thread U o[v_per_thread];
+  const int N = params.N;
+  const int Dv = params.Dv;
+  const int qk_off = min(int(simd_lid) * per_lane, int(params.D) - per_lane);
+  const int qk_skip = int(simd_lid) * per_lane - qk_off;
+  const int v_off = min(int(simd_lid) * per_lane, Dv - per_lane);
+  const int bh_idx = tid.x;
+  const int batch_idx = bh_idx / int(params.num_heads);
+  const int head_idx = bh_idx - batch_idx * int(params.num_heads);
+  const int kv_head_idx = head_idx / int(params.gqa_factor);
+  const int block_idx = tid.y;
+  const int key0 = block_idx * BN + simd_gid;
+  const long part = long(bh_idx) * BLOCKS + block_idx; // partial row
+  const int k_seq_stride = params.K_strides[2];
+  const int v_seq_stride = params.V_strides[2];
+  const int mask_seq_stride = params.M_strides[2];
 
-  threadgroup U outputs[BN * BD];
+  queries += batch_idx * long(params.Q_strides[0]) +
+      head_idx * long(params.Q_strides[1]) + qk_off;
+  keys += batch_idx * long(params.K_strides[0]) +
+      kv_head_idx * long(params.K_strides[1]) + key0 * k_seq_stride + qk_off;
+  values += batch_idx * long(params.V_strides[0]) +
+      kv_head_idx * long(params.V_strides[1]) + key0 * v_seq_stride + v_off;
+  if IF_CONSTEXPR (HAS_MASK) {
+    mask += batch_idx * long(params.M_strides[0]) +
+        head_idx * long(params.M_strides[1]) + key0 * mask_seq_stride;
+  }
+
+  thread U q[per_lane];
+  thread U k[per_lane];
+  thread U o[per_lane];
+  threadgroup U outputs[32 * BN];
   threadgroup U max_scores[BN];
   threadgroup U sum_exp_scores[BN];
 
-  const int block_idx = tid.z;
-  const int bh_idx = tid.x;
-  const int batch_idx = bh_idx / int(num_heads);
-  const int head_idx = bh_idx - batch_idx * int(num_heads);
-  const int q_seq_idx = tid.y;
-  const int o_offset = bh_idx * tpg.y + q_seq_idx;
-  const int kv_head_idx = head_idx / gqa_factor;
-
-  queries +=
-      batch_idx * q_batch_stride + head_idx * q_head_stride + q_seq_idx * q_seq_stride + simd_lid * qk_per_thread;
-  keys += batch_idx * k_batch_stride + kv_head_idx * k_head_stride + (block_idx * BN + simd_gid) * k_seq_stride +
-      simd_lid * qk_per_thread;
-  values += batch_idx * v_batch_stride + kv_head_idx * v_head_stride + (block_idx * BN + simd_gid) * v_seq_stride +
-      simd_lid * v_per_thread;
-  out += o_offset * blocks * V + block_idx * V + simd_lid * v_per_thread;
-  if IF_CONSTEXPR (HAS_MASK) {
-    mask += batch_idx * mask_batch_stride + head_idx * mask_head_stride +
-        (block_idx * BN + simd_gid) * mask_kv_seq_stride + q_seq_idx * mask_q_seq_stride;
-  }
-  sums += o_offset * blocks + block_idx;
-  maxs += o_offset * blocks + block_idx;
-
   // Read the query and 0 the output accumulator
-  for (uint i = 0; i < qk_per_thread; i++) {
-    q[i] = scale * static_cast<U>(queries[i]);
+  for (int i = 0; i < per_lane; i++) {
+    q[i] = i < qk_skip ? U(0) : params.scale * static_cast<U>(queries[i]);
   }
-  for (uint i = 0; i < v_per_thread; i++) {
+  for (int i = 0; i < per_lane; i++) {
     o[i] = 0;
   }
 
@@ -259,22 +117,22 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
   U sum_exp_score = 0;
 
   // For each key
-  for (uint i = block_idx * BN + simd_gid; i < N; i += blocks * BN) {
+  for (int i = key0; i < N; i += BLOCKS * BN) {
     bool use_key = true;
-    if (is_causal) {
-      use_key = int(i) <= q_seq_idx;
+    if IF_CONSTEXPR (is_causal) {
+      use_key = i == 0; // the query row sees key 0 (upper-left alignment)
     } else if IF_CONSTEXPR (is_bool_mask) {
       use_key = mask[0];
     }
     if (use_key) {
       // Read the key
-      for (uint j = 0; j < qk_per_thread; j++) {
+      for (int j = 0; j < per_lane; j++) {
         k[j] = static_cast<U>(keys[j]);
       }
 
       // Compute the i-th score
       U score = 0;
-      for (uint j = 0; j < qk_per_thread; j++) {
+      for (int j = 0; j < per_lane; j++) {
         score += q[j] * k[j];
       }
       score = simd_sum(score);
@@ -283,14 +141,11 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
         score += static_cast<U>(mask[0]);
       }
 
-      // c10::metal::max propagates NaN (plain max drops it -> row max -inf -> 0).
-      U new_max = c10::metal::max(max_score, score);
-      U factor;
-      U exp_score;
-      if (new_max == -INFINITY) {
-        factor = U(1);
-        exp_score = U(0);
-      } else {
+      // c10::metal::max propagates NaN (plain max drops it).
+      const U new_max = c10::metal::max(max_score, score);
+      U factor = 1;
+      U exp_score = 0;
+      if (new_max != -INFINITY) {
         factor = fast::exp(max_score - new_max);
         exp_score = fast::exp(score - new_max);
       }
@@ -299,16 +154,16 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
       sum_exp_score = sum_exp_score * factor + exp_score;
 
       // Update the output accumulator
-      for (uint j = 0; j < v_per_thread; j++) {
+      for (int j = 0; j < per_lane; j++) {
         o[j] = o[j] * factor + exp_score * static_cast<U>(values[j]);
       }
     }
 
     // Move the pointers to the next kv
-    keys += blocks * inner_k_stride;
-    values += blocks * inner_v_stride;
+    keys += BLOCKS * BN * k_seq_stride;
+    values += BLOCKS * BN * v_seq_stride;
     if IF_CONSTEXPR (HAS_MASK) {
-      mask += BN * blocks * mask_kv_seq_stride;
+      mask += BLOCKS * BN * mask_seq_stride;
     }
   }
 
@@ -320,169 +175,142 @@ template <typename T, int D, int V = D, bool is_causal = false, bool HAS_MASK = 
     sum_exp_scores[simd_gid] = sum_exp_score;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  max_score = (simd_lid < BN) ? max_scores[simd_lid] : -1e9;
-  U new_max = simd_max(max_score);
-  U factor = fast::exp(max_score - new_max);
-  sum_exp_score = (simd_lid < BN) ? sum_exp_scores[simd_lid] : 0;
-  sum_exp_score = simd_sum(sum_exp_score * factor);
+  // Lane l takes simdgroup l's running max and sum (neutral past BN).
+  const U m = simd_lid < BN ? max_scores[simd_lid] : U(-INFINITY);
+  const U new_max = simd_max(m);
+  const U lane_factor = new_max == -INFINITY ? U(1) : fast::exp(m - new_max);
+  const U sum =
+      simd_sum((simd_lid < BN ? sum_exp_scores[simd_lid] : U(0)) * lane_factor);
 
-  // Write the sum and new max
-  if (simd_gid == 0) {
-    sums[0] = sum_exp_score;
-    maxs[0] = new_max;
+  // Two-pass blocks hand their row max (log2 units) and sum to the merge.
+  if (BLOCKS > 1 && simd_gid == 0 && simd_lid == 0) {
+    sums[part] = sum;
+    maxs[part] = new_max * M_LOG2E_F;
   }
-
-  // Now we need to aggregate all the outputs
-  for (uint i = 0; i < v_per_thread; i++) {
-    outputs[simd_lid * BN + simd_gid] = o[i] * fast::exp(max_scores[simd_gid] - new_max);
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    // And write the output
-    if (simd_gid == 0) {
-      U output = outputs[simd_lid * BN];
-      for (uint j = 1; j < BN; j++) {
-        output += outputs[simd_lid * BN + j];
-      }
-      out[i] = static_cast<T>(output);
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
-}
-
-template <typename T, int D>
-[[kernel]] void sdpa_vector_2pass_2(const device T* partials [[buffer(0)]],
-                                    const device float* sums [[buffer(1)]],
-                                    const device float* maxs [[buffer(2)]],
-                                    device T* out [[buffer(3)]],
-                                    uint3 tid [[threadgroup_position_in_grid]],
-                                    uint3 tpg [[threadgroups_per_grid]],
-                                    uint simd_gid [[simdgroup_index_in_threadgroup]],
-                                    uint simd_lid [[thread_index_in_simdgroup]]) {
-  constexpr int BN = 32;
-  constexpr int BD = 32;
-  constexpr int elem_per_thread = D / BD;
-  constexpr int blocks = 32;
-
-  typedef float U;
-
-  thread U o[elem_per_thread];
-  threadgroup U outputs[BN * BD];
-
-  // Adjust positions
-  const int head_idx = tid.x;
-  const int q_seq_idx = tid.y;
-  const int hq_offset = head_idx * tpg.y + q_seq_idx;
-  partials += hq_offset * blocks * D + simd_gid * D + simd_lid * elem_per_thread;
-  sums += hq_offset * blocks;
-  maxs += hq_offset * blocks;
-  out += hq_offset * D + simd_gid * elem_per_thread;
-
-  // First every thread reads the max and sum_exp
-  U max_score = maxs[simd_lid];
-  U new_max = simd_max(max_score);
-  U factor = fast::exp(max_score - new_max);
-  U sum_exp_score = simd_sum(sums[simd_lid] * factor);
-
-  // Now read the block into registers and then use shared memory to transpose
-  // it
-  for (uint i = 0; i < elem_per_thread; i++) {
-    o[i] = partials[i];
-  }
-  for (uint i = 0; i < elem_per_thread; i++) {
-    outputs[simd_lid * BD + simd_gid] = o[i];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    const U safe_sum = (sum_exp_score == 0 ? 1e-6f : sum_exp_score);
-    o[i] = simd_sum(outputs[simd_gid * BD + simd_lid] * factor) / safe_sum;
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
-
-  // And write the output
-  if (simd_lid == 0) {
-    for (uint i = 0; i < elem_per_thread; i++) {
-      out[i] = static_cast<T>(o[i]);
-    }
+  // A fully masked row has sum == 0 and all-zero o; keep it 0 instead of NaN.
+  if IF_CONSTEXPR (BLOCKS == 1) {
+    decode_store<per_lane, BN>(
+        out + bh_idx * long(Dv),
+        o,
+        outputs,
+        lane_factor,
+        1 / (sum == 0 ? U(1) : sum),
+        Dv,
+        simd_gid,
+        simd_lid);
+  } else {
+    decode_store<per_lane, BN>(
+        partials + part * BD,
+        o,
+        outputs,
+        lane_factor,
+        U(1),
+        Dv,
+        simd_gid,
+        simd_lid);
   }
 }
 
-#define INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE, NAME_SUFFIX) \
-  template[[host_name("sdpa_vector_" #DTYPE "_" #QK_DIM "_" #VALUE_DIM NAME_SUFFIX)]] kernel void       \
-  sdpa_vector<DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE>(                                   \
-      const device DTYPE* queries [[buffer(0)]],                                                        \
-      const device DTYPE* keys [[buffer(1)]],                                                           \
-      const device DTYPE* values [[buffer(2)]],                                                         \
-      device DTYPE* out [[buffer(3)]],                                                                  \
-      const constant uint& gqa_factor [[buffer(4)]],                                                    \
-      const constant uint& N [[buffer(5)]],                                                             \
-      const constant uint3& qkv_head_strides [[buffer(6)]],                                             \
-      const constant uint3& qkv_seq_strides [[buffer(7)]],                                              \
-      const constant float& scale [[buffer(8)]],                                                        \
-      const device MASK_TYPE* mask [[buffer(9)]],                                                       \
-      const constant uint4& mask_strides [[buffer(10)]],                                                \
-      const constant uint4& qkv_batch_strides_heads [[buffer(11)]],                                     \
-      uint3 tid [[threadgroup_position_in_grid]],                                                       \
-      uint3 tpg [[threadgroups_per_grid]],                                                              \
-      uint simd_gid [[simdgroup_index_in_threadgroup]],                                                 \
-      uint simd_lid [[thread_index_in_simdgroup]]);
+// Merges the unnormalized fp32 partial rows written by the two-pass decode
+// and the split-K prefill kernels. kMergeLanes threads per output element
+// each take every kMergeLanes-th block and reduce with xor shuffles:
+//   out[row, c] = (sum over b of f_b P_b[row, c]) / (sum over b of f_b S_b),
+//   f_b = 2^(max_b - M), M = max over b of max_b (maxs in log2 units).
+// dims = (value head dim, blocks, out row stride, partial row width).
+template <typename T>
+[[kernel]] void sdpa_merge_partials(
+    const device float* partials [[buffer(0)]],
+    const device float* sums [[buffer(1)]],
+    const device float* maxs [[buffer(2)]],
+    device T* out [[buffer(3)]],
+    const constant uint4& dims [[buffer(4)]],
+    uint3 gid [[thread_position_in_grid]]) {
+  const uint lane = gid.x;
+  const uint col = gid.y;
+  const uint row = gid.z;
+  const uint blocks = dims.y;
+  const uint width = dims.w;
+  partials += long(row) * blocks * width + col;
+  sums += long(row) * blocks;
+  maxs += long(row) * blocks;
+  float M = -INFINITY;
+  for (uint b = 0; b < blocks; b++) {
+    M = c10::metal::max(M, maxs[b]);
+  }
+  float num = 0;
+  float den = 0;
+  for (uint b = lane; b < blocks; b += kMergeLanes) {
+    const float f = M == -INFINITY ? 1.0f : fast::exp2(maxs[b] - M);
+    num += f * partials[b * width];
+    den += f * sums[b];
+  }
+  for (ushort k = 1; k < kMergeLanes; k <<= 1) {
+    num += simd_shuffle_xor(num, k);
+    den += simd_shuffle_xor(den, k);
+  }
+  if (lane == 0) {
+    out[row * long(dims.z) + col] =
+        static_cast<T>(num / (den == 0 ? 1.0f : den));
+  }
+}
 
-#define INSTANTIATE_SDPA_VECTOR(DTYPE, QK_DIM, VALUE_DIM)                                       \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, false, float, "_masknone")       \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, true, false, float, "_masknone_causal") \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool")         \
-  INSTANTIATE_SDPA_VECTOR_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, DTYPE, "_mask" #DTYPE)
+#define instantiate_decode(name, blocks, bn, dtype, bd) \
+  instantiate_kernel(                                   \
+      name "_" #dtype "_" #bd "_masknone",              \
+      sdpa_vector,                                      \
+      dtype,                                            \
+      bd,                                               \
+      false,                                            \
+      false,                                            \
+      float,                                            \
+      blocks,                                           \
+      bn);                                              \
+  instantiate_kernel(                                   \
+      name "_" #dtype "_" #bd "_masknone_causal",       \
+      sdpa_vector,                                      \
+      dtype,                                            \
+      bd,                                               \
+      true,                                             \
+      false,                                            \
+      float,                                            \
+      blocks,                                           \
+      bn);                                              \
+  instantiate_kernel(                                   \
+      name "_" #dtype "_" #bd "_maskbool",              \
+      sdpa_vector,                                      \
+      dtype,                                            \
+      bd,                                               \
+      false,                                            \
+      true,                                             \
+      bool,                                             \
+      blocks,                                           \
+      bn);                                              \
+  instantiate_kernel(                                   \
+      name "_" #dtype "_" #bd "_mask" #dtype,           \
+      sdpa_vector,                                      \
+      dtype,                                            \
+      bd,                                               \
+      false,                                            \
+      true,                                             \
+      dtype,                                            \
+      blocks,                                           \
+      bn)
 
-#define INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE, NAME_SUFFIX) \
-  template[[host_name("sdpa_vector_2pass_1_" #DTYPE "_" #QK_DIM "_" #VALUE_DIM NAME_SUFFIX)]] kernel void       \
-  sdpa_vector_2pass_1<DTYPE, QK_DIM, VALUE_DIM, CAUSAL, HAS_MASK, MASK_TYPE>(                                   \
-      const device DTYPE* queries [[buffer(0)]],                                                                \
-      const device DTYPE* keys [[buffer(1)]],                                                                   \
-      const device DTYPE* values [[buffer(2)]],                                                                 \
-      device DTYPE* out [[buffer(3)]],                                                                          \
-      device float* sums [[buffer(4)]],                                                                         \
-      device float* maxs [[buffer(5)]],                                                                         \
-      const constant uint& gqa_factor [[buffer(6)]],                                                            \
-      const constant uint& N [[buffer(7)]],                                                                     \
-      const constant uint3& qkv_head_strides [[buffer(8)]],                                                     \
-      const constant uint3& qkv_seq_strides [[buffer(9)]],                                                      \
-      const constant float& scale [[buffer(10)]],                                                               \
-      const device MASK_TYPE* mask [[buffer(11)]],                                                              \
-      const constant uint4& mask_strides [[buffer(12)]],                                                        \
-      const constant uint4& qkv_batch_strides_heads [[buffer(13)]],                                             \
-      uint3 tid [[threadgroup_position_in_grid]],                                                               \
-      uint3 tpg [[threadgroups_per_grid]],                                                                      \
-      uint simd_gid [[simdgroup_index_in_threadgroup]],                                                         \
-      uint simd_lid [[thread_index_in_simdgroup]]);
+#define instantiate_decode_tile(dtype, bd)                            \
+  instantiate_decode("sdpa_vector", 1, kDecodeSimdgroups, dtype, bd); \
+  instantiate_decode(                                                 \
+      "sdpa_vector_2pass", kDecodeBlocks, kDecodeBlockSimdgroups, dtype, bd)
 
-#define INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, QK_DIM, VALUE_DIM)                                       \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, false, float, "_masknone")       \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, true, false, float, "_masknone_causal") \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, bool, "_maskbool")         \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1_ONE(DTYPE, QK_DIM, VALUE_DIM, false, true, DTYPE, "_mask" #DTYPE)
+// Keep the tiles in sync with decode_bucket in Attention.mm.
+#define instantiate_decode_tiles(dtype) \
+  instantiate_decode_tile(dtype, 32);   \
+  instantiate_decode_tile(dtype, 64);   \
+  instantiate_decode_tile(dtype, 96);   \
+  instantiate_decode_tile(dtype, 128);  \
+  instantiate_decode_tile(dtype, 256);  \
+  instantiate_decode_tile(dtype, 512);  \
+  instantiate_kernel("sdpa_merge_partials_" #dtype, sdpa_merge_partials, dtype)
 
-#define INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, VALUE_DIM)                             \
-  template [[host_name("sdpa_vector_2pass_2_" #DTYPE "_" #VALUE_DIM)]] kernel void        \
-  sdpa_vector_2pass_2<DTYPE, VALUE_DIM>(const device DTYPE* partials [[buffer(0)]],       \
-                                        const device float* sums [[buffer(1)]],           \
-                                        const device float* maxs [[buffer(2)]],           \
-                                        device DTYPE* out [[buffer(3)]],                  \
-                                        uint3 tid [[threadgroup_position_in_grid]],       \
-                                        uint3 tpg [[threadgroups_per_grid]],              \
-                                        uint simd_gid [[simdgroup_index_in_threadgroup]], \
-                                        uint simd_lid [[thread_index_in_simdgroup]]);
-
-#define INSTANTIATE_SDPA_VECTOR_HEADS(DTYPE)        \
-  INSTANTIATE_SDPA_VECTOR(DTYPE, 64, 64);           \
-  INSTANTIATE_SDPA_VECTOR(DTYPE, 96, 96);           \
-  INSTANTIATE_SDPA_VECTOR(DTYPE, 128, 128);         \
-  INSTANTIATE_SDPA_VECTOR(DTYPE, 256, 256);         \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, 64, 64);   \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, 96, 96);   \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, 128, 128); \
-  INSTANTIATE_SDPA_VECTOR_2PASS_1(DTYPE, 256, 256); \
-  INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, 64);   \
-  INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, 96);   \
-  INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, 128);  \
-  INSTANTIATE_SDPA_VECTOR_AGGREGATION(DTYPE, 256);
-
-INSTANTIATE_SDPA_VECTOR_HEADS(float);
-INSTANTIATE_SDPA_VECTOR_HEADS(half);
-INSTANTIATE_SDPA_VECTOR_HEADS(bfloat);
+instantiate_decode_tiles(float);
+instantiate_decode_tiles(half);
+instantiate_decode_tiles(bfloat);

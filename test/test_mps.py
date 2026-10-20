@@ -12361,10 +12361,10 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     def test_sdpa_math_mps_bool_mask_1pass(self, dtype):
-        q = torch.randn(1, 1, 8, 64, dtype=dtype, device='mps')
+        q = torch.randn(1, 1, 1, 64, dtype=dtype, device='mps')
         k = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
         v = torch.randn(1, 1, 512, 64, dtype=dtype, device='mps')
-        mask = torch.eye(8, 512, dtype=torch.bool, device='mps')
+        mask = torch.rand(1, 512, device='mps') > 0.5
 
         out_mps, _ = torch.ops.aten._scaled_dot_product_attention_math_for_mps(
             q, k, v, mask
@@ -12378,8 +12378,8 @@ class TestSDPA(TestCaseMPS):
     def test_sdpa_2pass(self, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/174861
         q = torch.randn(1, 32, 1, 128, dtype=dtype)
-        k = torch.randn(1, 2, 1024, 128, dtype=dtype)
-        v = torch.randn(1, 2, 1024, 128, dtype=dtype)
+        k = torch.randn(1, 2, 4096, 128, dtype=dtype)
+        v = torch.randn(1, 2, 4096, 128, dtype=dtype)
         sdpa_kwargs = {"enable_gqa": True}
 
         out_cpu = F.scaled_dot_product_attention(q, k, v, **sdpa_kwargs)
@@ -12393,7 +12393,7 @@ class TestSDPA(TestCaseMPS):
         self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
 
     @parametrize("dtype", [torch.bfloat16, torch.float32])
-    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    @parametrize("s_len", [16, 4096])  # one-pass and two-pass decode kernels
     def test_sdpa_additive_mask_vector(self, dtype, s_len):
         # Float additive mask matching the Q dtype should route to the
         # templated vector decode kernel
@@ -12414,7 +12414,7 @@ class TestSDPA(TestCaseMPS):
 
     @parametrize("dtype", [torch.bfloat16, torch.float32])
     @parametrize("layout", ["contiguous", "mT", "transpose_seq_head", "permute"])
-    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    @parametrize("s_len", [16, 4096])  # one-pass and two-pass decode kernels
     def test_sdpa_additive_mask_vector_strided(self, dtype, layout, s_len):
         batch, NH_kv, q_len, head_dim = 1, 2, 1, 128
         NH_q = NH_kv * 4  # GQA path
@@ -12432,7 +12432,7 @@ class TestSDPA(TestCaseMPS):
         self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
 
     @parametrize("dtype", [torch.bfloat16, torch.float])
-    @parametrize("s_len", [16, 1024])  # 1-pass and 2-pass kernels
+    @parametrize("s_len", [16, 4096])  # one-pass and two-pass decode kernels
     def test_sdpa_additive_mask_vector_fully_masked_row(self, dtype, s_len):
         # Every key masked out via additive -inf shouldn't return nans
         q = torch.randn(1, 32, 1, 128, dtype=dtype, device="mps")
@@ -12542,9 +12542,8 @@ class TestSDPA(TestCaseMPS):
     @parametrize("is_causal", [True, False])
     @parametrize("gqa_factor", [2, 4, 8])
     def test_sdpa_enable_gqa(self, dtype, is_causal, gqa_factor):
-        # HS=23 keeps the dispatch on the MPSGraph general path (not in the
-        # set of kernel-supported head dims), so this exercises sdpa_general_mps
-        # with KV expansion happening inside the helper
+        # HS=23 is not a kernel tile width, so the head dim is padded; the
+        # kernels expand KV across the GQA groups themselves.
         key_heads = 4
         q_heads = key_heads * gqa_factor
         L = 7
@@ -12686,8 +12685,8 @@ class TestSDPA(TestCaseMPS):
         batch = 2  # >1 so that batch-stride mistakes are observable
         NH_kv = 2
         NH_q = NH_kv * gqa_factor
-        q_len = 4  # <8 so that vector fast is eligible
-        s_len = 16  # smaller than 1024 so that we use the one–pass variant
+        q_len = 1  # the decode kernels take a single query row
+        s_len = 16  # below the two-pass threshold of 1024 keys: one-pass variant
         q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
         self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal, broadcast_mask=broadcast_mask)
 
@@ -12704,10 +12703,10 @@ class TestSDPA(TestCaseMPS):
         if is_causal and with_mask:
             self.skipTest("PyTorch SDPA disallows attn_mask together with is_causal")
         batch = 2  # >1 so that batch-stride mistakes are observable
-        NH_kv = 8
+        NH_kv = 1
         NH_q = NH_kv * gqa_factor
-        q_len = 8
-        s_len = 1024  # large enough to trigger the two–pass path
+        q_len = 1
+        s_len = 1024  # two-pass: >= 1024 keys and fewer than 16 (batch, head) rows
         q, k, v = self.generate_qkv(batch, NH_q, q_len, s_len, head_dim, layout, dtype, NH_kv=NH_kv)
         self.run_fast_attention_test(q, k, v, with_mask, is_causal=is_causal, broadcast_mask=broadcast_mask)
 
@@ -12997,14 +12996,36 @@ class TestSDPA(TestCaseMPS):
         tol = {torch.float32: 5e-5, torch.float16: 2e-3, torch.bfloat16: 8e-3}[dtype]
         self.assertLess(((got - ref).abs().max() / ref.abs().max()).item(), tol)
 
-    def test_caching_scale(self):
-        # TODO remove this test once sdpa_general becomes a metal kernel
-        q = torch.randn(1, 2, 4, 8, device="mps")
-        # first call with default scale (1/sqrt(8) = 0.3536)
-        y_default = F.scaled_dot_product_attention(q, q, q)
-        # second call with explicit scale=2.0
-        y_scale2 = F.scaled_dot_product_attention(q, q, q, scale=2.0)
-        self.assertNotEqual(y_default, y_scale2)
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @parametrize("mask", [None, "bool", "float32", "causal"])
+    @parametrize("shape", [
+        # (batch, NH, NH_kv, q_len, s_len, head_dim, v_dim); no head dim is a kernel tile width
+        (1, 23, 23, 1, 17, 121, 121),  # decode, lane windows clamped inside the head dim
+        (1, 4, 2, 1, 4096, 192, 128),  # two-pass decode with QK dim != V dim
+        (1, 2, 2, 1, 64, 600, 600),  # past the widest decode tile: prefill at q_len 1
+        (2, 8, 8, 8, 2048, 40, 40),  # short q_len on the prefill kernel, split-K
+        (1, 2, 2, 100, 300, 48, 48),  # partial Q and K blocks
+        (1, 2, 1, 64, 64, 256, 256),  # QK dim chunked, V/O in slabs (staged scores for float32)
+        (1, 1, 1, 40, 40, 512, 512),
+        (1, 2, 2, 4, 0, 64, 64),  # no keys
+    ], name_fn=lambda s: "x".join(map(str, s)))
+    def test_sdpa_non_tile_shapes(self, dtype, mask, shape):
+        batch, NH, NH_kv, q_len, s_len, head_dim, v_dim = shape
+        q = torch.randn(batch, NH, q_len, head_dim, dtype=dtype, device="mps")
+        k = torch.randn(batch, NH_kv, s_len, head_dim, dtype=dtype, device="mps")
+        v = torch.randn(batch, NH_kv, s_len, v_dim, dtype=dtype, device="mps")
+        attn_mask = None
+        if mask == "bool":
+            attn_mask = torch.rand(batch, 1, q_len, s_len, device="mps") > 0.3
+        elif mask == "float32":
+            attn_mask = torch.randn(batch, 1, q_len, s_len, device="mps")
+        is_causal = mask == "causal"
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, is_causal=is_causal, enable_gqa=NH != NH_kv)
+        cpu_mask = attn_mask.cpu() if attn_mask is not None else None
+        ref = F.scaled_dot_product_attention(
+            q.cpu().float(), k.cpu().float(), v.cpu().float(), attn_mask=cpu_mask, is_causal=is_causal, enable_gqa=NH != NH_kv
+        )
+        self._compare_tensors(out.cpu().float(), ref, tol=0.02 if dtype == torch.bfloat16 else 1e-4)
 
 class TestSDPAMetaDispatchMode(TorchDispatchMode):
     """
