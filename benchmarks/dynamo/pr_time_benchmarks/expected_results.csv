@@ -142,7 +142,7 @@ dtensor_dispatch_custom_handler,instruction_count,36060,0.1
 
 
 
-nn_module_guard_eval,instruction_count,71160,0.1
+nn_module_guard_eval,instruction_count,69010,0.1
 
 
 
@@ -154,15 +154,15 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,31627,0.1
 
 
 
-runtime_overhead_inductor,instruction_count,148100,0.1
+runtime_overhead_inductor,instruction_count,136300,0.1
 
 
 
-runtime_overhead_inductor_inference_mode,instruction_count,158000,0.1
+runtime_overhead_inductor_inference_mode,instruction_count,145900,0.1
 
 
 
-runtime_overhead_inductor_requires_grad,instruction_count,179200,0.1
+runtime_overhead_inductor_requires_grad,instruction_count,161100,0.1
 
 
 
@@ -170,15 +170,15 @@ runtime_overhead_inductor_requires_grad_backward,instruction_count,107500,0.1
 
 
 
-runtime_overhead_inductor_dynamic,instruction_count,145000,0.1
+runtime_overhead_inductor_dynamic,instruction_count,133300,0.1
 
 
 
-runtime_overhead_inductor_inference_mode_dynamic,instruction_count,155300,0.1
+runtime_overhead_inductor_inference_mode_dynamic,instruction_count,143500,0.1
 
 
 
-runtime_overhead_inductor_requires_grad_dynamic,instruction_count,178100,0.1
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,159400,0.1
 
 
 
@@ -186,7 +186,7 @@ runtime_overhead_inductor_requires_grad_backward_dynamic,instruction_count,10830
 
 
 
-runtime_overhead_eager_cpu,instruction_count,107500,0.1
+runtime_overhead_eager_cpu,instruction_count,101300,0.1
 
 
 
