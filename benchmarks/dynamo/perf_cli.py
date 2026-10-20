@@ -90,7 +90,13 @@ JOB_RE = re.compile(
     r"(?P<job_name>test(?:-osdc)?) \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
 )
 
-PERF_CONFIGS = re.compile(r"inductor_(huggingface|timm|torchbench)_perf")
+PERF_CONFIGS = re.compile(
+    r"inductor_(huggingface|timm|torchbench)_perf|inductor_huggingface_tp"
+)
+
+# Tensor-parallel Hugging Face CSVs append the TP degree and phase to the config,
+# e.g. inductor_no_cudagraphs_huggingface_bfloat16_inference_cuda_tp2_decode.
+TP_CONFIG_SUFFIX = re.compile(r"_tp(?P<tp_size>\d+)_(?P<phase>prefill|decode)$")
 
 SUITE_ALIASES = {
     "hf": "huggingface",
@@ -177,6 +183,8 @@ def _short_config(config: str, device: str = "") -> str:
             suite = s
             break
     parts = [p for p in (device, backend, suite, mode) if p]
+    if tp := TP_CONFIG_SUFFIX.search(c):
+        parts.append(f"{tp['phase']} tp{tp['tp_size']}")
     return " ".join(parts)
 
 
@@ -191,6 +199,15 @@ class ModelResult:
     dynamo_peak_mem: float = 0.0
     config: str = ""
     device: str = ""
+    batch_size: int | None = None
+    prompt_length: int | None = None
+    decode_length: int | None = None
+
+    @property
+    def workload(self) -> tuple[int | None, ...]:
+        if TP_CONFIG_SUFFIX.search(self.config):
+            return self.batch_size, self.prompt_length, self.decode_length
+        return ()
 
     @property
     def short_config(self) -> str:
@@ -243,7 +260,7 @@ class PerfData:
     @property
     def runtime(self) -> str:
         # Last token in config: e.g. "..._training_cuda" → "cuda"
-        parts = self.config.rsplit("_", 1)
+        parts = TP_CONFIG_SUFFIX.sub("", self.config).rsplit("_", 1)
         if len(parts) == 2:
             return parts[1]
         return "unknown"
@@ -420,6 +437,14 @@ def parse_csvs(csv_pairs: list[tuple[str, str]], device: str = "") -> list[PerfD
                     dynamo_peak_mem=float(row.get("dynamo_peak_mem", 0) or 0),
                     config=config,
                     device=device,
+                    **(
+                        {
+                            key: int(row[key]) if row.get(key) else None
+                            for key in ("batch_size", "prompt_length", "decode_length")
+                        }
+                        if TP_CONFIG_SUFFIX.search(config)
+                        else {}
+                    ),
                 )
             )
 
@@ -883,11 +908,19 @@ def resolve_baseline(head_run_id: int) -> int:
         "--repo",
         REPO,
         "--json",
-        "workflowName",
+        "workflowName,workflowDatabaseId",
         json_output=True,
     )
     wf_name = run_data.get("workflowName", "")
     nightly_id = WORKFLOW_NAME_TO_NIGHTLY_ID.get(wf_name)
+    tp_jobs = set()
+    if wf_name == "inductor-periodic":
+        nightly_id = run_data["workflowDatabaseId"]
+        tp_jobs = {
+            (job["config"], job["runner"])
+            for job in get_perf_jobs(get_run_jobs(head_run_id))
+            if job["config"] == "inductor_huggingface_tp"
+        }
     if nightly_id is None:
         print(
             f"Don't know which nightly corresponds to workflow '{wf_name}'",
@@ -916,6 +949,13 @@ def resolve_baseline(head_run_id: int) -> int:
     for run in runs:
         if run["databaseId"] != head_run_id:
             baseline_id = run["databaseId"]
+            if tp_jobs:
+                baseline_jobs = {
+                    (job["config"], job["runner"])
+                    for job in get_perf_jobs(get_run_jobs(baseline_id))
+                }
+                if not tp_jobs.issubset(baseline_jobs):
+                    continue
             created = run["createdAt"][:10]
             print(f"Baseline: run {baseline_id} (main, {created})")
             return baseline_id
@@ -1007,14 +1047,25 @@ def fetch_run_perf(
             return []
         print(f"No successful perf jobs in run {run_id}.", file=sys.stderr)
         sys.exit(1)
-    csv_pairs = download_and_extract_csvs(run_id, perf_jobs, attempt, no_cache=no_cache)
-    if not csv_pairs:
+    jobs_by_device = defaultdict(list)
+    for job in perf_jobs:
+        identity = (
+            job["runner"] if job["config"] == "inductor_huggingface_tp" else device
+        )
+        jobs_by_device[identity].append(job)
+    results = []
+    for identity, device_jobs in jobs_by_device.items():
+        csv_pairs = download_and_extract_csvs(
+            run_id, device_jobs, attempt, no_cache=no_cache
+        )
+        results.extend(parse_csvs(csv_pairs, device=identity))
+    if not results:
         if allow_empty:
             print(f"  no CSVs in run {run_id}, skipping", file=sys.stderr)
             return []
         print(f"No performance CSVs in run {run_id}.", file=sys.stderr)
         sys.exit(1)
-    return parse_csvs(csv_pairs, device=device)
+    return results
 
 
 @dataclass
@@ -1049,18 +1100,17 @@ class ConfigAgg:
 def compute_deltas(
     head_perf: list[PerfData], base_perf: list[PerfData], metric: Metric
 ) -> tuple[list[ModelDelta], dict[str, ConfigAgg]]:
-    """Join head and base on (device, config, model_name) and compute deltas.
+    """Join matching hardware, configs, models and TP workloads to compute deltas.
 
     Returns (per_model_deltas, per_config_aggregates).
     per_config_aggregates maps qualified_config -> ConfigAgg.
     """
-    # Build base lookup: (device, config, model_name) -> metric value
-    base_lookup: dict[tuple[str, str, str], float] = {}
+    base_lookup: dict[tuple[str, str, str, tuple[int | None, ...]], float] = {}
     for perf in base_perf:
         for m in perf.models:
             v = getattr(m, metric.field)
             if v > 0:
-                base_lookup[(perf.device, perf.config, m.name)] = v
+                base_lookup[(perf.device, perf.config, m.name, m.workload)] = v
 
     deltas = []
     for perf in head_perf:
@@ -1068,7 +1118,7 @@ def compute_deltas(
             head_val = getattr(m, metric.field)
             if head_val <= 0:
                 continue
-            key = (perf.device, perf.config, m.name)
+            key = (perf.device, perf.config, m.name, m.workload)
             if key not in base_lookup:
                 continue
             base_val = base_lookup[key]
@@ -1370,9 +1420,12 @@ def config_to_command(
     config: str,
     suite: str,
     model: str | None = None,
+    *,
+    result: ModelResult | None = None,
 ) -> str | None:
     """Turn a config name into a runnable benchmark command."""
-    m = CONFIG_RE.match(config)
+    tp = TP_CONFIG_SUFFIX.search(config)
+    m = CONFIG_RE.match(TP_CONFIG_SUFFIX.sub("", config))
     if not m:
         return None
 
@@ -1410,6 +1463,28 @@ def config_to_command(
         cmd_parts.append("--export-aot-inductor")
         cmd_parts.append("--disable-cudagraphs")
 
+    if tp:
+        # huggingface.py launches the torchrun worker group itself.
+        cmd_parts.extend(
+            [
+                f"--hf-inference-mode={tp['phase']}",
+                f"--tp-size={tp['tp_size']}",
+                "--nopython",
+            ]
+        )
+        if result is not None:
+            dimensions = {
+                "batch-size": result.batch_size,
+                "prompt-length": result.prompt_length,
+            }
+            if tp["phase"] == "decode":
+                dimensions["decode-length"] = result.decode_length
+            cmd_parts.extend(
+                f"--{key}={value}"
+                for key, value in dimensions.items()
+                if value is not None
+            )
+
     cmd_parts.extend(["--performance", "--cold-start-latency"])
 
     if model:
@@ -1446,23 +1521,25 @@ def cmd_repro(args):
 
     print_run_header("REPRO", metas)
 
-    configs_seen: dict[str, str] = {}  # config_name → suite
+    commands: dict[str, str] = {}
     for perf in all_perf:
-        configs_seen[perf.config] = perf.suite
+        if TP_CONFIG_SUFFIX.search(perf.config):
+            for model in perf.models:
+                if args.model and model.name != args.model:
+                    continue
+                cmd = config_to_command(
+                    perf.config, perf.suite, model.name, result=model
+                )
+                if cmd:
+                    commands[cmd] = perf.config
+        else:
+            cmd = config_to_command(perf.config, perf.suite, args.model)
+            if cmd:
+                commands[cmd] = perf.config
 
-    count = 0
-    commands: list[str] = []
-    for config in sorted(configs_seen):
-        suite = configs_seen[config]
-        cmd = config_to_command(config, suite, args.model)
-        if not cmd:
-            continue
-        commands.append(f"# {config}\n{cmd}")
-        count += 1
-
-    print(f"\nReproducible commands ({count} configs):\n")
-    for cmd in commands:
-        print(f"{cmd}\n")
+    print(f"\nReproducible commands ({len(commands)} commands):\n")
+    for cmd, config in sorted(commands.items()):
+        print(f"# {config}\n{cmd}\n")
 
 
 PIN_DIR = Path(".ci/docker/ci_commit_pins")
