@@ -1234,8 +1234,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             if self.value is collections.OrderedDict:
                 # Exact OrderedDict: represent as a bare OrderedDictVariable,
-                # mirroring dict.__new__(dict) -> ConstDictVariable.
-                return OrderedDictVariable({}, mutation_type=ValueMutationNew())
+                # mirroring dict.__new__(dict) -> ConstDictVariable. This is the
+                # only path that marks the container as created in this frame
+                # (`fresh`); it is what lets the instance __dict__ be modeled.
+                return OrderedDictVariable(
+                    {}, fresh=True, mutation_type=ValueMutationNew()
+                )
             # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
             # extra args — only the type arg matters.  Pass init_args=[] for
             # those so reconstruction emits base_cls.__new__(cls) without

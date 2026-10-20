@@ -3527,6 +3527,12 @@ class InstructionTranslatorBase(
         except Unsupported:
             if not obj.is_python_constant():
                 raise
+            if isinstance(
+                obj, variables.OrderedDictVariable
+            ) and obj.eager_attr_fold_is_unsound(self, attr):
+                # as_python_constant() rebuilds the container without its
+                # instance __dict__, so an eager fold would answer from a copy.
+                raise
             # An eager getattr would run a user-defined __get__ at trace time
             # and bake its result into the graph.
             if isinstance(obj, variables.UserDefinedClassVariable) and isinstance(

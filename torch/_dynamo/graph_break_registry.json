@@ -6168,6 +6168,76 @@
       ]
     }
   ],
+  "GB6769": [
+    {
+      "Gb_type": "attributed OrderedDict captured by a constructor",
+      "Context": "constructor arg {arg}, OrderedDict {ordered_dict.debug_repr()}",
+      "Explanation": "A new object's constructor observed the contents of an OrderedDict that has instance attributes. The container is reconstructed from an empty shell with its contents replayed afterwards, so the constructor cannot be ordered soundly.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0537": [
+    {
+      "Gb_type": "attribute lookup on OrderedDict with unmodeled __dict__",
+      "Context": "hasattr({self.debug_repr()}, {name})",
+      "Explanation": "Dynamo does not model the instance __dict__ of this OrderedDict, so it cannot tell whether the attribute exists.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1307": [
+    {
+      "Gb_type": "attribute deletion on OrderedDict",
+      "Context": "delattr({self.debug_repr()}, {args[0]})",
+      "Explanation": "Dynamo does not model attribute deletion on an OrderedDict: the deleted name may or may not exist on the live object, and replaying the delete is not implemented.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9376": [
+    {
+      "Gb_type": "setattr() on a pre-existing OrderedDict",
+      "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
+      "Explanation": "Dynamo models instance attributes of an OrderedDict only when the object is built inside the traced region; writing an attribute of a pre-existing OrderedDict is not modeled.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9287": [
+    {
+      "Gb_type": "non-constant attribute name in OrderedDict setattr",
+      "Context": "setattr({self.debug_repr()}, {name_var}, {value})",
+      "Explanation": "Dynamo requires the attribute name to be a constant.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4535": [
+    {
+      "Gb_type": "data descriptor attribute write on OrderedDict",
+      "Context": "setattr({self.debug_repr()}, {name}, {value})",
+      "Explanation": "Dynamo does not model writes to attributes that are data descriptors on the OrderedDict type (e.g. __dict__, __class__).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB6327": [
+    {
+      "Gb_type": "__dict__ access on OrderedDict",
+      "Context": "getattr({self.debug_repr()}, '__dict__')",
+      "Explanation": "Dynamo does not model the instance __dict__ view of an OrderedDict.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0337": [
     {
       "Gb_type": "strict_mode: unexpected kwargs",

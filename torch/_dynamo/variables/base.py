@@ -2538,12 +2538,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
         # cannot trace into.  Constant-fold it for VTs backed by a real
-        # Python object so that copy.deepcopy can trace through.
+        # Python object so that copy.deepcopy can trace through.  Skip the fold
+        # for an OrderedDict whose instance __dict__ the rebuilt copy would drop;
+        # it then falls through to the graph break below.
         if (
             name == "__reduce_ex__"
             and len(args) == 1
             and not kwargs
             and self.is_python_constant()
+            and not (
+                isinstance(self, variables.OrderedDictVariable)
+                and self.eager_attr_fold_is_unsound(tx, name)
+            )
         ):
             protocol = args[0].as_python_constant()
             return VariableTracker.build(
