@@ -1534,6 +1534,57 @@ class FxGraphHashDetails:
                     return True
         return False
 
+    @classmethod
+    def _collect_tensor_device_types(
+        cls, value: object, device_types: OrderedSet[str]
+    ) -> None:
+        if isinstance(value, torch.Tensor):
+            device_types.add(value.device.type)
+            return
+        if isinstance(value, (list, tuple, OrderedSet, frozenset)):
+            for item in value:
+                cls._collect_tensor_device_types(item, device_types)
+            return
+        if isinstance(value, dict):
+            for item in itertools.chain(value.keys(), value.values()):
+                cls._collect_tensor_device_types(item, device_types)
+
+    @classmethod
+    def _graph_device_types(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> OrderedSet[str]:
+        device_types: OrderedSet[str] = OrderedSet()
+        cls._collect_tensor_device_types(example_inputs, device_types)
+        if gm is None:
+            return device_types
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            for node in module.graph.nodes:
+                cls._collect_tensor_device_types(
+                    cls._tensor_metadata(node), device_types
+                )
+                factory_device = cls._factory_device_type(node)
+                if factory_device is not None:
+                    device_types.add(factory_device)
+        return device_types
+
+    @classmethod
+    def _mm_template_allow_tf32(
+        cls, gm: torch.fx.GraphModule | None, example_inputs: Sequence[InputType]
+    ) -> tuple[tuple[str, bool], ...]:
+        # NotImplementedError means this device has no DeviceInterface.
+        # allow_tf32() itself is not caught: a broken implementation should
+        # fail the compile instead of being cached as ALLOW_TF32=False.
+        flags: list[tuple[str, bool]] = []
+        for device_type in sorted(cls._graph_device_types(gm, example_inputs)):
+            try:
+                iface = get_interface_for_device(device_type)
+            except NotImplementedError:
+                continue
+            flags.append((device_type, bool(iface.allow_tf32())))
+        return tuple(flags)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule | None,
@@ -1679,6 +1730,11 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
+        # MM template ALLOW_TF32 follows DeviceInterface.allow_tf32. CUDA's
+        # precision string is already in cuda_matmul_settings; this records the
+        # resolved flag for every device in the graph so other backends
+        # invalidate the FX graph cache when their flag changes.
+        self.mm_template_allow_tf32 = self._mm_template_allow_tf32(gm, example_inputs)
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
@@ -3980,7 +4036,17 @@ class CppCodeCache:
     be compiled, while compilation flags are set by CppBuilder."""
 
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    # Shared by subclasses and never cleared: a key hashes the source and build
+    # command, and every miss rewrites its entry for the current cache directory.
+    _binary_paths: dict[str, str] = {}
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_cpp_kernels
+
+        CppCodeCache.cache.clear()
+        clear_cpp_kernels()
+
     cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
@@ -4104,14 +4170,23 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
+            from torch.compiler._runtime_cache import (
+                has_frozen_cpp_kernel,
+                restore_cpp_kernel,
+            )
             from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
+            # if requested, pre-compile any headers. A frozen binary is restored
+            # below and never built, so it needs no header.
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and not has_frozen_cpp_kernel(key)
+            ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -4175,6 +4250,9 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
+            cls._binary_paths[key] = binary_path
+            restore_cpp_kernel(key, binary_path)
+
             def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:
@@ -4199,6 +4277,9 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
+        from torch.compiler._runtime_cache import record_cpp_kernel
+
+        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
@@ -4213,6 +4294,8 @@ def _worker_compile_cpp(
     from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        if os.path.exists(cpp_builders[-1].get_target_file_path()):
+            return
         for builder in cpp_builders:
             if not os.path.exists(builder.get_target_file_path()):
                 builder.build()
@@ -4996,7 +5079,11 @@ class PyCodeCache:
         attrs: dict[str, Any] | None = None,
         *,
         set_sys_modules: bool | None = None,
+        kernel_sources: dict[str, tuple[str, str]] | None = None,
     ) -> ModuleType:
+        """kernel_sources maps each module-level Triton kernel def to the (name, source)
+        AsyncCompile compiles it from, so the module binds the kernels the worker pool
+        built (see compiled_kernels_for_load)."""
         if linemap is None:
             linemap = []
 
@@ -5010,7 +5097,12 @@ class PyCodeCache:
                 sys.modules.setdefault(mod.__name__, mod)
             return mod
 
-        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
+        if kernel_sources:
+            mod = _load_with_compiled_kernels(
+                key, path, set_sys_modules, kernel_sources
+            )
+        else:
+            mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
 
         # unzip into separate lines/nodes lists
         if set_sys_modules:
@@ -5074,6 +5166,44 @@ class PyCodeCache:
             ]
 
         return parse_stack_trace(entry)
+
+
+def _load_with_compiled_kernels(
+    key: str,
+    path: str,
+    set_sys_modules: bool,
+    kernel_sources: dict[str, tuple[str, str]],
+) -> ModuleType:
+    from torch._inductor.async_compile import AsyncCompile
+    from torch._inductor.runtime.triton_heuristics import compiled_kernels_for_load
+
+    async_compile = AsyncCompile()
+
+    def compile_kernel(subs_name: str, source: str) -> Any:
+        # Compiling serially loads the kernel's own module in this process, and its
+        # decorator must build the kernel rather than ask for it again.
+        token = compiled_kernels_for_load.set(None)
+        try:
+            return async_compile.triton(subs_name, source)
+        finally:
+            compiled_kernels_for_load.reset(token)
+
+    token = compiled_kernels_for_load.set(
+        {
+            name: functools.partial(compile_kernel, subs_name, source)
+            for name, (subs_name, source) in kernel_sources.items()
+        }
+    )
+    try:
+        mod = _reload_python_module(key, path, set_sys_modules=set_sys_modules)
+    finally:
+        compiled_kernels_for_load.reset(token)
+    # The module's own wait, if it has one, has already resolved these.
+    scope = {name: getattr(mod, name) for name in kernel_sources}
+    async_compile.wait(scope)
+    for name, kernel in scope.items():
+        setattr(mod, name, kernel)
+    return mod
 
 
 def _load_triton_kernel_from_source(

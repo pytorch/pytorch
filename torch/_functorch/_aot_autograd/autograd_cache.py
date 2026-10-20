@@ -30,6 +30,7 @@ from torch._dynamo.utils import (
     chromium_event_log_active,
     CompileEventLogger,
     counters,
+    is_safe_constant,
     is_safe_numpy_wrapper,
     numpy_wrapper_cache_key,
     warn_once,
@@ -67,7 +68,6 @@ from torch.compiler._cache import (
 )
 from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
-from torch.fx.traceback import _get_memory_budget_annotation
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -437,6 +437,18 @@ def _iter_graph_modules(
             yield module
 
 
+def _get_constant_annotations(node: Node) -> tuple[tuple[str, Any], ...]:
+    """
+    Read the fx.traceback.annotate entries of a node whose values are constants
+    Dynamo can embed in bytecode, i.e. the annotations it carries across graph
+    breaks.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return ()
+    return tuple((k, v) for k, v in custom.items() if is_safe_constant(v))
+
+
 def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list[str]:
     """
     Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
@@ -616,13 +628,16 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.sac_context_fn_hashes = _collect_context_fn_hashes(gm)
 
         # node.meta is stripped by GraphModule.__reduce__, so preserve the
-        # location and value of every budget annotation in the cache key.
-        self.region_activation_memory_budget_annotations = tuple(
-            (module_name, node_index, budget)
+        # location and value of every constant fx.traceback.annotate entry in
+        # the cache key. Joint passes may read them (e.g. the
+        # region_activation_memory_budget partitioner), and Dynamo recompiles
+        # a frame per annotation value, producing graphs that differ only here.
+        self.constant_annotations = tuple(
+            (module_name, node_index, annotations)
             for module_name, module in gm.named_modules()
             if isinstance(module, torch.fx.GraphModule)
             for node_index, node in enumerate(module.graph.nodes)
-            if (budget := _get_memory_budget_annotation(node)) is not None
+            if (annotations := _get_constant_annotations(node))
         )
 
         # Note: We use the live config module, not self.autograd_config (the
