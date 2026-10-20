@@ -16,8 +16,6 @@ from types import SimpleNamespace
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.metrics
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import CompileCounterWithBackend, extract_graph, normalize_gm
 from torch._inductor.codegen.cuda.device_op_overrides import CUDADeviceOpOverrides
 from torch._inductor.codegen.wrapper import (
@@ -129,31 +127,10 @@ def xfailIfNoAcceleratorTriton(test_func):
 
     @functools.wraps(test_func)
     def wrapper(*args, **kwargs):
-        device = kwargs.get("device")
-        if device is None and args:
-            device = getattr(args[0], "device_type", None)
-
-        reason = None
         if not has_triton():
-            reason = "Triton not available"
-        elif device is not None:
-            try:
-                device_interface = get_interface_for_device(torch.device(device).type)
-            except NotImplementedError:
-                reason = f"Triton not available for {device}"
-            else:
-                if not device_interface.is_triton_capable(device):
-                    reason = f"Triton not available for {device}"
-                else:
-                    try:
-                        device_interface.raise_if_triton_unavailable(device)
-                    except TritonUnavailableError as exc:
-                        reason = str(exc)
-
-        if reason is not None:
             import pytest
 
-            pytest.xfail(reason)
+            pytest.xfail("Triton not available")
         return test_func(*args, **kwargs)
 
     return wrapper
