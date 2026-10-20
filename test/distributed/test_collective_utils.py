@@ -14,13 +14,13 @@ from torch.distributed.collective_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
+    HardwareClassification,
     run_tests,
     TEST_ACCELERATOR,
     TestCase,
@@ -32,6 +32,8 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._spawn_processes()
@@ -142,13 +144,19 @@ class TestCollectiveUtils(MultiProcessTestCase):
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
 
-    @parametrize("device", ["cpu"] if device_type == "cpu" else ["cpu", device_type])
+
+class TestCollectiveUtilsDevice(MultiProcessTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
-    def test_check_rng_sync(
-        self,
-        device,
-    ) -> None:
+    def test_check_rng_sync(self, device) -> None:
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
@@ -182,6 +190,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
 
@@ -221,7 +231,8 @@ class TestUtils(TestCase):
         )
 
 
-instantiate_parametrized_tests(TestCollectiveUtils)
+instantiate_device_type_tests(TestCollectiveUtilsDevice, globals(), allow_xpu=True)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -33,7 +33,9 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..exc import (
+    handle_observed_exception,
     ObservedException,
+    ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -70,9 +72,11 @@ from .base import (
 from .constant import ConstantVariable
 from .iter import IteratorVariable
 from .object_protocol import (
+    generic_getiter,
     generic_richcompare_bool,
     maybe_get_python_type,
     pyindex_check,
+    pyiter_next,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
@@ -2364,9 +2368,129 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def bytearray_hex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.hex(*const_args, **const_kwargs)
+        except (OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_decode(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.decode(*const_args, **const_kwargs)
+        except (LookupError, TypeError, UnicodeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_append(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_append_impl: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        item = pynumber_index(tx, args[0])
+        if not item.is_python_constant():
+            return None
+        new_data = bytearray(self.data)
+        try:
+            new_data.append(item.as_python_constant())
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer: do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return ConstantVariable.create(None)
+
+    def bytearray_extend(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # bytearray_extend: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            return None
+        iterable = args[0]
+        # Only literal constants take the fast path: iterator variables are also
+        # python constants, but reading one returns a copy and would leave the
+        # traced iterator unconsumed.
+        if isinstance(iterable, ConstantVariable):
+            values = iterable.as_python_constant()
+        elif not isinstance(iterable, ByteArrayVariable) and issubclass(
+            maybe_get_python_type(iterable), (bytes, bytearray)
+        ):
+            # CPython reads a buffer before it considers __iter__, so a bytes
+            # or bytearray subclass that overrides __iter__ is still extended
+            # from its buffer. Raw-buffer access is not modeled here: decline.
+            return None
+        elif vt_is_iterable(iterable):
+            values = []
+            iterator = generic_getiter(tx, iterable)
+            # CPython asks the argument for a length hint (default 32) once it
+            # has the iterator and before it reads any item.
+            variables.BuiltinVariable(operator.length_hint).call_function(
+                tx, [iterable, ConstantVariable.create(32)], {}
+            )
+            # One item at a time, like CPython: a bad byte must leave the rest
+            # of the iterator unread, and __index__ may grow the iterable.
+            while True:
+                try:
+                    item = pyiter_next(tx, iterator)
+                except ObservedUserStopIteration:
+                    handle_observed_exception(tx)
+                    break
+                item = pynumber_index(tx, item)
+                if not item.is_python_constant():
+                    return None
+                value = item.as_python_constant()
+                if not 0 <= value < 256:
+                    raise_observed_exception(
+                        ValueError, tx, args=["byte must be in range(0, 256)"]
+                    )
+                values.append(value)
+        else:
+            raise_type_error(
+                tx, f"can't extend bytearray with {iterable.python_type_name()}"
+            )
+        new_data = bytearray(self.data)
+        try:
+            new_data.extend(values)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        self.data = new_data
+        return ConstantVariable.create(None)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
+        "hex": Method(bytearray_hex),
+        "decode": Method(bytearray_decode),
+        "append": Method(bytearray_append),
+        "extend": Method(bytearray_extend),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

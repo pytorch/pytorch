@@ -2590,12 +2590,6 @@ def solve_min_cut(
             return None
         if node.target is operator.getitem:
             return None
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return "marked MUST_SAVE"
-        if config.recompute_views and op_types.is_view(node):
-            return None
-        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
-            return None
         if isinstance(node.meta.get("val"), torch.device):
             # A device-valued node (e.g. the coor::current_device() node
             # compile_on_one_rank substitutes for a baked device) has no tensor to
@@ -2604,7 +2598,15 @@ def solve_min_cut(
             # leaving min-cut unable to place it at all once a backward op needs it.
             # Recomputing is both free and correct: the op only reads the current
             # accelerator, and doing so on the backward side is what makes the graph
-            # follow each rank's own device.
+            # follow each rank's own device. This precedes the MUST_SAVE check because
+            # selective AC tags the node MUST_SAVE when it is created inside a
+            # checkpointed region, and saving it is just as impossible then.
+            return None
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
+            return "marked MUST_SAVE"
+        if config.recompute_views and op_types.is_view(node):
+            return None
+        if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return None
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -2667,6 +2669,8 @@ def solve_min_cut(
         cannot_save_reason is None for finite weights, or a string explaining
         why the node cannot be saved for infinite weights.
         """
+        if node.meta.get("aot_runtime_epilogue_input_mutation", False):
+            return math.inf, "input mutation replayed after forward"
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes
@@ -3468,6 +3472,8 @@ def estimate_runtime(node: fx.Node) -> float:
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
             return True
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.device):
+            return x.meta["val"]
         else:
             return x
 
@@ -3526,7 +3532,10 @@ def choose_saved_values_set(
             ban_if_materialized_backward=False,
             ban_if_not_in_allowlist=False,
         )
-    if memory_budget == 0:
+    if memory_budget == 0 and not any(
+        node.meta.get("aot_runtime_epilogue_input_mutation", False)
+        for node in node_info.inputs
+    ):
         return node_info.inputs
 
     runtime_optimized_saved_values, _ = solve_min_cut(

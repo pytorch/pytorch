@@ -122,6 +122,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-cuda13.2-py3.11-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -142,6 +143,8 @@ jobs:
           { config: "default", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "default", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "default", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4" },
           { config: "distributed", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
           { config: "distributed", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
           { config: "distributed", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-45-172-t4-4" },
@@ -174,6 +177,14 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      # The default config picks these up by discovery; the inductor config in
+      # this same job already runs them on the same L4 runners. Only affects
+      # default (see EXCLUDE_CLAUSE in .ci/pytorch/test.sh).
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
       python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.2"
@@ -240,12 +251,14 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.12.7
+      # TODO: re-add { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-26" } once
+      # the macos-m2-26 fleet grows from 8 to 28 runners (pytorch-gha-infra#1558),
+      # see https://github.com/pytorch/test-infra/issues/8964
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
         ]}
     secrets: inherit
@@ -337,6 +350,7 @@ jobs:
       runner_prefix: "mt-"
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       # TODO (huydhn): Add this back once other workflow migrates
       # sync-tag: rocm-build
@@ -409,6 +423,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
       build-environment: linux-jammy-py3.11-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -461,6 +476,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      lf_runners: ${{ needs.get-label-type.outputs.lf-runners }}
       build-environment: linux-jammy-aarch64-py3.11
       docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.11-gcc13
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}

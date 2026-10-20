@@ -293,6 +293,15 @@ def cummaxmin(self, dim):
 @register_meta([aten.logcumsumexp.default, aten.logcumsumexp.out])
 @out_wrapper()
 def logcumsumexp(self, dim):
+    # torch._check rather than _check_not_implemented: a NotImplementedError
+    # from a meta kernel means "no meta implementation", which makes FakeTensor
+    # fall back to the real kernel and Dynamo graph break, so the input would
+    # only be rejected by running it eagerly. This rejects it while tracing.
+    torch._check(
+        self.dtype.is_floating_point or self.dtype.is_complex,
+        lambda: "logcumsumexp(): input dtype should be either floating point or "
+        f"complex. Got {self.dtype} instead.",
+    )
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
@@ -4166,7 +4175,13 @@ def meta_randint_like(self, high, **kwargs):
     )
 
 
-@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
+@register_meta(
+    [
+        aten._fused_adam_.default,
+        aten._fused_adamw_.default,
+        aten._fused_adamw_.tensor_lr,
+    ]
+)
 def meta__fused_adam_(
     self,
     grads,
@@ -4759,8 +4774,6 @@ def meta_median(input):
 )
 @out_wrapper("values", "indices")
 def meta_median_mode_dim(input, dim=-1, keepdim=False):
-    if device_hint(input) == "cuda":
-        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
@@ -6082,6 +6095,24 @@ def full(size, fill_value, *args, **kwargs):
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
 
+    # Only check direct symbols. A compound expression may overflow before its
+    # generated C++ check.
+    if (
+        isinstance(fill_value, (torch.SymInt, torch.SymFloat))
+        and fill_value.node.expr.is_Symbol
+        and utils.is_integer_dtype(dtype)
+    ):
+        info = torch.iinfo(dtype)
+
+        def error_msg():
+            return f"value cannot be converted to type {dtype} without overflow"
+
+        is_int = isinstance(fill_value, torch.SymInt)
+        if not (is_int and dtype in (torch.int64, torch.uint64)):
+            lower = -info.max if is_int and not dtype.is_signed else info.min
+            torch._check(lower <= fill_value, error_msg)
+            torch._check(fill_value < info.max + 1, error_msg)
+
     return torch.empty(size, *args, **kwargs)
 
 
@@ -6770,10 +6801,12 @@ def meta__scaled_dot_product_attention_math_for_mps(
             batch_size = 1
             for i in range(x.dim() - 3):
                 batch_size *= x.shape[i]
-            return x.view(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
+            return x.reshape(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
         else:
             return x, False
 
+    batch_shape = torch.broadcast_shapes(*(t.shape[:-3] for t in (query, key, value)))
+    query = query.expand(*batch_shape, *query.shape[-3:])
     q_, unsqueezed = ensure_4d(query)
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
@@ -7339,6 +7372,20 @@ def _check_scaled_mm_sizes(
             )
         )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
 
+        # On XPU, e8m0fnu scales are used for *both* MXFP8 (1x32 blocks) and
+        # DeepSeek-style (1x128/128x128 blocks) blockwise recipes.
+        if (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+            and self.dtype != torch.float4_e2m1fn_x2
+            and device_hint(self) == "xpu"
+        ):
+            num_k_blocks_check = ceil_div(_k, 32)
+            is_blockwise_scaling = (
+                scale_a.numel() == m * num_k_blocks_check
+                or scale_b.numel() == n * num_k_blocks_check
+            )
+
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
             torch._check(
@@ -7417,9 +7464,15 @@ def _check_scaled_mm_sizes(
                 )
         else:
             torch._check(
-                scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-                lambda: "For rowwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
+                (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
+                or (
+                    device_hint(self) == "xpu"
+                    and scale_a.dtype == torch.float8_e8m0fnu
+                    and scale_b.dtype == torch.float8_e8m0fnu
+                ),
+                lambda: "For rowwise scaling, both scales must be float32. For blockwise scaling, both scales must be float32, or (XPU only) float8_e8m0fnu.",
             )
+            is_e8m0fnu_scale = scale_a.dtype == torch.float8_e8m0fnu
             # for rowwise scaling, enforce 2D input tensors
             torch._check(
                 scale_a.dim() == 2 and scale_b.dim() == 2,
@@ -7427,12 +7480,12 @@ def _check_scaled_mm_sizes(
             )
 
             if (
-                scale_a.size(0) == m
+                not is_e8m0fnu_scale
+                and scale_a.size(0) == m
                 and scale_a.size(1) == 1
                 and scale_b.size(0) == 1
                 and scale_b.size(1) == n
             ):
-                # rowwise scaling
                 torch._check(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
@@ -8313,6 +8366,42 @@ def meta_bucketize_scalar(
         (),
         dtype=torch.int32 if out_int32 else torch.int64,
     )
+
+
+@register_meta([aten._histogramdd_bin_edges.default])
+def meta_histogramdd_bin_edges(self, bins, range=None, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return [self.new_empty((bin_count + 1,)) for bin_count in bins]
+
+
+@register_meta([aten._histogramdd_from_bin_cts.default])
+def meta_histogramdd_from_bin_cts(self, bins, range=None, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return self.new_empty(bins)
+
+
+@register_meta([aten._histogramdd_from_bin_tensors.default])
+def meta_histogramdd_from_bin_tensors(self, bins, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return self.new_empty([edges.numel() - 1 for edges in bins])
 
 
 @register_meta([aten.histc])

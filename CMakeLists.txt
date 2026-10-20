@@ -566,13 +566,18 @@ if(LINUX AND USE_CUDA AND CPU_AARCH64 AND USE_PRIORITIZED_TEXT_FOR_LD AND LLVM_B
 endif()
 cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
   "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+set(LLVM_BOLT_PROFILES_DIR "" CACHE PATH
+  "Directory containing LLVM BOLT profiles; empty uses bundled profiles.")
 
-option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
-option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
+set(USE_MIMALLOC_DEFAULT OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
-  set(USE_MIMALLOC ON)
+  set(USE_MIMALLOC_DEFAULT ON)
+endif()
+option(USE_MIMALLOC "Use mimalloc" "${USE_MIMALLOC_DEFAULT}")
+option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
+if(USE_MIMALLOC_DEFAULT)
   # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
   # See https://github.com/pytorch/pytorch/issues/174344
   if(CPU_AARCH64)
@@ -761,6 +766,18 @@ if(MSVC)
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
+
+  # Since VS 2022 17.10 (MSVC 14.40) std::mutex has a constexpr constructor
+  # that zero-initializes the mutex and relies on msvcp140.dll >= 14.40 to
+  # cope with that layout. If an older msvcp140.dll is already loaded in the
+  # process (stale VC redist, or a copy bundled by another package such as
+  # PyQt), the first lock during c10.dll static init faults inside DllMain and
+  # `import torch` fails with WinError 1114. Opt back into the classic
+  # constructor so the wheels work with any 14.x runtime.
+  # See https://github.com/pytorch/pytorch/issues/169429 and
+  # https://github.com/microsoft/STL/issues/4730
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
@@ -955,12 +972,23 @@ if(USE_LLVM_BOLT)
     append_cxx_flag_if_supported("${_flag}" CMAKE_CXX_FLAGS)
   endforeach()
 
-  # Extract the committed BOLT profiles for the build-time optimization
-  # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
-  set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
-  file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
-       DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+  if(NOT LLVM_BOLT_PROFILES_DIR)
+    # Extract the committed BOLT profiles for the build-time optimization
+    # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
+    set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
+    file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
+    file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+         DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+  endif()
+
+  add_custom_target(bolt_profile_quality_summary ALL
+    COMMAND "${Python_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
+      "${CMAKE_BINARY_DIR}/logs"
+    COMMENT "Summarizing BOLT profile quality"
+    VERBATIM
+    USES_TERMINAL
+  )
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -1367,6 +1395,11 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
   endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    # Suppress GCC's warning without changing the value of
+    # std::hardware_destructive_interference_size in public headers.
+    append_cxx_flag_if_supported("-Wno-interference-size" CMAKE_CXX_FLAGS)
+  endif()
   # needed for compat with newer versions of clang that use C++20 mangling rules
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
     append_cxx_flag_if_supported("-fclang-abi-compat=17" CMAKE_CXX_FLAGS)
@@ -1637,6 +1670,13 @@ if(SKBUILD)
   # headers, etc.) into the torch package.  Previously declared via
   # setup.py package_data.
   include(cmake/PackageData.cmake)
+
+  # setuptools-era top_level.txt; without it importlib.metadata.packages_distributions()
+  # stats every RECORD entry to infer top-level names. Keep in sync with
+  # [tool.scikit-build.wheel] packages in pyproject.toml.
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/top_level.txt" "functorch\ntorch\ntorchgen\n")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/top_level.txt"
+    DESTINATION "${SKBUILD_METADATA_DIR}")
 endif()
 
 include(cmake/PostBuildSteps.cmake)
