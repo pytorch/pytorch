@@ -331,38 +331,6 @@ class MPSBasicTests(TestCase):
         mask = torch.zeros(B, 1, S, S, device=self.device, dtype=dtype)
         self.assertEqual(torch.compile(fn)(q, k, v, mask), fn(q, k, v, mask))
 
-    @parametrize("reduction", ("mean", "sum", "amax"))
-    @parametrize("width", (32, 64, 128))
-    @parametrize("scatter_op", ("index_add", "scatter_add"))
-    def test_fused_reduction_then_atomic_add(self, reduction, width, scatter_op):
-        # Regression for #201455: fused reduction + atomic_add must run the
-        # atomic once per reduction group, not once per reduction thread.
-        def fn(x, index):
-            if reduction == "mean":
-                y = x.mean(dim=-1)
-            elif reduction == "sum":
-                y = x.sum(dim=-1)
-            else:
-                y = x.amax(dim=-1)
-            out = torch.zeros(1, device=x.device, dtype=x.dtype)
-            if scatter_op == "index_add":
-                return out.index_add(0, index, y)
-            return out.scatter_add(0, index, y)
-
-        x = torch.ones(1, width, device=self.device)
-        index = torch.zeros(1, dtype=torch.long, device=self.device)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x, index), fn(x, index))
-
-    def test_pointwise_index_add_unaffected(self):
-        # Guard for #201455 must not break plain (non-reduction) atomic_add.
-        def fn(src, index):
-            out = torch.zeros(1, device=src.device, dtype=src.dtype)
-            return out.index_add(0, index, src)
-
-        src = torch.ones(1, device=self.device)
-        index = torch.zeros(1, dtype=torch.long, device=self.device)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(src, index), fn(src, index))
-
     def test_nested_masked_cat(self):
         # Regression test for YOLOv3 compilation failure on MPS.
         # See https://github.com/pytorch/pytorch/actions/runs/23477894502

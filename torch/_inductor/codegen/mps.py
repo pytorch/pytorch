@@ -681,12 +681,8 @@ class MetalKernel(SIMDKernel):
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
-            # After a fused threadgroup reduction, every thread sees the reduced
-            # value. Ordinary stores are idempotent; atomic_add is not, so only
-            # one thread in the reduction group may perform it (#201455).
-            # Gate on is_reduction(): pointwise kernels also carry a size-1
-            # reduction tree, and guarding those references an undeclared index.
-            if self.features.is_reduction():
+            # Past the reduction every thread holds the same value, so only one may accumulate it
+            if self.features.is_reduction() and not self.inside_reduction:
                 reduction_dim = next(t for t in self.range_trees if t.is_reduction)
                 line = f"if ({reduction_dim.name} == 0) {line}"
         else:
