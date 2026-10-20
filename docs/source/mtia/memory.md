@@ -12,7 +12,7 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
 
 ```{eval-rst}
 .. autosummary::
-    :toctree: generated
+    :toctree: ../generated
     :nosignatures:
 
     reset_peak_memory_stats
