@@ -3588,8 +3588,15 @@ class GuardBuilder(GuardBuilderBase):
 
         code = [f"___normalize_count_iter({ref}) == {normalized_count_iter}"]
         self._set_guard_export_info(guard, code)
+        next_value, step = normalized_count_iter
+        reason = (
+            f"Expected {ref} to be an itertools.count iterator with next value {next_value!r} "
+            f"and step {step!r}; this compiled version uses those values."
+        )
         self.get_guard_manager(guard).add_lambda_guard(
-            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+            guard_fn,
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
+            guard.user_stack,
         )
 
     @register_guard_check_spec(
