@@ -788,7 +788,9 @@ void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+    if (!at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
+      bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+    }
   }
 #endif
   else {
@@ -1282,7 +1284,9 @@ void gemm_internal<double>(CUDABLAS_GEMM_ARGTYPES(double))
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<double>(CUDABLAS_GEMM_ARGS(double));
+    if (!at::native::gemm_internal_ck<double>(CUDABLAS_GEMM_ARGS(double))) {
+      gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGS(double));
+    }
   }
 #endif
   else {
@@ -1301,7 +1305,9 @@ void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
     if (at::detail::getCUDAHooks().isGPUArch({"gfx11", "gfx12"})) { //no CK GEMM version
       gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
     } else{
-      at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
+      if (!at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float))) {
+        gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGS(float));
+      }
     }
   }
 #endif
@@ -1362,7 +1368,9 @@ void gemm_internal<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half))
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
   else if (preferred == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+    if (!at::native::gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGS(at::Half))) {
+      gemm_internal_cublas<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+    }
   }
 #endif
   else {
@@ -1378,7 +1386,9 @@ void gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16))
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    at::native::gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    if (!at::native::gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16))) {
+      gemm_internal_cublas<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+    }
   }
 #endif
   else {
