@@ -45,7 +45,6 @@ from torch._C._dynamo.guards import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
@@ -1269,9 +1268,8 @@ def skip_if_cpu(fn):
 # CommonTemplate also serves copy_tests consumers that expose only self.device.
 # Keep its methods in place so consumers can migrate independently, and use local
 # skips to enforce CPU/CUDA contracts without splitting the shared template.
-# Check the selected device at call time: global GPU/Triton flags do not prove
-# that each generated device has a usable backend. CPU hosts can also run tests
-# on an accelerator, so distinguish the host device from the execution device.
+# CPU hosts can also run tests on an accelerator, so distinguish the host
+# device from the execution device.
 # Keep historical MPS paths that do not require Triton via allow_mps.
 def skip_if_not_cpu(fn):
     @functools.wraps(fn)
@@ -1327,16 +1325,6 @@ def skip_if_no_accelerator(fn):
 def _require_device_triton(device):
     if not has_triton():
         raise unittest.SkipTest(f"triton is required for {device}")
-    try:
-        device_interface = get_interface_for_device(torch.device(device).type)
-    except NotImplementedError as exc:
-        raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-    if not device_interface.is_triton_capable(device):
-        raise unittest.SkipTest(f"requires Triton support for {device}")
-    try:
-        device_interface.raise_if_triton_unavailable(device)
-    except TritonUnavailableError as exc:
-        raise unittest.SkipTest(str(exc)) from exc
 
 
 def skip_if_no_accelerator_triton(fn=None, *, allow_mps=False):
@@ -20682,9 +20670,7 @@ if RUN_CPU:
 
 class _AcceleratorTestCase(TestCase):
     def setUp(self):
-        # The module gate admits a matrix when any accelerator can run it.
-        # Each generated variant must still have its own usable Triton backend;
-        # preserve the historical MPS path, which does not require Triton.
+        # Preserve the historical MPS path, which does not require Triton.
         if torch.device(self.device).type != "mps":
             _require_device_triton(self.device)
         super().setUp()
