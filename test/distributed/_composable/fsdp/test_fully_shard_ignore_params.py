@@ -16,7 +16,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -69,21 +68,6 @@ class A(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.module_b(x) + self.addend
         return result.sum()
-
-
-class Y(nn.Module):
-    def __init__(self, device: str) -> None:
-        super().__init__()
-        p = torch.randn(10, device=device)
-        self.p = nn.Parameter(p)
-
-
-class X(nn.Module):
-    def __init__(self, device: str) -> None:
-        super().__init__()
-        q = torch.randn(10, device=device)
-        self.q = nn.Parameter(q)
-        self.y = Y(device)
 
 
 def _append_prefix(prefix: str, name: str) -> str:
@@ -316,8 +300,6 @@ class TestFullyShardIgnoreParams(FSDPTest):
                     ref_name_to_param_map, test_name_to_param_map
                 )
 
-
-instantiate_parametrized_tests(TestFullyShardIgnoreParams)
 
 instantiate_device_type_tests(
     TestFullyShardIgnoreParams,
