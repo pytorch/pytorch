@@ -83,7 +83,7 @@ class TestRuntimeEstimator(TestCase):
         device: str,
     ) -> float:
         warmup_iters, actual_iters = 2, 5
-        device_module = torch.get_device_module(torch.device(device))
+        device_module = torch.get_device_module(device)
         start_event = device_module.Event(enable_timing=True)
         end_event = device_module.Event(enable_timing=True)
         for _ in range(warmup_iters):
@@ -92,7 +92,7 @@ class TestRuntimeEstimator(TestCase):
         for _ in range(actual_iters):
             func(*args)
         end_event.record()
-        device_module.synchronize()
+        torch.accelerator.synchronize()
         measured_time = start_event.elapsed_time(end_event) / actual_iters
         return measured_time
 
@@ -163,9 +163,7 @@ class TestRuntimeEstimator(TestCase):
                 "operator-level-cost-model", self._train_step, fake_args
             )
         benchmark_accuracy = actual_runtime / benchmark_estimate
-        roofline_accuracy = (
-            actual_runtime / roofline_estimate if roofline_estimate else float("inf")
-        )
+        roofline_accuracy = actual_runtime / roofline_estimate
         print(
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}"
             f"\n Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
@@ -190,9 +188,7 @@ class TestRuntimeEstimator(TestCase):
                 "operator-level-cost-model", self._train_step, fake_args
             )
         benchmark_accuracy = actual_runtime / benchmark_estimate
-        roofline_accuracy = (
-            actual_runtime / roofline_estimate if roofline_estimate else float("inf")
-        )
+        roofline_accuracy = actual_runtime / roofline_estimate
         print(
             f"Actual: {actual_runtime} Benchmark Estimate: {benchmark_estimate} Accuracy: {benchmark_accuracy}\n"
             f"Actual: {actual_runtime} Roofline Estimatee: {roofline_estimate} Accuracy: {roofline_accuracy}"
@@ -202,7 +198,9 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.4)
 
 
-instantiate_device_type_tests(TestRuntimeEstimator, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestRuntimeEstimator, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
