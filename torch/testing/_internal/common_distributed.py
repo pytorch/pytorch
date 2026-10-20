@@ -1323,10 +1323,18 @@ class DistributedTestBase(MultiProcessTestCase):
         backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        if backend != "gloo":
-            device = torch.device(f"{torch.device(device).type}:{self.rank}")
-            torch.set_default_device(device)
-            torch.accelerator.set_device_index(device)
+        if "nccl" in backend or "xccl" in backend:
+            accelerator = torch.accelerator.current_accelerator()
+            if accelerator:
+                device_type = accelerator.type
+                device = torch.device(f"{device_type}:{self.rank}")
+                torch.set_default_device(device)
+                torch.accelerator.set_device_index(device)
+            else:
+                raise RuntimeError(
+                    "Expected to find an accelerator when initializing process group"
+                    f" with {backend} backend, but got None"
+                )
         torch.distributed.init_process_group(
             backend=backend,
             world_size=world_size,
