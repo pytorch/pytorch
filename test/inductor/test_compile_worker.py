@@ -1,8 +1,11 @@
 # Owner(s): ["module: inductor"]
+import functools
+import gc
 import io
 import json
 import operator
 import os
+import select
 import subprocess
 import sys
 import tempfile
@@ -12,7 +15,7 @@ import types
 import unittest
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures.process import BrokenProcessPool
-from threading import Event
+from threading import Event, Thread
 from unittest.mock import patch
 
 import torch._inductor.config as config
@@ -342,6 +345,64 @@ class TestCompileWorker(TestCase):
 class TestCompileWorkerWithTimer(TestCompileWorker):
     def make_pool(self, size):
         return SubprocPool(size, quiesce=True)
+
+
+class TestSubprocMainForkAfterQuiesce(TestCase):
+    @skipIfWindows(msg="fork only")
+    def test_job_after_quiesce_completes_while_old_pool_holds_its_lock(self):
+        # https://github.com/pytorch/pytorch/issues/200848: the next pool must
+        # not fork while the quiesced pool's manager thread still runs.
+        pickler = SubprocPickler()
+        jobs_r, jobs_w = os.pipe()
+        res_r, res_w = os.pipe()
+        results = os.fdopen(res_r, "rb")
+        main = SubprocMain(
+            pickler,
+            SubprocKind.FORK,
+            2,
+            os.fdopen(jobs_r, "rb"),
+            os.fdopen(res_w, "wb"),
+        )
+
+        def submit(job_id, fn, *args):
+            main.submit(job_id, pickler.dumps(functools.partial(fn, *args)))
+
+        def recv(timeout):
+            # Time out instead of hanging if the job is lost.
+            if not select.select([results], [], [], timeout)[0]:
+                return None
+            _, job_id, data = _recv_msg(results)
+            return job_id, pickler.loads(data)
+
+        try:
+            # Quiesce while a job runs, so that the pool's manager thread is
+            # still alive, and hold the pool's _shutdown_lock across the next
+            # fork, as that thread does while it joins the old workers.
+            submit(0, time.sleep, 1)
+            lock = main.pool._shutdown_lock
+            main._quiesce()
+            held = Event()
+
+            def hold_lock():
+                with lock:
+                    held.set()
+                    time.sleep(3)
+
+            Thread(target=hold_lock, daemon=True).start()
+            self.assertTrue(held.wait(5))
+            self.assertEqual(recv(30), (0, None))
+            # Job 0's future keeps the old executor alive until a GC; collect it
+            # so that the workers forked next free the executor as they start.
+            gc.collect()
+            submit(1, operator.add, 2, 2)
+            self.assertEqual(
+                recv(20), (1, 4), "the job submitted after the quiesce never returned"
+            )
+        finally:
+            main.running = False
+            main._shutdown_pool(terminate_workers=True)
+            results.close()
+            os.close(jobs_w)
 
 
 class TestSubprocPoolCallbackSafety(TestCase):
