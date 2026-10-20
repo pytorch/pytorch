@@ -64,6 +64,7 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     gemm_epilogue_source_expr,
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
+    lower_full_scalar,
     lower_gemm_epilogue_fx_node,
 )
 from torch._inductor.kernel.gemm_epilogue_layout import (
@@ -117,6 +118,49 @@ def bind_terminal_output_storage(
         output_storage=source,
         output_storage_nodes=tuple(owned_nodes),
     )
+
+
+def terminal_bf16_where(outputs: GemmOutputPlan) -> torch.fx.Node | None:
+    """Return the ``where`` whose only consumer is the plain BF16 D store.
+
+    ``where(cond, value, scalar)`` reaching the store through casts alone can
+    select already-rounded BF16 words. FlexGEMM computes casts to BF16 or FP32
+    in FP32, so the store's RN conversion is the only rounding of the result.
+    """
+    node = outputs.output
+    meta = node.meta.get("val")
+    if (
+        outputs.aux_outputs
+        or outputs.local_reduce is not None
+        or outputs.output_transform is not None
+        or outputs.output_storage is not None
+        or not isinstance(meta, torch.Tensor)
+        or meta.dtype is not torch.bfloat16
+    ):
+        return None
+    while node.target is torch.ops.prims.convert_element_type.default:
+        source, dtype = node.args
+        if dtype not in (torch.bfloat16, torch.float32) or not isinstance(
+            source, torch.fx.Node
+        ):
+            return None
+        node = source
+    if node.target is not torch.ops.aten.where.self:
+        return None
+    meta = node.meta.get("val")
+    scalar_arms = [
+        isinstance(arm, torch.fx.Node) and lower_full_scalar(arm) is not None
+        for arm in node.args[1:]
+    ]
+    # Any other user would read the rounded BF16 value instead of FP32.
+    if (
+        len(node.users) != 1
+        or not isinstance(meta, torch.Tensor)
+        or meta.dtype not in (torch.bfloat16, torch.float32)
+        or sum(scalar_arms) != 1
+    ):
+        return None
+    return node
 
 
 def tuple_output_plan(
@@ -755,6 +799,7 @@ class FlexGemmEpilogueEmitter:
         )
         self.output_storage = self.outputs.output_storage
         self.output_storage_nodes = frozenset(self.outputs.output_storage_nodes)
+        self.packed_bf16_where = terminal_bf16_where(self.outputs)
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
         self.local_reduce_finalize: str | None = None
         self.local_reduce_prepass: FlexGemmEpiModReductionSpec | None = None
@@ -1162,6 +1207,32 @@ class FlexGemmEpilogueEmitter:
             )
         return self.broadcast_fragment_partial(reduced, layout, source)
 
+    def lower_packed_bf16_where(self, node: torch.fx.Node) -> Any:
+        """Lower the terminal BF16 ``where`` on packed converted words."""
+        cond, true_arm, false_arm = node.args
+        fill_on_true = (
+            isinstance(true_arm, torch.fx.Node)
+            and lower_full_scalar(true_arm) is not None
+        )
+        value, fill = (false_arm, true_arm) if fill_on_true else (true_arm, false_arm)
+        cond, value, fill = (
+            flex_gemm_epilogue_arg(arg, self.env) for arg in (cond, value, fill)
+        )
+        if not (
+            CuteDSLOpOverrides._is_tensor_like(cond)
+            and CuteDSLOpOverrides._is_tensor_like(value)
+        ):
+            return lower_gemm_epilogue_fx_node(
+                self.kernel, self.env, node, context="FlexGEMM"
+            )
+        swap = ", fill_on_true=True" if fill_on_true else ""
+        return self.kernel.cse.generate(
+            self.kernel.body,
+            f"flex_gemm_packed_bf16_select({cond}, {value}, {fill}{swap})",
+            dtype=torch.bfloat16,
+            shape=(1,),
+        )
+
     def capture_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
         """Re-broadcast uniform captures to the current logical fragment.
 
@@ -1356,6 +1427,12 @@ class FlexGemmEpilogueEmitter:
                     else:
                         self.env[node] = source
                     continue
+                if (
+                    self.packed_bf16_where is not None
+                    and node is self.packed_bf16_where
+                ):
+                    self.env[node] = self.lower_packed_bf16_where(node)
+                    continue
                 self.env[node] = lower_gemm_epilogue_fx_node(
                     self.kernel,
                     self.capture_broadcast_env(node),
@@ -1366,6 +1443,9 @@ class FlexGemmEpilogueEmitter:
     def render(self) -> FlexGemmEpiModSource:
         """Render a deterministic generated EpiMod definition."""
         from torch._inductor.codegen.cutedsl._inline_asm import inline_asm_cache_key
+        from torch._inductor.kernel.flex_gemm.quack_ops.packed_select import (
+            packed_select_cache_key,
+        )
 
         spec = self.local_reduce_spec
         sink = None if spec is None else spec.sink
@@ -1464,6 +1544,7 @@ class FlexGemmEpilogueEmitter:
         )
         key_payload = (
             f"inline_asm={inline_asm_cache_key()}\n"
+            f"packed_select={packed_select_cache_key()}\n"
             f"fragment_reduced={self.local_reduce_fragment_reduced}\n"
             f"{self.graph_module.code}\n{body}return {{{return_source}}}\n"
             f"{finalize_payload}{prepass_payload}{self.epilogue_arg_kinds!r}"
@@ -1515,6 +1596,9 @@ class FlexGemmEpilogueEmitter:
             "from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (\n"
             "    interleave_lanes as flex_gemm_interleave_lanes,\n"
             "    interleaved_lane as flex_gemm_interleaved_lane,\n"
+            ")\n"
+            "from torch._inductor.kernel.flex_gemm.quack_ops.packed_select import (\n"
+            "    packed_bf16_select as flex_gemm_packed_bf16_select,\n"
             ")\n\n"
         )
         return FlexGemmEpiModSource(
