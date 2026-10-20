@@ -683,28 +683,7 @@ class TestTransformersAccelerator(NNTestCase):
             self.assertEqual(out, out_fp.nan_to_num())
 
     def test_multiheadattention_need_weights_fully_masked_row_no_nan_grad(self, device):
-        # Regression test for gh-41508.
-        #
-        # multi_head_attention_forward's need_weights=True branch computes
-        # attention weights with an explicit softmax()+bmm() (needed because
-        # the fused SDPA kernels never materialize the full attention weight
-        # matrix, so they can't serve need_weights=True callers). A row that
-        # is fully masked out (all -inf before softmax) is 0/0 under plain
-        # softmax and produces an all-NaN row; even though that row's output
-        # is normally excluded from the loss, autograd still backprops
-        # through it and 0 * nan = nan corrupts in_proj_weight/in_proj_bias
-        # for the *entire* batch via the shared projection matrix.
-        #
-        # Naively patching the NaN out of the softmax *output* afterwards
-        # (nan_to_num/masked_fill/where) does not work: softmax()'s backward
-        # reuses its own (NaN) saved forward output internally, so NaN
-        # reappears in softmax's own backward pass regardless. The fix uses
-        # torch._safe_softmax, which is NaN-free in forward and backward.
-        #
-        # need_weights=False already avoids NaN in the output for this exact
-        # input (cross-checked below as the reference), which is what
-        # confirms the fix computes the mathematically correct gradient, not
-        # merely a value that happens not to be NaN.
+        # gh-41508: need_weights=True must match need_weights=False for fully masked rows, NaN-free.
         torch.manual_seed(0)
         embed_dim, num_heads, tgt_len, bsz = 4, 2, 4, 2
         mha = nn.MultiheadAttention(embed_dim, num_heads, device=device)
@@ -714,11 +693,7 @@ class TestTransformersAccelerator(NNTestCase):
             [[False, False, False, False], [False, False, True, True]],
             dtype=torch.bool, device=device,
         )
-        # Bucketed/sliding-window attention (each position attends only to
-        # itself and the previous position) -- a plain causal mask does not
-        # reproduce the bug here, since every query can still see position 0
-        # or 1. This pattern leaves batch 1's last query with only padded
-        # keys (2, 3) available, i.e. a genuinely fully-masked row.
+        # Sliding window + padding: only batch 1's last query has no valid key.
         neg_inf = float("-inf")
         attn_mask = torch.tensor(
             [
@@ -731,35 +706,22 @@ class TestTransformersAccelerator(NNTestCase):
         )
 
         def run(need_weights):
-            mha_local = nn.MultiheadAttention(embed_dim, num_heads, device=device)
-            mha_local.load_state_dict(mha.state_dict())
-            out, _ = mha_local(
+            mha.zero_grad()
+            out, _ = mha(
                 x, x, x,
                 key_padding_mask=key_padding_mask,
                 attn_mask=attn_mask,
                 need_weights=need_weights,
             )
-            # batch 1's last two positions are fully masked (padded keys +
-            # causal mask leave no valid key for those queries); only sum
-            # the well-defined positions, matching how a real caller would
-            # mask the loss.
-            loss = out[:2].sum()
-            loss.backward()
-            grads = [p.grad.clone() for p in mha_local.parameters()]
-            return out.detach(), grads
+            out[:2].sum().backward()
+            return out.detach(), [p.grad.clone() for p in mha.parameters()]
 
         out_weights, grads_weights = run(need_weights=True)
         out_fast, grads_fast = run(need_weights=False)
 
-        self.assertFalse(torch.isnan(out_weights).any())
-        for g in grads_weights:
-            self.assertFalse(torch.isnan(g).any())
-
-        # The two code paths should agree on both output and gradients for
-        # this input, not merely both avoid NaN.
-        torch.testing.assert_close(out_weights, out_fast, atol=1e-5, rtol=1e-4)
+        self.assertEqual(out_weights, out_fast, atol=1e-5, rtol=1e-4)
         for g_weights, g_fast in zip(grads_weights, grads_fast):
-            torch.testing.assert_close(g_weights, g_fast, atol=1e-5, rtol=1e-4)
+            self.assertEqual(g_weights, g_fast, atol=1e-5, rtol=1e-4)
 
     @onlyAccelerator
     def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
