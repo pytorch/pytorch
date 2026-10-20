@@ -3703,7 +3703,9 @@ class GetAttrBuiltinVariable(BaseBuiltinVariable):
             if not check_unspec_or_constant_args(args, kwargs):
                 raise
             first = args[0]
-            drops_attrs = type(first) is variables.OrderedDictVariable and (
+            # isinstance (not exact type) so OrderedDictVariable subclasses get
+            # the same decline as the other eager-fold plugs.
+            drops_attrs = isinstance(first, variables.OrderedDictVariable) and (
                 first.eager_attr_fold_is_unsound(tx, args[1].as_python_constant())
             )
             if drops_attrs:
