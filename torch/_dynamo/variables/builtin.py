@@ -2019,12 +2019,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
 
-        if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
-            if isinstance(args[0], variables.UserDefinedObjectVariable):
-                return args[0].call_base_method(tx, name, args[1:], kwargs)
-            else:
-                return args[0].call_method(tx, name, args[1:], kwargs)
-
         if (
             name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__")
             and len(args) == 2
@@ -2042,6 +2036,12 @@ class BuiltinVariable(BaseBuiltinVariable):
                 return ConstantVariable.create(
                     getattr(self.fn, name)(lval, args[1].as_python_constant())
                 )
+
+        if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
+            if isinstance(args[0], variables.UserDefinedObjectVariable):
+                return args[0].call_base_method(tx, name, args[1:], kwargs)
+            else:
+                return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name, None)

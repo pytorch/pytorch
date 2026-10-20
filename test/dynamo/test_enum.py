@@ -1,13 +1,27 @@
 # Owner(s): ["module: dynamo"]
 
 import enum
+import sys
 import unittest
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same, skipIfNotPy312
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
+
+
+_MIXIN_ENUM_CASES = [
+    ((enum.IntEnum,), int, (0, 1)),
+    ((enum.IntFlag,), int, (1, 2)),
+    ((float, enum.Enum), float, (0.5, 1.5)),
+]
+if sys.version_info >= (3, 11):
+    _MIXIN_ENUM_CASES.append(((enum.StrEnum,), str, ("a", "b")))
 
 
 class EnumTests(torch._dynamo.test_case.TestCase):
@@ -472,6 +486,34 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, Priority.HIGH)
         self.assertEqual(ref, res)
 
+    @parametrize(
+        "bases,mixin,values",
+        _MIXIN_ENUM_CASES,
+        name_fn=lambda bases, mixin, values: "_".join(b.__name__ for b in bases),
+    )
+    def test_enum_explicit_mixin_dunder_comparison(self, bases, mixin, values):
+        # https://github.com/NVIDIA/TransformerEngine/issues/3716
+        class Backend(*bases):
+            NO = values[0]
+            YES = values[1]
+
+            def __eq__(self, other):
+                return mixin.__eq__(self, other)
+
+            def __ne__(self, other):
+                result = self.__eq__(other)
+                return result if result is NotImplemented else not result
+
+        def fn(x, backend):
+            if mixin.__lt__(backend, Backend.YES):
+                x = x * 2
+            return x + 1 if backend != Backend.NO else x - 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for backend in Backend:
+            self.assertEqual(fn(x, backend), opt_fn(x, backend))
+
     def test_flag_enum(self):
         """Test Flag enum operations."""
 
@@ -735,6 +777,9 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+
+instantiate_parametrized_tests(EnumTests)
 
 
 if __name__ == "__main__":
