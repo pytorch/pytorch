@@ -58,7 +58,9 @@ VERDICTS = {"ready_for_human_review", "changes_requested"}
 SEVERITIES = {"info", "minor", "major"}
 
 MAX_FINDINGS = 25
-MAX_MESSAGE = 600
+# Stage B's prompt asks for at most 1200 characters, leaving room for the
+# escaping neutralize() adds. Best effort: heavy escaping can still reach the cut.
+MAX_MESSAGE = 1500
 MAX_SUMMARY = 1500
 MAX_PATH = 400
 MAX_DROPPED_TRACKED = (

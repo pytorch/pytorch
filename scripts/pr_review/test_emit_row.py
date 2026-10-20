@@ -24,6 +24,7 @@ from emit_row import safe_detail, safe_model, usage_metrics  # noqa: E402
 from extract_verdict import (  # noqa: E402
     is_neutral_path,
     is_neutral_prose,
+    MAX_MESSAGE,
     neutralize,
     neutralize_path,
     published_findings,
@@ -188,7 +189,7 @@ class TestPublishedFindings(unittest.TestCase):
             {**FINDING, "severity": []},
             {**FINDING, "severity": {"a": 1}},
             {**FINDING, "message": ""},
-            {**FINDING, "message": "x" * 601},
+            {**FINDING, "message": "x" * (MAX_MESSAGE + 1)},
             {**FINDING, "message": "a \u2014 b"},
             {**FINDING, "path": "a\nb.py"},
             {**FINDING, "path": "x.py\n"},
