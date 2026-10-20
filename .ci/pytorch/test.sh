@@ -2371,9 +2371,17 @@ EOF
   # shellcheck disable=SC1091
   . venv/bin/activate
 
+  local fetch_submodules="${REPO_DIR}/.github/actions/checkout-pytorch/fetch-submodules.sh"
+
   # build torch at the base commit to generate a base function schema for comparison
   git reset --hard "${SHA_TO_COMPARE}"
-  git submodule sync && git submodule update --init --recursive
+  git submodule sync
+  # The base commit may predate fetch-submodules.sh.
+  if [[ -f "${fetch_submodules}" ]]; then
+    bash "${fetch_submodules}" tree:0
+  else
+    git submodule update --init --recursive
+  fi
   echo "::group::Installing Torch From Base Commit"
   pip3 install -r requirements.txt
   # shellcheck source=./common-build.sh
@@ -2387,7 +2395,7 @@ EOF
   python dump_all_function_schemas.py --filename nightly_schemas.txt
 
   git reset --hard "${SHA1}"
-  git submodule sync && git submodule update --init --recursive
+  git submodule sync && bash "${fetch_submodules}" tree:0
   # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"

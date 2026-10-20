@@ -130,7 +130,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
-          submodules: recursive
           show-progress: false
 
       - name: Make test env permanent
