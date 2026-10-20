@@ -235,11 +235,15 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     CLASS_MATCH is still kept when ``is_portable_identity_guard`` finds that
     its object unpickles by reference to the loading process's own: a module
     that is its ``sys.modules`` entry, a class or function that its
-    ``__module__`` and ``__qualname__`` lead back to, or a member of such an
-    enum. A ``<locals>`` class, a module missing from ``sys.modules``, a
-    ``functools.wraps`` wrapper and a NamedTuple class nested in a class (the
-    guard-state pickler rebuilds it as a fresh class) are still dropped, and so
-    is a class whose metaclass is nested or local. An object defined in
+    ``__module__`` and ``__qualname__`` lead back to, a member of such an
+    enum, or a top-level global of its ``__module__`` whose class is neither
+    nested nor local and whose reduction (its ``copyreg.dispatch_table``
+    entry, else ``__reduce_ex__``) names that global, such as
+    ``typing.List``. A ``<locals>`` class, a module missing from
+    ``sys.modules``, a ``functools.wraps`` wrapper, a NamedTuple class nested
+    in a class (the guard-state pickler rebuilds it as a fresh class) and a
+    singleton stored as a class attribute are still dropped, and so is a class
+    whose metaclass is nested or local. An object defined in
     ``__main__`` is kept like any other and resolves against the loading
     process's ``__main__``: a serving script that does not define it fails the
     load with an ``AttributeError`` rather than serving without the guard.
@@ -1616,6 +1620,38 @@ class _CapturePackage(CompilePackage):
         super().add_resume_function(python_code, python_module, function_name)
 
 
+def _is_variantless_entry_fallback(entry: _DynamoCacheEntry) -> bool:
+    # The artifact build refuses an entry frame that fell back on its first
+    # call (it has no variant to dispatch to), so that one stays uncovered.
+    if not entry.codes:
+        return False
+    first = entry.codes[0]
+    return first.eager_fallback and not first.bypassed and not first.guarded_codes
+
+
+def _variantless_entry_fallback_message(fn_name: str) -> str:
+    return (
+        f"precompile captured no dispatchable graph for {fn_name!r}: Dynamo gave up "
+        f"on the entry frame at its first call, so it holds no variant to serve. "
+        f"Dynamo gives up on, and skips for the rest of the capture, a frame with a "
+        f"graph break it cannot resume from (such as one inside a loop; check "
+        f"TORCH_LOGS=graph_breaks), a frame that calls torch._dynamo.skip_frame(), "
+        f"a frame it refuses to trace such as a generator, a frame whose UserError "
+        f"Dynamo suppressed, or one whose graph the backend declined by raising "
+        f"SkipFrame or failed on with an error Dynamo falls back on, such as "
+        f"DynamicOutputShapeException (check the backend's log). Fix that, or "
+        f"capture the functions the entry calls instead."
+    )
+
+
+def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
+    return (
+        code.eager_fallback
+        and not code.bypassed
+        and not (code is entry.codes[0] and _is_variantless_entry_fallback(entry))
+    )
+
+
 def _summarize(
     entry: _DynamoCacheEntry,
     *,
@@ -1636,18 +1672,22 @@ def _summarize(
     ``bypassed`` and ``uncovered_frames`` are read off the entry, one bare
     ``co_name`` per frame, so a repeated name is two frames and both lists are
     subsets of ``frames`` by construction. Uncovered is the coverage gap: the
-    frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
-    not bypassed. ``install()`` ``skip_code()``s a superset, every entry that is
-    not bypassed and has no guarded codes whether or not it entered Dynamo, so a
-    generated-but-never-executed resume entry is skipped there and is not a gap
-    here. ``backend_graphs`` counts the backend ids of the entries that are not
-    bypassed, the ones ``install()`` loads: a save-time bypass
-    (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
-    the entry and leaves its ids in place. ``truncated`` comes from the compile
-    path, which sees a frame hit the limit once and records it as ``co_name
-    (filename:firstlineno)``, so that set cannot merge two frames.
-    ``served_eagerly`` names the frames ``PrecompileSession._served_entry``
-    emptied: they hold no guarded code by design, not for lack of coverage.
+    frame entered Dynamo (``has_compile_id``, or ``eager_fallback`` for a
+    generator entry, flagged before ``_compile``), holds no guarded code, and
+    was neither bypassed nor served as an ``eager_fallback`` (Dynamo gave up on
+    it, so a load serves any variants it has and runs a call they miss
+    eagerly; those are ``eager_fallbacks``). ``install()`` ``skip_code()``s
+    every entry that is not bypassed and has no guarded codes whether or not it
+    entered Dynamo, so a generated-but-never-executed resume entry is skipped
+    there and is not a gap here. ``backend_graphs`` counts the backend ids of
+    the entries that are not bypassed, the ones ``install()`` loads: a
+    save-time bypass (``PrecompileCacheEntry.from_cache_entry``, backend
+    artifact missing) marks the entry and leaves its ids in place.
+    ``truncated`` comes from the compile path, which sees a frame hit the limit
+    once and records it as ``co_name (filename:firstlineno)``, so that set
+    cannot merge two frames. ``served_eagerly`` names the frames
+    ``PrecompileSession._served_entry`` emptied: they hold no guarded code by
+    design, not for lack of coverage.
     """
     return PrecompileSummary(
         frames=len(entry.codes),
@@ -1661,10 +1701,17 @@ def _summarize(
         uncovered_frames=tuple(
             c.python_code.co_name
             for c in entry.codes
-            if c.has_compile_id
+            if (c.has_compile_id or c.eager_fallback)
             and not c.guarded_codes
             and not c.bypassed
             and _frame_key(c.python_code) not in served_eagerly
+            and not _served_as_eager_fallback(entry, c)
+        ),
+        eager_fallbacks=tuple(
+            f"{c.python_code.co_name} "
+            f"({c.python_code.co_filename}:{c.python_code.co_firstlineno})"
+            for c in entry.codes
+            if _served_as_eager_fallback(entry, c)
         ),
         wont_generalize=_wont_generalize(kept, guard_sets),
         dropped_guards=tuple(sorted(dropped)),
@@ -1926,14 +1973,22 @@ class PrecompileSession(Generic[_P, _R]):
                 and (code.bypassed or (code.guarded_codes and key in lossy))
             ):
                 codes[i] = dataclasses.replace(
-                    code, guarded_codes=[], bypassed=False, skip_recursive=True
+                    code,
+                    guarded_codes=[],
+                    bypassed=False,
+                    skip_recursive=True,
+                    eager_fallback=False,
                 )
                 eager.add(key)
         return dataclasses.replace(entry, codes=codes), frozenset(eager)
 
     def summary(self) -> PrecompileSummary:
         """Coverage and guard information for everything captured so far."""
-        entry, eager = self._served_entry()
+        return self._summary_of(*self._served_entry())
+
+    def _summary_of(
+        self, entry: _DynamoCacheEntry, eager: frozenset[tuple[str, str, int]]
+    ) -> PrecompileSummary:
         # A frame served eagerly checks no guard, so neither its guards nor
         # its drops describe what the artifact serves.
         guard_sets = {k: v for k, v in self._guard_sets.items() if k not in eager}
@@ -1978,7 +2033,18 @@ class PrecompileSession(Generic[_P, _R]):
         require_no_risky_drops: bool,
     ) -> PrecompileSummary:
         """Run the coverage and guard gates, or raise saying which one failed."""
-        summary = self.summary()
+        entry, eager = self._served_entry()
+        summary = self._summary_of(entry, eager)
+        if _is_variantless_entry_fallback(entry):
+            # The artifact build refuses this too, so no flag is a way out; say
+            # so rather than suggest one. Checked before every other gate and
+            # whatever require_complete says: the entry did run, and the later
+            # gates either suggest a flag or say it never ran.
+            name = entry.codes[0].python_code.co_name
+            raise PackageError(
+                f"{_variantless_entry_fallback_message(name)} The artifact build "
+                f"refuses this whatever require_complete says."
+            )
         if require_no_risky_drops and summary.risky_dropped_guards:
             raise PackageError(
                 f"Precompilation dropped guard(s) that can affect dispatch on "
@@ -2017,8 +2083,9 @@ class PrecompileSession(Generic[_P, _R]):
                     f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
                     f"from the artifact. This is expected for a frame that only "
                     f"dispatches to covered submodules; it also looks exactly like a "
-                    f"frame Dynamo gave up on (check TORCH_LOGS=graph_breaks). Pass "
-                    f"require_complete=False once you have confirmed which."
+                    f"frame whose compile error was suppressed (suppress_errors=True; "
+                    f"Dynamo logs that error as a warning). Pass require_complete=False "
+                    f"once you have confirmed which."
                 )
             if summary.bypassed:
                 raise PackageError(
