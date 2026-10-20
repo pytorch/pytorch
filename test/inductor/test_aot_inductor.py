@@ -3881,6 +3881,64 @@ class AOTInductorTestsTemplate:
         expected = Model()(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    def test_proxy_executor_view_arg_no_handle_leak(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        with torch.library._scoped_library("leaktest", "FRAGMENT") as lib:
+            torch.library.define(
+                "leaktest::add_one",
+                "(Tensor a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "leaktest::add_one", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("leaktest::add_one", lib=lib)
+            def add_one_impl(a: torch.Tensor) -> torch.Tensor:
+                return a + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, a, b):
+                    y = torch.bmm(a, b)
+                    # A view with the same layout as the bmm output, so the
+                    # proxy executor arg is codegened as a new tensor handle.
+                    y = y.unsqueeze(1).transpose(1, 2).reshape(y.shape)
+                    return torch.ops.leaktest.add_one(y)
+
+            example_inputs = (
+                torch.randn(4, 16, 8, device=self.device),
+                torch.randn(4, 8, 16, device=self.device),
+            )
+            dim0 = Dim("dim0", min=1, max=2048)
+            dynamic_shapes = {"a": {0: dim0}, "b": {0: dim0}}
+            package_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+            FileCheck().check("aoti_torch_new_tensor_handle").check(
+                "aoti_torch_proxy_executor_call_function"
+            ).run(code)
+            for handle in re.findall(r"AtenTensorHandle (tmp_\w+);", code):
+                self.assertIn(f"RAIIAtenTensorHandle({handle})", code)
+
+            aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+            device_interface = get_interface_for_device(GPU_TYPE)
+            device: int = device_interface.current_device()
+            aot_inductor_module(*example_inputs)
+            mem_before = device_interface.memory_allocated(device)
+            aot_inductor_module(*example_inputs)
+            mem_after = device_interface.memory_allocated(device)
+            self.assertEqual(mem_before, mem_after)
+
+            actual = aot_inductor_module(*example_inputs)
+            expected = Model()(*example_inputs)
+            torch.testing.assert_close(actual, expected)
+
     @requires_multigpu()
     def test_replicate_on_devices(self):
         if self.device != GPU_TYPE or self.device == "mps":
