@@ -2979,11 +2979,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
             return VariableTracker.build(tx, module, new_source)
 
+        # The interface list is evaluated once, at the first _get_handlers()
+        # call; backends must register their interface before that point
+        # (see register_interface_for_device).
         @register(
-            torch.accelerator.current_stream,
-            torch.cuda.current_stream,
-            torch.mtia.current_stream,
-            torch.xpu.current_stream,
+            *dict.fromkeys(  # remove duplicates
+                [torch.accelerator.current_stream]
+                + [
+                    di.current_stream
+                    for _, di in get_registered_device_interfaces()
+                    if di.exposes_streams()
+                ]
+            )
         )
         def handle_current_stream(
             self,

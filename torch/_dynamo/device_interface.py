@@ -82,6 +82,15 @@ class DeviceInterface:
                 "Stream should be inherited from torch.Stream, otherwise, it couldn't be captured by dynamo."
             )
 
+    # Name of the attribute that exposes the raw stream handle on this
+    # device's Stream objects (e.g. "cuda_stream"). Consulted when deriving
+    # a StreamVariable subclass for a backend that registers a
+    # DeviceInterface without an explicit one. The derived accessor is
+    # reached only for streams Dynamo tracks as the current stream, and
+    # falls back to native_handle when the attribute is absent. None means
+    # the device exposes no raw handle attribute.
+    stream_handle_attr: str | None = None
+
     class Worker:
         """
         Worker API to query device properties that will work in multi processing
@@ -213,7 +222,10 @@ class DeviceInterface:
         so stream-capable backends must override it. The override must be a
         real, instantiable torch.Stream subclass: a placeholder that raises on
         construction is still reported as stream-capable here and fails later,
-        at guard time.
+        at guard time. It must also keep torch.Stream's
+        ``(stream_id, device_index, device_type)`` constructor form: Dynamo
+        reconstructs streams through it when comparing a current stream
+        against its device type.
         """
         return cls.Stream is not DeviceInterface.Stream
 
@@ -356,6 +368,7 @@ class CudaInterface(DeviceInterface):
     # make sure Event and Stream are implemented and inherited from the torch.Event and torch.Stream
     Event = torch.cuda.Event  # type: ignore[assignment]
     Stream = torch.cuda.Stream  # type: ignore[assignment]
+    stream_handle_attr = "cuda_stream"
 
     @staticmethod
     def is_gpu() -> bool:
@@ -606,6 +619,7 @@ class XpuInterface(DeviceInterface):
     device = torch.xpu.device  # type: ignore[assignment]
     Event = torch.xpu.Event  # type: ignore[assignment]
     Stream = torch.xpu.Stream  # type: ignore[assignment]
+    stream_handle_attr = "sycl_queue"
 
     @staticmethod
     def is_gpu() -> bool:
