@@ -3237,13 +3237,13 @@ class TestStreamExternalObjectRestore(InductorTestCase):
         torch.testing.assert_close(x.grad, torch.full_like(x, 2.0))
 
 
-instantiate_device_type_tests(TestStreamCodegenRuntime, globals(), except_for=("hpu",))
-instantiate_device_type_tests(TestUserStreamCompile, globals(), except_for=("hpu",))
-instantiate_device_type_tests(TestStreamOrderingStress, globals(), except_for=("hpu",))
-instantiate_device_type_tests(TestGenericStreamCompile, globals(), except_for=("hpu",))
-instantiate_device_type_tests(TestStreamIdentity, globals(), except_for=("hpu",))
+instantiate_device_type_tests(TestStreamCodegenRuntime, globals())
+instantiate_device_type_tests(TestUserStreamCompile, globals())
+instantiate_device_type_tests(TestStreamOrderingStress, globals())
+instantiate_device_type_tests(TestGenericStreamCompile, globals())
+instantiate_device_type_tests(TestStreamIdentity, globals())
 instantiate_device_type_tests(
-    TestStreamExternalObjectRestore, globals(), except_for=("hpu",)
+    TestStreamExternalObjectRestore, globals()
 )
 instantiate_device_type_tests(TestPDLWithMultiStream, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestAOTIUserStreams, globals(), only_for=("cuda",))
