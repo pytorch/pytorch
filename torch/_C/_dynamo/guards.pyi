@@ -232,6 +232,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: traceback.StackSummary | None,
     ) -> None: ...
+    def add_lambda_guard_no_args(
+        self,
+        user_lambda: Callable[[], Any],
+        verbose_code_parts: list[str],
+        user_stack: traceback.StackSummary | None,
+    ) -> None: ...
     def add_id_match_guard(
         self,
         id_val: int,

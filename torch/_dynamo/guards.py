@@ -2423,13 +2423,13 @@ class GuardBuilder(GuardBuilderBase):
             # Epilogue guards are run after all the other guards have finished.
             # If epilogue guards contain a getattr or getitem access, one of the
             # other guards would fail preventing the epilogue guards to run.
-            self.guard_manager.root.add_epilogue_lambda_guard(
+            self.guard_manager.root.add_epilogue_lambda_guard(  # noqa: LAMBDA_GUARD
                 guard_fn,
                 verbose_code_parts,
                 None,
             )
         else:
-            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts, None)
+            self.guard_manager.root.add_lambda_guard(guard_fn, verbose_code_parts, None)  # noqa: LAMBDA_GUARD
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -2813,7 +2813,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = f"___cow_tensor_matches({self.arg_ref(guard)}, {expected!r})"
         self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
@@ -2946,11 +2946,8 @@ class GuardBuilder(GuardBuilderBase):
 
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
-
-        def fn(x: object) -> bool:
-            return compare_fn(states)
-
-        self.guard_manager.root.add_lambda_guard(
+        fn = functools.partial(compare_fn, states)
+        self.guard_manager.root.add_lambda_guard_no_args(  # noqa: LAMBDA_GUARD
             fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
@@ -3008,7 +3005,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         last: list[tuple[tuple[weakref.ref[Any], ...], bool]] = []
 
-        def fn(x: object) -> bool:
+        def fn() -> bool:
             hooks = get_hooks()
             if not are_inline_hooks(hooks):
                 return hooks_fingerprint is None
@@ -3023,7 +3020,7 @@ class GuardBuilder(GuardBuilderBase):
             last[:] = [(tuple(weakref.ref(h) for h in hooks), result)]
             return result
 
-        self.guard_manager.root.add_lambda_guard(
+        self.guard_manager.root.add_lambda_guard_no_args(  # noqa: LAMBDA_GUARD
             fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
@@ -3072,7 +3069,7 @@ class GuardBuilder(GuardBuilderBase):
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             metadata_checker,
             get_verbose_code_parts(global_name, guard),
             guard.user_stack,
@@ -3091,7 +3088,7 @@ class GuardBuilder(GuardBuilderBase):
             return check_dtensor_spec(x, expected)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
@@ -3112,7 +3109,7 @@ class GuardBuilder(GuardBuilderBase):
             return check_opaque_obj(x, original_values)
 
         global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             opaque_guard_checker,
             get_verbose_code_parts(global_name, guard),
             guard.user_stack,
@@ -3264,7 +3261,7 @@ class GuardBuilder(GuardBuilderBase):
 
         relation = "==" if expected else "!="
         code = f"{ref} {relation} ___get_current_stream(torch.device('{device_type}'))"
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
         self._set_guard_export_info(guard, [code])
@@ -3319,7 +3316,7 @@ class GuardBuilder(GuardBuilderBase):
             # but x is an instance of base_type by construction.
             return base_type(x) == base_value  # pyrefly: ignore[bad-argument-type]
 
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             check_fn,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
@@ -3436,7 +3433,7 @@ class GuardBuilder(GuardBuilderBase):
             f"{expected.qualified_name()})"
         )
         self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
@@ -3464,7 +3461,7 @@ class GuardBuilder(GuardBuilderBase):
             f"{expected.receiver.__module__}.{expected.receiver.__qualname__}.{expected.name})"
         )
         self._set_guard_export_info(guard, [code])
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
@@ -3589,7 +3586,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = [f"___normalize_count_iter({ref}) == {normalized_count_iter}"]
         self._set_guard_export_info(guard, code)
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
@@ -3614,7 +3611,7 @@ class GuardBuilder(GuardBuilderBase):
 
         code = [f"___list_reverseiterator_len({ref}) == {length}"]
         self._set_guard_export_info(guard, code)
-        self.get_guard_manager(guard).add_lambda_guard(
+        self.get_guard_manager(guard).add_lambda_guard(  # noqa: LAMBDA_GUARD
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 

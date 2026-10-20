@@ -2029,11 +2029,13 @@ class LAMBDA_GUARD : public LeafGuard {
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
       py::object verbose_code_parts,
-      py::object user_stack)
+      py::object user_stack,
+      bool takes_value = true)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
-            std::move(user_stack)) {
+            std::move(user_stack)),
+        _takes_value(takes_value) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
@@ -2041,9 +2043,10 @@ class LAMBDA_GUARD : public LeafGuard {
     }
   }
 
-  // Runs the lambda function with the current f_locals value.
+  // Runs the lambda function with the guarded value, or with no arguments if
+  // it does not take one.
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
+    PyObject* x = call(value); // new ref
     if (x == nullptr) {
       // An exception is caught in the lambda function.
       PyErr_Clear();
@@ -2054,8 +2057,13 @@ class LAMBDA_GUARD : public LeafGuard {
     return result;
   }
 
+  // Only materialize f_locals as a dict for a lambda that reads them.
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    return check_nopybind(_takes_value ? reinterpret_cast<PyObject*>(map->to_dict()) : nullptr);
+  }
+
   GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
-    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
+    PyObject* x = call(value); // new ref
     if (x == nullptr) {
       // An exception is caught in the lambda function.
       std::string exc_message = get_exception_message();
@@ -2071,8 +2079,15 @@ class LAMBDA_GUARD : public LeafGuard {
   }
 
  private:
+  PyObject* call(PyObject* value) {
+    return _takes_value ? PyObject_CallOneArg(_guard_check_fn.ptr(), value)
+                        : PyObject_CallNoArgs(_guard_check_fn.ptr());
+  }
+
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
+  // False for a lambda that takes no arguments.
+  bool _takes_value;
 };
 
 class TYPE_MATCH : public LeafGuard {
@@ -8393,6 +8408,19 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(lambda),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
+          })
+      .def(
+          "add_lambda_guard_no_args",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(verbose_code_parts),
+                std::move(user_stack),
+                /*takes_value=*/false));
           })
       .def(
           "add_type_match_guard",
