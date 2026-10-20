@@ -119,6 +119,7 @@
 # /aten/src/ATen/native/ScaledBlasUtils.cpp
 # /aten/src/ATen/native/ScaledBlasUtils.h
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
+/test/test_quantize_tensor.py @vkuzo @slayton58
 #
 # [sparse]
 # label: module: sparse
