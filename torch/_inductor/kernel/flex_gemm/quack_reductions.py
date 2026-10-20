@@ -65,16 +65,15 @@ class GroupedTensorSSALayout(GemmReductionGeometry):
 
     def fragment_group_size_expr(self, source: Any) -> str:
         """Return the grouped extent available in one TensorSSA fragment."""
-        return (
-            f"cutlass.const_expr(min({self.group}, "
-            f"cute.size({source}.shape, mode=[0])))"
-        )
+        # Whole-fragment size: SM100 fragments are (V, 1, 1), SM90 WGMMA ones
+        # (((2, 2, V), 1), 1, R); adjacent N columns are the fastest mode in both.
+        return f"cutlass.const_expr(min({self.group}, cute.size({source}.shape)))"
 
     def fragment_repeat_expr(self, source: Any) -> str:
         """Return the number of grouped runs in one TensorSSA fragment."""
         return (
-            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
-            f"// min({self.group}, cute.size({source}.shape, mode=[0])))"
+            f"cutlass.const_expr(cute.size({source}.shape) "
+            f"// min({self.group}, cute.size({source}.shape)))"
         )
 
     def tensorssa_shape(self, source: Any) -> str:
