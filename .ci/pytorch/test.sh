@@ -2371,14 +2371,17 @@ EOF
   # shellcheck disable=SC1091
   . venv/bin/activate
 
-  # The base commit may predate fetch-submodules.sh, so run a copy from this commit.
-  local fetch_submodules
-  fetch_submodules=$(mktemp)
-  cp .github/actions/checkout-pytorch/fetch-submodules.sh "${fetch_submodules}"
+  local fetch_submodules="${REPO_DIR}/.github/actions/checkout-pytorch/fetch-submodules.sh"
 
   # build torch at the base commit to generate a base function schema for comparison
   git reset --hard "${SHA_TO_COMPARE}"
-  git submodule sync && bash "${fetch_submodules}" tree:0
+  git submodule sync
+  # The base commit may predate fetch-submodules.sh.
+  if [[ -f "${fetch_submodules}" ]]; then
+    bash "${fetch_submodules}" tree:0
+  else
+    git submodule update --init --recursive
+  fi
   echo "::group::Installing Torch From Base Commit"
   pip3 install -r requirements.txt
   # shellcheck source=./common-build.sh
