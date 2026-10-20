@@ -23006,6 +23006,22 @@ if RUN_GPU:
                 self.assertNotIn("triton_red_", backward)
                 self.assertNotIn("triton_per_", backward)
 
+            # Spatial cross-entropy (nll_loss2d_backward): the class dim is not
+            # the last one and classes is laid out as [C, 1, 1].
+            spatial_labels = torch.randint(0, 100, (4, 8, 8), device=GPU_TYPE)
+            spatial_labels[:, ::3] = -100
+            for dtype, upcast in ((torch.float32, True), (torch.bfloat16, False)):
+                x = torch.randn(4, 100, 8, 8, device=GPU_TYPE, dtype=dtype)
+                x.requires_grad_()
+                torch._dynamo.reset()
+                result, code = run_and_get_code(
+                    torch.compile(fn), x, spatial_labels, None, upcast
+                )
+                self.assertEqual(result, fn(x, spatial_labels, None, upcast))
+                (backward,) = [c for c in code if "log_softmax_backward" in c]
+                self.assertNotIn("triton_red_", backward)
+                self.assertNotIn("triton_per_", backward)
+
             # With per-row losses and special upstream gradients, NaN and inf
             # positions and signed zeros match eager.
             def per_row(x, labels, grad):

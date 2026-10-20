@@ -51,7 +51,7 @@ cpp_outer_loop_fused_inner_counts: list[CppOuterLoopFusedCount] = []
 
 num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
-num_matches_for_one_hot_sum = 0
+num_matches_for_one_hot_sum: int = 0
 
 num_loop_reordering = 0
 num_auto_chunking: int = 0
