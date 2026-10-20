@@ -323,6 +323,26 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             for line in ["len(x) == 2", "len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
 
+    def test_tuple_iterator_length_recompile_hint(self):
+        reasons = []
+
+        def fn(t, x):
+            if len(list(t)) > 2:
+                return x * 2
+            return x + 1
+
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: reasons.append(failure.reason)
+        )(fn)
+        x = torch.randn(3)
+        compiled(iter((1, 2, 3)), x)
+        compiled(iter((1, 2)), x)
+
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("___tuple_iterator_len(t) == 3", reasons[0])
+        expected_hint = "(HINT: Expected t to be a tuple iterator with 3 items left; this compiled version assumes that iterator type and remaining count.)"
+        self.assertIn(expected_hint, reasons[0])
+
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_recompile_child_run_only(self):
         def f(x, n):
