@@ -50,6 +50,7 @@ from torch.distributed.pipelining.schedules import (
     _build_recv_ops,
     _defer_recv_ops,
     _format_pipeline_order,
+    _get_loss_from_result,
     _merge_bw,
     _PendingSendTracker,
     _PipelineSchedule,
@@ -601,6 +602,157 @@ def _activation_intervals(
 
 class ScheduleTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("schedule_class", [ScheduleGPipe, ScheduleInterleaved1F1B])
+    @parametrize("structured", [False, True])
+    @parametrize("per_microbatch_kwargs", [False, True])
+    def test_loss_results_preserve_backward_and_detach_metrics(
+        self, schedule_class, structured, per_microbatch_kwargs
+    ):
+        store = FakeStore()
+        torch.distributed.init_process_group("fake", rank=0, world_size=1, store=store)
+        model = torch.nn.Linear(4, 4)
+        reference = copy.deepcopy(model)
+        inputs, targets = torch.randn(4, 4), torch.randn(4, 4)
+
+        def loss_fn(output, target, *, scale=1.0):
+            loss = torch.nn.functional.mse_loss(output, target, reduction="sum") * scale
+            return (
+                {"loss": loss, "metrics": {"mean": output.mean() * scale}}
+                if structured
+                else loss
+            )
+
+        stage = PipelineStage(model, 0, 1, "cpu")
+        stages = (
+            stage if issubclass(schedule_class, PipelineScheduleSingle) else [stage]
+        )
+        schedule = schedule_class(stages, 2, loss_fn=loss_fn, scale_grads=False)
+        try:
+            results, losses = [], []
+            inputs_mbs = list(torch.tensor_split(inputs, 2))
+            target_mbs = list(torch.tensor_split(targets, 2))
+            scales = (1.0, 2.0) if per_microbatch_kwargs else (1.0, 1.0)
+            if per_microbatch_kwargs:
+                schedule.step(
+                    arg_mbs=[(microbatch,) for microbatch in inputs_mbs],
+                    target_mbs=target_mbs,
+                    loss_kwarg_mbs=[{"scale": scale} for scale in scales],
+                    losses=losses,
+                    loss_results=results,
+                )
+            else:
+                schedule.step(
+                    inputs, target=targets, losses=losses, loss_results=results
+                )
+            expected_means = []
+            for input_mb, target_mb, scale in zip(
+                inputs_mbs, target_mbs, scales, strict=True
+            ):
+                output = reference(input_mb)
+                expected_means.append((output.mean() * scale).detach())
+                (
+                    torch.nn.functional.mse_loss(output, target_mb, reduction="sum")
+                    * scale
+                ).backward()
+            for parameter, expected in zip(
+                model.parameters(), reference.parameters(), strict=True
+            ):
+                self.assertEqual(parameter.grad, expected.grad)
+            self.assertEqual(len(results), 2)
+            for result, loss, expected_mean in zip(
+                results, losses, expected_means, strict=True
+            ):
+                self.assertIsInstance(result, dict)
+                self.assertEqual(result["loss"], loss)
+                self.assertFalse(result["loss"].requires_grad)
+                self.assertEqual(
+                    set(result["metrics"]), {"mean"} if structured else set()
+                )
+                for value in result["metrics"].values():
+                    self.assertFalse(value.requires_grad)
+                    self.assertIsNone(value.grad_fn)
+                if structured:
+                    self.assertEqual(result["metrics"]["mean"], expected_mean)
+            self.assertIsNone(schedule._loss_results)
+            self.assertIsNone(schedule._loss_kwarg_mbs)
+            self.assertFalse(schedule._internal_losses)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_loss_result_rejects_invalid_values(self):
+        with self.assertRaisesRegex(TypeError, "scalar tensor"):
+            _get_loss_from_result({"loss": torch.ones(2)})
+        with self.assertRaisesRegex(TypeError, "names to tensors"):
+            _get_loss_from_result({"loss": torch.ones(()), "metrics": {"value": 1}})
+        with self.assertRaisesRegex(TypeError, "names to tensors"):
+            _get_loss_from_result(
+                {"loss": torch.ones(()), "metrics": {1: torch.ones(())}}
+            )
+        with self.assertRaisesRegex(TypeError, "scalar tensor"):
+            _get_loss_from_result({"metrics": {}})
+        with self.assertRaisesRegex(TypeError, "loss/metrics dictionary"):
+            _get_loss_from_result((torch.ones(()), {}))
+        loss = torch.ones((), requires_grad=True)
+        self.assertIs(_get_loss_from_result({"loss": loss}), loss)
+
+    @parametrize("schedule_class", [ScheduleGPipe, ScheduleInterleaved1F1B])
+    def test_loss_results_eval_and_failure_cleanup(self, schedule_class):
+        torch.distributed.init_process_group(
+            "fake", rank=0, world_size=1, store=FakeStore()
+        )
+        should_fail = False
+        calls = 0
+
+        def loss_fn(output, target):
+            nonlocal calls
+            calls += 1
+            if should_fail and calls == 2:
+                raise RuntimeError("second microbatch loss failed")
+            loss = torch.nn.functional.mse_loss(output, target, reduction="sum")
+            return {"loss": loss, "metrics": {"loss_sum": loss}}
+
+        stage = PipelineStage(torch.nn.Linear(4, 4), 0, 1, "cpu")
+        stages = (
+            stage if issubclass(schedule_class, PipelineScheduleSingle) else [stage]
+        )
+        schedule = schedule_class(stages, 2, loss_fn=loss_fn, scale_grads=False)
+        inputs, targets = torch.randn(4, 4), torch.randn(4, 4)
+        results, losses = [], []
+        try:
+            with torch.no_grad():
+                output = schedule.eval(
+                    inputs,
+                    target=targets,
+                    losses=losses,
+                    loss_results=results,
+                    return_outputs=False,
+                )
+            self.assertIsNone(output)
+            self.assertEqual(len(results), 2)
+            self.assertEqual(len(losses), 2)
+            self.assertTrue(all(result["loss"].grad_fn is None for result in results))
+            self.assertIsNone(schedule._loss_results)
+            self.assertFalse(schedule._internal_losses)
+
+            should_fail, calls = True, 0
+            with (
+                torch.no_grad(),
+                self.assertRaisesRegex(RuntimeError, "second microbatch loss failed"),
+            ):
+                schedule.eval(
+                    inputs, target=targets, loss_results=results, return_outputs=False
+                )
+            self.assertEqual(len(results), 1)
+            self.assertIsNone(schedule._loss_results)
+            self.assertFalse(schedule._internal_losses)
+
+            with self.assertRaisesRegex(TypeError, "loss_results must be a list"):
+                schedule.eval(
+                    inputs, target=targets, loss_results=(), return_outputs=False
+                )
+        finally:
+            torch.distributed.destroy_process_group()
 
     def test_stage_recv_buffer_allocation_and_consumption(self):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)

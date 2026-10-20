@@ -8,7 +8,8 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict, deque, OrderedDict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache, partial
@@ -61,6 +62,36 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def _get_loss_from_result(
+    result: torch.Tensor | dict[str, Any],
+) -> torch.Tensor:
+    """Validate a dictionary result and extract its backward objective.
+
+    Legacy tensor losses are unchanged. Dictionary results must contain a
+    scalar tensor under ``loss``; ``metrics`` is an optional name-to-tensor map.
+
+    Args:
+        result: Tensor loss or dictionary containing the objective and metrics.
+
+    Returns:
+        The differentiable loss tensor, without detaching it.
+    """
+    if isinstance(result, torch.Tensor):
+        return result
+    if not isinstance(result, dict):
+        raise TypeError("loss_fn must return a tensor or a loss/metrics dictionary")
+    loss = result.get("loss")
+    metrics = result.get("metrics", {})
+    if not isinstance(loss, torch.Tensor) or loss.numel() != 1:
+        raise TypeError("loss_fn result['loss'] must be a scalar tensor")
+    if not isinstance(metrics, Mapping) or any(
+        not isinstance(name, str) or not isinstance(value, torch.Tensor)
+        for name, value in metrics.items()
+    ):
+        raise TypeError("loss_fn result['metrics'] must map names to tensors")
+    return loss
 
 
 class _ComputationType(str, Enum):
@@ -283,7 +314,7 @@ class _PipelineSchedule(ABC):
     def __init__(
         self,
         n_microbatches: int,
-        loss_fn: Callable[..., torch.Tensor] | None = None,
+        loss_fn: Callable[..., torch.Tensor | dict[str, Any]] | None = None,
         args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
@@ -321,6 +352,7 @@ class _PipelineSchedule(ABC):
         # Per-microbatch loss keyword arguments of the current step. Set by
         # ``step``.
         self._loss_kwarg_mbs: list[dict[str, Any]] | None = None
+        self._loss_results: list[dict[str, Any]] | None = None
         logger.info("Using %s", self.__class__.__name__)
 
     def _maybe_compute_loss(
@@ -339,13 +371,43 @@ class _PipelineSchedule(ABC):
                 if self._loss_kwarg_mbs is not None
                 else None
             )
-            loss = self._compute_loss(
+            result = self._loss_fn(
                 output,
                 target_mbs[mb_index],  # type: ignore[index]
-                loss_kwargs,
-                loss_kwarg_mb,
+                **(loss_kwargs or {}),
+                **(loss_kwarg_mb or {}),
             )
+            loss = _get_loss_from_result(result)
             self._internal_losses.append(loss)
+            if self._loss_results is not None:
+                metrics = result.get("metrics", {}) if isinstance(result, dict) else {}
+                self._loss_results.append(
+                    {
+                        "loss": loss.detach(),
+                        "metrics": {
+                            name: value.detach() for name, value in metrics.items()
+                        },
+                    }
+                )
+
+    @contextmanager
+    def _collect_loss_results(
+        self,
+        stages: Sequence[_PipelineStageBase],
+        results: list[dict[str, Any]] | None,
+    ) -> Iterator[None]:
+        """Export detached results only during this schedule call."""
+        if results is not None:
+            if not isinstance(results, list):
+                raise TypeError("loss_results must be a list")
+            if any(stage.is_last for stage in stages):
+                results.clear()
+        self._loss_results = results
+        try:
+            yield
+        finally:
+            self._loss_results = None
+            self._internal_losses.clear()
 
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
@@ -640,7 +702,9 @@ class _PipelineSchedule(ABC):
                     for stage in reversed(stages):
                         prev_stage_grad_meta = stage._prepare_backward_infra(
                             self._n_microbatches,
-                            loss_fn=self._loss_fn,
+                            loss_fn=lambda output, target, **kwargs: self._compute_loss(
+                                output, target, kwargs
+                            ),
                             target=target,
                             received_grad_meta=prev_stage_grad_meta,
                             loss_kwargs=loss_kwargs,
@@ -683,6 +747,7 @@ class _PipelineSchedule(ABC):
         *args,
         target=None,
         losses: list | None = None,
+        loss_results: list[dict[str, Any]] | None = None,
         return_outputs=True,
         loss_kwargs: dict[str, Any] | None = None,
         arg_mbs: Any = None,
@@ -700,6 +765,7 @@ class _PipelineSchedule(ABC):
         *args,
         target=None,
         losses: list | None = None,
+        loss_results: list[dict[str, Any]] | None = None,
         return_outputs: bool = True,
         loss_kwargs: dict[str, Any] | None = None,
         arg_mbs: Any = None,
@@ -726,6 +792,11 @@ class _PipelineSchedule(ABC):
             losses (list, optional): Mutable list populated with one loss per
                 microbatch when this schedule owns the last stage and a
                 ``loss_fn`` was configured. Default: ``None``.
+            loss_results (list[dict], optional): Mutable list
+                populated with detached losses and metrics on the last stage.
+                Scalar loss functions produce results with empty metrics.
+                The list can be partially populated if execution fails.
+                Default: ``None``.
             return_outputs (bool, optional): Whether to merge and return output
                 chunks on the last stage. Default: ``True``.
             loss_kwargs (dict, optional): Extra keyword arguments forwarded to
@@ -768,6 +839,7 @@ class _PipelineSchedule(ABC):
                 *args,
                 target=target,
                 losses=losses,
+                loss_results=loss_results,
                 return_outputs=return_outputs,
                 loss_kwargs=loss_kwargs,
                 arg_mbs=arg_mbs,
@@ -822,9 +894,10 @@ class _PipelineSchedule(ABC):
         return arg_mbs, kwarg_mbs
 
     def _compute_loss(self, output, target, loss_kwargs=None, loss_kwarg_mb=None):
-        return self._loss_fn(  # type: ignore[misc]
+        result = self._loss_fn(  # type: ignore[misc]
             output, target, **(loss_kwargs or {}), **(loss_kwarg_mb or {})
         )
+        return _get_loss_from_result(result)
 
     def _split_inputs(
         self,
@@ -1181,6 +1254,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         target=None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_results: list[dict[str, Any]] | None = None,
         loss_kwargs: dict[str, Any] | None = None,
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
@@ -1205,6 +1279,11 @@ class PipelineScheduleSingle(_PipelineSchedule):
             losses (list, optional): Mutable list populated with one loss per
                 microbatch when this schedule owns the last stage and a
                 ``loss_fn`` was configured. Default: ``None``.
+            loss_results (list[dict], optional): Mutable list
+                populated with detached losses and metrics on the last stage.
+                Scalar loss functions produce results with empty metrics.
+                The list can be partially populated if execution fails.
+                Default: ``None``.
             return_outputs (bool, optional): Whether to merge and return output
                 chunks on the last stage. Default: ``True``.
             loss_kwargs (dict, optional): Keyword arguments passed unchanged
@@ -1290,18 +1369,21 @@ class PipelineScheduleSingle(_PipelineSchedule):
         self._loss_kwarg_mbs = loss_kwarg_mbs
         try:
             # Run microbatches
-            self._step_microbatches(
-                args_split,
-                kwargs_split,
-                targets_split,
-                losses,
-                return_outputs,
-                loss_kwargs=loss_kwargs,
-            )
+            with self._collect_loss_results([self._stage], loss_results):
+                self._step_microbatches(
+                    args_split,
+                    kwargs_split,
+                    targets_split,
+                    losses,
+                    return_outputs,
+                    loss_kwargs=loss_kwargs,
+                )
+                if not self._has_backward and isinstance(
+                    self._stage.submod, FSDPModule
+                ):
+                    self._stage.submod.finalize_forward()
         finally:
             self._loss_kwarg_mbs = None
-        if not self._has_backward and isinstance(self._stage.submod, FSDPModule):
-            self._stage.submod.finalize_forward()
 
         # Return merged results per original format
         if self._stage.is_last and return_outputs:
@@ -3009,6 +3091,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         target=None,
         losses: list | None = None,
         return_outputs: bool = True,
+        loss_results: list[dict[str, Any]] | None = None,
         loss_kwargs: dict[str, Any] | None = None,
         arg_mbs: Any = None,
         kwarg_mbs: Any = None,
@@ -3034,6 +3117,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
             losses (list, optional): Mutable list populated with one loss per
                 microbatch when this schedule owns the last stage and a
                 ``loss_fn`` was configured. Default: ``None``.
+            loss_results (list[dict], optional): Mutable list
+                populated with detached losses and metrics on the last stage.
+                Scalar loss functions produce results with empty metrics.
+                The list can be partially populated if execution fails.
+                Default: ``None``.
             return_outputs (bool, optional): Whether to merge and return output
                 chunks on the last stage. Default: ``True``.
             loss_kwargs (dict, optional): Keyword arguments passed unchanged
@@ -3126,14 +3214,15 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self._loss_kwarg_mbs = loss_kwarg_mbs
         try:
             # Run microbatches
-            self._step_microbatches(
-                args_split,
-                kwargs_split,
-                targets_split,
-                losses,
-                return_outputs,
-                loss_kwargs=loss_kwargs,
-            )
+            with self._collect_loss_results(self._stages, loss_results):
+                self._step_microbatches(
+                    args_split,
+                    kwargs_split,
+                    targets_split,
+                    losses,
+                    return_outputs,
+                    loss_kwargs=loss_kwargs,
+                )
         finally:
             self._loss_kwarg_mbs = None
 
