@@ -5084,6 +5084,7 @@ class TestRsample(DistributionsTestCase):
             )
 
     @set_default_dtype(torch.double)
+    @device_rng_seed(default=5, xpu=0)  # see Note [Randomized statistical tests]
     def test_dirichlet_tangent_field(self):
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
