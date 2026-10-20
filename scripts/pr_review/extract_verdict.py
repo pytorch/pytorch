@@ -874,7 +874,8 @@ def sanitize_findings(  # noqa: C901
             "message": clean_message,
         }
         # The publish job drops a finding that fails this, so drop it HERE.
-        # Only a bug in the producer above reaches it.
+        # It catches a message that fails uncut, which neutralize_message()
+        # returns whole, and any bug in the producer above.
         if not is_publishable_finding(finding):
             drop({"path": path, "line": line, "reason": "failed_publish_check"})
             continue
