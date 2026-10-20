@@ -1146,6 +1146,25 @@ class TestSympyFunctions(TestCase):
         self.assertIsInstance(TorchSymMin(128 * x, 512 * x), TorchSymMin)
         self.assertIsInstance(TorchSymMax(128 * x, 512 * x), TorchSymMax)
 
+    def test_mod_of_even_factor_is_not_folded_to_zero(self):
+        # sympy < 1.15 reports e.g. Max(6, 2*x - 12) / 6 as an integer
+        # (https://github.com/sympy/sympy/pull/28442), which made Mod and
+        # PythonMod fold these expressions to 0.
+        x = sympy.Symbol("x", integer=True, positive=True)
+        cases = [
+            (TorchSymMax(6, 2 * x - 12), 6, lambda v: max(6, 2 * v - 12)),
+            (TorchSymMax(2 * x, 4) ** 2, 12, lambda v: max(2 * v, 4) ** 2),
+            (2**x * (x + 1), 6, lambda v: 2**v * (v + 1)),
+        ]
+        for p, q, fn in cases:
+            for mod in (Mod, PythonMod):
+                expr = mod(p, q)
+                for v in range(1, 16):
+                    self.assertEqual(int(expr.subs(x, v)), fn(v) % q)
+        # Proven multiples are still folded.
+        self.assertEqual(Mod(6 * TorchSymMax(x, 2), 6), 0)
+        self.assertEqual(PythonMod(6 * TorchSymMax(x, 2), 3), 0)
+
     def test_modular_indexing_does_not_strip_unproven_nonnegative_term(self):
         q0 = sympy.Symbol("q0", integer=True, nonnegative=True)
         n = sympy.Symbol("n", integer=True, positive=True)
