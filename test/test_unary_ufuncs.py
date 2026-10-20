@@ -1881,6 +1881,18 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
+    @skipIfNoSciPy
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("stride", (1, 2))
+    def test_erfinv_near_endpoints(self, device, dtype, stride):
+        bits = 24 if dtype == torch.float32 else 53
+        values = [1 - 2.0**-k for k in range(2, bits + 1)]
+        values += [-x for x in values]
+        x = torch.empty(len(values) * stride, device=device, dtype=dtype)[::stride]
+        x.copy_(torch.tensor(values, device=device, dtype=dtype))
+        expected = torch.from_numpy(scipy.special.erfinv(x.cpu().numpy()))
+        self.assertEqual(torch.special.erfinv(x), expected, atol=0, rtol=4 * torch.finfo(dtype).eps)
+
 
 class TestUnaryUfuncsCpuOnly(TestCase):
     hw_classification = HardwareClassification.CPU
