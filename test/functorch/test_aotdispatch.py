@@ -13562,22 +13562,18 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestAOTAutogradAccelerator,
     globals(),
-    except_for=("hpu",),
 )
 instantiate_device_type_tests(
     TestAOTAutogradWithDynamoAccelerator,
     globals(),
-    except_for=("hpu",),
 )
 instantiate_device_type_tests(
     TestAOTAutogradWithCacheAccelerator,
     globals(),
-    except_for=("hpu",),
 )
 instantiate_device_type_tests(
     TestAOTModuleSimplifiedAccelerator,
     globals(),
-    except_for=("hpu",),
 )
 
 
