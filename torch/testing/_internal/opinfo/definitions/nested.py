@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import itertools
 import math
 from copy import copy
 from dataclasses import dataclass
@@ -831,22 +832,28 @@ def sample_inputs_unary_dimwise(
                 name=f"{_describe_njt(njt)}: {_describe_dim(njt, dim)}",
             )
 
-    if op_info.full_name in {"chunk", "narrow", "split", "split_with_sizes"}:
-        # Contiguous NJT with a non-leading ragged dimension (gh-153238).
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(9, length, 9, device=device, dtype=dtype)
-                for length in (3, 4)
-            ],
-            layout=torch.jagged,
-            requires_grad=requires_grad,
+
+# Dimwise sample inputs for a contiguous NJT with a non-leading ragged dimension
+# (gh-153238). Sample inputs funcs for ops that support this layout yield from both
+# sample_inputs_unary_dimwise() and this helper.
+def _sample_inputs_non_leading_ragged_dimwise(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    if op_kwargs is None:
+        op_kwargs = {}
+
+    single_dim_argname, _ = op_info._extra_op_data.get_dim_argnames()
+    nt = torch.nested.nested_tensor(
+        [torch.randn(9, length, 9, device=device, dtype=dtype) for length in (3, 4)],
+        layout=torch.jagged,
+        requires_grad=requires_grad,
+    )
+    for dim in (0, 1, 2, -1):
+        yield SampleInput(
+            _clone(nt),
+            kwargs={single_dim_argname: dim, **op_kwargs},
+            name=f"{_describe_njt(nt)}: {_describe_dim(nt, dim)}, dim={dim}",
         )
-        for dim in (0, 1, 2, -1):
-            yield SampleInput(
-                _clone(nt),
-                kwargs={single_dim_argname: dim, **op_kwargs},
-                name=f"{_describe_njt(nt)}: {_describe_dim(nt, dim)}, dim={dim}",
-            )
 
 
 def batchwise_reference_chunk(op, sample):
@@ -1005,8 +1012,11 @@ def reference_bmm(op, sample):
 
 
 def sample_inputs_chunk(op_info, device, dtype, requires_grad, **kwargs):
-    for sample_input in sample_inputs_unary_dimwise(
-        op_info, device, dtype, requires_grad, **kwargs
+    for sample_input in itertools.chain(
+        sample_inputs_unary_dimwise(op_info, device, dtype, requires_grad, **kwargs),
+        _sample_inputs_non_leading_ragged_dimwise(
+            op_info, device, dtype, requires_grad, **kwargs
+        ),
     ):
         # ragged dim chunking: test a single chunks value
         if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
@@ -1124,8 +1134,11 @@ def sample_inputs_masked_select(
 
 
 def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
-    for sample_input in sample_inputs_unary_dimwise(
-        op_info, device, dtype, requires_grad, **kwargs
+    for sample_input in itertools.chain(
+        sample_inputs_unary_dimwise(op_info, device, dtype, requires_grad, **kwargs),
+        _sample_inputs_non_leading_ragged_dimwise(
+            op_info, device, dtype, requires_grad, **kwargs
+        ),
     ):
         # ragged dim narrowing: test a single start, length value
         if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
@@ -1395,8 +1408,11 @@ def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_split(op_info, device, dtype, requires_grad, **kwargs):
-    for sample_input in sample_inputs_unary_dimwise(
-        op_info, device, dtype, requires_grad, **kwargs
+    for sample_input in itertools.chain(
+        sample_inputs_unary_dimwise(op_info, device, dtype, requires_grad, **kwargs),
+        _sample_inputs_non_leading_ragged_dimwise(
+            op_info, device, dtype, requires_grad, **kwargs
+        ),
     ):
         # ragged dim chunking: test a single split size
         if sample_input.kwargs["dim"] == sample_input.input._ragged_idx:
@@ -1411,8 +1427,11 @@ def sample_inputs_split(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_split_with_sizes(op_info, device, dtype, requires_grad, **kwargs):
-    for sample_input in sample_inputs_unary_dimwise(
-        op_info, device, dtype, requires_grad, **kwargs
+    for sample_input in itertools.chain(
+        sample_inputs_unary_dimwise(op_info, device, dtype, requires_grad, **kwargs),
+        _sample_inputs_non_leading_ragged_dimwise(
+            op_info, device, dtype, requires_grad, **kwargs
+        ),
     ):
         # It will never make sense to operate on the ragged dim.
         # TODO: Handle this with error_inputs
