@@ -459,28 +459,59 @@ def initialize_cuda_context_rng():
 _tf32_off_lock = threading.Lock()
 _tf32_off_depth = 0
 _tf32_off_saved_precision = None
-_tf32_off_cudnn_ctx = None
+
+# allow_tf32_cudnn is a plain bool (no three-tier enum like matmul's), but it
+# has the same legacy/new-API pairing requirement: setAllowTF32CuDNN writes it
+# together with CUDA/CONV and CUDA/RNN, and the op-less getter raises if the
+# map and bool ever disagree. _set_float32_conv_precision() recovers it via
+# setAllowTF32CuDNN(), so it must be snapshotted and restored like the matmul
+# legacy enum rather than left for the per-op cudnn.conv/rnn.fp32_precision
+# setters to fix up (those only write the map, not this bool).
+_INCONSISTENT_CUDNN_ALLOW_TF32 = "<inconsistent legacy/new cudnn tf32>"
 
 
-# The allow_tf32 setter writes both the legacy Float32MatmulPrecision enum and
-# the backend-specific fp32_precision values. Restoring only one of them leaves
-# the two disagreeing, and every later read of allow_tf32 in the process then
-# raises "mix of the legacy and new APIs".
+def _get_legacy_cudnn_allow_tf32():
+    try:
+        return torch.backends.cudnn.allow_tf32
+    except RuntimeError:
+        return _INCONSISTENT_CUDNN_ALLOW_TF32
+
+
+def _set_legacy_cudnn_allow_tf32(value):
+    # Bypass the frozen-flags ContextProp check (same as the per-op
+    # fp32_precision setters, which call the raw _C binding directly) since
+    # this restore path must work even when direct attribute assignment to
+    # torch.backends.cudnn is disabled.
+    if value != _INCONSISTENT_CUDNN_ALLOW_TF32:
+        torch._C._set_cudnn_allow_tf32(value)
+
+
+# allow_tf32 (matmul) and _set_float32_conv_precision (conv/rnn) each write
+# both the legacy enum/bool and the new fp32_precision map entries. Restoring
+# only one of them leaves the two disagreeing, and every later read of
+# allow_tf32 in the process then raises "mix of the legacy and new APIs".
 def _save_matmul_precision():
     return (_get_legacy_float32_matmul_precision(),
             torch.backends.cuda.matmul.fp32_precision,
-            torch.backends.mkldnn.matmul.fp32_precision)
+            _get_legacy_cudnn_allow_tf32(),
+            torch.backends.cudnn.conv.fp32_precision,
+            torch.backends.cudnn.rnn.fp32_precision,
+            torch.backends.mkldnn.matmul.fp32_precision,
+            torch.backends.mkldnn.conv.fp32_precision)
 
 
 def _restore_matmul_precision(saved):
-    legacy, cuda_precision, mkldnn_precision = saved
-    # set_float32_matmul_precision overwrites both backend-specific values, so
-    # it goes first. Restoring those as fp32_precision strings rather than as
-    # allow_tf32 booleans also preserves the "none" default, which allow_tf32
-    # cannot express (it yields "ieee", which the leak detector flags on ROCm).
+    (legacy, cuda_precision, cudnn_allow_tf32, cudnn_conv_precision,
+     cudnn_rnn_precision, mkldnn_matmul_precision, mkldnn_conv_precision) = saved
+    # The legacy enum/bool restores go first: each overwrites its paired map
+    # entries, so the precise fp32_precision values are pinned back afterward.
     _set_legacy_float32_matmul_precision(legacy)
+    _set_legacy_cudnn_allow_tf32(cudnn_allow_tf32)
     torch.backends.cuda.matmul.fp32_precision = cuda_precision
-    torch.backends.mkldnn.matmul.fp32_precision = mkldnn_precision
+    torch.backends.cudnn.conv.fp32_precision = cudnn_conv_precision
+    torch.backends.cudnn.rnn.fp32_precision = cudnn_rnn_precision
+    torch.backends.mkldnn.matmul.fp32_precision = mkldnn_matmul_precision
+    torch.backends.mkldnn.conv.fp32_precision = mkldnn_conv_precision
 
 
 @contextlib.contextmanager
@@ -490,13 +521,16 @@ def tf32_off():
     # rank thread over the same process-global flags, so per-entry
     # save/restore can interleave and leak a modified state past the last
     # exit, which the TestCase fp32 precision leak detector then flags.
-    global _tf32_off_depth, _tf32_off_saved_precision, _tf32_off_cudnn_ctx
+    global _tf32_off_depth, _tf32_off_saved_precision
     with _tf32_off_lock:
         if _tf32_off_depth == 0:
             _tf32_off_saved_precision = _save_matmul_precision()
-            torch.backends.cuda.matmul.allow_tf32 = False
-            _tf32_off_cudnn_ctx = torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False)
-            _tf32_off_cudnn_ctx.__enter__()
+            # set_float32_matmul_precision writes CUDA/MATMUL+MKLDNN/MATMUL+
+            # legacy enum together; _set_float32_conv_precision does the same
+            # for CUDA conv+rnn+legacy bool and MKLDNN/CONV. See
+            # Context::setFloat32MatmulPrecision/setFloat32ConvPrecision.
+            torch.set_float32_matmul_precision("highest")
+            torch._C._set_float32_conv_precision("highest")
         _tf32_off_depth += 1
     try:
         yield
@@ -504,8 +538,6 @@ def tf32_off():
         with _tf32_off_lock:
             _tf32_off_depth -= 1
             if _tf32_off_depth == 0:
-                _tf32_off_cudnn_ctx.__exit__(None, None, None)
-                _tf32_off_cudnn_ctx = None
                 _restore_matmul_precision(_tf32_off_saved_precision)
                 _tf32_off_saved_precision = None
 
@@ -515,10 +547,14 @@ def tf32_on(self, tf32_precision=1e-5):
     old_matmul_precision = _save_matmul_precision()
     old_precision = self.precision
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
+        # set_float32_matmul_precision writes CUDA/MATMUL+MKLDNN/MATMUL+
+        # legacy enum together; _set_float32_conv_precision does the same
+        # for CUDA conv+rnn+legacy bool and MKLDNN/CONV. See
+        # Context::setFloat32MatmulPrecision/setFloat32ConvPrecision.
+        torch.set_float32_matmul_precision("high")
         self.precision = tf32_precision
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield
+        torch._C._set_float32_conv_precision("high")
+        yield
     finally:
         _restore_matmul_precision(old_matmul_precision)
         self.precision = old_precision
@@ -527,18 +563,17 @@ def tf32_on(self, tf32_precision=1e-5):
 @contextlib.contextmanager
 def tf32_enabled():
     """
-    Context manager to temporarily enable TF32 for CUDA operations.
+    Context manager to temporarily enable TF32 for CUDA and XPU operations.
     Restores the previous TF32 state after exiting the context.
     """
     old_matmul_precision = _save_matmul_precision()
     try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
-            yield
+        torch.set_float32_matmul_precision("high")
+        torch._C._set_float32_conv_precision("high")
+        yield
     finally:
         _restore_matmul_precision(old_matmul_precision)
+
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -551,10 +586,9 @@ def tf32_enabled():
 #        a = ...; b = ...;
 #        c = torch.matmul(a, b)
 #        self.assertEqual(c, expected)
-# In the above example, when testing torch.float32 and torch.complex64 on CUDA
-# on a CUDA >= 11 build on an >=Ampere architecture, the matmul will be running at
-# TF32 mode and TF32 mode off, and on TF32 mode, the assertEqual will use reduced
-# precision to check values.
+# In the above example, supported float32 (and CUDA complex64) operations run
+# once with TF32 enabled and once with TF32 disabled; the enabled run uses the
+# reduced-precision tolerance.
 #
 # This decorator can be used for function with or without device/dtype, such as
 # @tf32_on_and_off(0.005)
@@ -565,10 +599,10 @@ def tf32_enabled():
 # def test_my_op(self, device, dtype)
 # @tf32_on_and_off(0.005)
 # def test_my_op(self, dtype)
-# if neither device nor dtype is specified, it will check if the system has ampere device
-# if device is specified, it will check if device is cuda
-# if dtype is specified, it will check if dtype is float32 or complex64
-# tf32 and fp32 are different only when all the three checks pass
+# if neither device nor dtype is specified, it checks for TF32 support on CUDA or XPU
+# if device is specified, it checks whether that device type supports TF32
+# if dtype is specified, CUDA accepts float32/complex64 and XPU accepts float32
+# tf32 and fp32 are different only when all the applicable checks pass
 def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
     def with_tf32_disabled(self, function_call):
         with tf32_off():
@@ -585,11 +619,29 @@ def tf32_on_and_off(tf32_precision=1e-5, *, only_if=True):
         @functools.wraps(f)
         def wrapped(*args, **kwargs):
             kwargs.update(zip(arg_names, args, strict=False))
-            cond = torch.cuda.is_tf32_supported() and only_if
+            device_type = None
             if 'device' in kwargs:
-                cond = cond and (torch.device(kwargs['device']).type == 'cuda')
+                device_type = torch.device(kwargs['device']).type
+                if device_type == 'cuda':
+                    device_supports_tf32 = torch.cuda.is_tf32_supported()
+                elif device_type == 'xpu':
+                    device_supports_tf32 = torch.xpu.is_tf32_supported()
+                else:
+                    device_supports_tf32 = False
+            else:
+                device_supports_tf32 = (
+                    torch.cuda.is_tf32_supported() or torch.xpu.is_tf32_supported()
+                )
+            cond = device_supports_tf32 and only_if
+            if 'device' in kwargs:
+                cond = cond and (device_type in {'cuda', 'xpu'})
             if 'dtype' in kwargs:
-                cond = cond and (kwargs['dtype'] in {torch.float32, torch.complex64})
+                supported_dtypes = (
+                    {torch.float32, torch.complex64}
+                    if device_type != 'xpu'
+                    else {torch.float32}
+                )
+                cond = cond and (kwargs['dtype'] in supported_dtypes)
             if cond:
                 with_tf32_disabled(kwargs['self'], lambda: f(**kwargs))
                 with_tf32_enabled(kwargs['self'], lambda: f(**kwargs))

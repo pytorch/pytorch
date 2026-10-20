@@ -192,7 +192,7 @@ sycl::event deconvolution(
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
-  at::native::onednn::apply_tf32_if_allowed(pattr);
+  at::native::onednn::apply_tf32_if_allowed(pattr, at::Float32Op::CONV);
 
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
@@ -277,7 +277,7 @@ sycl::event deconvolution_backward_data(
     pattr.set_deterministic(true);
 #endif
 
-  at::native::onednn::apply_tf32_if_allowed(pattr);
+  at::native::onednn::apply_tf32_if_allowed(pattr, at::Float32Op::CONV);
 
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding_l = padding.vec();
@@ -381,7 +381,7 @@ sycl::event deconvolution_backward_weights(
     pattr.set_deterministic(true);
 #endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  at::native::onednn::apply_tf32_if_allowed(pattr);
+  at::native::onednn::apply_tf32_if_allowed(pattr, at::Float32Op::CONV);
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,

@@ -295,6 +295,13 @@ bool Context::allowTF32OneDNN() const {
   void Context::setAllowTF32OneDNN(bool b){
   #ifdef USE_XPU
   allow_tf32_onednn = b;
+  // oneDNN/XPU is independent of CUDA: only write the MKLDNN map entries that
+  // the oneDNN kernels read. Do NOT touch the legacy float32_matmul_precision
+  // enum here -- it is shared with CUDA, and writing it without also syncing
+  // CUDA/MATMUL would make an unrelated CUDA allow_tf32/getter call crash
+  // later with "mix of the legacy and new APIs".
+  setFloat32Precision(Float32Backend::MKLDNN, Float32Op::MATMUL, b ? Float32Precision::TF32 : Float32Precision::IEEE);
+  setFloat32Precision(Float32Backend::MKLDNN, Float32Op::CONV, b ? Float32Precision::TF32 : Float32Precision::NONE);
   #else
   TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
   #endif
@@ -510,6 +517,33 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
   if (match(sl)) { return; }
   TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
     "setFloat32MatmulPrecision call has no effect.");
+}
+
+void Context::setFloat32ConvPrecision(const std::string &s) {
+  auto match = [this](const std::string & s_) {
+    // CUDA has no bf16 conv path, so "medium" only differs from "high" on MKLDNN.
+    if (s_ == "highest") {
+      setAllowTF32CuDNN(false);
+      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::CONV, Float32Precision::IEEE);
+      return true;
+    } else if (s_ == "high") {
+      setAllowTF32CuDNN(true);
+      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::CONV, Float32Precision::TF32);
+      return true;
+    } else if (s_ == "medium") {
+      setAllowTF32CuDNN(true);
+      setFloat32Precision(Float32Backend::MKLDNN, Float32Op::CONV, Float32Precision::BF16);
+      return true;
+    }
+    return false;
+  };
+  if (match(s)) { return; }
+  std::string sl;
+  std::transform(s.begin(), s.end(), sl.begin(),
+                 [](unsigned char c) -> unsigned char { return std::tolower(c); });
+  if (match(sl)) { return; }
+  TORCH_WARN(s, " is not one of 'highest', 'high', or 'medium'; the current"
+    "setFloat32ConvPrecision call has no effect.");
 }
 
 void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32Precision p) {
