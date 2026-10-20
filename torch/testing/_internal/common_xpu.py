@@ -57,14 +57,14 @@ _CODENAME_TO_ARCH = {
 
 
 @functools.lru_cache(1)
-def get_xpu_codename() -> XPUCodename | None:
-    device_id = torch.xpu.get_device_capability()["device_id"]
+def get_xpu_codename(device: torch.device | None = None) -> XPUCodename | None:
+    device_id = torch.xpu.get_device_capability(device)["device_id"]
     return _DEVICE_ID_TO_CODENAME.get(device_id)
 
 
 @functools.lru_cache(1)
-def get_xpu_arch() -> XPUArch | None:
-    codename = get_xpu_codename()
+def get_xpu_arch(device: torch.device | None = None) -> XPUArch | None:
+    codename = get_xpu_codename(device)
     return _CODENAME_TO_ARCH.get(codename, XPUArch.Unknown)
 
 
