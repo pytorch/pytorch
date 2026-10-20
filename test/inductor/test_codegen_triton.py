@@ -1415,6 +1415,47 @@ def helper(x):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "shape, stride, expected",
+        [
+            ((32, 32), (32, 1), True),
+            ((2**30 - 1,), (1,), True),
+            ((2**30,), (1,), False),
+            ((2,), (2**30,), False),
+        ],
+    )
+    def test_constant_pointer_range_survives_scheduling(
+        self, scheduled, shape, stride, expected
+    ):
+        self._graph.constants["weight"] = torch.empty_strided(
+            shape, stride, dtype=torch.float16, device="meta"
+        )
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
+    @parametrize("scheduled", [False, True])
+    @parametrize(
+        "storage_numel, expected",
+        [(2**30 - 1, True), (2**30, False), (2**30 + 1, False)],
+    )
+    def test_constant_pointer_range_checks_backing_storage(
+        self, scheduled, storage_numel, expected
+    ):
+        self._graph.constants["weight"] = torch.empty(
+            storage_numel, dtype=torch.float16, device="meta"
+        )[:32]
+        scheduler = Mock()
+        scheduler.get_buffer_layout.side_effect = KeyError("weight")
+        arg = TensorArg(name="in_ptr0", buffer="weight", dtype=torch.float16)
+
+        with patch.object(self._graph, "scheduler", scheduler if scheduled else None):
+            self.assertEqual(triton_utils._is_tensor_within_2gb(arg), expected)
+
     @inductor_config.patch("triton.emit_pointer_range_32", True)
     def test_config_of_emit_pointer_range_32_enabled(self):
         from torch._inductor.utils import (
@@ -1499,6 +1540,45 @@ def helper(x):
             self.skipTest(
                 "tt.pointer_range is only literal with the V4 attrs descriptor"
             )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch({"freezing": True, "triton.emit_pointer_range_32": True})
+    def test_constant_pointer_range_in_generated_code(self):
+        self._skip_unless_annotation_is_literal()
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "weight", torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return x + self.weight
+
+        x = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        with torch.no_grad():
+            _, kernels = run_and_get_kernels(
+                torch.compile(Module().eval(), fullgraph=True), x, remove_quote=True
+            )
+        self.assertEqual(len(kernels), 1)
+        meta = next(
+            keyword.value
+            for node in ast.walk(ast.parse(kernels[0]))
+            if isinstance(node, ast.Call)
+            for keyword in node.keywords
+            if keyword.arg == "triton_meta"
+        )
+        meta = {key.value: value for key, value in zip(meta.keys, meta.values)}
+        signature = ast.literal_eval(meta["signature"])
+        configs = ast.literal_eval(meta["configs"])
+        # Only the frozen weight has an fp16 pointer; input and output are fp32.
+        weight_indices = [
+            idx for idx, dtype in enumerate(signature.values()) if dtype == "*fp16"
+        ]
+        self.assertEqual(len(weight_indices), 1)
+        self.assertIn(["tt.pointer_range", 32], configs[0][(weight_indices[0],)])
 
     @staticmethod
     def _flex_inputs(requires_grad=False):
