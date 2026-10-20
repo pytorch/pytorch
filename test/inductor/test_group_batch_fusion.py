@@ -1510,39 +1510,56 @@ class TestGroupBatchFusion(TestCase):
         counters.clear()
 
     @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
-        },
-    )
-    def test_xpu_batch_linear_lhs(self):
-        # batch_linear_lhs is disabled by default; enabling it for XPU via mock
-        # config must make the fusion fire on XPU tensors.
+    def test_xpu_auto_enable_batch_linear_lhs(self):
         default_options = config.pre_grad_fusion_options
         self.assertIn("batch_linear_lhs", default_options)
         self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
+        orig_fusion_options = copy.deepcopy(default_options)
         z = 10
         for has_bias in [True, False]:
-            orig_fusion_options = dict(config.pre_grad_fusion_options)
             counters.clear()
             module = MyModule4(z, "xpu", has_bias)
+            ref_module = copy.deepcopy(module)
             input = [torch.randn(20, z, device="xpu")]
             traced = torch.compile(module)
-            ref = module(*input)
+            ref = ref_module(*input)
             res = traced(*input)
-            self.compare_pred(module, traced, input)
-            self.assertGreater(counters["inductor"]["batch_linear_lhs"], 0)
+            self.compare_pred(ref_module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 2)
             self.assertEqual(ref, res)
             ref.sum().backward()
             res.sum().backward()
-            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
-            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_parameters(ref_module, traced, rtol=1e-5, atol=1e-5)
+            self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             self.assertEqual(
                 orig_fusion_options,
                 dict(config.pre_grad_fusion_options),
                 "config.pre_grad_fusion_options should not be mutated",
             )
             counters.clear()
+
+    def test_batch_linear_lhs_default_is_xpu_only(self):
+        self.assertEqual(
+            config.pre_grad_fusion_options["batch_linear_lhs"]["devices"], ("xpu",)
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(64, 16, bias=False)
+                self.b = torch.nn.Linear(64, 16, bias=False)
+
+            def forward(self, x):
+                return torch.sin(self.a(x)), torch.cos(self.b(x))
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        counters.clear()
+        with torch.no_grad():
+            expected = module(x)
+            actual = torch.compile(module, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
 
     @requires_gpu()
     @torch._inductor.config.patch(
