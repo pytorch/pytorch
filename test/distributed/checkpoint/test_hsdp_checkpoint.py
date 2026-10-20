@@ -19,7 +19,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 from torch.distributed.tensor import Replicate
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     _get_device_type,
     DTensorContinuousTestBase,
@@ -83,13 +87,8 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    def test_hsdp_checkpoint(self, device) -> None:
-        self.run_subtests(
-            {"is_even_sharded_model": [True, False]},
-            self._test_hsdp_checkpoint,
-        )
-
-    def _test_hsdp_checkpoint(self, is_even_sharded_model: bool) -> None:
+    @parametrize("is_even_sharded_model", [True, False])
+    def test_hsdp_checkpoint(self, device, is_even_sharded_model) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -146,14 +145,9 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
-    def test_hsdp_fsdp_checkpoint_conversion(self, device) -> None:
-        self.run_subtests(
-            {"is_even_sharded_model": [True, False]},
-            self._test_hsdp_fsdp_checkpoint_conversion,
-        )
-
-    def _test_hsdp_fsdp_checkpoint_conversion(
-        self, is_even_sharded_model: bool
+    @parametrize("is_even_sharded_model", [True, False])
+    def test_hsdp_fsdp_checkpoint_conversion(
+        self, device, is_even_sharded_model
     ) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
