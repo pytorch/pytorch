@@ -83,10 +83,12 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @classmethod
     def opts(cls, high_priority_stream=False):
-        # The high-priority-stream knob is NCCL-specific.
-        if cls.backend_str() != "nccl":
-            return None
-        opts = c10d.ProcessGroupNCCL.Options()
+        pg_cls = (
+            c10d.ProcessGroupXCCL
+            if cls.backend_str() == "xccl"
+            else c10d.ProcessGroupNCCL
+        )
+        opts = pg_cls.Options()
         opts.is_high_priority_stream = high_priority_stream
         return opts
 
@@ -252,7 +254,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
             )
 
         # Premul Sum
-        if _nccl_version_at_least((2, 11, 1)):
+        if _supports_premul_sum():
             for dtype in torch.half, torch.float, torch.double, torch.bfloat16:
                 for factor in (
                     3.0,
@@ -264,7 +266,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                         .to(dtype=dtype)
                     ]
 
-                    allreduce(tensors, c10d._make_nccl_premul_sum(factor))
+                    allreduce(tensors, c10d.ReduceOp.PREMUL_SUM(factor))
 
                     self.assertEqual(
                         factor
@@ -423,15 +425,15 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
+    @skipIfXpu(
+        msg="XCCL collectives on expandable_segments memory crash: https://github.com/intel/torch-xpu-ops/issues/4427"
+    )
     def test_nccl_cudagraph_multisegment(self):
         # Prior to NCCL 2.29, this would cause an Invalid Memory Access (IMA)
         # because NCCL didn't properly handle multisegment memory in graphs.
         local_device_idx = self.rank_to_GPU[self.rank][0]
         torch.accelerator.set_device_index(local_device_idx)
-        # expandable_segments is a CUDA caching-allocator knob; other backends
-        # have no equivalent, so only they set up the multisegment condition.
-        if device_type == "cuda":
-            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:True")
 
         b, t, d = 64, 1, 101024
         inp = torch.ones((b, t, d), device=device_type) * (self.rank + 1)
@@ -454,12 +456,14 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         torch.accelerator.synchronize()
 
         self.assertEqual(static_output.sum().item(), expected_sum)
-        if device_type == "cuda":
-            torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+        torch._C._accelerator_setAllocatorSettings("expandable_segments:False")
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+    )
+    @skipIfXpu(
+        msg="XCCL reduce does not handle PREMUL_SUM: https://github.com/intel/torch-xpu-ops/issues/5777"
     )
     def test_reduce_ops(self):
         pg = self.pg
@@ -505,7 +509,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                     reduce(tensors, self.rank, rt, op)
 
             # Premul sum
-            if _nccl_version_at_least((2, 11, 1)):
+            if _supports_premul_sum():
                 for factor in (3.0, torch.tensor([5.0], device=local_device_id)):
                     if isinstance(factor, torch.Tensor):
                         factor_ref = factor.cpu().item()
@@ -524,7 +528,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                     ]
 
                     reduce(float_tensors_ref, rt, 0)
-                    reduce(float_tensors, rt, 0, c10d._make_nccl_premul_sum(factor))
+                    reduce(float_tensors, rt, 0, c10d.ReduceOp.PREMUL_SUM(factor))
                     if self.rank == rt:
                         self.assertEqual(float_tensors_ref[0], float_tensors[0])
 
@@ -1067,7 +1071,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         expected = torch.tensor(prod_val)
         self.assertEqual(expected, output_tensor)
 
-        if _nccl_version_at_least((2, 11, 1)):
+        if _supports_premul_sum():
             for factor in (3.0, torch.tensor([5.0], device=self.rank)):
                 if isinstance(factor, torch.Tensor):
                     factor_ref = factor.cpu().item()
@@ -1079,7 +1083,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                 tensor_lists_ref = [
                     [t.float() * factor_ref for t in tl] for tl in tensor_lists
                 ]
-                reduce_scatter(output, tensor_lists, c10d._make_nccl_premul_sum(factor))
+                reduce_scatter(output, tensor_lists, c10d.ReduceOp.PREMUL_SUM(factor))
                 reduce_scatter(output_ref, tensor_lists_ref, c10d.ReduceOp.SUM)
                 self.assertEqual(output_ref, output)
 
@@ -1275,6 +1279,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+    )
+    @skipIfXpu(
+        msg="XCCL reduce does not handle PREMUL_SUM: https://github.com/intel/torch-xpu-ops/issues/5777"
     )
     def test_reduce_op_premul_sum(self):
         if not _supports_premul_sum():
