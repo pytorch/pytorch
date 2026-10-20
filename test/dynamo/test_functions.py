@@ -8928,9 +8928,22 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, expected)
 
 
+_FUNCTION_DEVICE_TEST_BASES = (FunctionTestsDevice,)
+
 instantiate_device_type_tests(
     FunctionTestsDevice, globals(), except_for="cpu", allow_xpu=True
 )
+
+
+def get_function_device_test_classes():
+    return [
+        cls
+        for cls in globals().values()
+        if isinstance(cls, type)
+        and cls not in _FUNCTION_DEVICE_TEST_BASES
+        and issubclass(cls, _FUNCTION_DEVICE_TEST_BASES)
+    ]
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
