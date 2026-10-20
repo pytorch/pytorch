@@ -67,6 +67,22 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
+  # Flash Attention runtime (aotriton_v2.dll + its liblzma.dll dependency).
+  # aotriton's ExternalProject generates these in torch/lib/ during the build,
+  # after configure, so OPTIONAL defers the existence check to install time;
+  # a configure-time EXISTS guard misses them (WinError 126 loading torch_hip).
+  foreach(_fa_dll aotriton_v2.dll liblzma.dll)
+    install(FILES "${TORCH_SRC_DIR}/lib/${_fa_dll}"
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+  endforeach()
+
+  # MSVC OpenMP (libomp140) - TheRock copies this into torch/lib/ before the
+  # wheel build when using MSVC OpenMP instead of MKL libiomp.
+  set(_libomp140 "${TORCH_SRC_DIR}/lib/libomp140.x86_64.dll")
+  if(EXISTS "${_libomp140}")
+    install(FILES "${_libomp140}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+
   # libuv (uv.dll) - required by torch distributed (gloo transport).
   # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
   # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
