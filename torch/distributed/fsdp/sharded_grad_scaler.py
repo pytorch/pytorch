@@ -100,8 +100,11 @@ class ShardedGradScaler(GradScaler):
             ``torch.accelerator.current_accelerator``, falling back to ``"cuda"``
             when no accelerator is available (or when ``enabled=False``).
             ``"mps"`` is never inferred (no collective backend supports MPS
-            tensors); single-device MPS AMP keeps using the base
-            ``torch.amp.GradScaler``, whose ``"cuda"`` default is fixed.
+            tensors); for single-device MPS AMP, use
+            ``torch.amp.GradScaler(device="mps")``. If a backend is
+            half-registered (accelerator hooks without a matching Python
+            device module), the probe raises ``RuntimeError`` and
+            construction fails.
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
