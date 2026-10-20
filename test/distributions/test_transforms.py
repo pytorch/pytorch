@@ -488,50 +488,149 @@ class TestComposeTransform(TestCase):
             )
 
 
-@pytest.mark.parametrize(
-    ("batch_shape", "event_shape", "dist"),
-    [
-        ((4, 4), (), base_dist0),
-        ((4,), (4,), base_dist1),
-        ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
-        ((4,), (4,), TransformedDistribution(base_dist0, [transform1])),
-        ((4,), (4,), TransformedDistribution(base_dist0, [transform0, transform1])),
-        ((), (4, 4), TransformedDistribution(base_dist0, [transform0, transform2])),
-        ((4,), (4,), TransformedDistribution(base_dist0, [transform1, transform0])),
-        ((), (4, 4), TransformedDistribution(base_dist0, [transform1, transform2])),
-        ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform0])),
-        ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform1])),
-        ((4,), (4,), TransformedDistribution(base_dist1, [transform0])),
-        ((4,), (4,), TransformedDistribution(base_dist1, [transform1])),
-        ((), (4, 4), TransformedDistribution(base_dist1, [transform2])),
-        ((4,), (4,), TransformedDistribution(base_dist1, [transform0, transform1])),
-        ((), (4, 4), TransformedDistribution(base_dist1, [transform0, transform2])),
-        ((4,), (4,), TransformedDistribution(base_dist1, [transform1, transform0])),
-        ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
-        ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
-        ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
-        ((3, 4, 4), (), base_dist2),
-        ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2])),
-        ((3,), (4, 4), TransformedDistribution(base_dist2, [transform0, transform2])),
-        ((3,), (4, 4), TransformedDistribution(base_dist2, [transform1, transform2])),
-        ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform0])),
-        ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform1])),
-    ],
-)
-def test_transformed_distribution_shapes(batch_shape, event_shape, dist):
-    if dist.batch_shape != batch_shape:
-        raise AssertionError(
-            f"Expected batch_shape {batch_shape}, got {dist.batch_shape}"
-        )
-    if dist.event_shape != event_shape:
-        raise AssertionError(
-            f"Expected event_shape {event_shape}, got {dist.event_shape}"
-        )
-    x = dist.rsample()
-    try:
-        dist.log_prob(x)  # this should not crash
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
+class TestTransformedDistribution(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "batch_shape,event_shape,dist",
+        [
+            ((4, 4), (), base_dist0),
+            ((4,), (4,), base_dist1),
+            ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
+            ((3, 4, 4), (), base_dist2),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2])),
+            (
+                (3,),
+                (4, 4),
+                TransformedDistribution(base_dist2, [transform0, transform2]),
+            ),
+            (
+                (3,),
+                (4, 4),
+                TransformedDistribution(base_dist2, [transform1, transform2]),
+            ),
+            (
+                (3,),
+                (4, 4),
+                TransformedDistribution(base_dist2, [transform2, transform0]),
+            ),
+            (
+                (3,),
+                (4, 4),
+                TransformedDistribution(base_dist2, [transform2, transform1]),
+            ),
+        ],
+    )
+    def test_transformed_distribution_shapes(self, batch_shape, event_shape, dist):
+        if dist.batch_shape != batch_shape:
+            raise AssertionError(
+                f"Expected batch_shape {batch_shape}, got {dist.batch_shape}"
+            )
+        if dist.event_shape != event_shape:
+            raise AssertionError(
+                f"Expected event_shape {event_shape}, got {dist.event_shape}"
+            )
+        x = dist.rsample()
+        try:
+            dist.log_prob(x)  # this should not crash
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
+
+    @parametrize("sample_shape", [(), (7,)], name_fn=str)
+    @parametrize("transform_dim", [0, 1, 2])
+    @parametrize("base_batch_dim", [0, 1, 2])
+    @parametrize("base_event_dim", [0, 1, 2])
+    @parametrize("num_transforms", [0, 1, 2, 3])
+    def test_transformed_distribution(
+        self,
+        base_batch_dim,
+        base_event_dim,
+        transform_dim,
+        num_transforms,
+        sample_shape,
+    ):
+        shape = torch.Size([2, 3, 4, 5])
+        base_dist = Normal(0, 1)
+        base_dist = base_dist.expand(shape[4 - base_batch_dim - base_event_dim :])
+        if base_event_dim:
+            base_dist = Independent(base_dist, base_event_dim)
+        transforms = [
+            AffineTransform(torch.zeros(shape[4 - transform_dim :]), 1),
+            ReshapeTransform((4, 5), (20,)),
+            ReshapeTransform((3, 20), (6, 10)),
+        ]
+        transforms = transforms[:num_transforms]
+        transform = ComposeTransform(transforms)
+
+        # Check validation in .__init__().
+        if base_batch_dim + base_event_dim < transform.domain.event_dim:
+            with self.assertRaises(ValueError):
+                TransformedDistribution(base_dist, transforms)
+            return
+        d = TransformedDistribution(base_dist, transforms)
+
+        # Check sampling is sufficiently expanded.
+        x = d.sample(sample_shape)
+        expected_shape = sample_shape + d.batch_shape + d.event_shape
+        if x.shape != expected_shape:
+            raise AssertionError(
+                f"Expected sample shape {expected_shape}, got {x.shape}"
+            )
+        num_unique = len(set(x.reshape(-1).tolist()))
+        if num_unique < 0.9 * x.numel():
+            raise AssertionError(
+                f"Expected num_unique >= {0.9 * x.numel()}, got {num_unique}"
+            )
+
+        # Check log_prob shape on full samples.
+        log_prob = d.log_prob(x)
+        if log_prob.shape != sample_shape + d.batch_shape:
+            raise AssertionError(
+                f"Expected log_prob shape {sample_shape + d.batch_shape}, got {log_prob.shape}"
+            )
+
+        # Check log_prob shape on partial samples.
+        y = x
+        while y.dim() > len(d.event_shape):
+            y = y[0]
+        log_prob = d.log_prob(y)
+        if log_prob.shape != d.batch_shape:
+            raise AssertionError(
+                f"Expected log_prob shape {d.batch_shape}, got {log_prob.shape}"
+            )
+
+    def test_save_load_transform(self):
+        # Evaluating `log_prob` populates the `_inv` cache, which can
+        # contain reference cycles. Here, we check that `__getstate__`
+        # drops the cache, and that we can evaluate the density after loading.
+        dist = TransformedDistribution(Normal(0, 1), [AffineTransform(2, 3)])
+        x = torch.linspace(0, 1, 10)
+        log_prob = dist.log_prob(x)
+        stream = io.BytesIO()
+        torch.save(dist, stream)
+        stream.seek(0)
+        with torch.serialization.safe_globals(
+            [TransformedDistribution, AffineTransform, Normal]
+        ):
+            other = torch.load(stream)
+        if not torch.allclose(log_prob, other.log_prob(x)):
+            raise AssertionError("Loaded distribution log_prob does not match original")
 
 
 @pytest.mark.parametrize("transform", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
@@ -589,83 +688,9 @@ def test_jit_jacobian(transform):
         raise AssertionError("JIT jacobian output does not match")
 
 
-@pytest.mark.parametrize("sample_shape", [(), (7,)], ids=str)
-@pytest.mark.parametrize("transform_dim", [0, 1, 2])
-@pytest.mark.parametrize("base_batch_dim", [0, 1, 2])
-@pytest.mark.parametrize("base_event_dim", [0, 1, 2])
-@pytest.mark.parametrize("num_transforms", [0, 1, 2, 3])
-def test_transformed_distribution(
-    base_batch_dim, base_event_dim, transform_dim, num_transforms, sample_shape
-):
-    shape = torch.Size([2, 3, 4, 5])
-    base_dist = Normal(0, 1)
-    base_dist = base_dist.expand(shape[4 - base_batch_dim - base_event_dim :])
-    if base_event_dim:
-        base_dist = Independent(base_dist, base_event_dim)
-    transforms = [
-        AffineTransform(torch.zeros(shape[4 - transform_dim :]), 1),
-        ReshapeTransform((4, 5), (20,)),
-        ReshapeTransform((3, 20), (6, 10)),
-    ]
-    transforms = transforms[:num_transforms]
-    transform = ComposeTransform(transforms)
-
-    # Check validation in .__init__().
-    if base_batch_dim + base_event_dim < transform.domain.event_dim:
-        with pytest.raises(ValueError):
-            TransformedDistribution(base_dist, transforms)
-        return
-    d = TransformedDistribution(base_dist, transforms)
-
-    # Check sampling is sufficiently expanded.
-    x = d.sample(sample_shape)
-    expected_shape = sample_shape + d.batch_shape + d.event_shape
-    if x.shape != expected_shape:
-        raise AssertionError(f"Expected sample shape {expected_shape}, got {x.shape}")
-    num_unique = len(set(x.reshape(-1).tolist()))
-    if num_unique < 0.9 * x.numel():
-        raise AssertionError(
-            f"Expected num_unique >= {0.9 * x.numel()}, got {num_unique}"
-        )
-
-    # Check log_prob shape on full samples.
-    log_prob = d.log_prob(x)
-    if log_prob.shape != sample_shape + d.batch_shape:
-        raise AssertionError(
-            f"Expected log_prob shape {sample_shape + d.batch_shape}, got {log_prob.shape}"
-        )
-
-    # Check log_prob shape on partial samples.
-    y = x
-    while y.dim() > len(d.event_shape):
-        y = y[0]
-    log_prob = d.log_prob(y)
-    if log_prob.shape != d.batch_shape:
-        raise AssertionError(
-            f"Expected log_prob shape {d.batch_shape}, got {log_prob.shape}"
-        )
-
-
-def test_save_load_transform():
-    # Evaluating `log_prob` populates the `_inv` cache, which can
-    # contain reference cycles. Here, we check that `__getstate__`
-    # drops the cache, and that we can evaluate the density after loading.
-    dist = TransformedDistribution(Normal(0, 1), [AffineTransform(2, 3)])
-    x = torch.linspace(0, 1, 10)
-    log_prob = dist.log_prob(x)
-    stream = io.BytesIO()
-    torch.save(dist, stream)
-    stream.seek(0)
-    with torch.serialization.safe_globals(
-        [TransformedDistribution, AffineTransform, Normal]
-    ):
-        other = torch.load(stream)
-    if not torch.allclose(log_prob, other.log_prob(x)):
-        raise AssertionError("Loaded distribution log_prob does not match original")
-
-
 instantiate_parametrized_tests(TestTransforms)
 instantiate_parametrized_tests(TestComposeTransform)
+instantiate_parametrized_tests(TestTransformedDistribution)
 
 
 if __name__ == "__main__":
