@@ -66,6 +66,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_13: Extension built with TORCH_TARGET_VERSION=2.13.0
     - libtorch_agn_2_14: Extension built with TORCH_TARGET_VERSION=2.14.0
     - libtorch_agn_2_15: Extension built with TORCH_TARGET_VERSION=2.15.0
+    - libtorch_agn_2_16: Extension built with TORCH_TARGET_VERSION=2.16.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -150,6 +151,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.15 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 16):
+            try:
+                import libtorch_agn_2_16  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_16_extension"
+                )
+        else:
+            print(f"Skipping 2.16 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -682,6 +693,24 @@ class TestLibtorchAgnostic(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
             libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @skipIfTorchDynamo("Dynamo failed to run FX node with fake tensors")
+    def test_my_add(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(3, 4, device=device)
+
+        result = libtorch_agnostic.ops.my_add(a, b, alpha=2)
+        expected = torch.add(a, b, alpha=2)
+        self.assertEqual(result, expected)
+
+        i = torch.ones(3, 4, dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "argument alpha must not be a floating point number"
+        ):
+            libtorch_agnostic.ops.my_add(i, i)
 
     # TODO: Debug this for Python FakeTensor:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
