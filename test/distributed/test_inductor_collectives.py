@@ -17,8 +17,6 @@ import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
 from torch import nn
 from torch._C import FileCheck
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import CompileCounter
 from torch._dynamo.utils import same
 from torch._inductor.comms import (
@@ -98,18 +96,6 @@ def requires_triton_backend(test_func):
             device = torch.accelerator.current_accelerator()
         if device is None:
             raise unittest.SkipTest("No accelerator is available")
-        try:
-            device_interface = get_interface_for_device(torch.device(device).type)
-        except NotImplementedError as exc:
-            raise unittest.SkipTest(f"requires Triton support for {device}") from exc
-
-        if not device_interface.is_triton_capable(device):
-            raise unittest.SkipTest(f"requires Triton support for {device}")
-
-        try:
-            device_interface.raise_if_triton_unavailable(device)
-        except TritonUnavailableError as exc:
-            raise unittest.SkipTest(str(exc)) from exc
 
         return test_func(self, *args, **kwargs)
 
