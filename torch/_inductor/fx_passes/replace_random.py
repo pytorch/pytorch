@@ -136,7 +136,9 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
     device_seeds = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(inductor_prims.seed).match(node):
-            device_seeds[node.args[0]].append(node)
+            # Handle both positional seed(device) and keyword seed(device=...) forms
+            device = node.args[0] if node.args else node.kwargs.get("device")
+            device_seeds[device].append(node)
 
     if not device_seeds:
         return 0
