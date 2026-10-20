@@ -89,6 +89,12 @@ tests = [
     test_repros.ReproTests,
     test_subgraphs.SubGraphTests,
 ]
+tests.extend(
+    cls
+    for name, cls in vars(test_functions).items()
+    if name.startswith(("FunctionTestsCudaOnly", "FunctionTestsDevice"))
+    and getattr(cls, "device_type", None) not in ("cpu", "meta")
+)
 
 test = None
 for test in tests:
