@@ -7,6 +7,7 @@ from .common import (
     register_complex,
     register_force_test,
     register_inductor,
+    register_simple,
     split_complex_tensor,
 )
 
@@ -34,6 +35,9 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(prims.conj)
 def conj_impl(self: ComplexTensor) -> ComplexTensor:
     return aten._conj(self)
+
+
+rev_impl = register_simple(prims.rev)
 
 
 INDUCTOR_OPS = [getattr(prims, op) for op in prims if op.startswith(("fft_", "_fft_"))]

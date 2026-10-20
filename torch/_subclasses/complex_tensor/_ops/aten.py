@@ -172,7 +172,11 @@ for simple_op in SIMPLE_FORCE_TESTED_OPS:
 
 del simple_op
 
-INDUCTOR_OPS = [getattr(aten, op) for op in aten if op.startswith(("fft_", "_fft_"))]
+INDUCTOR_OPS = [
+    getattr(aten, op)
+    for op in aten
+    if op.startswith(("fft_", "_fft_", "linalg", "_linalg"))
+]
 
 for inductor_op in INDUCTOR_OPS:
     globals()[_get_func_name(inductor_op)] = register_force_test(
@@ -204,10 +208,21 @@ add_impl = register_binary_linear(aten.add)
 add__impl = register_binary_linear_inplace(aten.add_, add_impl)
 sub_impl = register_binary_linear(aten.sub)
 sub__impl = register_binary_linear_inplace(aten.sub_, sub_impl)
-copy_impl = register_binary_linear(aten.copy)
 diagonal_scatter_impl = register_binary_linear(aten.diagonal_scatter)
 fill_impl = register_binary_linear(aten.fill)
 fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
+
+
+@register_complex(aten.copy)
+def copy_impl(
+    self: ComplexTensor, src: ComplexTensor, non_blocking: bool = False
+) -> ComplexTensor:
+    self_re, self_im = split_complex_arg(self)
+    src_re, src_im = split_complex_arg(src)
+    return ComplexTensor(
+        aten.copy(self_re, src_re, non_blocking=non_blocking),
+        aten.copy(self_im, src_im, non_blocking=non_blocking),
+    )
 
 
 @register_complex(aten.rsub)
@@ -793,13 +808,6 @@ def view_as_complex_impl(self: ComplexTensor) -> torch.Tensor:
     return ComplexTensor(self[..., 0], self[..., 1])
 
 
-@register_complex(aten.linalg_vector_norm)
-def linalg_vector_norm_impl(
-    self: ComplexTensor, *args: Any, **kwargs: Any
-) -> torch.Tensor:
-    return torch.linalg.vector_norm(torch.abs(self), *args, **kwargs)
-
-
 @register_force_test(aten.copy_)
 def copy__impl(
     self: ComplexTensor | torch.Tensor,
@@ -867,6 +875,7 @@ def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     if isinstance(self, InterleavedComplexTensor):
         out = aten.alias(self)
         torch._C._set_conj(out, not self.is_conj())
+        return out
 
     return ComplexTensor(aten.alias(self.re), -self.im)
 
@@ -877,6 +886,7 @@ def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
     if isinstance(self, InterleavedComplexTensor):
         out = aten.alias(self)
         torch._C._set_neg(out, not self.is_neg())
+        return out
 
     return ComplexTensor(-self.re, -self.im)
 
@@ -884,27 +894,31 @@ def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.resolve_conj)
 def resolve_conj_impl(self: ComplexTensor) -> InterleavedComplexTensor | ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
-    if isinstance(self, InterleavedComplexTensor):
-        conj = self.is_conj()
-        if not conj:
-            return aten.alias(self)
+    conj = self.is_conj()
+    if not conj:
+        return aten.alias(self)
 
-        data = torch.stack((self.re, self.im))
-        return InterleavedComplexTensor(data)
-    return self
+    re, im = split_complex_arg(self)
+    re, im = re.clone(), im.clone()
+    neg = self.is_neg()
+    if neg:
+        re, im = aten._neg_view(re), aten._neg_view(im)
+    return ComplexTensor(re, im)
 
 
 @register_complex(aten.resolve_neg)
 def resolve_neg_impl(self: ComplexTensor) -> InterleavedComplexTensor | ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
-    if isinstance(self, InterleavedComplexTensor):
-        neg = self.is_neg()
-        if not neg:
-            return aten.alias(self)
+    neg = self.is_neg()
+    if not neg:
+        return aten.alias(self)
 
-        return InterleavedComplexTensor(-self._data)
-
-    return self
+    re, im = split_complex_arg(self)
+    re, im = re.clone(), im.clone()
+    conj = self.is_conj()
+    if conj:
+        im = aten._neg_view(im)
+    return ComplexTensor(re, im)
 
 
 @register_complex(aten.index_add)
