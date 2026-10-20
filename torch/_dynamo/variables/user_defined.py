@@ -351,19 +351,6 @@ def is_data_descriptor(obj: object) -> bool:
     )
 
 
-def type_attr_takes_precedence(obj: VariableTracker, name: str) -> bool:
-    """Return True if attribute *name* on obj's type wins over its instance dict.
-
-    Mirrors PyObject_GenericGetAttr: getset/tp_members and data descriptors on
-    the type win over the instance ``__dict__``; non-data descriptors and plain
-    class attributes are shadowed by it.
-    """
-    if obj.lookup_tp_getset_member(name) is not None:
-        return True
-    type_attr = mro_lookup(obj.python_type(), name)
-    return type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr)
-
-
 def is_hashable(obj: object) -> bool:
     try:
         hash(obj)
@@ -1247,8 +1234,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             if self.value is collections.OrderedDict:
                 # Exact OrderedDict: represent as a bare OrderedDictVariable,
-                # mirroring dict.__new__(dict) -> ConstDictVariable.
-                return OrderedDictVariable({}, mutation_type=ValueMutationNew())
+                # mirroring dict.__new__(dict) -> ConstDictVariable. This is the
+                # only path that marks the container as created in this frame
+                # (`fresh`); it is what lets the instance __dict__ be modeled.
+                return OrderedDictVariable(
+                    {}, fresh=True, mutation_type=ValueMutationNew()
+                )
             # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
             # extra args — only the type arg matters.  Pass init_args=[] for
             # those so reconstruction emits base_cls.__new__(cls) without
