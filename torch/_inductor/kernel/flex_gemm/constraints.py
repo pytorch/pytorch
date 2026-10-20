@@ -110,7 +110,8 @@ FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR = (
 FLEX_GEMM_CAPTURE_SHAPE_ERROR = (
     "FlexGEMM captured tensor epilogue args must match the GEMM output shape "
     "[M, N] or broadcast as [1, N] / [M, 1] / [1, 1]; 1-D captures are read as "
-    "[1, N] when used directly or as w[None, :], and as [M, 1] as w[:, None]"
+    "[1, N] when used directly or as w[None, :], and as [M, 1] as w[:, None]; "
+    "bmm also supports per-batch rows, columns, and tiles, or batch-shared vectors/scalars"
 )
 FLEX_GEMM_LANE_DOMAIN_MIXED_ERROR = (
     "FlexGEMM lane-domain expressions must combine values selected from the same "
