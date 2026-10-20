@@ -1453,6 +1453,64 @@ class TestBasicGEMM(TestCase):
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+    def _quantize_per_token(self, a, dtype):
+        qrange = {torch.int8: (-128, 127), torch.uint8: (0, 255)}
+        if dtype not in qrange:
+            raise ValueError(f"_quantize_per_token: unsupported dtype {dtype}")
+        qmin, qmax = qrange[dtype]
+        min_val = a.amin(dim=-1, keepdim=True)
+        max_val = a.amax(dim=-1, keepdim=True)
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+        eps = torch.finfo(a.dtype).smallest_normal
+        scale = (max_val_pos - min_val_neg).clamp(min=eps) / (qmax - qmin)
+        zero_point = (qmin - min_val_neg.div(scale).round()).clamp(qmin, qmax)
+        qa = a.div(scale).add(zero_point).round().clamp_(qmin, qmax).to(dtype)
+        scale = scale.squeeze(-1).to(torch.float32).contiguous()
+        zero_point = zero_point.squeeze(-1).to(torch.int32).contiguous()
+        return qa, scale, zero_point
+
+    @parametrize("m", [128])
+    @parametrize("k", [512, 1024])
+    @parametrize("n", [512, 1024])
+    @parametrize("q_group", [32, 64, 128])
+    @parametrize("act_dtype", [torch.int8, torch.uint8])
+    @parametrize("out_dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_qlinear_w4a8_int(self, device, m, k, n, q_group, act_dtype, out_dtype):
+        inner_k_tiles = 2
+        torch.manual_seed(1)
+        a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_fp32 = torch.rand((k, n), dtype=torch.float32, device=device)
+
+        mat_a, mat_a_scale, mat_a_zero_point = self._quantize_per_token(
+            a_fp32, act_dtype
+        )
+        b_uint8, mat_b_scales, mat_b_zero_points = self._group_quantize_tensor(
+            b_fp32, n_bit=4, q_group_size=q_group
+        )
+        mat_b = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
+
+        out = torch.ops.onednn.qlinear_w4a8_int(
+            mat_a,
+            mat_b,
+            mat_a_scale,
+            mat_b_scales,
+            mat_a_zero_point,
+            mat_b_zero_points,
+            q_group,
+            out_dtype,
+            None,
+        )
+        self.assertEqual(out.dtype, out_dtype)
+        self.assertEqual(out.shape, (m, n))
+
+        a_dequant = (
+            mat_a.to(torch.float32) - mat_a_zero_point.unsqueeze(-1).to(torch.float32)
+        ) * mat_a_scale.unsqueeze(-1)
+        ref = torch.mm(a_dequant, b_fp32).to(out_dtype)
+
+        self.assertEqual(out, ref, atol=1e-2, rtol=0.05)
+
     def test_mm_with_offset(self, device):
         from torch._dynamo.testing import rand_strided
 
