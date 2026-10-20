@@ -2093,5 +2093,36 @@ class TestScaleSwizzleInference(TestCase):
         )
 
 
+@instantiate_parametrized_tests
+class TestIsBigGpu(TestCase):
+    def setUp(self):
+        super().setUp()
+        inductor_utils.is_big_gpu.cache_clear()
+        self.addCleanup(inductor_utils.is_big_gpu.cache_clear)
+
+    @parametrize(
+        "sms,integrated,expected",
+        [
+            (20, False, False),
+            (68, False, True),
+            (8, True, False),
+            (16, True, True),
+            (20, True, True),
+        ],
+    )
+    def test_cuda_sm_threshold(self, sms, integrated, expected):
+        device = torch.device("cuda", 0)
+        dev_props = types.SimpleNamespace(multi_processor_count=sms)
+        cuda_props = types.SimpleNamespace(is_integrated=integrated)
+        create = mock.patch.object(
+            inductor_utils.DeviceProperties, "create", return_value=dev_props
+        )
+        get_props = mock.patch.object(
+            torch.cuda, "get_device_properties", return_value=cuda_props
+        )
+        with mock.patch.object(torch.version, "hip", None), create, get_props:
+            self.assertEqual(inductor_utils.is_big_gpu(device), expected)
+
+
 if __name__ == "__main__":
     run_tests()

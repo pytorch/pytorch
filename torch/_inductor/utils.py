@@ -2131,10 +2131,12 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    # XPU already uses 16. Jetson (Orin 16 SMs, Thor 20 SMs) also benefits
-    # from max-autotune GEMM (measured ~1.2-1.4x) with no correctness issues.
-    # See https://github.com/pytorch/pytorch/issues/201471
-    min_sms = 16 if device.type == "xpu" else 16  # was 68 (RTX 3080)
+    # Integrated GPUs (e.g. Jetson Orin/Thor) are small by design, so the
+    # discrete-card threshold would permanently disable max_autotune_gemm there
+    is_igpu = (
+        device.type == "cuda" and torch.cuda.get_device_properties(device).is_integrated
+    )
+    min_sms = 16 if device.type == "xpu" or is_igpu else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
