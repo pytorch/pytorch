@@ -5,9 +5,14 @@ first error turns the writer off, so it never changes a test's outcome."""
 from __future__ import annotations
 
 import contextlib
+import functools
 import inspect
+import json
 import os
+import subprocess
 import sys
+import tempfile
+import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass
@@ -30,6 +35,12 @@ if TYPE_CHECKING:
 # Set where the test runs; xdist ships it to the controller with the report. Not
 # item.user_properties, which pytest also writes into the junit XML CI ingests.
 _TEST_ID = "_torchci_test_id"
+# The run in flight, published for run_test.py in test/conftest.py's stepcurrent
+# directory (take_inflight). Fields: path (the report's absolute path),
+# report_size (its size when the run started), test (the run line's identity
+# fields), rerun_number, started_at (epoch seconds); null when nothing is in
+# flight.
+_INFLIGHT_FILE = "report_inflight"
 
 _disabled = False
 _writer: ReportWriter | None = None
@@ -42,9 +53,12 @@ def _disable(error: Exception) -> None:
     _disabled = True
     try:
         print(f"torchci: report disabled after error: {error!r}", file=sys.stderr)
-        if _writer is not None and _writer.file is not None:
-            report_file, _writer.file = _writer.file, None
-            report_file.close()
+        if _writer is not None:
+            # Nothing more gets published, so what's there would go stale.
+            _writer._publish(None)
+            if _writer.file is not None:
+                report_file, _writer.file = _writer.file, None
+                report_file.close()
     except Exception:
         pass
 
@@ -57,8 +71,32 @@ def _guard() -> Iterator[None]:
         _disable(error)
 
 
+def _is_gtest(item: pytest.Item) -> bool:
+    # pytest-cpp isn't a torch dependency, so check the item's module before
+    # importing it. Its Boost.Test and Catch2 items are CppItems too.
+    if not type(item).__module__.startswith("pytest_cpp."):
+        return False
+    from pytest_cpp.google import GoogleTestFacade
+
+    return isinstance(getattr(item, "facade", None), GoogleTestFacade)
+
+
+@functools.cache
+def _gtest_identities(binary: str) -> dict[str, report.TestId]:
+    # pytest-cpp parses gtest's plain-text test list; gtest's JSON test list has
+    # each test's suite and name as separate fields.
+    with tempfile.TemporaryDirectory(prefix="torchci-gtest-") as tmp:
+        path = os.path.join(tmp, "tests.json")
+        args = [binary, "--gtest_list_tests", f"--gtest_output=json:{path}"]
+        subprocess.run(args, check=True, capture_output=True)
+        with open(path, encoding="utf-8") as listing:
+            return report.gtest_identities(binary, json.load(listing))
+
+
 def identity(item: pytest.Item) -> report.TestId | None:
-    """None for an item that isn't a Python test function."""
+    """None for an item that is neither a Python test function nor a gtest."""
+    if _is_gtest(item):
+        return _gtest_identities(str(item.path)).get(item.name)
     if not isinstance(item, pytest.Function):
         return None
     # originalname drops pytest parameters. Unwrapping the function recovers the
@@ -108,7 +146,8 @@ class _Run:
 
 class ReportWriter:
     def __init__(self, path: str, report_uuid: str) -> None:
-        self.path = path
+        # run_test.py reads the published path from another working directory.
+        self.path = os.path.abspath(path)
         self.report_uuid = report_uuid
         self.file: IO[str] | None = None
         # By node id and xdist worker (report.node, None without xdist), as junitxml
@@ -117,11 +156,29 @@ class ReportWriter:
         self.runs: dict[tuple[str, Any], _Run] = {}
         self.rerun_numbers: Counter[str] = Counter()
         self.tests: dict[str, report.TestId | None] = {}
+        # Set when test/conftest.py's stepcurrent plugin is active (--sc, --scs or
+        # --rs) without xdist; only run_test.py's retry loop reads what is
+        # published (take_inflight).
+        self.cache: pytest.Cache | None = None
+        self.inflight_key = ""
+        # A session that starts no test removes its report (pytest_sessionfinish).
+        self.started_test = False
+
+    def _publish(self, inflight: dict[str, Any] | None) -> None:
+        # Best effort: a failed publication must not turn the report off.
+        if self.cache is not None:
+            with contextlib.suppress(Exception):
+                self.cache.set(self.inflight_key, inflight)
 
     def pytest_sessionstart(self, session: Session) -> None:
         if _disabled:
             return
         with _guard():
+            config = session.config
+            stepcurrent = config.pluginmanager.get_plugin("stepcurrentplugin")
+            if stepcurrent and not config.getoption("numprocesses", default=None):
+                self.cache = config.cache
+                self.inflight_key = f"{stepcurrent.directory}/{_INFLIGHT_FILE}"
             record = report.report_record(self.report_uuid, environment.capture())
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.file = open(self.path, "w", encoding="utf-8", newline="\n")  # noqa: SIM115
@@ -132,8 +189,26 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
-            # Empty on an xdist controller; workers send identities via makereport.
+            # Names the run in flight at logstart. Empty on an xdist controller,
+            # whose workers send identities via makereport.
             self.tests = {item.nodeid: identity(item) for item in session.items}
+
+    def pytest_runtest_logstart(self, nodeid: str) -> None:
+        self.started_test = True
+        if _disabled or self.file is None:
+            return
+        with _guard():
+            # Before setup, so run_test.py can record the run if the process dies.
+            # pytest-rerunfailures starts each attempt here.
+            if (test := self.tests.get(nodeid)) is not None:
+                inflight = {
+                    "path": self.path,
+                    "report_size": os.fstat(self.file.fileno()).st_size,
+                    "test": test._asdict(),
+                    "rerun_number": self.rerun_numbers[nodeid],
+                    "started_at": time.time(),
+                }
+                self._publish(inflight)
 
     # Before test/conftest.py's LogXMLReruns rewrites skip longreprs.
     @pytest.hookimpl(tryfirst=True)
@@ -181,9 +256,12 @@ class ReportWriter:
     def _finish(self, key: tuple[str, Any], run: _Run) -> None:
         del self.runs[key]
         nodeid = key[0]
-        # No identity: the item isn't a Python test function, its setup report never
-        # arrived (the attempt was interrupted), or, under xdist, the worker's writer
-        # turned itself off and its setup report came without one.
+        # Cleared before the line is written: a process killed between the two
+        # loses the run rather than recording it twice.
+        self._publish(None)
+        # No identity: the item is neither a Python test function nor a gtest, its
+        # setup report never arrived (the attempt was interrupted), or, under xdist,
+        # the worker's writer turned itself off and its setup report came without one.
         if self.file is not None and run.test is not None:
             record = report.run_record(
                 run.test,
@@ -201,9 +279,59 @@ class ReportWriter:
         if _disabled:
             return
         with _guard():
+            # Under xdist, -x stops right after the final failing report, so that
+            # run's teardown report never arrives; its outcome is already known.
+            for key, run in list(self.runs.items()):
+                if run.failed_phase:
+                    self._finish(key, run)
             if self.file is not None:
                 self.file.close()
                 self.file = None
+                # Nothing to upload from a session that started no test, like
+                # run_test.py's serial pass over a file without serial tests. One
+                # that started a test keeps its report even with no run in it:
+                # run_test.py appends the run an interrupt or timeout left in flight.
+                if not self.started_test:
+                    os.remove(self.path)
+
+
+def take_inflight(cache_dir: str | os.PathLike[str]) -> dict[str, Any] | None:
+    """For run_test.py: the run the writer left in flight, or None. Removed even
+    when unreadable, so no later process records it."""
+    file = os.path.join(cache_dir, _INFLIGHT_FILE)
+    try:
+        with open(file, encoding="utf-8") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return None
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(file)
+    # Empty when the process died inside the cache write.
+    return json.loads(data) if data.strip() else None
+
+
+def append_run(inflight: dict[str, Any], outcome: str, outcome_summary: str) -> None:
+    """For run_test.py: appends the run in flight to its report with ``outcome``."""
+    path = inflight["path"]
+    try:
+        size = os.path.getsize(path)
+    except FileNotFoundError:
+        return
+    # The writer wrote after publishing this run, so it did finish: its clear was
+    # lost (pytest's cache swallows write errors), or its last line is torn.
+    if size != inflight["report_size"]:
+        return
+    run = report.run_record(
+        report.TestId(**inflight["test"]),
+        inflight["rerun_number"],
+        outcome,
+        inflight["started_at"],
+        time.time(),
+        outcome_summary=outcome_summary,
+    )
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(report.line(run))
 
 
 @pytest.hookimpl(hookwrapper=True)

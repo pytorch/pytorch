@@ -1304,6 +1304,8 @@
 # label: module: docs
 # /docs/
 /docs/source/conf.py @albanD
+# label: oncall: distributed infra, module: docs
+/docs/source/distributed* @d4l3k @kapilsh
 # label: oncall: pt2, module: docs, module: higher order operators
 /docs/source/higher_order_ops/ @bohnstingl
 # label: module: docs, module: xpu

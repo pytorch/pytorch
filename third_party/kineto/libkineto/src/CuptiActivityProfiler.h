@@ -21,6 +21,8 @@ class CuptiActivityProfiler : public GenericActivityProfiler {
   CuptiActivityProfiler(CuptiActivityApi& cupti, bool cpuOnly);
   CuptiActivityProfiler(const CuptiActivityProfiler&) = delete;
   CuptiActivityProfiler& operator=(const CuptiActivityProfiler&) = delete;
+  CuptiActivityProfiler(CuptiActivityProfiler&&) = delete;
+  CuptiActivityProfiler& operator=(CuptiActivityProfiler&&) = delete;
   ~CuptiActivityProfiler() override = default;
 
  protected:
@@ -73,8 +75,5 @@ class CuptiActivityProfiler : public GenericActivityProfiler {
   // Calls to CUPTI is encapsulated behind this interface
   CuptiActivityApi& cupti_;
 };
-
-// Helper function to map context ID to device ID
-uint32_t contextIdtoDeviceId(uint32_t contextId);
 
 } // namespace KINETO_NAMESPACE
