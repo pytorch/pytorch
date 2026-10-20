@@ -4697,6 +4697,43 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(vt.eager_attr_fold_is_unsound(None, "__dict__"))
         self.assertFalse(vt.eager_attr_fold_is_unsound(None, "keys"))
 
+    def test_getattr_dunder_dict_subclass_fold_declined(self):
+        # User-level trigger for a real NNModuleHooksDictVariable: a non-empty
+        # hooks dict. getattr(hd, "__dict__", ...) reaches the
+        # GetAttrBuiltinVariable eager-fold plug, which must decline for the
+        # subclass exactly like the direct hd.__dict__ read and the other sites.
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x
+
+        m = M()
+        m.register_forward_hook(lambda mod, inp, out: out)
+        name = "__dict__"
+
+        def getattr_default(x):
+            hd = m._forward_hooks
+            return x, getattr(hd, name, 42)
+
+        self._check_declined(
+            getattr_default, (torch.zeros(1),), "__dict__ access on OrderedDict"
+        )
+
+        def getattr_no_default(x):
+            hd = m._forward_hooks
+            return x, getattr(hd, name)
+
+        self._check_declined(
+            getattr_no_default, (torch.zeros(1),), "__dict__ access on OrderedDict"
+        )
+
+        def direct(x):
+            hd = m._forward_hooks
+            return x, hd.__dict__
+
+        self._check_declined(
+            direct, (torch.zeros(1),), "__dict__ access on OrderedDict"
+        )
+
     # ---- A5 provenance: SourcelessBuilder-wrapped real OrderedDicts --------
     def test_sourceless_builder_wrapped_od_is_not_fresh(self):
         # No user-level trigger reaches this path today, so cover the builder
