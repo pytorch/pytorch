@@ -1926,6 +1926,12 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             return SourcelessBuilder.create(tx, object())
 
+        if self.fn is str.format:
+            # The builtin constant-fold handler formats as_python_constant()
+            # copies before call_format() runs; decline an attributed
+            # OrderedDict instead of folding away its instance __dict__.
+            StringFormatVariable.check_attributed_format(tx, args, kwargs)
+
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}

@@ -2069,6 +2069,48 @@ class StringFormatVariable(VariableTracker):
     def python_type(self) -> type:
         return str
 
+    @staticmethod
+    def _walk_format_args(
+        sym_args: "Sequence[VariableTracker]",
+        sym_kwargs: "dict[str, VariableTracker]",
+    ) -> list[VariableTracker]:
+        vts: list[VariableTracker] = []
+        for arg in itertools.chain(sym_args, sym_kwargs.values()):
+            VariableTracker.visit(vts.append, arg)
+        return vts
+
+    @staticmethod
+    def decline_attributed_format() -> NoReturn:
+        """Decline formatting a fresh OrderedDict that has instance attributes.
+
+        Constant folding rebuilds the container from its contents only and the
+        shell-first escape replay has not filled in its attributes yet, so the
+        instance __dict__ would be missing from what gets formatted.
+        """
+        unimplemented(
+            gb_type="string formatting of an attributed OrderedDict",
+            context="format()/f-string of an attributed OrderedDict",
+            explanation="Formatting rebuilds the OrderedDict from its contents "
+            "only or observes it before its attributes/contents replay, so its "
+            "modeled instance attributes would be missing.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @classmethod
+    def check_attributed_format(
+        cls,
+        tx: "InstructionTranslatorBase",
+        sym_args: "Sequence[VariableTracker]",
+        sym_kwargs: "dict[str, VariableTracker]",
+    ) -> None:
+        from .dicts import OrderedDictVariable
+
+        if any(
+            istype(vt, OrderedDictVariable) and vt.has_instance_attributes(tx)
+            for vt in cls._walk_format_args(sym_args, sym_kwargs)
+        ):
+            cls.decline_attributed_format()
+
     @classmethod
     def create(
         cls,
@@ -2077,6 +2119,7 @@ class StringFormatVariable(VariableTracker):
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        cls.check_attributed_format(tx, sym_args, sym_kwargs)
         if all(
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
@@ -2089,28 +2132,14 @@ class StringFormatVariable(VariableTracker):
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)
-        # An attributed OrderedDict built in this frame is reconstructed as an
-        # empty shell whose contents are replayed by the side-effects pass after
-        # the deferred format() call is emitted, so formatting it would render
-        # the empty shell. Constant-only contents were folded above, which is
-        # sound because an OrderedDict repr never shows instance attributes.
+        # A deferred format()/f-string observes these fresh OrderedDicts at
+        # restore_stack time; a later attribute write must decline instead of
+        # changing what the format renders.
         from .dicts import OrderedDictVariable
 
-        vts: list[VariableTracker] = []
-        for arg in itertools.chain(sym_args, sym_kwargs.values()):
-            VariableTracker.visit(vts.append, arg)
-        for vt in vts:
-            if not (istype(vt, OrderedDictVariable) and vt.fresh):
-                continue
-            if vt.check_deferred_format_observation(tx):
-                unimplemented(
-                    gb_type="string formatting of an attributed OrderedDict",
-                    context="OrderedDict observed by a deferred format()/f-string",
-                    explanation="A deferred format()/f-string observes this "
-                    "OrderedDict before its contents/attributes replay, where it "
-                    "is still an empty shell; formatting it would render the shell.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
+        for vt in cls._walk_format_args(sym_args, sym_kwargs):
+            if istype(vt, OrderedDictVariable) and vt.fresh:
+                vt.mark_deferred_format_observation()
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(

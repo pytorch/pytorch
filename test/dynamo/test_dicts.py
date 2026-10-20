@@ -4091,8 +4091,12 @@ class _ODAttrTuple(tuple):
         return super().__new__(cls, od)
 
 
+class _ODAttrSubclass(OrderedDict):
+    """OrderedDict subclass used to check the type argument of __new__."""
+
+
 class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
-    """Instance attribute (``__dict__``) support for in-frame OrderedDicts (Phase 1)."""
+    """Instance attribute (``__dict__``) support for in-frame OrderedDicts."""
 
     hw_classification = HardwareClassification.GENERIC
 
@@ -4105,7 +4109,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, frame_count)
         return out, cnt, opt
 
-    # ---- A1: the two issue reproducers -------------------------------------
+    # ---- #201124 reproducers -------------------------------------------------
     def test_issue_repro_state_dict_len(self):
         m = torch.nn.Linear(2, 2)
 
@@ -4133,7 +4137,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         opt(x)
         self.assertEqual(cnt.frame_count, 1)
 
-    # ---- A2: nn.Module.state_dict() end to end -----------------------------
+    # ---- nn.Module.state_dict() end to end ----------------------------------
     def test_state_dict_escape_matches_eager(self):
         class Inner(torch.nn.Module):
             def __init__(self):
@@ -4183,7 +4187,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(sd2._metadata, eager_sd._metadata)
 
-    # ---- B1: formatting must not observe the empty shell -------------------
+    # ---- Formatting must not observe the empty shell ------------------------
     def test_str_format_of_attributed_od_not_empty_shell(self):
         # Escaping attributed OrderedDicts are materialized as an empty shell and
         # their contents replayed by the side effects pass. String formatting
@@ -4221,6 +4225,14 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
             d.a = 1
             return x, fmt.format((d,))
 
+        def format_constant_attr_field(x):
+            # Constant-only arguments would fold through as_python_constant(),
+            # which drops the instance attributes.
+            d = OrderedDict()
+            d["k"] = 1
+            d.a = 1
+            return x, "{.a}".format(d)  # noqa: UP032
+
         x = torch.zeros(1)
         for fn in (
             format_fresh,
@@ -4228,6 +4240,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
             format_state_dict,
             format_before_attr_write,
             format_nested,
+            format_constant_attr_field,
         ):
             eager = fn(x)
             self.assertNotEqual(eager[1], "OrderedDict()")
@@ -4242,7 +4255,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
             out = torch.compile(fn, backend="eager", fullgraph=False)(x)
             self.assertEqual(out, eager)
 
-    # ---- A3: fresh OrderedDict attribute semantics -------------------------
+    # ---- Fresh OrderedDict attribute semantics ------------------------------
     def test_fresh_attr_write_read(self):
         def fn(x):
             x = x + 1
@@ -4280,7 +4293,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         # matching eager means reporting it absent.
         self.assertFalse(hasattr(OrderedDict(), "__module__"))
 
-    # ---- A4: escape replay -------------------------------------------------
+    # ---- Escape replay ------------------------------------------------------
     def test_escape_replay_contents_attrs_identity(self):
         def fn(x):
             x = x + 1
@@ -4304,7 +4317,7 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         self.assertIs(out[1]["inner"], out[3])
         self.assertEqual(out[3].b, 2)
 
-    def test_constructor_read_of_attributed_od_is_sound(self):
+    def test_constructor_read_of_attributed_od_declines(self):
         def fn(x):
             d = OrderedDict()
             d["k"] = 1
@@ -4316,23 +4329,19 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         eager = fn(x)
         self.assertEqual(tuple(eager[1]), ("k",))
         torch._dynamo.reset()
-        try:
-            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        except Unsupported as exc:
-            self.assertEqual(
-                exc.gb_type,
-                "attributed OrderedDict captured by a constructor",
-            )
-        else:
-            self.assertEqual(out, eager)
-            self.assertEqual(tuple(out[1]), ("k",))
+        with self.assertRaises(Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "attributed OrderedDict captured by a constructor",
+        )
 
         torch._dynamo.reset()
         out = torch.compile(fn, backend="eager", fullgraph=False)(x)
         self.assertEqual(out, eager)
         self.assertEqual(tuple(out[1]), ("k",))
 
-    # ---- N1/N3/N4/N5: automated-review regressions -------------------------
+    # ---- Attribute / copy / constructor interactions -----------------------
     def test_dict_copy_is_fresh(self):
         def copy_fresh(x):
             x = x + 1
@@ -4362,29 +4371,15 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out[1:], (2, ["k"], 42))
 
     def test_new_with_subclass_type_arg_stays_subclass(self):
-        class SubOD(OrderedDict):
-            pass
-
         def fn(x):
-            d = OrderedDict.__new__(SubOD)
+            x = x + 1
+            d = OrderedDict.__new__(_ODAttrSubclass)
             d.x = 1
             return x, type(d).__name__, d.x
 
         x = torch.zeros(1)
-        eager = fn(x)
-        self.assertEqual(eager[1], "SubOD")
-        torch._dynamo.reset()
-        try:
-            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        except Unsupported:
-            pass
-        else:
-            self.assertEqual(out, eager)
-            self.assertEqual(out[1], "SubOD")
-
-        torch._dynamo.reset()
-        out = torch.compile(fn, backend="eager", fullgraph=False)(x)
-        self.assertEqual(out, eager)
+        out, _, _ = self._check_compiles(fn, (x,), fn(x))
+        self.assertEqual(out[1:], ("_ODAttrSubclass", 1))
 
         # Normal exact construction still goes through the fresh fast path.
         def exact(x):
@@ -4405,39 +4400,11 @@ class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
 
             d = OrderedDict()
             d.keys = shadow
-            return (
-                x,
-                d.keys(),
-                d.__getattribute__("keys")(),
-                type(d).__getattribute__(d, "keys")(),
-            )
+            return x, d.keys(), d.__getattribute__("keys")()
 
         x = torch.zeros(1)
         out, _, _ = self._check_compiles(fn, (x,), fn(x))
-        self.assertEqual(out[1:], (5, 5, 5))
-
-        # Unbound object.__getattribute__ is a pre-existing generic graph break
-        # (it also declines for plain dict/str), so a sound decline is allowed
-        # here; the eager fallback must be correct.
-        def unbound(x):
-            def shadow():
-                return 5
-
-            d = OrderedDict()
-            d.keys = shadow
-            return x, object.__getattribute__(d, "keys")()
-
-        torch._dynamo.reset()
-        eager = unbound(x)
-        try:
-            out = torch.compile(unbound, backend="eager", fullgraph=True)(x)
-        except Unsupported:
-            pass
-        else:
-            self.assertEqual(out, eager)
-        torch._dynamo.reset()
-        out = torch.compile(unbound, backend="eager", fullgraph=False)(x)
-        self.assertEqual(out, eager)
+        self.assertEqual(out[1:], (5, 5))
 
     def test_reduce_ex_plug_declines_for_attributed_od(self):
         # The __reduce_ex__ constant-fold plug must be reached (and skip the

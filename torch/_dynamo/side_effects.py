@@ -1808,7 +1808,7 @@ def _codegen_ordered_dict_instance_attr_mutation(
         cg.load_method("update")
         cg(var, allow_cache=False)  # full contents, not via source
         cg.extend_output([*create_call_method(1), create_instruction("POP_TOP")])
-        ctx.log(var)
+    # _codegen_attribute_mutation replays the instance dict and logs the var once.
     _codegen_attribute_mutation(ctx)
 
 

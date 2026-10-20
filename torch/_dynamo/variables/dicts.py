@@ -921,7 +921,7 @@ class OrderedDictVariable(ConstDictVariable):
         # SourcelessBuilder, whose instance __dict__ is not modeled at all.
         self.fresh = fresh
         # Set when a deferred format()/f-string will observe this fresh object
-        # at restore_stack time; see check_deferred_format_observation.
+        # at restore_stack time; see mark_deferred_format_observation.
         self._format_deferred = format_deferred
 
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
@@ -1034,14 +1034,12 @@ class OrderedDictVariable(ConstDictVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if self._format_deferred:
-            unimplemented(
-                gb_type="string formatting of an attributed OrderedDict",
-                context="OrderedDict observed by a deferred format()/f-string",
-                explanation="A deferred format()/f-string observes this "
-                "OrderedDict before its contents/attributes replay, where it is "
-                "still an empty shell; formatting it would render the shell.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            # An earlier deferred format()/f-string observes this object before
+            # its attribute replay, so writing now would change the rendered
+            # result; decline the same way the format itself does.
+            from .misc import StringFormatVariable
+
+            StringFormatVariable.decline_attributed_format()
         if not name_var.is_python_constant():
             unimplemented(
                 gb_type="non-constant attribute name in OrderedDict setattr",
@@ -1090,20 +1088,11 @@ class OrderedDictVariable(ConstDictVariable):
                 return value
         return None
 
-    def check_deferred_format_observation(
-        self, tx: "InstructionTranslatorBase"
-    ) -> bool:
+    def mark_deferred_format_observation(self) -> None:
         """Record that a deferred format()/f-string will observe this fresh
-        OrderedDict at restore_stack time.
-
-        Returns True when the object is already attributed: its contents replay
-        is emitted after the format call, so the format would render the empty
-        shell and the caller must decline.
-        """
-        if tx.output.side_effects.has_pending_mutation(self):
-            return True
+        OrderedDict at restore_stack time, so a later attribute write must
+        decline instead of changing what the format renders."""
         self._format_deferred = True
-        return False
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1173,6 +1162,10 @@ class OrderedDictVariable(ConstDictVariable):
             hints=[*graph_break_hints.SUPPORTABLE],
         )
 
+    def has_instance_attributes(self, tx: "InstructionTranslatorBase") -> bool:
+        """Whether this fresh OrderedDict carries modeled instance attributes."""
+        return self.fresh and tx.output.side_effects.has_pending_mutation(self)
+
     def eager_attr_fold_is_unsound(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> bool:
@@ -1189,9 +1182,9 @@ class OrderedDictVariable(ConstDictVariable):
         if type(self) is not OrderedDictVariable:
             # Non-__dict__ OrderedDict subclasses keep their pre-fix behavior.
             return False
-        if not self.fresh:
-            return True
-        return tx.output.side_effects.has_pending_mutation(self)
+        # A fresh __dict__ is modeled, so folding it is only unsound once it
+        # holds attributes; a pre-existing __dict__ is unmodeled entirely.
+        return not self.fresh or self.has_instance_attributes(tx)
 
     def _load_ordered_dict_type(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(

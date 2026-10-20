@@ -6625,8 +6625,8 @@
   "GB2178": [
     {
       "Gb_type": "string formatting of an attributed OrderedDict",
-      "Context": "OrderedDict observed by a deferred format()/f-string",
-      "Explanation": "A deferred format()/f-string observes this OrderedDict before its contents/attributes replay, where it is still an empty shell; formatting it would render the shell.",
+      "Context": "format()/f-string of an attributed OrderedDict",
+      "Explanation": "Formatting rebuilds the OrderedDict from its contents only or observes it before its attributes/contents replay, so its modeled instance attributes would be missing.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
