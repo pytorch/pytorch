@@ -1856,6 +1856,9 @@ def _compile(
                     package=package,
                 )
         except exc.SkipFrame as e:
+            if package is not None:
+                # Dynamo runs this frame eagerly from now on, so a load does too.
+                package.record_eager_fallback(code)
             if one_graph:
                 log.debug("No graph captured with export/fullgraph=True")
             if e._torch_dynamo_tracer_output is None:
@@ -2532,6 +2535,19 @@ class ConvertFrame:
 
             if not config.suppress_errors and not soft_fail:
                 raise
+
+            package = self._inner_convert._package
+            if (
+                package is not None
+                and isinstance(e, (Unsupported, UserError))
+                and e.frame_exec_strategy is None
+                and e.apply_to_code
+            ):
+                # Dynamo gave up on the frame and skips it from now on, so a load
+                # runs it eagerly too. A recompile limit hit sets RUN_ONLY instead
+                # and stays a coverage gap. These are exactly the soft failures
+                # Dynamo skips the frame for whatever suppress_errors says.
+                package.record_eager_fallback(code)
 
             # Suppress the error.  NB: It's very important to do the
             # suppression logging HERE, where the actual suppression
