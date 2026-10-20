@@ -382,37 +382,110 @@ class TestTransforms(TestCase):
             raise AssertionError("Transform sign test failed")
 
 
-def test_compose_transform_shapes():
-    transform0 = ExpTransform()
-    transform1 = SoftmaxTransform()
-    transform2 = LowerCholeskyTransform()
-
-    if transform0.event_dim != 0:
-        raise AssertionError(
-            f"Expected transform0.event_dim == 0, got {transform0.event_dim}"
-        )
-    if transform1.event_dim != 1:
-        raise AssertionError(
-            f"Expected transform1.event_dim == 1, got {transform1.event_dim}"
-        )
-    if transform2.event_dim != 2:
-        raise AssertionError(
-            f"Expected transform2.event_dim == 2, got {transform2.event_dim}"
-        )
-    if ComposeTransform([transform0, transform1]).event_dim != 1:
-        raise AssertionError("Expected ComposeTransform([t0, t1]).event_dim == 1")
-    if ComposeTransform([transform0, transform2]).event_dim != 2:
-        raise AssertionError("Expected ComposeTransform([t0, t2]).event_dim == 2")
-    if ComposeTransform([transform1, transform2]).event_dim != 2:
-        raise AssertionError("Expected ComposeTransform([t1, t2]).event_dim == 2")
-
-
 transform0 = ExpTransform()
 transform1 = SoftmaxTransform()
 transform2 = LowerCholeskyTransform()
 base_dist0 = Normal(torch.zeros(4, 4), torch.ones(4, 4))
 base_dist1 = Dirichlet(torch.ones(4, 4))
 base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
+
+
+class TestComposeTransform(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_compose_transform_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = SoftmaxTransform()
+        transform2 = LowerCholeskyTransform()
+
+        if transform0.event_dim != 0:
+            raise AssertionError(
+                f"Expected transform0.event_dim == 0, got {transform0.event_dim}"
+            )
+        if transform1.event_dim != 1:
+            raise AssertionError(
+                f"Expected transform1.event_dim == 1, got {transform1.event_dim}"
+            )
+        if transform2.event_dim != 2:
+            raise AssertionError(
+                f"Expected transform2.event_dim == 2, got {transform2.event_dim}"
+            )
+        if ComposeTransform([transform0, transform1]).event_dim != 1:
+            raise AssertionError("Expected ComposeTransform([t0, t1]).event_dim == 1")
+        if ComposeTransform([transform0, transform2]).event_dim != 2:
+            raise AssertionError("Expected ComposeTransform([t0, t2]).event_dim == 2")
+        if ComposeTransform([transform1, transform2]).event_dim != 2:
+            raise AssertionError("Expected ComposeTransform([t1, t2]).event_dim == 2")
+
+    @parametrize(
+        "event_dims", [(0,), (1,), (2, 3), (0, 1, 2), (1, 2, 0), (2, 0, 1)], name_fn=str
+    )
+    def test_compose_affine(self, event_dims):
+        transforms = [
+            AffineTransform(torch.zeros((1,) * e), 1, event_dim=e) for e in event_dims
+        ]
+        transform = ComposeTransform(transforms)
+        if transform.codomain.event_dim != max(event_dims):
+            raise AssertionError(
+                f"Expected codomain.event_dim {max(event_dims)}, got {transform.codomain.event_dim}"
+            )
+        if transform.domain.event_dim != max(event_dims):
+            raise AssertionError(
+                f"Expected domain.event_dim {max(event_dims)}, got {transform.domain.event_dim}"
+            )
+
+        base_dist = Normal(0, 1)
+        if transform.domain.event_dim:
+            base_dist = base_dist.expand((1,) * transform.domain.event_dim)
+        dist = TransformedDistribution(base_dist, transform.parts)
+        if dist.support.event_dim != max(event_dims):
+            raise AssertionError(
+                f"Expected support.event_dim {max(event_dims)}, got {dist.support.event_dim}"
+            )
+
+        base_dist = Dirichlet(torch.ones(5))
+        if transform.domain.event_dim > 1:
+            base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
+        dist = TransformedDistribution(base_dist, transforms)
+        if dist.support.event_dim != max(1, *event_dims):
+            raise AssertionError(
+                f"Expected support.event_dim {max(1, *event_dims)}, got {dist.support.event_dim}"
+            )
+
+    @parametrize("batch_shape", [(), (6,), (5, 4)], name_fn=str)
+    def test_compose_reshape(self, batch_shape):
+        transforms = [
+            ReshapeTransform((), ()),
+            ReshapeTransform((2,), (1, 2)),
+            ReshapeTransform((3, 1, 2), (6,)),
+            ReshapeTransform((6,), (2, 3)),
+        ]
+        transform = ComposeTransform(transforms)
+        if transform.codomain.event_dim != 2:
+            raise AssertionError(
+                f"Expected codomain.event_dim 2, got {transform.codomain.event_dim}"
+            )
+        if transform.domain.event_dim != 2:
+            raise AssertionError(
+                f"Expected domain.event_dim 2, got {transform.domain.event_dim}"
+            )
+        data = torch.randn(batch_shape + (3, 2))
+        if transform(data).shape != batch_shape + (2, 3):
+            raise AssertionError(
+                f"Expected shape {batch_shape + (2, 3)}, got {transform(data).shape}"
+            )
+
+        dist = TransformedDistribution(Normal(data, 1), transforms)
+        if dist.batch_shape != batch_shape:
+            raise AssertionError(
+                f"Expected batch_shape {batch_shape}, got {dist.batch_shape}"
+            )
+        if dist.event_shape != (2, 3):
+            raise AssertionError(f"Expected event_shape (2, 3), got {dist.event_shape}")
+        if dist.support.event_dim != 2:
+            raise AssertionError(
+                f"Expected support.event_dim 2, got {dist.support.event_dim}"
+            )
 
 
 @pytest.mark.parametrize(
@@ -516,78 +589,6 @@ def test_jit_jacobian(transform):
         raise AssertionError("JIT jacobian output does not match")
 
 
-@pytest.mark.parametrize(
-    "event_dims", [(0,), (1,), (2, 3), (0, 1, 2), (1, 2, 0), (2, 0, 1)], ids=str
-)
-def test_compose_affine(event_dims):
-    transforms = [
-        AffineTransform(torch.zeros((1,) * e), 1, event_dim=e) for e in event_dims
-    ]
-    transform = ComposeTransform(transforms)
-    if transform.codomain.event_dim != max(event_dims):
-        raise AssertionError(
-            f"Expected codomain.event_dim {max(event_dims)}, got {transform.codomain.event_dim}"
-        )
-    if transform.domain.event_dim != max(event_dims):
-        raise AssertionError(
-            f"Expected domain.event_dim {max(event_dims)}, got {transform.domain.event_dim}"
-        )
-
-    base_dist = Normal(0, 1)
-    if transform.domain.event_dim:
-        base_dist = base_dist.expand((1,) * transform.domain.event_dim)
-    dist = TransformedDistribution(base_dist, transform.parts)
-    if dist.support.event_dim != max(event_dims):
-        raise AssertionError(
-            f"Expected support.event_dim {max(event_dims)}, got {dist.support.event_dim}"
-        )
-
-    base_dist = Dirichlet(torch.ones(5))
-    if transform.domain.event_dim > 1:
-        base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
-    dist = TransformedDistribution(base_dist, transforms)
-    if dist.support.event_dim != max(1, *event_dims):
-        raise AssertionError(
-            f"Expected support.event_dim {max(1, *event_dims)}, got {dist.support.event_dim}"
-        )
-
-
-@pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)
-def test_compose_reshape(batch_shape):
-    transforms = [
-        ReshapeTransform((), ()),
-        ReshapeTransform((2,), (1, 2)),
-        ReshapeTransform((3, 1, 2), (6,)),
-        ReshapeTransform((6,), (2, 3)),
-    ]
-    transform = ComposeTransform(transforms)
-    if transform.codomain.event_dim != 2:
-        raise AssertionError(
-            f"Expected codomain.event_dim 2, got {transform.codomain.event_dim}"
-        )
-    if transform.domain.event_dim != 2:
-        raise AssertionError(
-            f"Expected domain.event_dim 2, got {transform.domain.event_dim}"
-        )
-    data = torch.randn(batch_shape + (3, 2))
-    if transform(data).shape != batch_shape + (2, 3):
-        raise AssertionError(
-            f"Expected shape {batch_shape + (2, 3)}, got {transform(data).shape}"
-        )
-
-    dist = TransformedDistribution(Normal(data, 1), transforms)
-    if dist.batch_shape != batch_shape:
-        raise AssertionError(
-            f"Expected batch_shape {batch_shape}, got {dist.batch_shape}"
-        )
-    if dist.event_shape != (2, 3):
-        raise AssertionError(f"Expected event_shape (2, 3), got {dist.event_shape}")
-    if dist.support.event_dim != 2:
-        raise AssertionError(
-            f"Expected support.event_dim 2, got {dist.support.event_dim}"
-        )
-
-
 @pytest.mark.parametrize("sample_shape", [(), (7,)], ids=str)
 @pytest.mark.parametrize("transform_dim", [0, 1, 2])
 @pytest.mark.parametrize("base_batch_dim", [0, 1, 2])
@@ -664,6 +665,7 @@ def test_save_load_transform():
 
 
 instantiate_parametrized_tests(TestTransforms)
+instantiate_parametrized_tests(TestComposeTransform)
 
 
 if __name__ == "__main__":
