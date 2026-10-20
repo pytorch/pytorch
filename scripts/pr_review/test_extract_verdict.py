@@ -41,14 +41,17 @@ from extract_verdict import (
     failure,
     is_neutral_prose,
     MAX_DROPPED_TRACKED,
+    MAX_MESSAGE,
     MAX_PATH,
     MAX_SUMMARY,
     neutralize,
+    neutralize_message,
     neutralize_path,
     parse_diff,
     published_findings,
     Rejected,
     sanitize_findings,
+    TRUNCATED,
 )
 
 
@@ -1276,6 +1279,46 @@ class TestTruncationNeverLeavesADanglingEscape(unittest.TestCase):
         self.assertEqual(len(out), 599)
         trailing = len(out) - len(out.rstrip("\\"))
         self.assertEqual(trailing % 2, 0, f"ends on a lone backslash: {out[-6:]!r}")
+
+
+class TestAnOverflowingMessageEndsInAMarker(unittest.TestCase):
+    def test_a_message_within_the_cap_is_unchanged(self):
+        text = "x" * MAX_MESSAGE
+        self.assertEqual(neutralize_message(text), text)
+
+    def test_a_cut_message_ends_in_the_marker_and_stays_publishable(self):
+        # Escaping grows `&` to `&amp;` and `[` to `\[`, so every offset of
+        # these lands the cut inside an entity or an escape pair somewhere.
+        for unit in ("&", "[", "<", "#1 ", "word "):
+            for pad in range(6):
+                text = "a" * pad + unit * (MAX_MESSAGE // len(unit) + 1)
+                out = neutralize_message(text)
+                self.assertTrue(out.endswith(TRUNCATED), repr(out[-12:]))
+                self.assertLessEqual(len(out), MAX_MESSAGE)
+                self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_the_marker_does_not_complete_a_url(self):
+        # Cut so the kept text ends in `www`; `www...` would be a live URL.
+        out = neutralize_message("& " * 248 + "abcd www text")
+        self.assertTrue(out.endswith("www" + TRUNCATED), repr(out[-12:]))
+        self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_the_cut_does_not_split_an_allowed_digest(self):
+        out = neutralize_message("& " * 228 + "abc " + "ab12cd34" * 16 + " is wrong.")
+        self.assertTrue(out.endswith("abc" + TRUNCATED), repr(out[-12:]))
+        self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_an_overlong_message_that_shrinks_when_neutralized_is_not_cut(self):
+        # Over MAX_MESSAGE on the way in, far under it once links are peeled.
+        out = neutralize_message("[x](y) " * 215)
+        self.assertTrue(out.endswith(TRUNCATED), repr(out[-12:]))
+        self.assertTrue(is_neutral_prose(out, MAX_MESSAGE), repr(out[-12:]))
+
+    def test_a_single_token_with_no_publishable_prefix_comes_back_empty(self):
+        self.assertEqual(neutralize_message("&" * 274 + "ab12cd34" * 16 + ".bad"), "")
+
+    def test_a_message_that_neutralizes_to_nothing_gets_no_marker(self):
+        self.assertEqual(neutralize_message("\\" * (MAX_MESSAGE + 1)), "")
 
 
 class TestDowngradeKeepsTheOriginalReason(unittest.TestCase):
