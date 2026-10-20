@@ -4,11 +4,13 @@ import contextlib
 import json
 import math
 import os
+import subprocess
+import sys
 import unittest
 import warnings
-from itertools import product
-from functools import partial
 from collections.abc import Callable
+from functools import partial, wraps
+from itertools import product
 
 import torch
 import torch.nn.functional as F
@@ -55,6 +57,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
+    runOnRocmArch,
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
@@ -124,6 +127,69 @@ def sm_carveout(value: int | None):
         yield
     finally:
         torch._C._set_sm_carveout_experimental(None)
+
+
+def _isolated_gfx942_tf32_rounding(value: bool | None):
+    def decorator(test_fn):
+        @wraps(test_fn)
+        def wrapper(self, *args, **kwargs):
+            child = "PYTORCH_GFX942_TF32_ROUNDING_TEST_CHILD"
+            if os.environ.get(child) == "1":
+                return test_fn(self, *args, **kwargs)
+
+            env = {**os.environ, child: "1"}
+            flag = "TORCH_GFX942_ENABLE_RN"
+            if value is None:
+                env.pop(flag, None)
+            else:
+                env[flag] = "1" if value else "0"
+            test_id = f"{type(self).__name__}.{self._testMethodName}"
+            proc = subprocess.run(
+                [sys.executable, __file__, test_id],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            self.assertEqual(
+                0,
+                proc.returncode,
+                f"isolated subprocess for {test_id} failed\n"
+                f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}",
+            )
+
+        return wrapper
+
+    return decorator
+
+
+def _tf32_rounding_outputs(a, identity):
+    size = a.shape[-1]
+    bias = torch.zeros((size, size), device=a.device, dtype=a.dtype)
+    batch_a = a.unsqueeze(0)
+    batch_identity = identity.unsqueeze(0)
+    batch_bias = bias.unsqueeze(0)
+    expanded_batch_a = batch_a.expand(3, -1, -1)
+    expanded_batch_identity = batch_identity.expand(3, -1, -1)
+    return {
+        "mm": torch.mm(a, identity),
+        "addmm": torch.addmm(bias, a, identity),
+        "linear": F.linear(a, identity, torch.zeros(size, device=a.device)),
+        "bmm": torch.bmm(batch_a, batch_identity).squeeze(0),
+        "bmm_expanded": torch.bmm(
+            expanded_batch_a, expanded_batch_identity
+        ),
+        "baddbmm": torch.baddbmm(
+            batch_bias, batch_a, batch_identity
+        ).squeeze(0),
+    }
+
+
+def _float32_matrix_from_bits(bits, device):
+    signed_bits = bits if bits < 2**31 else bits - 2**32
+    return torch.tensor(
+        [[signed_bits]], dtype=torch.int32, device=device
+    ).view(torch.float32)
 
 
 class TestMatmulCuda(InductorTestCase):
@@ -398,6 +464,167 @@ class TestMatmulCuda(InductorTestCase):
                 (matrix(64, 2), matrix(2, 4)),
                 "extern_kernels.mm(",
             )
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(["gfx942"])
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(True)
+    def test_gfx942_tf32_rounding_to_nearest(self, device):
+        size = 128
+        input_value = 1.0 + 3.0 * 2.0**-12
+        rounded_value = 1.0 + 2.0**-10
+        a = torch.full((size, size), input_value, device=device).t()
+        identity = torch.eye(size, device=device)
+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with blas_library_context("cublaslt"):
+            rounded_outputs = _tf32_rounding_outputs(a, identity)
+            os.environ["TORCH_GFX942_ENABLE_RN"] = "0"
+            cached_outputs = _tf32_rounding_outputs(a, identity)
+
+        expected_rounded = torch.full_like(a, rounded_value)
+        for name, output in rounded_outputs.items():
+            with self.subTest(operation=name):
+                rounded_for_output = expected_rounded.expand_as(output)
+                self.assertEqual(output, rounded_for_output, atol=0, rtol=0)
+                self.assertEqual(
+                    cached_outputs[name], rounded_for_output, atol=0, rtol=0
+                )
+
+        torch.backends.cuda.matmul.allow_tf32 = False
+        self.assertEqual(torch.mm(a, identity), a, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(["gfx942"])
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(None)
+    def test_gfx942_tf32_rounding_disabled_by_default(self, device):
+        size = 128
+        input_value = 1.0 + 3.0 * 2.0**-12
+        a = torch.full((size, size), input_value, device=device).t()
+        identity = torch.eye(size, device=device)
+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with blas_library_context("cublaslt"):
+            output = torch.mm(a, identity)
+        self.assertEqual(output, torch.ones_like(a), atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(["gfx942"])
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(True)
+    def test_gfx942_tf32_rounding_edge_cases(self, device):
+        finite_cases = {
+            "below_halfway": (0x3F800FFF, 0x3F800000),
+            "halfway_to_even_down": (0x3F801000, 0x3F800000),
+            "above_halfway": (0x3F801001, 0x3F802000),
+            "halfway_to_even_up": (0x3F803000, 0x3F804000),
+            "negative_above_halfway": (0xBF801001, 0xBF802000),
+            "subnormal_halfway_to_zero": (0x00001000, 0x00000000),
+            "finite_overflow_to_infinity": (0x7F7FF000, 0x7F800000),
+            "positive_infinity": (0x7F800000, 0x7F800000),
+            "negative_infinity": (0xFF800000, 0xFF800000),
+        }
+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        one = torch.ones((1, 1), device=device)
+        with blas_library_context("cublaslt"):
+            for name, (input_bits, expected_bits) in finite_cases.items():
+                with self.subTest(case=name):
+                    output = torch.mm(
+                        _float32_matrix_from_bits(input_bits, device), one
+                    )
+                    output_bits = output.view(torch.int32).item() & 0xFFFFFFFF
+                    self.assertEqual(output_bits, expected_bits)
+
+            # A NaN whose payload is entirely in the discarded low 13 bits
+            # must remain a NaN instead of being rounded into infinity.
+            nan_output = torch.mm(
+                _float32_matrix_from_bits(0x7F800001, device), one
+            )
+            self.assertTrue(torch.isnan(nan_output).item())
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(["gfx942"])
+    @parametrize(
+        "a_shape,b_shape",
+        [((0, 1024), (1024, 1024)), ((1024, 1024), (1024, 0))],
+    )
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(True)
+    def test_gfx942_tf32_rounding_skips_empty_output(
+        self, device, a_shape, b_shape
+    ):
+        a = torch.empty(a_shape, device=device)
+        b = torch.empty(b_shape, device=device)
+        torch.backends.cuda.matmul.allow_tf32 = True
+
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        allocated_before = torch.cuda.memory_allocated()
+        output = torch.mm(a, b)
+        torch.cuda.synchronize()
+        peak_delta = torch.cuda.max_memory_allocated() - allocated_before
+
+        self.assertEqual(output.shape, (a_shape[0], b_shape[1]))
+        self.assertLess(peak_delta, a.nbytes + b.nbytes)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(["gfx950"])
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(True)
+    def test_gfx942_tf32_rounding_is_noop_on_gfx950(self, device):
+        size = 128
+        input_value = 1.0 + 3.0 * 2.0**-12
+        a = torch.full((size, size), input_value, device=device).t()
+        identity = torch.eye(size, device=device)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with blas_library_context("cublaslt"):
+            output = torch.mm(a, identity)
+        self.assertEqual(output, a, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @runOnRocmArch(["gfx942"])
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(True)
+    def test_gfx942_tf32_rounding_with_fp32_precision_api(self, device):
+        size = 128
+        input_value = 1.0 + 3.0 * 2.0**-12
+        rounded_value = 1.0 + 2.0**-10
+        a = torch.full((size, size), input_value, device=device).t()
+        identity = torch.eye(size, device=device)
+
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        with blas_library_context("cublaslt"):
+            outputs = _tf32_rounding_outputs(a, identity)
+
+        expected = torch.full_like(a, rounded_value)
+        for name, output in outputs.items():
+            with self.subTest(operation=name):
+                self.assertEqual(output, expected.expand_as(output), atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    @serialTest()
+    @_isolated_gfx942_tf32_rounding(None)
+    def test_tf32_fp32_precision_api_with_rounding_disabled(self, device):
+        size = 128
+        input_value = 1.0 + 3.0 * 2.0**-12
+        a = torch.full((size, size), input_value, device=device).t()
+        identity = torch.eye(size, device=device)
+
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        outputs = _tf32_rounding_outputs(a, identity)
+
+        for name, output in outputs.items():
+            with self.subTest(operation=name):
+                self.assertEqual(output, a.expand_as(output), atol=1e-3, rtol=0)
 
     @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
     def test_legacy_cublas_honors_sm_carveout(self, device):
