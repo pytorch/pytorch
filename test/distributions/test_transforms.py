@@ -37,7 +37,13 @@ from torch.distributions.transforms import (
     Transform,
 )
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def get_transforms(cache_size):
@@ -202,94 +208,178 @@ ALL_TRANSFORMS = (
 )
 
 
-@pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_inv_inv(transform, ids=transform_id):
-    if transform.inv.inv is not transform:
-        raise AssertionError("Expected transform.inv.inv is transform")
+class TestTransforms(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("transform", ALL_TRANSFORMS)
+    def test_inv_inv(self, transform):
+        if transform.inv.inv is not transform:
+            raise AssertionError("Expected transform.inv.inv is transform")
 
-@pytest.mark.parametrize("x", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-@pytest.mark.parametrize("y", TRANSFORMS_CACHE_INACTIVE, ids=transform_id)
-def test_equality(x, y):
-    if x is y:
-        if x != y:
-            raise AssertionError("Expected x == y when x is y")
-    else:
-        if x == y:
-            raise AssertionError("Expected x != y when x is not y")
-    if identity_transform != identity_transform.inv:
-        raise AssertionError("Expected identity_transform == identity_transform.inv")
+    @parametrize("x", TRANSFORMS_CACHE_INACTIVE)
+    @parametrize("y", TRANSFORMS_CACHE_INACTIVE)
+    def test_equality(self, x, y):
+        if x is y:
+            if x != y:
+                raise AssertionError("Expected x == y when x is y")
+        else:
+            if x == y:
+                raise AssertionError("Expected x != y when x is not y")
+        if identity_transform != identity_transform.inv:
+            raise AssertionError(
+                "Expected identity_transform == identity_transform.inv"
+            )
 
-
-@pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_with_cache(transform):
-    if transform._cache_size == 0:
-        transform = transform.with_cache(1)
-    if transform._cache_size != 1:
-        raise AssertionError(f"Expected cache_size 1, got {transform._cache_size}")
-    x = generate_data(transform).requires_grad_()
-    try:
-        y = transform(x)
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-    y2 = transform(x)
-    if y2 is not y:
-        raise AssertionError("Expected y2 is y with caching")
-
-
-@pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-@pytest.mark.parametrize("test_cached", [True, False])
-def test_forward_inverse(transform, test_cached):
-    x = generate_data(transform).requires_grad_()
-    if not transform.domain.check(x).all():
-        raise AssertionError("Input data are not valid for domain")
-    try:
-        y = transform(x)
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-    if y.shape != transform.forward_shape(x.shape):
-        raise AssertionError(
-            f"Expected y.shape {transform.forward_shape(x.shape)}, got {y.shape}"
-        )
-    if test_cached:
-        x2 = transform.inv(y)  # should be implemented at least by caching
-    else:
+    @parametrize("transform", ALL_TRANSFORMS)
+    def test_with_cache(self, transform):
+        if transform._cache_size == 0:
+            transform = transform.with_cache(1)
+        if transform._cache_size != 1:
+            raise AssertionError(f"Expected cache_size 1, got {transform._cache_size}")
+        x = generate_data(transform).requires_grad_()
         try:
-            x2 = transform.inv(y.clone())  # bypass cache
+            y = transform(x)
         except NotImplementedError:
-            pytest.skip("Not implemented.")
-    if x2.shape != transform.inverse_shape(y.shape):
-        raise AssertionError(
-            f"Expected x2.shape {transform.inverse_shape(y.shape)}, got {x2.shape}"
-        )
-    y2 = transform(x2)
-    if transform.bijective:
-        # verify function inverse
-        if not torch.allclose(x2, x, atol=1e-4, equal_nan=True):
+            self.skipTest("Not implemented.")
+        y2 = transform(x)
+        if y2 is not y:
+            raise AssertionError("Expected y2 is y with caching")
+
+    @parametrize("transform", ALL_TRANSFORMS)
+    @parametrize("test_cached", [True, False])
+    def test_forward_inverse(self, transform, test_cached):
+        x = generate_data(transform).requires_grad_()
+        if not transform.domain.check(x).all():
+            raise AssertionError("Input data are not valid for domain")
+        try:
+            y = transform(x)
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
+        if y.shape != transform.forward_shape(x.shape):
             raise AssertionError(
-                "\n".join(
-                    [
-                        f"{transform} t.inv(t(-)) error",
-                        f"x = {x}",
-                        f"y = t(x) = {y}",
-                        f"x2 = t.inv(y) = {x2}",
-                    ]
-                )
+                f"Expected y.shape {transform.forward_shape(x.shape)}, got {y.shape}"
             )
-    else:
-        # verify weaker function pseudo-inverse
-        if not torch.allclose(y2, y, atol=1e-4, equal_nan=True):
+        if test_cached:
+            x2 = transform.inv(y)  # should be implemented at least by caching
+        else:
+            try:
+                x2 = transform.inv(y.clone())  # bypass cache
+            except NotImplementedError:
+                self.skipTest("Not implemented.")
+        if x2.shape != transform.inverse_shape(y.shape):
             raise AssertionError(
-                "\n".join(
-                    [
-                        f"{transform} t(t.inv(t(-))) error",
-                        f"x = {x}",
-                        f"y = t(x) = {y}",
-                        f"x2 = t.inv(y) = {x2}",
-                        f"y2 = t(x2) = {y2}",
-                    ]
-                )
+                f"Expected x2.shape {transform.inverse_shape(y.shape)}, got {x2.shape}"
             )
+        y2 = transform(x2)
+        if transform.bijective:
+            # verify function inverse
+            if not torch.allclose(x2, x, atol=1e-4, equal_nan=True):
+                raise AssertionError(
+                    "\n".join(
+                        [
+                            f"{transform} t.inv(t(-)) error",
+                            f"x = {x}",
+                            f"y = t(x) = {y}",
+                            f"x2 = t.inv(y) = {x2}",
+                        ]
+                    )
+                )
+        else:
+            # verify weaker function pseudo-inverse
+            if not torch.allclose(y2, y, atol=1e-4, equal_nan=True):
+                raise AssertionError(
+                    "\n".join(
+                        [
+                            f"{transform} t(t.inv(t(-))) error",
+                            f"x = {x}",
+                            f"y = t(x) = {y}",
+                            f"x2 = t.inv(y) = {x2}",
+                            f"y2 = t(x2) = {y2}",
+                        ]
+                    )
+                )
+
+    @parametrize("transform", ALL_TRANSFORMS)
+    def test_jacobian(self, transform):
+        x = generate_data(transform)
+        try:
+            y = transform(x)
+            actual = transform.log_abs_det_jacobian(x, y)
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
+        # Test shape
+        target_shape = x.shape[: x.dim() - transform.domain.event_dim]
+        if actual.shape != target_shape:
+            raise AssertionError(f"Expected shape {target_shape}, got {actual.shape}")
+
+        # Expand if required
+        transform = reshape_transform(transform, x.shape)
+        ndims = len(x.shape)
+        event_dim = ndims - transform.domain.event_dim
+        x_ = x.view((-1,) + x.shape[event_dim:])
+        n = x_.shape[0]
+        # Reshape to squash batch dims to a single batch dim
+        transform = reshape_transform(transform, x_.shape)
+
+        # 1. Transforms with unit jacobian
+        if isinstance(transform, ReshapeTransform) or isinstance(
+            transform.inv, ReshapeTransform
+        ):
+            expected = x.new_zeros(x.shape[x.dim() - transform.domain.event_dim])
+        # 2. Transforms with 0 off-diagonal elements
+        elif transform.domain.event_dim == 0:
+            jac = jacobian(transform, x_)
+            # assert off-diagonal elements are zero
+            if not torch.allclose(jac, jac.diagonal().diag_embed()):
+                raise AssertionError("Off-diagonal elements are not zero")
+            expected = jac.diagonal().abs().log().reshape(x.shape)
+        # 3. Transforms with non-0 off-diagonal elements
+        else:
+            if isinstance(transform, CorrCholeskyTransform):
+                jac = jacobian(lambda x: tril_matrix_to_vec(transform(x), diag=-1), x_)
+            elif isinstance(transform.inv, CorrCholeskyTransform):
+                jac = jacobian(
+                    lambda x: transform(vec_to_tril_matrix(x, diag=-1)),
+                    tril_matrix_to_vec(x_, diag=-1),
+                )
+            elif isinstance(transform, StickBreakingTransform):
+                jac = jacobian(lambda x: transform(x)[..., :-1], x_)
+            else:
+                jac = jacobian(transform, x_)
+
+            # Note that jacobian will have shape (batch_dims, y_event_dims, batch_dims, x_event_dims)
+            # However, batches are independent so this can be converted into a (batch_dims, event_dims, event_dims)
+            # after reshaping the event dims (see above) to give a batched square matrix whose determinant
+            # can be computed.
+            gather_idx_shape = list(jac.shape)
+            gather_idx_shape[-2] = 1
+            gather_idxs = (
+                torch.arange(n)
+                .reshape((n,) + (1,) * (len(jac.shape) - 1))
+                .expand(gather_idx_shape)
+            )
+            jac = jac.gather(-2, gather_idxs).squeeze(-2)
+            out_ndims = jac.shape[-2]
+            jac = jac[
+                ..., :out_ndims
+            ]  # Remove extra zero-valued dims (for inverse stick-breaking).
+            expected = torch.slogdet(jac).logabsdet
+
+        if not torch.allclose(actual, expected, atol=1e-5):
+            raise AssertionError("Jacobian computation does not match expected")
+
+    @parametrize("transform", ALL_TRANSFORMS)
+    def test_transform_sign(self, transform: Transform):
+        try:
+            sign = transform.sign
+        except NotImplementedError:
+            self.skipTest("Not implemented.")
+
+        x = generate_data(transform).requires_grad_()
+        y = transform(x).sum()
+        (derivatives,) = grad(y, [x])
+        if not torch.less(torch.as_tensor(0.0), derivatives * sign).all():
+            raise AssertionError("Transform sign test failed")
 
 
 def test_compose_transform_shapes():
@@ -424,76 +514,6 @@ def test_jit_jacobian(transform):
     x = generate_data(transform).requires_grad_()
     if not torch.allclose(f(x), traced_f(x), atol=1e-5, equal_nan=True):
         raise AssertionError("JIT jacobian output does not match")
-
-
-@pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_jacobian(transform):
-    x = generate_data(transform)
-    try:
-        y = transform(x)
-        actual = transform.log_abs_det_jacobian(x, y)
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-    # Test shape
-    target_shape = x.shape[: x.dim() - transform.domain.event_dim]
-    if actual.shape != target_shape:
-        raise AssertionError(f"Expected shape {target_shape}, got {actual.shape}")
-
-    # Expand if required
-    transform = reshape_transform(transform, x.shape)
-    ndims = len(x.shape)
-    event_dim = ndims - transform.domain.event_dim
-    x_ = x.view((-1,) + x.shape[event_dim:])
-    n = x_.shape[0]
-    # Reshape to squash batch dims to a single batch dim
-    transform = reshape_transform(transform, x_.shape)
-
-    # 1. Transforms with unit jacobian
-    if isinstance(transform, ReshapeTransform) or isinstance(
-        transform.inv, ReshapeTransform
-    ):
-        expected = x.new_zeros(x.shape[x.dim() - transform.domain.event_dim])
-    # 2. Transforms with 0 off-diagonal elements
-    elif transform.domain.event_dim == 0:
-        jac = jacobian(transform, x_)
-        # assert off-diagonal elements are zero
-        if not torch.allclose(jac, jac.diagonal().diag_embed()):
-            raise AssertionError("Off-diagonal elements are not zero")
-        expected = jac.diagonal().abs().log().reshape(x.shape)
-    # 3. Transforms with non-0 off-diagonal elements
-    else:
-        if isinstance(transform, CorrCholeskyTransform):
-            jac = jacobian(lambda x: tril_matrix_to_vec(transform(x), diag=-1), x_)
-        elif isinstance(transform.inv, CorrCholeskyTransform):
-            jac = jacobian(
-                lambda x: transform(vec_to_tril_matrix(x, diag=-1)),
-                tril_matrix_to_vec(x_, diag=-1),
-            )
-        elif isinstance(transform, StickBreakingTransform):
-            jac = jacobian(lambda x: transform(x)[..., :-1], x_)
-        else:
-            jac = jacobian(transform, x_)
-
-        # Note that jacobian will have shape (batch_dims, y_event_dims, batch_dims, x_event_dims)
-        # However, batches are independent so this can be converted into a (batch_dims, event_dims, event_dims)
-        # after reshaping the event dims (see above) to give a batched square matrix whose determinant
-        # can be computed.
-        gather_idx_shape = list(jac.shape)
-        gather_idx_shape[-2] = 1
-        gather_idxs = (
-            torch.arange(n)
-            .reshape((n,) + (1,) * (len(jac.shape) - 1))
-            .expand(gather_idx_shape)
-        )
-        jac = jac.gather(-2, gather_idxs).squeeze(-2)
-        out_ndims = jac.shape[-2]
-        jac = jac[
-            ..., :out_ndims
-        ]  # Remove extra zero-valued dims (for inverse stick-breaking).
-        expected = torch.slogdet(jac).logabsdet
-
-    if not torch.allclose(actual, expected, atol=1e-5):
-        raise AssertionError("Jacobian computation does not match expected")
 
 
 @pytest.mark.parametrize(
@@ -643,18 +663,7 @@ def test_save_load_transform():
         raise AssertionError("Loaded distribution log_prob does not match original")
 
 
-@pytest.mark.parametrize("transform", ALL_TRANSFORMS, ids=transform_id)
-def test_transform_sign(transform: Transform):
-    try:
-        sign = transform.sign
-    except NotImplementedError:
-        pytest.skip("Not implemented.")
-
-    x = generate_data(transform).requires_grad_()
-    y = transform(x).sum()
-    (derivatives,) = grad(y, [x])
-    if not torch.less(torch.as_tensor(0.0), derivatives * sign).all():
-        raise AssertionError("Transform sign test failed")
+instantiate_parametrized_tests(TestTransforms)
 
 
 if __name__ == "__main__":
