@@ -31,6 +31,7 @@ from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._custom_class_base import CustomClassBase
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._guards import compile_context, CompileContext
 from torch._higher_order_ops.wrap import inductor_compiled_code
@@ -1101,34 +1102,13 @@ class CompiledAOTI(OutputCode):
             self.current_callable = current_callable
             return
 
-        if self.device_type.startswith("cuda"):
-            current_callable = (
-                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
-                    current_callable,
-                    1,
-                    self.device_type,
-                    "",
-                    True,
-                ).run  # type: ignore[attr-defined]
-            )  # type: ignore[attr-defined]
-        elif self.device_type.startswith("xpu"):
-            current_callable = (
-                torch._C._aoti.AOTIModelContainerRunnerXpu(  # type: ignore[call-arg]
-                    current_callable,
-                    1,
-                    self.device_type,
-                    "",
-                ).run  # type: ignore[attr-defined]
-            )  # type: ignore[attr-defined]
-        elif self.device_type == "cpu":
-            current_callable = (
-                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
-                    current_callable, 1
-                ).run  # type: ignore[attr-defined]
-            )  # type: ignore[attr-defined]
-        else:
-            raise RuntimeError(f"unsupported device type {self.device_type}")
-        self.current_callable = current_callable
+        device_interface = get_interface_for_device(torch.device(self.device_type))
+        try:
+            self.current_callable = device_interface.load_aoti_callable(
+                current_callable, self.device_type
+            )
+        except NotImplementedError as exc:
+            raise RuntimeError(f"unsupported device type {self.device_type}") from exc
         self._boxed_call = True
         for file in self._cached_files:
             if not os.path.exists(file):
