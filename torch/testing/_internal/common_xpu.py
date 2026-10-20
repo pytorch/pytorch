@@ -63,7 +63,7 @@ def get_xpu_codename(device: torch.device | None = None) -> XPUCodename | None:
 
 
 @functools.lru_cache(1)
-def get_xpu_arch(device: torch.device | None = None) -> XPUArch | None:
+def get_xpu_arch(device: torch.device | None = None) -> XPUArch:
     codename = get_xpu_codename(device)
     return _CODENAME_TO_ARCH.get(codename, XPUArch.Unknown)
 
