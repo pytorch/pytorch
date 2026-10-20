@@ -12,8 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import TritonUnavailableError
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch.testing._internal.common_cuda import evaluate_gfx_arch_within, SM70OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -321,19 +319,6 @@ def _require_device_triton(device, *, xfail=False):
     reason = None
     if not has_triton():
         reason = "Triton not available"
-    else:
-        try:
-            device_interface = get_interface_for_device(torch.device(device).type)
-        except NotImplementedError:
-            reason = f"Triton not available for {device}"
-        else:
-            if not device_interface.is_triton_capable(device):
-                reason = f"Triton not available for {device}"
-            else:
-                try:
-                    device_interface.raise_if_triton_unavailable(device)
-                except TritonUnavailableError as exc:
-                    reason = str(exc)
 
     if reason is None:
         return
