@@ -12306,6 +12306,9 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
                # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+               DecorateInfo(unittest.skip("XPU complex arange is unsupported; see intel/torch-xpu-ops#5668"),
+                            'TestDecomp', 'test_comprehensive',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                             device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
