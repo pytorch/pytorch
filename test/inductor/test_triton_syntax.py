@@ -96,7 +96,7 @@ class TestTritonSyntacticallyValid(TestCase):
 instantiate_device_type_tests(
     TestTritonSyntacticallyValid,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 # The built-in device test bases do not include MTIA.
