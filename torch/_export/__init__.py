@@ -183,7 +183,8 @@ def _init_aoti_runner_registry() -> None:
 
 def _get_aoti_runner(so_path: str, num_threads: int, device_type: str):
     _init_aoti_runner_registry()
-    runner_entry, takes_device = _AOTI_RUNNER_REGISTER.get(device_type, (None, False))
+    device = torch.device(device_type)
+    runner_entry, takes_device = _AOTI_RUNNER_REGISTER.get(device.type, (None, False))
     runner_cls = (
         getattr(torch._C._aoti, runner_entry, None)
         if isinstance(runner_entry, str)
