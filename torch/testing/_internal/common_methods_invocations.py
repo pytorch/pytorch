@@ -4984,7 +4984,7 @@ def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
                        requires_grad=requires_grad, low=-5, high=5)
     return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
-def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True, **kwargs):
+def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
     batch_options: list[list[int]] = [
         [],  # no batch
@@ -5011,13 +5011,8 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
     yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(4, 2), create_tensor(4))
 
     # in_features == 0, used to abort the process on MPS, see https://github.com/pytorch/pytorch/issues/190050
-    # Callers that forward these to gradcheck forward-mode AD (e.g.
-    # linear_cross_entropy) opt out via include_empty=False: gradcheck collapses
-    # its tolerance to 0 for zero-element inputs, see
-    # https://github.com/pytorch/pytorch/issues/190436
-    if include_empty:
-        yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
-        yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0))
+    yield SampleInput(create_tensor(3, 4, 0), create_tensor(5, 0), create_tensor(5))
 
     # 1D weight contracts away the last input dim (out_features == 1 with the
     # trailing output dim squeezed); its backward used to SIGABRT on MPS, see
@@ -5030,11 +5025,10 @@ def sample_inputs_linear(self, device, dtype, requires_grad, include_empty=True,
         yield SampleInput(create_tensor(8, 3), create_tensor(3))
         yield SampleInput(create_tensor(2, 3, 4), create_tensor(4))
         yield SampleInput(create_tensor(2, 1, 2, 1, 2), create_tensor(2))
-        if include_empty:
-            # An empty reduction dim and an empty batch, where the shortcuts taken for
-            # zero-element tensors still have to drop the 1D weight's output dim.
-            yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
-            yield SampleInput(create_tensor(0, 8), create_tensor(8))
+        # An empty reduction dim and an empty batch, where the shortcuts taken for
+        # zero-element tensors still have to drop the 1D weight's output dim.
+        yield SampleInput(create_tensor(3, 4, 0), create_tensor(0))
+        yield SampleInput(create_tensor(0, 8), create_tensor(8))
 
 def sample_inputs_bilinear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4, 5], [8, 8, 8]]
@@ -7360,7 +7354,7 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, *,
         ]
 
     for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
-        for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad, include_empty=False):
+        for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad):
             linear_input = linear_sample.input
             if len(linear_sample.args) == 1:
                 linear_weight = linear_sample.args[0]
