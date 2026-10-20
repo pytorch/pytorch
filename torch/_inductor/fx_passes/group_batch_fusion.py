@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import logging
 import operator
 from collections import OrderedDict
@@ -552,6 +553,8 @@ class BatchLinearLHSFusion(BatchFusion):
                     )
                 ):
                     return None
+            if _has_layout_sensitive_user(node):
+                return None
             bias_dim = None if bias_tensor is None else bias_tensor.ndim  # type: ignore[union-attr]
             group_key = ("batch_linear_lhs", bias_dim, input)
         else:
@@ -630,6 +633,196 @@ class BatchLinearLHSFusion(BatchFusion):
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
         counters["inductor"]["batch_linear_lhs"] += 1
+
+
+_OPERATOR_TO_ATEN = {
+    operator.add: torch.ops.aten.add,
+    operator.sub: torch.ops.aten.sub,
+    operator.mul: torch.ops.aten.mul,
+    operator.truediv: torch.ops.aten.div,
+    operator.neg: torch.ops.aten.neg,
+    operator.pow: torch.ops.aten.pow,
+    operator.matmul: torch.ops.aten.matmul,
+}
+
+
+@functools.lru_cache(None)
+def _aten_op_overloads(name):
+    packet = getattr(torch.ops.aten, name, None)
+    return tuple(packet.op_overloads()) if packet is not None else ()
+
+
+def _layout_target_overloads(target):
+    if isinstance(target, torch._ops.OpOverload):
+        return (target,)
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        return tuple(target.op_overloads())
+    if isinstance(target, str):
+        if not hasattr(torch.Tensor, target) and target not in ("sym_size",):
+            return ()
+        return _aten_op_overloads(target)
+    name = torch.jit._builtins._find_builtin(target)
+    if name is None or not name.startswith("aten::"):
+        return ()
+    return _aten_op_overloads(name.removeprefix("aten::"))
+
+
+def _layout_user_overloads(user):
+    target = user.target
+    args = user.args
+    kwargs = dict(user.kwargs)
+    if target in (torch.nn.functional.relu, torch.nn.functional.silu):
+        if get_arg_value(user, 1, "inplace") not in (None, False):
+            return ()
+        args = args[:1]
+        kwargs.pop("inplace", None)
+        target = (
+            torch.ops.aten.relu
+            if target is torch.nn.functional.relu
+            else torch.ops.aten.silu
+        )
+    elif target is torch.nn.functional.softmax:
+        if get_arg_value(user, 1, "dim") is None:
+            return ()
+        args = (*args[:2], *args[3:])
+        kwargs.pop("_stacklevel", None)
+        target = torch.ops.aten.softmax
+    elif target is torch.nn.functional.layer_norm:
+        target = torch.ops.aten.layer_norm
+    elif target in (torch.nn.functional.sigmoid, torch.nn.functional.tanh):
+        target = (
+            torch.ops.aten.sigmoid
+            if target is torch.nn.functional.sigmoid
+            else torch.ops.aten.tanh
+        )
+    elif target in _OPERATOR_TO_ATEN:
+        target = _OPERATOR_TO_ATEN[target]
+    candidates = []
+    for op in _layout_target_overloads(target):
+        schema = op._schema
+        positional = [arg for arg in schema.arguments if not arg.kwarg_only]
+        if len(args) > len(positional):
+            continue
+        supplied = OrderedSet(arg.name for arg in positional[: len(args)])
+        candidate_kwargs = dict(kwargs)
+        if "input" in candidate_kwargs and any(
+            arg.name == "self" for arg in schema.arguments
+        ):
+            candidate_kwargs["self"] = candidate_kwargs.pop("input")
+        if supplied.intersection(candidate_kwargs):
+            continue
+        supplied.update(candidate_kwargs)
+        if supplied.difference(arg.name for arg in schema.arguments):
+            continue
+        if any(
+            arg.name not in supplied and not arg.has_default_value()
+            for arg in schema.arguments
+        ):
+            continue
+        candidates.append(op)
+    return candidates
+
+
+_LAYOUT_SENSITIVE_OPS = OrderedSet(
+    [
+        "view",
+        "_unsafe_view",
+        "view_as",
+        "view_as_complex",
+        "as_strided",
+        "as_strided_copy",
+        "_reshape_alias",
+        "unsafe_chunk",
+        "unsafe_split",
+        "unsafe_split_with_sizes",
+        "stride",
+        "sym_stride",
+        "storage_offset",
+        "sym_storage_offset",
+        "is_contiguous",
+        "sym_is_contiguous",
+        "_has_same_storage_numel",
+        "is_set_to",
+        "clone",
+    ]
+)
+
+_CONVERSION_METHODS = OrderedSet(
+    [
+        "float",
+        "double",
+        "half",
+        "bfloat16",
+        "long",
+        "int",
+        "short",
+        "char",
+        "byte",
+        "bool",
+        "type",
+        "type_as",
+        "to",
+        "cpu",
+        "cuda",
+        "xpu",
+    ]
+)
+
+_LAYOUT_INDEPENDENT_OPS = OrderedSet(
+    [
+        "cat",
+        "stack",
+        "mm",
+        "bmm",
+        "matmul",
+        "linear",
+        "sum",
+        "mean",
+        "softmax",
+        "_softmax",
+        "layer_norm",
+        "native_layer_norm",
+        "rms_norm",
+        "size",
+        "sym_size",
+        "dim",
+        "numel",
+    ]
+)
+
+
+def _direct_layout_user_is_sensitive(user: torch.fx.Node) -> bool:
+    if user.op == "output":
+        return True
+    if user.op not in ("call_method", "call_function"):
+        return True
+    if user.target is operator.getitem or (
+        user.op == "call_method" and user.target in _CONVERSION_METHODS
+    ):
+        return True
+    ops = _layout_user_overloads(user)
+    if not ops or any(op._schema.is_mutable for op in ops):
+        return True
+    if any(op.namespace != "aten" for op in ops):
+        return True
+    names = OrderedSet(op.overloadpacket.__name__ for op in ops)
+    if names == OrderedSet(["contiguous"]):
+        return get_arg_value(user, 1, "memory_format") not in (
+            None,
+            torch.contiguous_format,
+        )
+    if names.intersection(_LAYOUT_SENSITIVE_OPS) or any(
+        op.is_view or torch.Tag.maybe_aliasing_or_mutating in op.tags for op in ops
+    ):
+        return True
+    return not (
+        any(torch.Tag.pointwise in op.tags for op in ops)
+        or all(op.overloadpacket.__name__ in _LAYOUT_INDEPENDENT_OPS for op in ops)
+    )
+
+
+def _has_layout_sensitive_user(node: torch.fx.Node) -> bool:
+    return any(_direct_layout_user_is_sensitive(user) for user in node.users)
 
 
 # Poor person's check for if a node in the graph mutates its input.
