@@ -22975,6 +22975,76 @@ if RUN_GPU:
             torch.testing.assert_close(result[0], expected[0])
             torch.testing.assert_close(result[1], expected[1])
 
+        def test_cross_entropy_backward_has_no_class_reduction(self):
+            # nll_loss_backward's one-hot gradient is summed over the classes by
+            # log_softmax_backward; that sum must fold to the selected term.
+            # bf16 logits are upcast inside log_softmax_backward, which sums
+            # the upcast one-hot gradient.
+            def fn(x, labels, weight, upcast):
+                loss = torch.nn.functional.cross_entropy(
+                    x.float() if upcast else x, labels, weight=weight, ignore_index=-100
+                )
+                return torch.autograd.grad(loss, x)[0]
+
+            labels = torch.randint(0, 1000, (64,), device=GPU_TYPE)
+            labels[::5] = -100
+            for weight, dynamic, (dtype, upcast) in itertools.product(
+                (None, torch.rand(1000, device=GPU_TYPE)),
+                (False, True),
+                ((torch.float32, True), (torch.bfloat16, False)),
+            ):
+                if weight is not None:
+                    weight = weight.to(torch.float32 if upcast else dtype)
+                x = torch.randn(64, 1000, device=GPU_TYPE, dtype=dtype)
+                x.requires_grad_()
+                torch._dynamo.reset()
+                result, code = run_and_get_code(
+                    torch.compile(fn, dynamic=dynamic), x, labels, weight, upcast
+                )
+                self.assertEqual(result, fn(x, labels, weight, upcast))
+                (backward,) = [c for c in code if "log_softmax_backward" in c]
+                self.assertNotIn("triton_red_", backward)
+                self.assertNotIn("triton_per_", backward)
+
+            # Spatial cross-entropy (nll_loss2d_backward): the class dim is not
+            # the last one and classes is laid out as [C, 1, 1].
+            spatial_labels = torch.randint(0, 100, (4, 8, 8), device=GPU_TYPE)
+            spatial_labels[:, ::3] = -100
+            for dtype, upcast in ((torch.float32, True), (torch.bfloat16, False)):
+                x = torch.randn(4, 100, 8, 8, device=GPU_TYPE, dtype=dtype)
+                x.requires_grad_()
+                torch._dynamo.reset()
+                result, code = run_and_get_code(
+                    torch.compile(fn), x, spatial_labels, None, upcast
+                )
+                self.assertEqual(result, fn(x, spatial_labels, None, upcast))
+                (backward,) = [c for c in code if "log_softmax_backward" in c]
+                self.assertNotIn("triton_red_", backward)
+                self.assertNotIn("triton_per_", backward)
+
+            # With per-row losses and special upstream gradients, NaN and inf
+            # positions and signed zeros match eager.
+            def per_row(x, labels, grad):
+                loss = torch.nn.functional.cross_entropy(x, labels, reduction="none")
+                return torch.autograd.grad(loss, x, grad)[0]
+
+            x = torch.randn(8, 1000, device=GPU_TYPE, requires_grad=True)
+            labels = torch.randint(0, 1000, (8,), device=GPU_TYPE)
+            labels[1] = -100
+            grad = torch.tensor(
+                [1.0, 1.0, -0.0, 0.0, float("inf"), -float("inf"), float("nan"), 2.0],
+                device=GPU_TYPE,
+            )
+            torch._dynamo.reset()
+            result = torch.compile(per_row)(x, labels, grad)
+            expected = per_row(x, labels, grad)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.isnan(), expected.isnan())
+            self.assertEqual(result.isinf(), expected.isinf())
+            zeros = expected == 0
+            self.assertTrue((result[zeros] == 0).all())
+            self.assertEqual(result[zeros].signbit(), expected[zeros].signbit())
+
         def test_row_broadcast_pointwise_uses_2d_tiling(self):
             # Per-row operands of a pointwise kernel over long rows should be
             # loaded once per block row ([rows, cols] tiling) rather than
