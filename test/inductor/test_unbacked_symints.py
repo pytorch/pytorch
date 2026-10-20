@@ -7,8 +7,7 @@ import sympy
 
 import torch
 from torch._dynamo import config as dynamo_config
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.exc import InternalTorchDynamoError, TritonUnavailableError
+from torch._dynamo.exc import InternalTorchDynamoError
 from torch._inductor import config as inductor_config, ir
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.sizevars import SizeVarAllocator
@@ -39,16 +38,6 @@ def requires_accelerator_triton(fn):
         if torch.device(device).type != "cpu":
             if not HAS_TRITON:
                 raise unittest.SkipTest("requires triton")
-            try:
-                interface = get_interface_for_device(torch.device(device).type)
-            except NotImplementedError as exc:
-                raise unittest.SkipTest(f"requires Triton for {device}") from exc
-            if not interface.is_triton_capable(device):
-                raise unittest.SkipTest(f"requires Triton support for {device}")
-            try:
-                interface.raise_if_triton_unavailable(device)
-            except TritonUnavailableError as exc:
-                raise unittest.SkipTest(str(exc)) from exc
         return fn(self, device, *args, **kwargs)
 
     return wrapper
