@@ -51,16 +51,24 @@ from torch._C._distributed_c10d import (
     GatherOptions,
     get_debug_level,
     HealthCheckHook,
+    HookOpName,  # noqa: F401
     NanCheckHook,
+    PostHookArgs,  # noqa: F401
     PrefixStore,
+    PreHookArgs,  # noqa: F401
     ProcessGroup,
+    PutOptions,  # noqa: F401
     ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    SignalOptions,  # noqa: F401
     Store,
+    WaitSignalOptions,  # noqa: F401
     Window,
+    WindowAccessType,  # noqa: F401
+    WindowAttr,  # noqa: F401
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
@@ -859,6 +867,7 @@ def _create_nccl2_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -887,6 +896,7 @@ def _create_nccl_lazy_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -3123,6 +3133,7 @@ def _new_process_group_helper(
                 # pyrefly: ignore [bad-argument-type]
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
+                dist_backend_opts.group_desc = group_desc
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
                 dist_backend_opts.process_group = pg
                 dist_backend_opts.split_from = split_from
