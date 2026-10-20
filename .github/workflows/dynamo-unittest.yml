@@ -30,6 +30,8 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
+  # No 3.11 leg: pull.yml's linux-jammy-py3.11-clang21 build already runs these tests
+  # (dynamo core tests in its default config, plus dynamo_wrapped). Keep in sync.
   dynamo-build:
     name: dynamo-build
     uses: ./.github/workflows/_linux-build.yml
@@ -37,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.15']
+        python-version: ['3.12', '3.13', '3.15']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
@@ -67,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13', '3.15']
+        python-version: ['3.12', '3.13', '3.15']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang21
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang21-${{ needs.get-label-type.outputs.ci-docker-hash }}
