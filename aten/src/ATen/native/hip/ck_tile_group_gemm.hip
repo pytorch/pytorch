@@ -195,8 +195,54 @@ namespace at::hip::detail {
 		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>
 			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t> {};
 
+		// configs for bf16 inputs on gfx942. 64 KB of LDS caps (M_Tile + N_Tile) * K_Tile at 32K elements, and the bf16
+		// 32x32x16 / 16x16x32 warp tiles are two 32x32x8 / 16x16x16 MFMAs, of which 16x16x32 is usually faster here.
+		// 192-wide tiles only build along a non-contiguous dim, and 192x256 with 32x32x16 warp tiles gives wrong results.
+		template <>
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::bf16_t> {
+			// Pads M, N and K with 1-element C vectors, so it accepts every shape.
+			using AnyShape = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true, false, 0, 1>;
+
+			// Forward (2D x 3D, 3D x 3D): row-major A, column-major B
+			struct Forward {
+				using N256 = CkTileGroupGemmConfig<256, 192, 64, 16, 16, 32, 2, 2, false, true, false>;
+				using N128 = N256;
+				using N64 = CkTileGroupGemmConfig<128, 192, 64, 32, 32, 16, 2, 2, false, true, false>;
+				using Aligned = N256;
+				using Unaligned = AnyShape;
+			};
+
+			// dX (2D x 3D, 3D x 3D): row-major A and B
+			struct GradInput {
+				// eight waves split 256x256 into 128 accumulators per lane
+				using N256 = CkTileGroupGemmConfig<256, 256, 32, 32, 32, 16, 2, 4, false, false, false>;
+				using N128 = CkTileGroupGemmConfig<128, 128, 64, 16, 16, 32, 2, 2, false, false, false>;
+				using N64 = CkTileGroupGemmConfig<128, 64, 64, 16, 16, 32, 2, 2, false, false, false>;
+				using Aligned = CkTileGroupGemmConfig<256, 128, 32, 16, 16, 32, 2, 2, false, true, false>;
+				using Unaligned = AnyShape;
+			};
+
+			// dW (2D x 2D): column-major A, row-major B, jagged K, so every config pads K
+			struct GradWeight {
+				using N256 = CkTileGroupGemmConfig<256, 128, 64, 16, 16, 32, 2, 2, true, true, true>;
+				using N128 = CkTileGroupGemmConfig<128, 128, 64, 16, 16, 32, 2, 2, false, false, true>;
+				using N64 = N256;
+				using Aligned = N256;
+				using Unaligned = AnyShape;
+			};
+
+			// Layouts none of the three cover, e.g. column-major A with jagged M or jagged N (3D x 2D)
+			using Fallback = AnyShape;
+		};
+
+		template <>
+		struct CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::half_t>
+			: CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::bf16_t> {};
+
 		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::bf16_t>>);
 		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX950, ck_tile::half_t>>);
+		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::bf16_t>>);
+		static_assert(GroupGemmConfigs<CkTileGroupGemmConfigs<amdgcn_target_id::GFX942, ck_tile::half_t>>);
 
 		// Host-side view of one launch, for picking a config. -1 marks the jagged dim.
 		struct GemmProblem {
@@ -581,6 +627,8 @@ namespace at::hip::detail {
 		};
 		if (at::detail::getCUDAHooks().isGPUArch({"gfx950"})) {
 			launch(std::integral_constant<amdgcn_target_id, amdgcn_target_id::GFX950>{});
+		} else if (at::detail::getCUDAHooks().isGPUArch({"gfx942"})) {
+			launch(std::integral_constant<amdgcn_target_id, amdgcn_target_id::GFX942>{});
 		} else {
 			TORCH_CHECK_NOT_IMPLEMENTED(false, "ck_tile group gemm: no tile configs for ", at::cuda::getCurrentDeviceProperties()->gcnArchName);
 		}
