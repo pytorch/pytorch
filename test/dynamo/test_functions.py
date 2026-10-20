@@ -42,9 +42,7 @@ from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -55,10 +53,6 @@ from torch.testing._internal.common_utils import (
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
-
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
 
 T = TypeVar("T")
 
@@ -6237,10 +6231,9 @@ class GraphModule(torch.nn.Module):
 
     def test_torch_get_device_module(self):
         def f1():
-            mod1 = torch.get_device_module()
-            mod2 = torch.get_device_module("cpu")
-            mod3 = torch.get_device_module(torch.device(device_type))
-            return mod1, mod2, mod3
+            mod1 = torch.get_device_module("cpu")
+            mod2 = torch.get_device_module(torch.device("cpu"))
+            return mod1, mod2
 
         self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
 
@@ -6265,25 +6258,26 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(Unsupported):
             f4()
 
+        # test for changing torch.get_device_module() (super rare case due to lru_cache)
         @torch.compile(backend="eager", fullgraph=True)
         def f5():
-            return torch.get_device_module()
+            return torch.get_device_module("cpu")
 
         f5()
-        old_get_device_module = torch.get_device_module
-        patched_module = types.SimpleNamespace(synchronize=lambda: None)
+        patched_module = types.SimpleNamespace()
 
-        def new_get_device_module(requested_device=None):
-            if requested_device:
-                return old_get_device_module(requested_device)
+        def new_get_device_module(_requested_device=None):
             return patched_module
 
+        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
+        # torch.get_device_module
         with patch("torch.get_device_module", new_get_device_module):
             self.assertIs(f5(), patched_module)
 
+        # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
         def f6():
-            mod = torch.get_device_module()
+            mod = torch.get_device_module("cpu")
             mod.synchronize()
             return mod
 
