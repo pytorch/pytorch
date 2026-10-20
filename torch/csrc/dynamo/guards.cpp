@@ -2059,7 +2059,8 @@ class LAMBDA_GUARD : public LeafGuard {
 
   // Only materialize f_locals as a dict for a lambda that reads them.
   bool check_nopybind(FrameLocalsMapping* map) override {
-    return check_nopybind(_takes_value ? reinterpret_cast<PyObject*>(map->to_dict()) : nullptr);
+    PyDictObject* f_locals = _takes_value ? map->to_dict() : nullptr;
+    return check_nopybind(reinterpret_cast<PyObject*>(f_locals));
   }
 
   GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
