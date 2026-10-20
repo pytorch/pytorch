@@ -1839,7 +1839,7 @@ PyLong_Export(PyObject *obj, PyLongExport *export_long)
         export_long->value = value;
         export_long->negative = 0;
         export_long->ndigits = 0;
-        export_long->digits = 0;
+        export_long->digits = _Py_NULL;
         export_long->_reserved = 0;
     }
     else {

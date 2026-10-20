@@ -68,7 +68,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_constant,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current, make_fx
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     ShapeEnv,
@@ -358,18 +358,10 @@ class Match:
         # pyrefly: ignore [bad-context-manager]
         with context:
             if trace_fn is None:
-                # Under compile-on-one-rank the graph stays rank-agnostic until
-                # post_grad's respecialize_current_device_nodes, so a replacement
-                # spliced in before then must not bake the compiling rank's device.
-                rank_agnostic = bool(
-                    self.graph.find_nodes(
-                        op="call_function", target=torch.ops.coor.current_device.default
-                    )
-                )
                 trace_fn = functools.partial(
                     fwd_only,
                     run_functional_passes=run_functional_passes,
-                    is_replacement=rank_agnostic,
+                    is_replacement=_is_rank_agnostic(self.graph),
                 )
 
             if should_propagate_eager_input_vals(self.nodes):
@@ -1127,6 +1119,18 @@ class _TargetArgsExpr(_TargetExpr):
                 if not is_match(child_match):
                     return child_match
                 m.extend(child_match)
+            elif _is_current_device_node(child_node) and isinstance(
+                pattern, torch.device
+            ):
+                # Under compile-on-one-rank, patterns are traced on the compiling
+                # rank's device while the graph keeps a rank-agnostic device node.
+                if not _coor_device_index_is_current(pattern):
+                    return FailedMatch(
+                        "constant_args: {} {!r}!={pattern!r}",
+                        node,
+                        child_node,
+                        pattern=pattern,
+                    )
             elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
                 return FailedMatch(
                     "constant_args: {} {!r}!={pattern!r}",
@@ -2212,7 +2216,10 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(
+                replace_trace_fn = trace_fn
+                if trace_fn is fwd_only and _is_rank_agnostic(match.graph):
+                    replace_trace_fn = functools.partial(fwd_only, is_replacement=True)
+                match.replacement_graph = replace_trace_fn(
                     replace_fn, args, get_decomp_fn=get_decomp_fn
                 )
                 match.kwargs = structured_match_kwargs
@@ -3143,6 +3150,25 @@ def fx_to_pattern(
     if not isinstance(pattern, PatternExpr):
         return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
+
+
+def _is_current_device_node(n: object) -> bool:
+    return (
+        isinstance(n, torch.fx.Node)
+        and n.op == "call_function"
+        and n.target is torch.ops.coor.current_device.default
+    )
+
+
+def _is_rank_agnostic(graph: torch.fx.Graph) -> bool:
+    # Under compile-on-one-rank the graph stays rank-agnostic until post_grad's
+    # respecialize_current_device_nodes, so a replacement spliced in before then
+    # must not bake the compiling rank's device.
+    return bool(
+        graph.find_nodes(
+            op="call_function", target=torch.ops.coor.current_device.default
+        )
+    )
 
 
 @torch.no_grad()
