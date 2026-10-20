@@ -514,6 +514,8 @@ def make_test_cls_with_patches(
                 new_fn = unittest.expectedFailure(new_fn)
             setattr(DummyTestClass, new_name, decorator(new_fn))
         # NB: Doesn't handle slots correctly, but whatever
+        elif name in ("setUpClass", "tearDownClass") and name in cls.__dict__:
+            setattr(DummyTestClass, name, cls.__dict__[name])
         elif not hasattr(DummyTestClass, name):
             setattr(DummyTestClass, name, getattr(cls, name))
 
