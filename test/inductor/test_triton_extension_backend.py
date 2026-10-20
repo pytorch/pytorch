@@ -347,7 +347,7 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TritonExtensionBackendAcceleratorTests,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
