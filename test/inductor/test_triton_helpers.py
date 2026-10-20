@@ -538,19 +538,19 @@ class MinimumMaximumTest(_TritonDeviceTestCase):
 instantiate_device_type_tests(
     ExclusiveScanDecoupledLookback64Test,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     SelectOneTest,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     Random4xTest,
     globals(),
-    except_for=("cpu", "hpu"),
+    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -558,7 +558,7 @@ if HAS_TRITON:
     instantiate_device_type_tests(
         MinimumMaximumTest,
         globals(),
-        except_for=("cpu", "hpu"),
+        except_for=("cpu",),
         allow_xpu=True,
     )
 
