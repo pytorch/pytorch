@@ -51,16 +51,24 @@ from torch._C._distributed_c10d import (
     GatherOptions,
     get_debug_level,
     HealthCheckHook,
+    HookOpName,  # noqa: F401
     NanCheckHook,
+    PostHookArgs,  # noqa: F401
     PrefixStore,
+    PreHookArgs,  # noqa: F401
     ProcessGroup,
+    PutOptions,  # noqa: F401
     ReconfigureOptions,
     ReduceOp,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
+    SignalOptions,  # noqa: F401
     Store,
+    WaitSignalOptions,  # noqa: F401
     Window,
+    WindowAccessType,  # noqa: F401
+    WindowAttr,  # noqa: F401
     Work,
 )
 from torch._utils_internal import set_pytorch_distributed_envs_from_justknobs
