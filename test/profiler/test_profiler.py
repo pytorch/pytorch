@@ -56,7 +56,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyOn,
     skipXPUIf,
 )
 from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
@@ -1266,6 +1265,26 @@ class TestProfiler(TestCase):
 import torch
 from torch.profiler import profile, ProfilerActivity
 p = profile(activities=[ProfilerActivity.CPU])
+p.start()
+torch.ones(10) * 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_memory_profiler_all_threads_left_running_at_exit(self):
+        # c10 still points at the profiler's memory reporter during static
+        # destruction.
+        script = """
+import torch
+from torch.profiler import profile, ProfilerActivity
+config = torch._C._profiler._ExperimentalConfig(profile_all_threads=True)
+p = profile(
+    activities=[ProfilerActivity.CPU],
+    profile_memory=True,
+    experimental_config=config,
+)
 p.start()
 torch.ones(10) * 2
 """
@@ -3121,10 +3140,20 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
         self.assertTrue(len(p2.events()) == 0)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
-    @onlyOn("cpu")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
-    def test_profile_memory_all_threads(self, device):
-        allocation_size = 123457
+    @parametrize("with_cpu_activity", [True, False])
+    @parametrize("profile_memory", [True, False])
+    def test_profile_memory_all_threads(
+        self, device, with_cpu_activity, profile_memory
+    ):
+        device_type = device.split(":")[0]
+        activities = get_profiler_activities(device_type)
+        if not with_cpu_activity:
+            activities.remove(ProfilerActivity.CPU)
+            if not activities:
+                self.skipTest("no device activity to profile without CPU")
+        # Multiple of the CUDA caching allocator's 512-byte rounding.
+        allocation_size = 512 * 241
 
         def allocate_on_worker():
             tensor = torch.empty(allocation_size, dtype=torch.uint8, device=device)
@@ -3134,16 +3163,18 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             profile_all_threads=True
         )
         with torch.profiler.profile(
-            activities=[ProfilerActivity.CPU],
-            profile_memory=True,
+            activities=activities,
+            profile_memory=profile_memory,
             experimental_config=experimental_config,
         ) as prof:
             worker = threading.Thread(target=allocate_on_worker)
             worker.start()
             worker.join()
 
-        memory_sizes = {event.cpu_memory_usage for event in prof.events()}
-        self.assertTrue({allocation_size, -allocation_size}.issubset(memory_sizes))
+        attr = "cpu_memory_usage" if device_type == "cpu" else "device_memory_usage"
+        memory_sizes = {getattr(event, attr) for event in prof.events()}
+        found = {allocation_size, -allocation_size}.issubset(memory_sizes)
+        self.assertEqual(found, profile_memory)
 
     @onlyAccelerator
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")

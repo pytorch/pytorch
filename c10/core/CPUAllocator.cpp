@@ -46,7 +46,9 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
 };
 
 ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
-  static ProfiledCPUMemoryReporter reporter_;
+  // We use a leaky singleton because allocations on other threads can still
+  // update it while static destructors run at exit.
+  static auto& reporter_ = *new ProfiledCPUMemoryReporter();
   return reporter_;
 }
 

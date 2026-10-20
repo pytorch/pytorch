@@ -376,7 +376,9 @@ class GlobalCallbackSession {
   std::condition_variable cv_; // guarded by mutex_
 };
 
-GlobalCallbackSession global_callback_session;
+// We use a leaky singleton because callbacks and memory reports on other
+// threads can still use the session while static destructors run at exit.
+GlobalCallbackSession& global_callback_session = *new GlobalCallbackSession();
 
 class GlobalMemoryReportingInfo final : public c10::MemoryReportingInfoBase {
  public:
@@ -409,7 +411,7 @@ class GlobalMemoryReportingInfo final : public c10::MemoryReportingInfoBase {
 
  private:
   template <typename F>
-  void report(F&& report_event) {
+  void report(const F& report_event) {
     if (!global_callback_session.isActive()) {
       return;
     }
@@ -427,7 +429,13 @@ class GlobalMemoryReportingInfo final : public c10::MemoryReportingInfoBase {
   }
 };
 
-GlobalMemoryReportingInfo global_memory_reporting_info;
+// We use a leaky singleton because a normal global is destroyed at exit. If a
+// profiler is left running, c10 still holds a pointer to it, so any free during
+// static destruction would call into a destroyed reporter.
+GlobalMemoryReportingInfo& globalMemoryReportingInfo() {
+  static auto& info = *new GlobalMemoryReportingInfo();
+  return info;
+}
 
 std::unique_ptr<at::ObserverContext> onFunctionEnterGlobal(
     const at::RecordFunction& fn) {
@@ -906,13 +914,13 @@ void enableProfiler(
         : pushTLSProfilingCallbacks(scopes);
   }
 
-  if (config.pushGlobalCallbacks() && config.profile_memory) {
+  if (config.experimental_config.profile_all_threads && config.profile_memory) {
     // Without CPU activity, pushGlobalProfilingCallbacks() did not activate
     // the session, so activate it for memory reporting.
     if (!has_cpu) {
       global_callback_session.activate(/*new_session=*/true);
     }
-    c10::setGlobalMemoryReportingInfo(&global_memory_reporting_info);
+    c10::setGlobalMemoryReportingInfo(&globalMemoryReportingInfo());
   }
 
   if (!config.global()) {

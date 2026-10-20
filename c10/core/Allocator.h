@@ -328,6 +328,9 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
   virtual bool memoryProfilingEnabled() const = 0;
 };
 
+// Registers a reporter for profiling memory allocations when not using
+// thread-local profilers. Allocators can still call the old reporter after you
+// unregister it, so never destroy it.
 C10_API void setGlobalMemoryReportingInfo(MemoryReportingInfoBase* reporter);
 C10_API bool memoryProfilingEnabled();
 C10_API void reportMemoryUsageToProfiler(

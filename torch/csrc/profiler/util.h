@@ -160,7 +160,9 @@ template <typename T>
 class GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
-    /* library-local */ static GlobalStateManager singleton_;
+    // We use a leaky singleton because global callbacks and memory reports on
+    // other threads can still read the state while static destructors run.
+    /* library-local */ static auto& singleton_ = *new GlobalStateManager();
     return singleton_;
   }
 
