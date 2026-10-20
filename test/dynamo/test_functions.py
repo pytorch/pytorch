@@ -42,7 +42,10 @@ from torch._dynamo.variables import ConstantVariable, SkipFunctionVariable
 from torch._dynamo.variables.functions import WrappedMethodDescriptorVariable
 from torch._dynamo.variables.lists import RangeVariable
 from torch.nn import functional as F
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -7311,11 +7314,10 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
 
 
-class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
-    """Tests CUDA-only device properties unavailable on other accelerators."""
+class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    hw_classification = HardwareClassification.CUDA
-
+    @onlyCUDA
     def test_get_device_properties_tensor_device(self, device):
         def fn(a):
             x = a.to(device)
@@ -7327,10 +7329,6 @@ class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
         torch._dynamo.testing.standard_test(
             self, fn=fn, nargs=1, expected_frame_count=1
         )
-
-
-class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_device_manual_seed(self, device):
         import torch._inductor.config as inductor_config
@@ -8930,7 +8928,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, expected)
 
 
-instantiate_device_type_tests(FunctionTestsCudaOnly, globals(), only_for="cuda")
 instantiate_device_type_tests(
     FunctionTestsDevice, globals(), except_for="cpu", allow_xpu=True
 )
