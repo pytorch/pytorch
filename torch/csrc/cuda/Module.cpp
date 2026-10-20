@@ -95,6 +95,31 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+// _cuda_exchangeDevice that also makes the device's primary context current.
+// Inductor's generated code enters a device with it, in place of
+// torch.cuda._DeviceGuard plus torch._C._cuda_setDevice.
+static PyObject* THCPModule_exchangeDeviceWithContext(
+    PyObject* self,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  if (device_index < 0) {
+    return THPUtils_packInt32(-1);
+  }
+
+  torch::utils::device_lazy_init(at::kCUDA);
+  auto current_device = c10::cuda::ExchangeDevice(device_index);
+  // If the device changed, ExchangeDevice called cudaSetDevice, which made the
+  // primary context current.
+  if (current_device == device_index) {
+    c10::cuda::MakePrimaryContextCurrent(device_index);
+  }
+
+  return THPUtils_packDeviceIndex(current_device);
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchangeDevice");
@@ -2492,6 +2517,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
     {"_cuda_exchangeDevice", THCPModule_exchangeDevice, METH_O, nullptr},
+    {"_cuda_exchangeDeviceWithContext",
+     THCPModule_exchangeDeviceWithContext,
+     METH_O,
+     nullptr},
     {"_cuda_maybeExchangeDevice",
      THCPModule_maybeExchangeDevice,
      METH_O,

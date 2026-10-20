@@ -47,6 +47,16 @@ C10_CUDA_API DeviceIndex ExchangeDevice(DeviceIndex device);
 
 C10_CUDA_API DeviceIndex MaybeExchangeDevice(DeviceIndex device);
 
+// Makes device's primary context current on this thread, as
+// SetDevice(device, /*force=*/true) does; device must already be the current
+// device. ExchangeDevice and SetDevice skip cudaSetDevice when the device
+// already matches, but a new thread (e.g. autograd's) can match and still have
+// no current context, which driver API calls such as Triton kernel launches
+// need. With the CUDA 12.8+ driver API, this first checks whether the context
+// is already current, which is much cheaper than forcing cudaSetDevice. On ROCm
+// it does nothing, because HIP has no separate contexts.
+C10_CUDA_API void MakePrimaryContextCurrent(DeviceIndex device);
+
 C10_CUDA_API void SetTargetDevice();
 
 enum class SyncDebugMode { L_DISABLED = 0, L_WARN, L_ERROR };
@@ -143,6 +153,7 @@ using c10::cuda::GetDevice;
 using c10::cuda::GetDeviceCount;
 using c10::cuda::getDeviceIndexWithPrimaryContext;
 using c10::cuda::hasPrimaryContext;
+using c10::cuda::MakePrimaryContextCurrent;
 using c10::cuda::MaybeExchangeDevice;
 using c10::cuda::MaybeSetDevice;
 using c10::cuda::memcpy_and_sync;
