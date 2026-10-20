@@ -12342,14 +12342,26 @@ op_db: list[OpInfo] = [
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-
-               # torch-xpu-ops/issues/4321
-               DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
-                            dtypes=(torch.int64,)),
+                # torch-xpu-ops/issues/4321
+                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
+                             dtypes=(torch.int64,)),
+               # XPU complex arange is unsupported. Tracked in intel/torch-xpu-ops#5668.
+               DecorateInfo(unittest.skip("XPU complex arange is unsupported; see intel/torch-xpu-ops#5668"),
+                            'TestDecomp', 'test_comprehensive',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_strided_layout',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
+            )),
            )),
     OpInfo('cauchy',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
