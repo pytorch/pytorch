@@ -3836,16 +3836,8 @@ class GuardBuilder(GuardBuilderBase):
         annotation = output_graph.fx_annotation
         code = [f"torch.fx.traceback._get_current_annotation() == {annotation!r}"]
         self._set_guard_export_info(guard, code)
-
-        get_annotation = torch.fx.traceback._get_current_annotation
-
-        # If == raises (e.g. multi-element tensor values), LAMBDA_GUARD treats it
-        # as a guard failure, so the frame recompiles.
-        def fn(x: object) -> bool:
-            return get_annotation() == annotation
-
-        self.guard_manager.root.add_lambda_guard(
-            fn, get_verbose_code_parts(code, guard), guard.user_stack
+        self.guard_manager.root.add_fx_annotation_guard(
+            annotation, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
     # Global state guard — not source-specific, checked separately at runtime.

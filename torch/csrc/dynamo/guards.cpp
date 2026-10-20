@@ -46,6 +46,10 @@
 #include <ATen/native/mtia/EmptyTensor.h>
 #endif
 
+#ifdef USE_MPS
+#include <ATen/mps/EmptyTensor.h>
+#endif
+
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -268,23 +272,21 @@ bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  // In terms of a sparse_csr tensor, it does not support strides information
-  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
-  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
-      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
-      v.layout() == c10::kSparseBsr;
-  if (!does_not_support_stride) {
-    sym_strides = v.sym_strides();
+  auto check_with_strides = [&](c10::SymIntArrayRef sym_strides) {
+    return check(
+        state,
+        v.key_set(),
+        v.dtype().toScalarType(),
+        v.device(),
+        v.sym_sizes(),
+        sym_strides,
+        v.requires_grad());
+  };
+  // Compressed sparse layouts don't support strides; compare against -1s.
+  if (at::sparse_csr::is_sparse_compressed(v)) {
+    return check_with_strides(std::vector<SymInt>(v.ndimension(), -1));
   }
-
-  return check(
-      state,
-      v.key_set(),
-      v.dtype().toScalarType(),
-      v.device(),
-      v.sym_sizes(),
-      sym_strides,
-      v.requires_grad());
+  return check_with_strides(v.sym_strides());
 }
 
 bool TensorCheck::check(
@@ -309,17 +311,13 @@ bool TensorCheck::check(
   const auto& sizes = sym_sizes;
   const auto& strides = sym_strides;
   for (auto i : c10::irange(ndim)) {
-    auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
-    if (known_size.has_value()) {
-      if (known_size.value() != sizes[i]) {
-        return false;
-      }
+    const auto& known_size = sizes_[i];
+    const auto& known_stride = strides_[i];
+    if (known_size && *known_size != sizes[i]) {
+      return false;
     }
-    if (known_stride.has_value()) {
-      if (known_stride.value() != strides[i]) {
-        return false;
-      }
+    if (known_stride && *known_stride != strides[i]) {
+      return false;
     }
   }
   return true;
@@ -669,6 +667,9 @@ struct AutocastState {
   std::array<bool, DEVICES.size()> enabled{};
   std::array<at::ScalarType, DEVICES.size()> dtype{};
   bool cache_enabled;
+  // Excluded autocast dispatch keys, equivalent to `enabled` but checkable in
+  // one mask compare.
+  c10::DispatchKeySet disabled_keys;
 
   AutocastState() {
     for (size_t i = 0; i < DEVICES.size(); i++) {
@@ -676,22 +677,26 @@ struct AutocastState {
       dtype[i] = at::autocast::get_autocast_dtype(DEVICES[i]);
     }
     cache_enabled = at::autocast::is_autocast_cache_enabled();
+    disabled_keys = c10::impl::tls_local_dispatch_key_set().excluded_ &
+        c10::autocast_dispatch_keyset;
   }
 
-  bool operator==(const AutocastState& o) const {
-    for (size_t i = 0; i < DEVICES.size(); i++) {
-      // If disabled audocast, autocast_dtype comparison not occur
-      if (enabled[i] == false && o.enabled[i] == false) {
-        continue;
-      }
-      if (enabled[i] != o.enabled[i] || dtype[i] != o.dtype[i]) {
+  // Compares all enabled flags at once via the TLS excluded set, and only
+  // fetches dtypes for enabled devices.
+  bool matches_current() const {
+    const auto& excluded{c10::impl::tls_local_dispatch_key_set().excluded_};
+    if ((excluded & c10::autocast_dispatch_keyset) != disabled_keys) {
+      return false;
+    }
+
+    for (size_t i{0}; i < DEVICES.size(); ++i) {
+      if (enabled[i] &&
+          dtype[i] != at::autocast::get_autocast_dtype(DEVICES[i])) {
         return false;
       }
     }
-    if (cache_enabled != o.cache_enabled) {
-      return false;
-    }
-    return true;
+
+    return cache_enabled == at::autocast::is_autocast_cache_enabled();
   }
 
   std::string reason(const AutocastState& o) const {
@@ -725,6 +730,16 @@ struct AutocastState {
     json_t.enabled = json_j.at("enabled");
     json_t.dtype = json_j.at("dtype");
     json_t.cache_enabled = json_j.at("cached_enabled");
+
+    // Rebuild disabled_keys from enabled
+    json_t.disabled_keys = c10::DispatchKeySet();
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (!json_t.enabled[i]) {
+        json_t.disabled_keys = json_t.disabled_keys.add(
+            at::autocast::get_autocast_dispatch_key_from_device_type(
+                DEVICES[i]));
+      }
+    }
   }
 };
 
@@ -746,8 +761,7 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _cuda_matmul_precision =
-        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    _cuda_matmul_precision = ctx.float32PrecisionCudaMatmul();
     _uses_legacy_allow_tf32 = false;
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
@@ -756,8 +770,7 @@ struct GlobalStateGuard {
   }
 
   bool cudaMatmulPrecisionMatches(const at::Context& ctx) const {
-    const auto precision =
-        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    const auto precision = ctx.float32PrecisionCudaMatmul();
     return _uses_legacy_allow_tf32
         ? precision != at::Float32Precision::BF16X9 &&
             (_cuda_matmul_precision == at::Float32Precision::TF32) ==
@@ -768,7 +781,7 @@ struct GlobalStateGuard {
   bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
-            _autocast_state == AutocastState() &&
+            _autocast_state.matches_current() &&
             _torch_function == torch::torch_function_enabled() &&
             _torch_function_all_disabled ==
                 at::impl::torch_function_all_disabled() &&
@@ -787,9 +800,8 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    AutocastState current_autocast;
-    if (!(_autocast_state == current_autocast))
-      os << _autocast_state.reason(current_autocast);
+    if (!_autocast_state.matches_current())
+      os << _autocast_state.reason(AutocastState{});
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())
@@ -1376,6 +1388,12 @@ static PyObject* _empty_strided_device(
         sizes, strides, dtype, c10::DeviceType::MTIA));
   }
 #endif
+#ifdef USE_MPS
+  else if constexpr (device_type == c10::DeviceType::MPS) {
+    return THPVariable_Wrap(at::detail::empty_strided_mps(
+        sizes, strides, dtype, c10::DeviceType::MPS));
+  }
+#endif
   else {
     TORCH_CHECK(
         false, "PyTorch compiled without support for the specified device.");
@@ -1424,6 +1442,40 @@ static PyObject* _empty_strided_mtia(
     PyObject* const* args,
     Py_ssize_t nargs) {
   return _empty_strided_device<c10::DeviceType::MTIA>(args, nargs);
+}
+
+static PyObject* _empty_strided_mps(
+    PyObject* /*self*/,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  return _empty_strided_device<c10::DeviceType::MPS>(args, nargs);
+}
+
+static PyObject* _alloc_from_pool(
+    PyObject* /*self*/,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  HANDLE_TH_ERRORS;
+  TORCH_CHECK(
+      nargs == 5, "expects 5 args: pool, offset_bytes, dtype, size, stride");
+
+  TORCH_CHECK(THPVariable_Check(args[0]));
+  const auto& pool{THPVariable_Unpack(args[0])};
+
+  auto offset_bytes{PyLong_AsLongLong(args[1])};
+  if (offset_bytes == -1 && PyErr_Occurred()) {
+    return nullptr;
+  }
+
+  TORCH_CHECK(THPDtype_Check(args[2]));
+  auto dtype{reinterpret_cast<THPDtype*>(args[2])->scalar_type};
+
+  auto sizes{unwrap_size_tuple(args[3])};
+  auto strides{unwrap_size_tuple(args[4])};
+
+  return THPVariable_Wrap(torch::inductor::_alloc_from_pool(
+      pool, offset_bytes, dtype, sizes, strides));
+  END_HANDLE_TH_ERRORS;
 }
 
 static PyObject* _reinterpret_tensor(
@@ -2451,6 +2503,70 @@ class DEFAULT_DEVICE : public LeafGuard {
   py::object _device;
 };
 
+// Checks torch.fx.traceback._get_current_annotation() == expected without
+// calling into Python. That function returns None when current_meta["custom"]
+// is missing or empty, and a copy of it otherwise.
+class FX_ANNOTATION : public LeafGuard {
+ public:
+  FX_ANNOTATION(
+      RootGuardManager* root_guard_manager,
+      py::object expected,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        // traceback.py rebinds current_meta, so keep its module dict instead.
+        _traceback_dict(
+            py::module::import("torch.fx.traceback").attr("__dict__")),
+        _expected(std::move(expected)) {}
+
+  template <typename T>
+  bool check_nopybind_template(T* value) { // borrowed ref
+    static PyObject* current_meta_str = THPUtils_internString("current_meta");
+    py::object meta = get_item(_traceback_dict.ptr(), current_meta_str);
+    if (!meta || !PyDict_Check(meta.ptr())) {
+      return false;
+    }
+
+    static PyObject* custom_str = THPUtils_internString("custom");
+    py::object custom_ref = get_item(meta.ptr(), custom_str);
+    PyObject* custom = custom_ref.ptr();
+    if (!custom || (PyDict_Check(custom) && !PyDict_GET_SIZE(custom))) {
+      return _expected.is_none();
+    }
+
+    // If == raises (e.g. multi-element tensor values), the guard fails, so the
+    // frame recompiles.
+    return py_equals(custom, _expected.ptr(), /*false_on_error=*/true);
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    return check_nopybind_template(value);
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    return check_nopybind_template(value);
+  }
+
+ private:
+  // Returns an owned reference, or an empty object if key is missing. Owning it
+  // keeps a free-threaded build safe when another thread rebinds current_meta
+  // or custom mid-check.
+  static py::object get_item(PyObject* dict, PyObject* key) {
+    PyObject* item = nullptr;
+    if (PyDict_GetItemRef(dict, key, &item) < 0) {
+      PyErr_Clear();
+    }
+    return py::reinterpret_steal<py::object>(item);
+  }
+
+  py::object _traceback_dict;
+  // The annotation at compile time: a dict, or None when there was none.
+  py::object _expected;
+};
+
 class GLOBAL_STATE : public LeafGuard {
  public:
   GLOBAL_STATE(
@@ -2679,8 +2795,11 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
   }
 
   bool _check() {
-    PyObject* current_level = PyObject_GetAttrString(
-        forward_ad_module.ptr(), "_current_level"); // new ref
+    // Interned once; PyObject_GetAttrString builds a new string every call.
+    static PyObject* current_level_name =
+        PyUnicode_InternFromString("_current_level");
+    PyObject* current_level = PyObject_GetAttr(
+        forward_ad_module.ptr(), current_level_name); // new ref
     if (current_level == nullptr) {
       // Attribute absent, clear the exception and return false.
       PyErr_Clear();
@@ -5313,8 +5432,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     }
 
     for (int64_t idx = 0; (size_t)idx < len; idx++) {
-      std::shared_ptr<c10::SafePyObject> mode =
-          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+      const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
       if (mode_type != _ref_stack.at(idx)) {
@@ -6281,7 +6399,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return false;
     }
-    at::Tensor tensor = THPVariable_Unpack(obj);
+    const at::Tensor& tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
@@ -6316,7 +6434,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return GuardDebugInfo(false, "not a tensor" + get_source(), 0);
     }
-    at::Tensor tensor = THPVariable_Unpack(obj);
+    const at::Tensor& tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
       if (_index >= tensor.dim()) {
@@ -7757,7 +7875,7 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  static std::array<PyMethodDef, 14> _methods{
+  static std::array<PyMethodDef, 16> _methods{
       {{"check_type_id",
         castPyCFunctionFast(check_type_id),
         METH_FASTCALL,
@@ -7798,6 +7916,14 @@ PyObject* torch_c_dynamo_guards_init() {
         nullptr},
        {"_empty_strided_mtia",
         castPyCFunctionFast(_empty_strided_mtia),
+        METH_FASTCALL,
+        nullptr},
+       {"_empty_strided_mps",
+        castPyCFunctionFast(_empty_strided_mps),
+        METH_FASTCALL,
+        nullptr},
+       {"_alloc_from_pool",
+        castPyCFunctionFast(_alloc_from_pool),
         METH_FASTCALL,
         nullptr},
        {"_reinterpret_tensor",
@@ -8422,6 +8548,18 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<DEFAULT_DEVICE>(
                 self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fx_annotation_guard",
+          [](GuardManager& self,
+             py::object expected,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<FX_ANNOTATION>(
+                self.get_root(),
+                std::move(expected),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
