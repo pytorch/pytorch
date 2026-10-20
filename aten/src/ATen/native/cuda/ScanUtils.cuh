@@ -71,6 +71,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(
   int64_t* row_idx_buf = ibuf + 2 * num_threads_x * threadIdx.y;
 
   const size_t row_stride = static_cast<size_t>(blockDim.y) * gridDim.x;
+  // The loops break before incrementing so that no counter steps past its bound and wraps.
   for (index_t block_row = blockIdx.x * static_cast<index_t>(blockDim.y);
        block_row < num_rows;) {
     const index_t row = block_row + threadIdx.y;
@@ -163,8 +164,10 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(
 template<typename scalar_t, typename index_t, class BinaryFunction>
 __global__ void tensor_kernel_scan_outer_dim_with_indices(const scalar_t *self_, scalar_t *values_, int64_t *indices_,
                   const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size, scalar_t init, BinaryFunction binary_op) {
-  const size_t orow_stride = gridDim.x;
-  const size_t irow_stride = static_cast<size_t>(gridDim.y) * blockDim.x;
+  // The host clamps gridDim to maxGridSize[1] and blockDim.x to 512, so both strides fit in uint32_t.
+  const uint32_t orow_stride = gridDim.x;
+  const uint32_t irow_stride = gridDim.y * blockDim.x;
+  // The loops break before incrementing so that no counter steps past its bound and wraps.
   for (uint32_t orow = blockIdx.x; orow < num_orows;) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows;) {
       const index_t offset = static_cast<index_t>(orow) * row_size * num_irows + irow;
@@ -189,12 +192,12 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(const scalar_t *self_,
       if (num_irows - irow <= irow_stride) {
         break;
       }
-      irow += static_cast<uint32_t>(irow_stride);
+      irow += irow_stride;
     }
     if (num_orows - orow <= orow_stride) {
       break;
     }
-    orow += static_cast<uint32_t>(orow_stride);
+    orow += orow_stride;
   }
 }
 
@@ -439,7 +442,7 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   // Treat all inner dimensions (i.e. dim > dimension) as one.
   const int64_t num_irows = c10::multiply_integers(sizes.begin() + dim + 1, sizes.end());
 
-  dim3 threads(std::min(512, int(num_irows)));
+  dim3 threads(std::min<int64_t>(512, num_irows));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
 

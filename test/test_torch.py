@@ -1888,6 +1888,16 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(indices[:, -1].min().item(), row_size - 1)
         self.assertEqual(indices[:, -1].max().item(), row_size - 1)
 
+    @onlyCUDA
+    @largeTensorTest('16GB')
+    def test_cumsum_outer_dim_large_irows(self, device):
+        # scan_outer_dim narrowed num_irows > INT_MAX to int when choosing
+        # the block size, which produced an invalid launch configuration.
+        x = torch.zeros(2, 1, 2**31 + 1, dtype=torch.int8, device=device)
+        out = torch.ones_like(x)
+        torch.cumsum(x, dim=1, dtype=torch.int8, out=out)
+        self.assertEqual(out.max().item(), 0)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
