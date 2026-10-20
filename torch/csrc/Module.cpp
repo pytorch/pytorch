@@ -964,6 +964,21 @@ static PyObject* THPModule_setFloat32MatmulPrecision(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_setFloat32ConvPrecision(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkString(arg),
+      "_set_float32_conv_precision expects a str, "
+      "but got ",
+      THPUtils_typename(arg));
+  std::string s = THPUtils_unpackString(arg);
+  at::globalContext().setFloat32ConvPrecision(s);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_float32MatmulPrecision(
     PyObject* _unused,
     PyObject* noargs) {
@@ -2229,6 +2244,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_float32_matmul_precision",
      THPModule_setFloat32MatmulPrecision,
+     METH_O,
+     nullptr},
+    {"_set_float32_conv_precision",
+     THPModule_setFloat32ConvPrecision,
      METH_O,
      nullptr},
     {"_get_cublas_allow_fp16_reduced_precision_reduction",

@@ -393,6 +393,10 @@ class TORCH_API Context {
   static void alertNotDeterministic(std::string_view const& caller);
 
   void setFloat32MatmulPrecision(const std::string& s);
+  // Unified entry point for conv precision, mirroring setFloat32MatmulPrecision:
+  // writes CUDA (conv+rnn+legacy allow_tf32_cudnn, via setAllowTF32CuDNN) and
+  // MKLDNN/CONV together so callers don't need to know about each backend.
+  void setFloat32ConvPrecision(const std::string& s);
   void setFloat32Precision(
       Float32Backend backend,
       Float32Op op,

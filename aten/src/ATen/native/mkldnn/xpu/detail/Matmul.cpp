@@ -198,7 +198,9 @@ sycl::event matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    bool allow_tf32 = at::globalContext().allowTF32OneDNN();
+    bool allow_tf32 = at::globalContext().float32Precision(
+        at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) ==
+        at::Float32Precision::TF32;
     if (allow_tf32) {
       pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
     } else {
