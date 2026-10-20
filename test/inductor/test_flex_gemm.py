@@ -807,6 +807,29 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=32))
         self.assertTrue(grouped_reduce_supports_config(sm120, axis=0, group=32))
 
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    def test_grouped_main_store_sm90_legality(self):
+        _skip_unless_quack_deps(self, block_copy=True)
+        from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
+            GroupedMainStore,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        sm90 = GemmConfig(
+            tile_m=128, tile_n=128, cluster_m=1, pingpong=True, device_capacity=9
+        )
+        pair = GroupedMainStore("main", 2)
+        self.assertTrue(pair.supports_config(sm90))
+        self.assertTrue(pair.supports_config(dataclasses.replace(sm90, tile_n=192)))
+        # The SM90 STSM store needs tile_n % 32; group 4 and paired fragment
+        # reductions stay SM100-only.
+        self.assertFalse(pair.supports_config(dataclasses.replace(sm90, tile_n=208)))
+        self.assertFalse(pair.supports_config(dataclasses.replace(sm90, swap_ab=True)))
+        self.assertFalse(GroupedMainStore("main", 4).supports_config(sm90))
+        self.assertFalse(
+            GroupedMainStore("main", 2, min_fragment_n=64).supports_config(sm90)
+        )
+
     def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
         from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
         from torch._inductor.fx_passes.post_grad import is_valid_addmm_fusion
@@ -2512,6 +2535,64 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
         with self.assertRaisesRegex(Exception, "currently support only aten.mm"):
             torch.compile(addmm_fn, backend="inductor", fullgraph=True)(bias, a, b)
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    @parametrize(
+        "case",
+        (
+            # QuACK reads tiles per batch; a batch-shared tile is not a bmm capture.
+            ("shared_tile", torch.bmm, lambda acc, t: acc * t, (4, 5), "must match"),
+            ("aux", torch.bmm, lambda acc, t: (acc * t, acc + 1), (2, 1, 5), "aux"),
+            ("baddbmm", torch.baddbmm, lambda acc, t: acc * t, (2, 1, 5), "aten.mm"),
+        ),
+        name_fn=lambda case: case[0],
+    )
+    def test_generated_bmm_capture_rejects_unsupported_scope(self, case):
+        _, gemm, epilogue, capture_shape, error = case
+        a, b = torch.randn(2, 4, 8), torch.randn(2, 8, 5)
+        operands = (torch.randn(2, 4, 5), a, b) if gemm is torch.baddbmm else (a, b)
+
+        def fn(capture, *operands):
+            return flex_gemm(
+                gemm,
+                operands,
+                lambda acc: epilogue(acc, capture),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(Exception, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(
+                torch.randn(capture_shape), *operands
+            )
+
+    @skipIfNoCuteDSL
+    @parametrize(
+        "case", ("vector", "cast_column", "squeezed_row", "prims_reshape", "dtype_view")
+    )
+    def test_bmm_capture_rejects_axis_changing_views(self, case):
+        a, b = torch.randn(8, 8, 8), torch.randn(8, 8, 8)
+        shape = {"cast_column": (8, 1), "squeezed_row": (8, 1, 8)}.get(case, (8,))
+
+        def fn(a, b, capture):
+            def epilogue(acc):
+                if case == "squeezed_row":
+                    value = capture.squeeze(1)
+                elif case == "cast_column":
+                    value = capture.bfloat16().float().view(8, 1, 1)
+                elif case == "prims_reshape":
+                    value = torch.ops.prims.reshape.default(capture, [8, 1, 1])
+                elif case == "dtype_view":
+                    value = capture.view(torch.int32).float()
+                else:
+                    value = capture.view(8, 1, 1)
+                return acc * value
+
+            return flex_gemm(
+                torch.bmm, (a, b), epilogue, kernel_options={"backend": "QUACK"}
+            )
+
+        with self.assertRaisesRegex(InductorError, "preserve batch, row, and column"):
+            torch.compile(fn, fullgraph=True)(a, b, torch.randn(shape))
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
@@ -9665,6 +9746,272 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
 
 
 instantiate_device_type_tests(TestFlexGemmGroupedMmDevice, globals(), only_for="cuda")
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmBatchedCaptureDevice(FlexGemmTestCase):
+    """bmm captures read per batch or shared across batches."""
+
+    B, M, K, N = 3, 201, 64, 256
+
+    def makeCaptures(self, case, device):
+        B, M, N = self.B, self.M, self.N
+        # Offset each batch so reading another batch's capture is a large error.
+        offset = torch.arange(B, device=device).view(B, 1, 1)
+        if case == "per_batch":
+            # ACE-style gate sliced from modulation[B, 6, N]: batch stride 6N.
+            modulation = self.makeTensor(B, 6, N, device=device) + offset
+            residual = self.makeTensor(B, M, N, device=device) + offset
+            col = torch.rand(B, M, 1, device=device) + offset
+            return modulation[:, 5:6, :], residual, col
+        row = self.makeTensor(N, device=device) + 1
+        col = torch.rand(1, M, 1, device=device)
+        scalar = torch.full((1, 1, 1), 0.5, device=device)
+        return row, col, scalar
+
+    @parametrize("case", ("per_batch", "shared"))
+    def test_bmm_captures_match_reference(self, device, case):
+        a = self.makeTensor(self.B, self.M, self.K, device=device)
+        b = self.makeTensor(self.B, self.K, self.N, device=device)
+        x, y, z = self.makeCaptures(case, device)
+
+        def epilogue_fn(acc, x, y, z):
+            if case == "shared":
+                x = x.view(1, 1, self.N)
+            return (acc.float() * x + y) * z
+
+        def fn(a, b, x, y, z):
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, x, y, z),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        actual, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), a, b, x, y, z
+        )
+
+        self.assertWorstElementMatchesLowPrecisionEager(
+            actual,
+            epilogue_fn(torch.bmm(a, b), x, y, z),
+            (torch.bmm(a.double(), b.double()) * x.double() + y.double()) * z.double(),
+            self.K,
+        )
+        self.assertFlexGemmGeneratedCode(code)
+        self.assertNotIn("extern_kernels.bmm(", code)
+
+    def test_bmm_captures_dynamic_batch(self, device):
+        def epilogue(acc, gate, residual):
+            return (acc.float() * gate.float() + residual.float()).to(acc.dtype)
+
+        def fn(a, weight, gate, residual):
+            b = weight.t().unsqueeze(0).expand(a.shape[0], -1, -1)
+            return flex_gemm(
+                torch.bmm,
+                (a, b),
+                lambda acc: epilogue(acc, gate, residual),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+        weight = self.makeTensor(self.N, self.K, device=device)
+        for batch, rows in ((2, 125), (4, 201)):
+            a = self.makeTensor(batch, rows, self.K, device=device)
+            modulation = self.makeTensor(batch, 6, self.N, device=device)
+            gate = modulation[:, 5:6, :]
+            residual = self.makeTensor(batch, rows, self.N, device=device)
+            actual = compiled(a, weight, gate, residual)
+            self.assertMatchesLowPrecisionEager(
+                actual,
+                epilogue(a @ weight.t(), gate, residual),
+                (a.double() @ weight.double().t()) * gate.double() + residual.double(),
+                self.K,
+            )
+
+
+instantiate_device_type_tests(
+    TestFlexGemmBatchedCaptureDevice, globals(), only_for="cuda"
+)
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(not SM100OrLater, "SM100+ required")
+class TestFlexGemmPackedSelectDevice(FlexGemmTestCase):
+    """A terminal BF16 ``where`` against a scalar selects packed BF16 words."""
+
+    B, M, K, N = 3, 200, 64, 272
+    # name: (batched, gate shape, epilogue, uses packed select)
+    CASES = {
+        "bmm_row_gate": (
+            True,
+            (B, M, 1),
+            lambda acc, gate: torch.where(gate, acc, -1024.0),
+            True,
+        ),
+        "col_gate_nan_fill": (
+            False,
+            (M, 1),
+            lambda acc, gate: torch.where(gate, acc, float("nan")),
+            True,
+        ),
+        "col_gate_signed_zero": (
+            False,
+            (M, 1),
+            lambda acc, gate: torch.where(gate, acc.float(), -0.0).to(torch.bfloat16),
+            True,
+        ),
+        # Neighboring lanes of one packed word take different predicates.
+        "tile_gate_true_arm": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(gate, float("-inf"), acc),
+            True,
+        ),
+        "compare_cast_chain": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(acc > 0, acc.float() * 0.5, -2.0).to(
+                torch.bfloat16
+            ),
+            True,
+        ),
+        "later_fp32_math": (
+            False,
+            (M, N),
+            lambda acc, gate: (
+                torch.where(gate, acc.float() + 2**-8, -1.0) - acc.float()
+            ).to(torch.bfloat16),
+            False,
+        ),
+        "fp32_output": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(gate, acc.float(), -1.0),
+            False,
+        ),
+        "intervening_fp16_cast": (
+            False,
+            (M, N),
+            lambda acc, gate: torch.where(gate, acc.float(), -1.0)
+            .to(torch.float16)
+            .to(torch.bfloat16),
+            False,
+        ),
+        "aux_output": (
+            False,
+            (M, N),
+            lambda acc, gate: (torch.where(gate, acc, -1.0), acc.float()),
+            False,
+        ),
+    }
+
+    @parametrize("case", tuple(CASES))
+    def test_terminal_bf16_where_matches_exact_reference(self, device, case):
+        batched, gate_shape, epilogue, packed = self.CASES[case]
+        gemm = torch.bmm if batched else torch.mm
+        batch = (self.B,) if batched else ()
+        # Integer operands keep every FP32 accumulation order exact.
+        a = torch.randint(-4, 5, (*batch, self.M, self.K), device=device).bfloat16()
+        b = torch.randint(-4, 5, (*batch, self.K, self.N), device=device).bfloat16()
+        gate = torch.rand(gate_shape, device=device) > 0.5
+
+        def fn(a, b, gate):
+            return flex_gemm(
+                gemm,
+                (a, b),
+                lambda acc: epilogue(acc, gate),
+                kernel_options={"backend": "QUACK"},
+            )
+
+        # Keep the intervening FP16 cast visible to exercise the lowering guard.
+        with inductor_config.patch(
+            emulate_precision_casts=case == "intervening_fp16_cast"
+        ):
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, backend="inductor", fullgraph=True), a, b, gate
+            )
+
+        # FlexGEMM evaluates the epilogue in FP32 and rounds once when storing.
+        expected = epilogue(gemm(a.double(), b.double()).float(), gate)
+        if not isinstance(actual, tuple):
+            actual, expected = (actual,), (expected,)
+        for result, reference in zip(actual, expected, strict=True):
+            reference = reference.to(result.dtype)
+            self.assertEqual(result, reference, atol=0, rtol=0)
+            if case == "col_gate_signed_zero":
+                self.assertEqual(result.view(torch.int16), reference.view(torch.int16))
+        self.assertFlexGemmGeneratedCode(code)
+        self.assertEqual("packed_bf16_select(" in code, packed)
+
+
+instantiate_device_type_tests(
+    TestFlexGemmPackedSelectDevice, globals(), only_for="cuda"
+)
+
+
+@skipIfNoCuteDSL
+@unittest.skipIf(
+    not TEST_CUDA or torch.cuda.get_device_capability() != (9, 0), "SM90 required"
+)
+@instantiate_parametrized_tests
+class TestFlexGemmSm90GroupedMainDevice(FlexGemmTestCase):
+    """Paired (SwiGLU-style) grouped-main outputs on Hopper's WGMMA fragments."""
+
+    @parametrize("chunked", (False, True))
+    @parametrize("autotune", (False, True))
+    def test_paired_output_matches_reference(self, chunked, autotune):
+        m, k, n = 333, 256, 1024
+        a = self.makeTensor(m, k)
+        w = self.makeTensor(n, k)
+        b = w.t() if chunked else w.t().contiguous()
+        row_scale = self.makeTensor(m, 1, dtype=torch.float32)
+
+        def epilogue_fn(acc, row_scale):
+            if chunked:
+                gate, up = acc.float().chunk(2, dim=-1)
+            else:
+                lanes = acc.float().view(acc.shape[0], -1, 2)
+                gate, up = lanes[..., 0], lanes[..., 1]
+            # Asymmetric in the lanes so a gate/up swap fails; the column
+            # capture broadcasts across both lanes.
+            return (F.silu(gate) * up * row_scale - 2 * up).to(acc.dtype)
+
+        def fn(a, b, row_scale):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                lambda acc: epilogue_fn(acc, row_scale),
+                kernel_options={"backend": "QUACK", "autotune": autotune},
+            )
+
+        tune_context = (
+            self.limitEpiModAutotune() if autotune else contextlib.nullcontext()
+        )
+        with tune_context:
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, b, row_scale
+            )
+        expected = epilogue_fn(a.double() @ b.double(), row_scale.double())
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue_fn(a @ b, row_scale), expected, k
+        )
+        self.assertIn("flex_gemm_epilogue(", code)
+
+    def test_paired_output_rejects_fp32_output(self):
+        def epilogue_fn(acc):
+            lanes = acc.float().view(acc.shape[0], -1, 2)
+            return lanes[..., 0] * lanes[..., 1]
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm, (a, b), epilogue_fn, kernel_options={"backend": "QUACK"}
+            )
+
+        a, b = self.makeTensor(128, 64), self.makeTensor(64, 256)
+        with self.assertRaisesRegex(Exception, "SM90 must be 16-bit"):
+            torch.compile(fn, fullgraph=True)(a, b)
 
 
 @skipIfNoCuteDSL
