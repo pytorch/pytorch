@@ -2367,6 +2367,16 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx)
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .object_protocol import python_constant_repr_impl
+
+        return python_constant_repr_impl(self, tx, fn=str)
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
