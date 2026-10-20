@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/Pool.h>
@@ -21,7 +20,6 @@
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
-#include <ATen/ops/stack.h>
 #endif
 
 namespace at::native {
@@ -32,9 +30,41 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Normalization_metallib.h>
 #endif
+using namespace std::string_view_literals;
 
-static std::optional<Tensor> as_float(const std::optional<Tensor>& t) {
-  return t.has_value() && t->defined() ? std::optional<Tensor>(t->to(kFloat).contiguous()) : std::nullopt;
+static std::string_view batch_norm_variant(const Tensor& x, const Tensor& out) {
+  if (!offsetsFitIn<uint32_t>(x, out)) {
+    return "strided64_";
+  }
+  return x.is_non_overlapping_and_dense() && out.strides() == x.strides() ? "" : "strided_";
+}
+
+static BatchNormLayout<> batch_norm_layout(const Tensor& x, const Tensor& out) {
+  using dim_t = c10::metal::vec3<int64_t>;
+  const auto dim = [&](int64_t d) { return dim_t{x.size(d), x.stride(d), out.stride(d)}; };
+  std::vector<dim_t> sorted, dims;
+  for (const auto d : c10::irange(x.dim())) {
+    if (d != 1 && x.size(d) != 1) {
+      sorted.push_back(dim(d));
+    }
+  }
+  std::ranges::sort(sorted, {}, &dim_t::y);
+  for (const auto& e : sorted) {
+    const auto& f = dims.empty() ? e : dims.back();
+    if (!dims.empty() && e.y == f.x * f.y && e.z == f.x * f.z) {
+      dims.back().x *= e.x;
+    } else {
+      dims.push_back(e);
+    }
+  }
+  const bool has_inner = !dims.empty() && (x.size(1) == 1 || dims[0].y <= x.stride(1));
+  const auto inner = has_inner ? dims[0] : dim_t{1, 0, 0};
+  BatchNormLayout<> layout{.channel = dim(1),
+                           .inner = inner,
+                           .outer_numel = x.numel() / (x.size(1) * inner.x),
+                           .outer_ndim = static_cast<int32_t>(std::max<size_t>(dims.size() - has_inner, 1))};
+  std::ranges::copy(dims | std::views::drop(has_inner), layout.outer_dims.begin());
+  return layout;
 }
 
 static Tensor batch_norm_reduce(const Tensor& x,
@@ -42,7 +72,8 @@ static Tensor batch_norm_reduce(const Tensor& x,
                                 const std::optional<Tensor>& mean = std::nullopt) {
   constexpr int64_t min_elems_per_thread = 16, groups_per_core = 4;
   static const auto max_groups = groups_per_core * std::max(at::mps::MPSDevice::getInstance()->getCoreCount(), 1u);
-  const auto C = x.size(1), inner = C == 1 ? x.numel() : x.stride(1), outer = x.numel() / (C * inner);
+  const auto layout = batch_norm_layout(x, dy.value_or(x));
+  const int64_t C = layout.channel.x, inner = layout.inner.x, outer = layout.outer_numel;
   const bool channels_last = inner == 1;
   const auto threads = channels_last
       ? BN_MAX_THREADS
@@ -53,37 +84,52 @@ static Tensor batch_norm_reduce(const Tensor& x,
   const auto chunks = std::max<int64_t>(1, std::min(max_groups / blocks, c10::metal::ceil_div(outer, ty)));
   const auto splits = std::max<int64_t>(1, std::min(max_groups / (blocks * chunks), c10::metal::ceil_div(inner, tx)));
   auto out = at::empty({chunks * splits, C, BN_PARTIAL_SIZE}, x.options().dtype(kFloat));
-  const std::array<uint32_t, 3> sizes = {uint32_t(C), uint32_t(inner), uint32_t(outer)};
-  const auto m = as_float(mean);
-  const auto name = std::string(dy ? "batch_norm_backward_reduce_" : "batch_norm_reduce_") + scalarToMetalTypeString(x);
+  const auto name = fmt::format("batch_norm_{}reduce_{}{}",
+                                dy ? "backward_"sv : ""sv,
+                                batch_norm_variant(x, dy.value_or(x)),
+                                scalarToMetalTypeString(x));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
       [encoder setComputePipelineState:lib.getPipelineStateForFunc(name)];
-      mtl_setArgs(encoder, x, out, sizes, dy, m);
+      mtl_setArgs(encoder, x, out, layout, dy, mean);
       [encoder dispatchThreadgroups:MTLSizeMake(blocks, chunks, splits) threadsPerThreadgroup:MTLSizeMake(tx, ty, 1)];
     }
   });
   return out;
 }
 
-static Tensor batch_norm_stats(const Tensor& part,
-                               const std::optional<Tensor>& weight,
-                               const std::optional<Tensor>& bias,
+template <size_t N>
+static Tensor batch_norm_stats(const Tensor& x,
+                               const std::optional<Tensor>& part,
+                               std::array<std::optional<Tensor>, N> tensors,
                                double eps,
-                               const std::optional<Tensor>& mean = std::nullopt,
-                               const std::optional<Tensor>& var = std::nullopt,
-                               bool train = true) {
-  const auto C = part.size(-2);
-  const auto w = as_float(weight), b = as_float(bias), m = as_float(mean), v = as_float(var);
-  auto stats = at::empty({C, BN_NUM_STATS}, part.options());
-  const std::array<uint32_t, 2> sizes = {uint32_t(C), uint32_t(part.numel() / (BN_PARTIAL_SIZE * C))};
+                               double momentum,
+                               std::optional<bool> backward_train = std::nullopt) {
+  const auto C = x.size(1);
+  const auto dtype = (backward_train ? tensors[BN_BACKWARD_MEAN] : tensors[BN_SAVE_MEAN])->scalar_type();
+  for (auto& t : tensors) {
+    t = t.has_value() && t->defined() ? t : std::nullopt;
+    TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "weight, bias, running and saved stats must share a dtype");
+  }
+  BatchNormStatsParams<> params{.num_channels = C,
+                                .num_partials = part ? part->size(0) : 0,
+                                .eps = static_cast<float>(eps),
+                                .momentum = static_cast<float>(momentum)};
+  std::ranges::transform(tensors, params.strides.begin(), [](const auto& t) { return t ? t->stride(0) : 0; });
+  auto stats = at::empty({C, BN_NUM_STATS}, x.options().dtype(kFloat));
+  const auto name =
+      fmt::format("batch_norm_{}stats_{}", backward_train ? "backward_"sv : ""sv, scalarToMetalTypeString(dtype));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(v ? "batch_norm_backward_stats" : "batch_norm_stats");
+      auto pso = lib.getPipelineStateForFunc(name);
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, part, w, b, stats, sizes, eps, m, v, train);
+      mtl_setArgs(encoder, part, stats, params);
+      std::apply([&](const auto&... t) { mtl_setArgs<3>(encoder, t...); }, tensors);
+      if (backward_train) {
+        mtl_setArgs<3 + N>(encoder, *backward_train);
+      }
       mtl_dispatch1DJob(encoder, pso, C);
     }
   });
@@ -94,23 +140,29 @@ static void batch_norm_elemt(const Tensor& out,
                              const Tensor& x,
                              const Tensor& stats,
                              const std::optional<Tensor>& dy = std::nullopt) {
-  const auto C = x.size(1), inner = C == 1 ? x.numel() : x.stride(1);
-  const auto dst = out.strides() == x.strides() ? out : at::empty_like(x);
+  constexpr int64_t max_grid = std::numeric_limits<uint32_t>::max();
+  auto layout = batch_norm_layout(x, out);
+  // A plane wider than the grid is folded into the outer dims, which the 64-bit variant grid-strides over
+  if (layout.inner.x > max_grid) {
+    std::shift_right(layout.outer_dims.begin(), layout.outer_dims.end(), 1);
+    layout.outer_dims[0] = std::exchange(layout.inner, {1, 0, 0});
+    layout.outer_numel *= layout.outer_dims[0].x;
+    layout.outer_ndim++;
+  }
+  const auto name = fmt::format("batch_norm_elemt_{}{}", batch_norm_variant(x, out), scalarToMetalTypeString(x));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc("batch_norm_elemt_" + scalarToMetalTypeString(x));
+      auto pso = lib.getPipelineStateForFunc(name);
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder, dst, x, stats, dy);
-      mtl_dispatch3DJob(encoder, pso, inner, C, x.numel() / (C * inner));
+      mtl_setArgs(encoder, out, x, stats, layout, dy);
+      mtl_dispatch3DJob(encoder, pso, layout.inner.x, layout.channel.x, std::min(layout.outer_numel, max_grid));
     }
   });
-  if (!dst.is_same(out)) {
-    out.copy_(dst);
-  }
 }
 } // namespace mps
 
+// Inverse standard deviation now becomes variance (without epsilon)
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          const std::optional<Tensor>& weight_opt,
                                                          const std::optional<Tensor>& bias_opt,
@@ -131,27 +183,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   if (output.numel() == 0) {
     return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
   }
-  TORCH_CHECK_NOT_IMPLEMENTED(self.numel() <= std::numeric_limits<uint32_t>::max(),
-                              "batch_norm on MPS does not support tensors with more than 2^32 elements");
-  const auto input = self.is_non_overlapping_and_dense() ? self : self.contiguous();
   TORCH_CHECK_VALUE(train || has_running_mean, "running_mean must be defined in evaluation mode");
-  const auto part = train
-      ? mps::batch_norm_reduce(input)
-      : at::stack({running_mean_opt->to(kFloat), running_var_opt->to(kFloat), input.new_ones({input.size(1)}, kFloat)},
-                  1);
-  const auto stats = mps::batch_norm_stats(part, weight_opt, bias_opt, epsilon);
-  if (train) {
-    save_mean.copy_(stats.select(1, BN_MEAN));
-    save_var.copy_(stats.select(1, BN_INVSTD));
-    if (has_running_mean) {
-      running_mean_opt->lerp_(stats.select(1, BN_MEAN).to(running_mean_opt->scalar_type()), momentum);
-      running_var_opt->lerp_(stats.select(1, BN_VAR).to(running_var_opt->scalar_type()), momentum);
-    }
-  } else {
-    save_mean.resize_({0});
-    save_var.resize_({0});
-  }
-  mps::batch_norm_elemt(output, input, stats);
+  save_mean.resize_({train ? self.size(1) : 0});
+  save_var.resize_({train ? self.size(1) : 0});
+  const auto part = train ? std::optional<Tensor>(mps::batch_norm_reduce(self)) : std::nullopt;
+  const auto stats = mps::batch_norm_stats<BN_NUM_PARAMS>(
+      self, part, {weight_opt, bias_opt, running_mean_opt, running_var_opt, save_mean, save_var}, epsilon, momentum);
+  mps::batch_norm_elemt(output, self, stats);
   return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
 }
 
@@ -163,10 +201,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
                                                   bool train,
                                                   double momentum,
                                                   double epsilon) {
-  // See https://github.com/pytorch/pytorch/issues/180984
-  const auto memory_format = self.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
-
-  auto output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
+  auto output = at::empty_like(self);
 
   int64_t n_input = self.size(1);
   // Saved stats follow CPU: float only when the parameters are float and the input is not
@@ -306,36 +341,24 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   TORCH_CHECK_VALUE(mean.has_value() && mean->defined() && var.has_value() && var->defined(),
                     train ? "save_mean and save_var" : "running_mean and running_var",
                     " must be defined");
-  TORCH_CHECK_NOT_IMPLEMENTED(input.numel() <= std::numeric_limits<uint32_t>::max(),
-                              "batch_norm on MPS does not support tensors with more than 2^32 elements");
-  const auto& param = weight_opt.has_value() && weight_opt->defined() ? *weight_opt : *mean;
-  // See https://github.com/pytorch/pytorch/issues/180984
-  auto grad_input = grad_input_mask[0]
-      ? at::empty_like(input, input.suggest_memory_format(/*channels_last_strides_exact_match=*/true))
-      : Tensor();
-  auto grad_weight = grad_input_mask[1] ? at::empty({input.size(1)}, param.options()) : Tensor();
-  auto grad_bias = grad_input_mask[2] ? at::empty({input.size(1)}, param.options()) : Tensor();
+  auto grad_input = grad_input_mask[0] ? at::empty_like(input) : Tensor();
+  auto grad_weight = grad_input_mask[1] ? at::empty({input.size(1)}, mean->options()) : Tensor();
+  auto grad_bias = grad_input_mask[2] ? at::empty({input.size(1)}, mean->options()) : Tensor();
   if (input.numel() == 0) {
     return std::make_tuple(grad_input,
                            grad_weight.defined() ? grad_weight.zero_() : grad_weight,
                            grad_bias.defined() ? grad_bias.zero_() : grad_bias);
   }
-  const auto x = input.is_non_overlapping_and_dense() ? input : input.contiguous();
-  const auto dy = grad_out.scalar_type() == x.scalar_type() && grad_out.strides() == x.strides()
-      ? grad_out
-      : at::empty_like(x).copy_(grad_out);
+  const bool reuse_grad_out = grad_out.scalar_type() == input.scalar_type() &&
+      (!train || !grad_input.defined() || grad_out.strides() == grad_input.strides());
+  const auto dy = reuse_grad_out ? grad_out : at::empty_like(input).copy_(grad_out);
   const auto part = train || grad_input_mask[1] || grad_input_mask[2]
-      ? mps::batch_norm_reduce(x, dy, mean)
-      : at::empty({0, x.size(1), BN_PARTIAL_SIZE}, x.options().dtype(kFloat));
-  const auto stats = mps::batch_norm_stats(part, weight_opt, std::nullopt, epsilon, mean, var, train);
+      ? std::optional<Tensor>(mps::batch_norm_reduce(input, dy, mean->to(kFloat).contiguous()))
+      : std::nullopt;
+  const auto stats = mps::batch_norm_stats<BN_NUM_BACKWARD_PARAMS>(
+      input, part, {weight_opt, mean, var, grad_weight, grad_bias}, epsilon, 0, train);
   if (grad_input.defined()) {
-    train ? mps::batch_norm_elemt(grad_input, x, stats, dy) : mps::batch_norm_elemt(grad_input, dy, stats);
-  }
-  if (grad_weight.defined()) {
-    grad_weight.copy_(stats.select(1, BN_GRAD_WEIGHT));
-  }
-  if (grad_bias.defined()) {
-    grad_bias.copy_(stats.select(1, BN_GRAD_BIAS));
+    train ? mps::batch_norm_elemt(grad_input, input, stats, dy) : mps::batch_norm_elemt(grad_input, dy, stats);
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
