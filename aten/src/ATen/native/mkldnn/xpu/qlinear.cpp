@@ -15,7 +15,6 @@ namespace at::native::xpu {
 namespace {
 
 using at::blas::ScalingType;
-using at::blas::SwizzleType;
 using at::native::scaled::convert_int_to_enum;
 
 Tensor& _woq_scaled_gemm(
@@ -117,6 +116,8 @@ Tensor& _woq_scaled_block128x128(
       " and shape ",
       scale_b.sizes());
 
+  // scale_b_list[0] : [N//128, K//128]. However, oneDNN needs real
+  // row-major 2D data, so scale_b is transposed to [K//128, N//128] below.
   Tensor sb = scale_b.t();
   sb = sb.scalar_type() == kFloat8_e8m0fnu ? sb.to(kFloat) : sb;
   sb = sb.is_contiguous() ? sb : sb.contiguous();
@@ -151,6 +152,8 @@ Tensor& _woq_scaled_mxfp8(
       " and shape ",
       scale_b.sizes());
 
+  // scale_b_list[0] : [N, K//32]. However, oneDNN needs real row-major 2D
+  // data, so scale_b is transposed to [K//32, N] below.
   Tensor sb = scale_b.t();
   sb = sb.is_contiguous() ? sb : sb.contiguous();
 
@@ -184,6 +187,8 @@ Tensor& _woq_scaled_mxfp4(
       " and shape ",
       scale_b.sizes());
 
+  // scale_b_list[0] : [N, K//32]. However, oneDNN needs real row-major 2D
+  // data, so scale_b is transposed to [K//32, N] below.
   Tensor sb = scale_b.t();
   sb = sb.is_contiguous() ? sb : sb.contiguous();
 
@@ -457,9 +462,6 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
 //    - `scale_recipe_b`: a single-element list with an integer
 //    corresponding to a `ScalingType` enum describing the scaling scheme
 //    used for `scale_b_list[0]`
-//    - `swizzle_b`: An integer corresponding to a `SwizzleType` enum
-//    describing the swizzling scheme for `scale_b_list[0]`.
-//        Not supported for XPU for now.
 //    - `bias`: the bias, can be type `torch.bfloat16`, `torch.float16`, or
 //    `torch.float32`
 Tensor QLinearOnednnXPU::woq_scaled_mm(
@@ -467,7 +469,6 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
     const Tensor& mat_b,
     const at::ITensorListRef& scale_b_list,
     at::IntArrayRef scale_recipe_b,
-    at::IntArrayRef swizzle_b,
     const std::optional<Tensor>& bias) {
   TORCH_CHECK(
       mat_a.dim() == 2,
@@ -540,22 +541,8 @@ Tensor QLinearOnednnXPU::woq_scaled_mm(
 
   std::vector<int64_t> scale_recipe_b_vec(
       scale_recipe_b.begin(), scale_recipe_b.end());
-  std::vector<int64_t> swizzle_b_vec(swizzle_b.begin(), swizzle_b.end());
   auto scale_recipe_b_enum =
       convert_int_to_enum<ScalingType>(scale_recipe_b_vec);
-  auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b_vec);
-
-  TORCH_CHECK_VALUE(
-      swizzle_b_enum.empty() ||
-          swizzle_b_enum.size() == scale_recipe_b_enum.size(),
-      "swizzle_b must be empty or match the number of scale_recipe_b "
-      "entries, got ",
-      swizzle_b_enum.size());
-  for (auto s : swizzle_b_enum) {
-    TORCH_CHECK_VALUE(
-        s == SwizzleType::NO_SWIZZLE,
-        "For XPU WOQ gemm, scale_b swizzle entries must all be NO_SWIZZLE");
-  }
 
   Tensor mat_a_ = mat_a.is_contiguous() ? mat_a : mat_a.contiguous();
   ScalingType scaling_choice_b = scale_recipe_b_enum[0];

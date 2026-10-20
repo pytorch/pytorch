@@ -1776,7 +1776,7 @@ def forward(self, x_1, w_1):
     @parametrize("mat_a_dtype", [torch.bfloat16, torch.half, torch.float32])
     @parametrize("with_bias", [True, False])
     def test_woq_scaled_mm(self, device, recipe, mat_a_dtype, with_bias):
-        from torch.nn.functional import ScalingType, SwizzleType
+        from torch.nn.functional import ScalingType
 
         torch.manual_seed(0)
         M, K, N = 128, 256, 256
@@ -1808,7 +1808,6 @@ def forward(self, x_1, w_1):
             mat_b,
             [scale_b],
             [scale_recipe],
-            [SwizzleType.NO_SWIZZLE],
             bias,
         )
         self.assertEqual(out.dtype, mat_a.dtype)

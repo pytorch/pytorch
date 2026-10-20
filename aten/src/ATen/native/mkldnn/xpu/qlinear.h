@@ -87,7 +87,6 @@ class QLinearOnednnXPU final {
       const Tensor& mat_b,
       const at::ITensorListRef& scale_b_list,
       at::IntArrayRef scale_recipe_b,
-      at::IntArrayRef swizzle_b,
       const std::optional<Tensor>& bias);
 
   static inline c10::ScalarType qlinear_decide_out_dtype(
