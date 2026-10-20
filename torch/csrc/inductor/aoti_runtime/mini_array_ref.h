@@ -158,3 +158,14 @@ class MiniArrayRef final {
 };
 
 } // namespace torch::aot_inductor
+
+#if __cplusplus >= 202002L
+#include <ranges>
+// MiniArrayRef is a non-owning view, so destroying it does not invalidate its
+// iterators.
+namespace std::ranges {
+template <typename T>
+inline constexpr bool
+    enable_borrowed_range<torch::aot_inductor::MiniArrayRef<T>> = true;
+} // namespace std::ranges
+#endif

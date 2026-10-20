@@ -50,6 +50,7 @@ from torch._inductor.codegen.common import (
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -291,6 +292,36 @@ class TritonExtensionBackendGenericTests(TritonExtensionBackendTestBase):
 
     def test_open_device_registration(self):
         self._test_open_device_registration()
+
+    @unittest.skipUnless(has_triton_package(), "Requires the triton package")
+    def test_flex_attention_open_device_registration(self):
+        torch._register_device_module("privateuseone", self.module)
+        # ExtensionScheduling.codegen_template is a no-op, so the flex template
+        # kernel needs the real TritonScheduling.
+        register_backend_for_device(
+            "privateuseone", codegen.triton.TritonScheduling, PythonWrapperCodegen
+        )
+        register_device_op_overrides("privateuseone", CPUDeviceOpOverrides())
+        device_interface.register_interface_for_device("privateuseone", DeviceInterface)
+
+        device = torch.device("privateuseone")
+        q, k, v = (torch.ones(1, 2, 128, 16).to(device) for _ in range(3))
+        # The extension device lacks the kernels create_block_mask needs.
+        block_mask = create_block_mask(
+            lambda b, h, q_idx, kv_idx: q_idx >= kv_idx, 1, 1, 128, 128, device="cpu"
+        ).to(device)
+
+        with unittest.mock.patch(
+            "torch.utils._triton.triton_hash_with_backend",
+            new=mock_triton_hash_with_backend,
+        ):
+            code = get_triton_code(
+                torch.compile(flex_attention), q, k, v, block_mask=block_mask
+            )
+
+        FileCheck().check("@triton.jit").check(
+            "def triton_tem_fused_flex_attention"
+        ).check("device_str='privateuseone'").run(code)
 
 
 @unittest.skipUnless(TRITON_HAS_CPU, "Requires Triton CPU backend.")

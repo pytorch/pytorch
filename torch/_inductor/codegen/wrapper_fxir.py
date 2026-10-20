@@ -49,6 +49,7 @@ from .common import (
 )
 from .wrapper import (
     AllocateLine,
+    AssertAlignmentLine,
     BufferLike,
     CommentLine,
     DynamicScalarLine,
@@ -250,6 +251,10 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         self, input_names: Iterable[str], stream: int = 0
     ) -> None:
         """FXIR does not emit deferred alignment copies."""
+
+    def defines_triton_kernels_as_code(self) -> bool:
+        # Each kernel is imported from a `name = async_compile.triton(...)` module of its own.
+        return False
 
     @classmethod
     def create(
@@ -833,6 +838,16 @@ class FxConverter:
     def _generate_assert_size_stride(self, line: WrapperLine) -> None:
         pass
 
+    def _generate_assert_alignment(self, line: WrapperLine) -> None:
+        from torch._C._dynamo.guards import assert_alignment
+
+        if not isinstance(line, AssertAlignmentLine):
+            raise AssertionError(f"expected AssertAlignmentLine, got {type(line)}")
+        self.gm.graph.call_function(
+            assert_alignment,
+            args=(self.buffer_to_node[line.name], line.alignment, line.op_name),
+        )
+
     def _generate_comment(self, line: WrapperLine) -> None:
         if not isinstance(line, CommentLine):
             raise AssertionError(f"expected CommentLine, got {type(line)}")
@@ -1310,6 +1325,10 @@ class FxConverter:
             k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
             for k, v in kernel.kwargs.items()
         }
+        # Symbolic scalar args, e.g. a SymInt output_size, must be FX nodes.
+        args, kwargs = pytree.tree_map_only(
+            sympy.Expr, self._generate_sym_node, (args, kwargs)
+        )
 
         result_buffer: str | None = None
         if isinstance(kernel, ir.ExternKernelOut):

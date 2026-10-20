@@ -45,6 +45,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    IS_S390X,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -513,6 +514,19 @@ class TestOperators(TestCase):
                 "pca_lowrank",
                 {torch.float32: tol(atol=3e-05, rtol=4e-06)},
                 device_type="cpu",
+            ),
+            *(
+                [
+                    tol1(
+                        "grid_sampler_2d",
+                        {
+                            torch.float32: tol(atol=1e-04, rtol=1e-04)
+                        },  # Adjust values as needed
+                        device_type="cpu",
+                    )
+                ]
+                if IS_S390X
+                else []
             ),
         ),
     )
@@ -1696,8 +1710,10 @@ class TestOperators(TestCase):
                 ),  # NYI: forward-AD for _embedding_bag
                 xfail(
                     "nn.functional.grid_sample", ""
-                ),  # NYI: forward AD for grid_sampler_2d
-                xfail("grid_sampler_2d", ""),  # NYI: forward AD for grid_sampler_2d
+                ),  # NYI: forward AD for grid_sampler_2d_backward
+                xfail(
+                    "grid_sampler_2d", ""
+                ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
                     "nn.functional.hardsigmoid", ""
                 ),  # NYI: forward AD for hardsigmoid_backward
@@ -1919,10 +1935,10 @@ class TestOperators(TestCase):
                 xfail("nn.functional.gaussian_nll_loss"),  # data depenedant flow
                 xfail(
                     "nn.functional.grid_sample"
-                ),  # Forward AD not implemented and no decomposition
+                ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
                     "grid_sampler_2d"
-                ),  # Forward AD not implemented and no decomposition
+                ),  # NYI: forward AD for grid_sampler_2d_backward
                 xfail(
                     "nn.functional.hardsigmoid"
                 ),  # Forward AD not implemented and no decomposition

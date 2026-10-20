@@ -27,10 +27,12 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     make_dynamo_test,
     NestedTensorTestCase,
     parametrize,
+    skipIfCppFakeTensor,
     subtest,
 )
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -1268,7 +1270,7 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         from torch._functorch._aot_autograd.runtime_wrappers import (
             _AnalyzeCustomOpInputOutputMode,
         )
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 
         class Bare(torch.Tensor):
             pass
@@ -1297,7 +1299,66 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
             fake_inp = fake_mode.from_tensor(x)
             with _AnalyzeCustomOpInputOutputMode():
                 fake_out = torch.ops.aten.add.Tensor(fake_inp, 1)
-        self.assertIsInstance(fake_out, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_out))
+
+    def test_inplace_op_preserves_subclass_type(self):
+        # An inplace op resyncs the VariableTracker metadata from the fake tensor,
+        # which no longer carries a non-traceable subclass type.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            y = torch.empty_like(x)
+            y.copy_(x)
+            return y
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertIsInstance(res_act, MySubclass)
+        self.assertEqual(res_exp, res_act)
+
+        # The wrong class is also observable inside the graph, where it silently
+        # takes the other branch instead of raising.
+        def observe_intermediate(x):
+            y = torch.empty_like(x)
+            y.copy_(x)
+            return isinstance(y, MySubclass)
+
+        def observe_input(x):
+            x.add_(1)
+            return isinstance(x, MySubclass)
+
+        self.assertTrue(compile_full_eager(observe_intermediate)(x))
+        self.assertTrue(compile_full_eager(observe_input)(x.clone()))
+
+    def test_comparison_with_torch_function_disabled(self):
+        # A subclass that disables __torch_function__ does not intercept the
+        # comparison, so the result is a plain tensor and must be modelled as one.
+        class DisabledTF(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return x > 0
+
+        def fn_inplace(x):
+            x.add_(1)
+            return x > 0
+
+        base = torch.randn(2, 2)
+        for cls in (DisabledTF, MyParam):
+            for f in (fn, fn_inplace):
+                res_exp = f(base.clone().as_subclass(cls))
+                res_act = compile_full_eager(f)(base.clone().as_subclass(cls))
+                self.assertIs(type(res_exp), torch.Tensor)
+                self.assertIs(type(res_act), torch.Tensor)
+                self.assertEqual(res_exp, res_act)
 
     # ACT (AsyncCollectiveTensor) can be constructed directly, so the guard
     # relaxation for ACT inputs is exercised here on CPU without a process group.
@@ -1599,6 +1660,82 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_exp = fn(x)
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
+
+    @parametrize("prebound", (False, True))
+    def test_raw_tensor_descriptor_bypasses_subclass_override(self, prebound):
+        class S(torch.Tensor):
+            def add(self, other):
+                return self * 0 - 777
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(2).as_subclass(S)
+        descriptor = torch.Tensor.add
+        if prebound:
+            bound = descriptor.__get__(x, S)
+
+            def fn():
+                return bound(1)
+
+            args = ()
+        else:
+
+            def fn(x):
+                return descriptor(x, 1)
+
+            args = (x,)
+
+        expected = fn(*args)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(actual, S)
+
+    @parametrize("override", (False, True))
+    @parametrize("prebound", (False, True))
+    def test_raw_tensor_inplace_view_descriptor_unsupported(self, prebound, override):
+        class S(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        if override:
+            S.unsqueeze_ = lambda self, dim: self
+
+        descriptor = torch.Tensor.unsqueeze_
+
+        def run(x, compile_fn):
+            if prebound:
+                bound = descriptor.__get__(x, S)
+
+                def fn():
+                    return bound(0) + 1
+
+                return compile_fn(fn)()
+
+            def fn(x):
+                return descriptor(x, 0) + 1
+
+            return compile_fn(fn)(x)
+
+        fullgraph_x = torch.ones(2).as_subclass(S)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
+            run(
+                fullgraph_x,
+                partial(torch.compile, backend="eager", fullgraph=True),
+            )
+        self.assertEqual(fullgraph_x.shape, (2,))
+
+        eager_x = torch.ones(2).as_subclass(S)
+        expected = run(eager_x, lambda fn: fn)
+
+        compiled_x = torch.ones(2).as_subclass(S)
+        actual = run(compiled_x, partial(torch.compile, backend="eager"))
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_x, eager_x)
 
     def test_subclass_dont_invoke_torch_function_on_overridden_attr(self):
         from types import MethodWrapperType
@@ -3165,7 +3302,44 @@ class TestTwoTensorSubclass(
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s47)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_3: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_4: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_5: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_6: "Sym(s47)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_9: "Sym(s47)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_10: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_11: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_12: "Sym(s47)",  # PlainAOTInput(idx=1)
+        primals_13: "Sym(s16)",  # PlainAOTInput(idx=2)
+    ):
+        mul: "f32[s47, s16]" = torch.ops.aten.mul.Tensor(primals_1, primals_12);  primals_1 = None
+        mul_3: "f32[s47, s16]" = torch.ops.aten.mul.Tensor(primals_5, primals_12);  primals_5 = None
+        return (
+            mul,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a')
+            primals_12,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
+            mul_3,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b')
+            primals_12,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
+            primals_12,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_12,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_13,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3201,11 +3375,40 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
             normalize_gm(bw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_12: "Sym(s47)",  # PlainAOTInput(idx=1)
+        primals_13: "Sym(s16)",  # PlainAOTInput(idx=2)
+        tangents_1: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='a')
+        tangents_2: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='b')
+    ):
+        mul_8: "f32[s47, s16]" = torch.ops.aten.mul.Tensor(tangents_1, primals_12);  tangents_1 = None
+        mul_9: "f32[s47, s16]" = torch.ops.aten.mul.Tensor(tangents_2, primals_12);  tangents_2 = None
+        return (
+            mul_8,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a')
+            primals_12,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='a'), idx=0)
+            mul_9,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b')
+            primals_12,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), attr='b'), idx=0)
+            primals_12,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=0)), idx=0)
+            None,  # None
+            None,  # None
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3232,6 +3435,7 @@ class GraphModule(torch.nn.Module):
             None,  # None
         )
 """,
+            ),
         )
 
     def test_tensor_subclass_TwoTensor_clone_view(self):
@@ -3334,7 +3538,52 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "Sym(s97)",  # PlainAOTInput(idx=0)
+        primals_2: "Sym(s98)",  # PlainAOTInput(idx=1)
+        primals_3: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='a')
+        primals_4: "Sym(s97)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='a'), idx=0)
+        primals_5: "Sym(s98)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='a'), idx=1)
+        primals_6: "Sym(s98)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='a'), idx=0)
+        primals_7: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='b')
+        primals_8: "Sym(s97)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='b'), idx=0)
+        primals_9: "Sym(s98)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='b'), idx=1)
+        primals_10: "Sym(s98)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=2), attr='b'), idx=0)
+        primals_11: "Sym(s97)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=2), idx=0)
+        primals_12: "Sym(s98)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=2), idx=1)
+        primals_13: "Sym(s98)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=2), idx=0)
+    ):
+        mul: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(primals_3, primals_1);  primals_3 = None
+        mul_3: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(primals_7, primals_1);  primals_7 = None
+        mul_8: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul, primals_2);  mul = None
+        mul_11: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_3, primals_2);  mul_3 = None
+        mul_16: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_8, primals_1);  mul_8 = None
+        mul_19: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_11, primals_1);  mul_11 = None
+        mul_24: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_16, primals_2);  mul_16 = None
+        mul_27: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_19, primals_2);  mul_19 = None
+        return (
+            mul_24,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a')
+            primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
+            mul_27,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b')
+            primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
+            primals_11,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_1,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_2,  # SavedForBackwardsAOTOutput(idx=1)
+            primals_11,  # SavedForBackwardsAOTOutput(idx=2)
+            primals_13,  # SavedForBackwardsAOTOutput(idx=3)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3378,11 +3627,48 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=3)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
             normalize_gm(bw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "Sym(s97)",  # PlainAOTInput(idx=0)
+        primals_2: "Sym(s98)",  # PlainAOTInput(idx=1)
+        primals_11: "Sym(s97)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=2), idx=0)
+        primals_13: "Sym(s98)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=2), idx=0)
+        tangents_1: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='a')
+        tangents_2: "f32[s97, s98]",  # SubclassGetAttrAOTInput(base=TangentAOTInput(output=PlainAOTOutput(idx=0)), attr='b')
+    ):
+        mul_32: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_1, primals_2);  tangents_1 = None
+        mul_33: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(tangents_2, primals_2);  tangents_2 = None
+        mul_34: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_32, primals_1);  mul_32 = None
+        mul_35: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_33, primals_1);  mul_33 = None
+        mul_36: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_34, primals_2);  mul_34 = None
+        mul_37: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_35, primals_2);  mul_35 = primals_2 = None
+        mul_38: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_36, primals_1);  mul_36 = None
+        mul_39: "f32[s97, s98]" = torch.ops.aten.mul.Tensor(mul_37, primals_1);  mul_37 = primals_1 = None
+        return (
+            None,  # None
+            None,  # None
+            mul_38,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a')
+            primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='a'), idx=0)
+            mul_39,  # SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b')
+            primals_11,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=SubclassGetAttrAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), attr='b'), idx=0)
+            primals_11,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
+            primals_13,  # SubclassSizeAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=1)
+            primals_13,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3417,6 +3703,7 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SubclassStrideAOTOutput(base=GradAOTOutput(grad_of=PlainAOTInput(idx=2)), idx=0)
         )
 """,
+            ),
         )
 
     def test_tensor_subclass_TwoTensor_view(self):
@@ -3517,7 +3804,42 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s47)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_3: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_4: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_5: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_6: "Sym(s47)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_9: "Sym(s47)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_10: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_11: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_12: "Sym(s47)",  # PlainAOTInput(idx=1)
+        primals_13: "Sym(s16)",  # PlainAOTInput(idx=2)
+    ):
+        clone: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_5);  primals_5 = None
+
+        mul_6: "Sym(s16*s47)" = primals_12 * primals_13
+        view: "f32[s16*s47]" = torch.ops.aten.view.default(clone, [mul_6]);  clone = None
+        view_1: "f32[s16*s47]" = torch.ops.aten.view.default(clone_1, [mul_6]);  clone_1 = None
+        return (
+            view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a')
+            mul_6,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='a'), idx=0)
+            view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b')
+            mul_6,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=0), attr='b'), idx=0)
+            mul_6,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=0), idx=0)
+            primals_12,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_13,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3551,6 +3873,7 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3597,7 +3920,43 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s47)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_3: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_4: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_5: "f32[s47, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_6: "Sym(s47)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_9: "Sym(s47)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_10: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_11: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_12: "Sym(s47)",  # PlainAOTInput(idx=1)
+        primals_13: "Sym(s16)",  # PlainAOTInput(idx=2)
+    ):
+        clone: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[s47, s16]" = torch.ops.aten.clone.default(primals_5);  primals_5 = None
+
+        mul_6: "Sym(s16*s47)" = primals_12 * primals_13
+        view: "f32[s16*s47]" = torch.ops.aten.view.default(clone, [mul_6])
+        view_1: "f32[s16*s47]" = torch.ops.aten.view.default(clone_1, [mul_6]);  clone_1 = None
+        return (
+            clone,  # PlainAOTOutput(idx=0)
+            view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a')
+            mul_6,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a'), idx=0)
+            view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b')
+            mul_6,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b'), idx=0)
+            mul_6,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=1), idx=0)
+            primals_12,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_13,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3632,6 +3991,7 @@ class GraphModule(torch.nn.Module):
             primals_13,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3746,7 +4106,41 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[1].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_3: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_4: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_5: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_6: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_9: "Sym(s16)",  # PlainAOTInput(idx=1)
+    ):
+        clone: "f32[3, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
+
+        view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
+        view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
+        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_numel_default_1: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone_1)
+        return (
+            clone,  # PlainAOTOutput(idx=0)
+            view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a')
+            sym_numel_default,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a'), idx=0)
+            view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b')
+            sym_numel_default_1,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b'), idx=0)
+            sym_numel_default,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=1), idx=0)
+            clone_1,  # PlainAOTOutput(idx=2)
+            primals_9,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_2,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3779,6 +4173,7 @@ class GraphModule(torch.nn.Module):
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3847,7 +4242,41 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_3: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_4: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_5: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_6: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_9: "Sym(s16)",  # PlainAOTInput(idx=1)
+    ):
+        clone: "f32[3, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
+
+        view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
+        view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
+        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_numel_default_1: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone_1)
+        return (
+            clone,  # PlainAOTOutput(idx=0)
+            view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a')
+            sym_numel_default,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a'), idx=0)
+            view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b')
+            sym_numel_default_1,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b'), idx=0)
+            sym_numel_default,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=1), idx=0)
+            clone_1,  # PlainAOTOutput(idx=2)
+            primals_9,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_2,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3880,6 +4309,7 @@ class GraphModule(torch.nn.Module):
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -4363,6 +4793,7 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_eager, result_compiled)
 
 
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(
     _SubclassCompileCheckMixin,
     torch._dynamo.test_case.TestCase,
@@ -4693,6 +5124,17 @@ class GraphModule(torch.nn.Module):
 
         self._validate_compile(fn, arg_fn=lambda: (values, offsets, offsets))
 
+    def test_in_graph_keepdim_reduction_binary_op(self):
+        # AOTAutograd used to emit an unguardable ephemeral nested-int guard
+        # while tracing the backward for this broadcast.
+        def fn(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return (nt - nt.mean(-1, keepdim=True)).values().sum()
+
+        values = torch.randn(15, 8, requires_grad=True)
+        offsets = torch.tensor([0, 5, 10, 15], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
     def test_in_graph_construction_from_input_4(self):
         # The offsets is taken from an NJT input
         def fn(nt, other_values):
@@ -4801,8 +5243,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):
