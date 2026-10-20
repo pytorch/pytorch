@@ -6263,22 +6263,32 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(Unsupported):
             f4()
 
+        # test for changing torch.get_device_module() (super rare case due to lru_cache)
         @torch.compile(backend="eager", fullgraph=True)
         def f5():
             return torch.get_device_module()
 
         f5()
+        new_device = (
+            "cpu"
+            if torch._C._get_accelerator() == torch.device(device_type)
+            else device_type
+        )
+
         old_get_device_module = torch.get_device_module
-        patched_module = types.SimpleNamespace(synchronize=lambda: None)
 
-        def new_get_device_module(requested_device=None):
-            if requested_device:
-                return old_get_device_module(requested_device)
-            return patched_module
+        def new_get_device_module(device=None):
+            if device:
+                return old_get_device_module(device)
+            return getattr(torch, new_device)
 
+        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
+        # torch.get_device_module
         with patch("torch.get_device_module", new_get_device_module):
-            self.assertIs(f5(), patched_module)
+            print(torch.get_device_module())
+            self.assertEqual(f5(), getattr(torch, new_device))
 
+        # synchronize causes a graph break, so no fullgraph=True
         @torch.compile(backend="eager")
         def f6():
             mod = torch.get_device_module()
@@ -7321,42 +7331,6 @@ class FunctionTestsCudaOnly(torch._dynamo.test_case.TestCase):
 
 class FunctionTestsDevice(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_torch_get_device_module_accelerator(self, device):
-        def f1():
-            mod1 = torch.get_device_module()
-            mod2 = torch.get_device_module("cpu")
-            mod3 = torch.get_device_module(torch.device(device))
-            return mod1, mod2, mod3
-
-        self.assertEqual(f1(), torch.compile(f1, backend="eager", fullgraph=True)())
-
-        # test for changing torch.get_device_module() (super rare case due to lru_cache)
-        @torch.compile(backend="eager", fullgraph=True)
-        def f5():
-            return torch.get_device_module()
-
-        f5()
-        old_get_device_module = torch.get_device_module
-
-        def new_get_device_module(requested_device=None):
-            if requested_device:
-                return old_get_device_module(requested_device)
-            return torch.cpu
-
-        # NOTE: torch.get_device_module.__wrapped__ is guarded on, but not
-        # torch.get_device_module
-        with patch("torch.get_device_module", new_get_device_module):
-            self.assertEqual(f5(), torch.cpu)
-
-        # synchronize causes a graph break, so no fullgraph=True
-        @torch.compile(backend="eager")
-        def f6():
-            mod = torch.get_device_module()
-            mod.synchronize()
-            return mod
-
-        f6()
 
     def test_device_manual_seed(self, device):
         import torch._inductor.config as inductor_config
