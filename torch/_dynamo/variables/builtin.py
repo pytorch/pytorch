@@ -2033,9 +2033,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             # reflected operation when the operands are incompatible).
             lval = args[0].as_python_constant()
             if isinstance(lval, self.fn):
-                return ConstantVariable.create(
-                    getattr(self.fn, name)(lval, args[1].as_python_constant())
-                )
+                try:
+                    res = getattr(self.fn, name)(lval, args[1].as_python_constant())
+                except Exception as e:
+                    raise_observed_exception(type(e), tx, args=list(e.args))
+                return ConstantVariable.create(res)
 
         if self.fn in (set, frozenset, list, tuple, int, str, float, complex):
             if isinstance(args[0], variables.UserDefinedObjectVariable):
