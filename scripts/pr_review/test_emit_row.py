@@ -189,7 +189,9 @@ class TestPublishedFindings(unittest.TestCase):
             {**FINDING, "severity": []},
             {**FINDING, "severity": {"a": 1}},
             {**FINDING, "message": ""},
-            {**FINDING, "message": "x" * (MAX_MESSAGE + 1)},
+            # Prose: a long run of one letter is also a blob, so it would be
+            # dropped whatever its length.
+            {**FINDING, "message": ("word " * MAX_MESSAGE)[:MAX_MESSAGE] + "x"},
             {**FINDING, "message": "a \u2014 b"},
             {**FINDING, "path": "a\nb.py"},
             {**FINDING, "path": "x.py\n"},

@@ -1283,7 +1283,8 @@ class TestTruncationNeverLeavesADanglingEscape(unittest.TestCase):
 
 class TestAnOverflowingMessageEndsInAMarker(unittest.TestCase):
     def test_a_message_within_the_cap_is_unchanged(self):
-        text = "x" * MAX_MESSAGE
+        # Prose: `"x" * MAX_MESSAGE` is a blob that build() would drop.
+        text = ("word " * MAX_MESSAGE)[: MAX_MESSAGE - 1] + "s"
         self.assertEqual(neutralize_message(text), text)
 
     def test_a_cut_message_ends_in_the_marker_and_stays_publishable(self):
