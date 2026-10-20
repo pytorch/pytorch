@@ -287,15 +287,10 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
+          fetch-depth: 1
+          no-sudo: true
       - name: Populate binary env
         shell: bash
         run: |
@@ -556,15 +551,10 @@ jobs:
           # that it doesn't interfere
           Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
+          fetch-depth: 1
+          no-sudo: true
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
