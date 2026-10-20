@@ -195,6 +195,7 @@ class TestPrecompile(TestCase):
             bypassed=("gen",),
             truncated=("loop (m.py:12)",),
             uncovered_frames=("helper",),
+            eager_fallbacks=("dispatch (m.py:30)",),
             wont_generalize=("n",),
             dropped_guards=(("HASATTR", "m"),) + risky,
             kept_guards=(("EQUALS_MATCH", "n"), ("TENSOR_MATCH", "x")),
@@ -210,7 +211,7 @@ class TestPrecompile(TestCase):
         # failures last, so a failure never sits between two notes.
         self.assertExpectedInline(
             str(summary),
-            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 eager fallback: ['dispatch (m.py:30)'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
         )
         # Keyword-only: four leading ints would otherwise transpose silently.
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
@@ -261,6 +262,7 @@ class TestPrecompile(TestCase):
         self.assertFalse(summary(bypassed=("f",)).complete)
         self.assertFalse(summary(truncated=("f",)).complete)
         self.assertFalse(summary(uncovered_frames=("f",)).complete)
+        self.assertTrue(summary(eager_fallbacks=("f (m.py:1)",)).complete)
         # Coverage only: the guard fields never make a capture incomplete.
         risky = (("ID_MATCH", "self.act"),)
         flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
@@ -521,7 +523,7 @@ class TestPrecompile(TestCase):
         def helper(x):
             return x
 
-        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False, **kw):
             return _DynamoCodeCacheEntry(
                 python_code=SerializedCode.from_code_object(fn.__code__),
                 python_module=__name__,
@@ -532,18 +534,20 @@ class TestPrecompile(TestCase):
                 code_source=None,
                 install_to_global=resume_name is not None,
                 bypassed=bypassed,
+                **kw,
             )
 
         variant = _GuardedCodeCacheEntry(
             guards_state=b"",
             dynamo_code=SerializedCode.from_code_object(helper.__code__),
         )
+        fallback = {"variants": [variant], "eager_fallback": True}
         entry = _DynamoCacheEntry(
             codes=[
                 code_entry(forward, variants=[variant], bypassed=True),
                 code_entry(forward),  # a submodule's forward: same co_name
-                code_entry(helper, "__resume_at_12_3", [variant]),
-                code_entry(helper, "__resume_at_40_7", [variant], bypassed=True),
+                code_entry(helper, "__resume_at_12_3", **fallback),
+                code_entry(helper, "__resume_at_40_7", bypassed=True, **fallback),
             ],
             source_info=SourceInfo(inlined_sources=set()),
             device_type="cpu",
@@ -552,6 +556,10 @@ class TestPrecompile(TestCase):
         frames = _multigraph_frames(entry)
         self.assertEqual([f["is_entry"] for f in frames], [True, False, False, False])
         self.assertEqual([f["bypassed"] for f in frames], [True, False, False, True])
+        # A bypassed code serves nothing, so it is never an eager fallback.
+        self.assertEqual(
+            [f["eager_fallback"] for f in frames], [False, False, True, False]
+        )
         self.assertEqual(
             [f["resume_names"] for f in frames],
             [[], [], ["__resume_at_12_3"], ["__resume_at_40_7"]],
@@ -633,7 +641,7 @@ class TestPrecompile(TestCase):
         def step(x):
             return x * scale
 
-        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False, **kw):
             return _DynamoCodeCacheEntry(
                 python_code=SerializedCode.from_code_object(fn.__code__),
                 python_module=__name__,
@@ -644,6 +652,7 @@ class TestPrecompile(TestCase):
                 code_source=None,
                 install_to_global=resume_name is not None,
                 bypassed=bypassed,
+                **kw,
             )
 
         def reject(fn_name, codes):
@@ -670,6 +679,10 @@ class TestPrecompile(TestCase):
         # A bypassed HELPER beside a variant-less entry is the thin-wrapper case.
         with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
             reject("fwd_loss_bwd", [thin, dead_helper])
+        # An entry Dynamo gave up on at its first call is not a thin wrapper.
+        fallback = code_entry(fwd_loss_bwd, eager_fallback=True)
+        with self.assertRaisesRegex(PrecompileError, "gave up on the entry frame"):
+            reject("fwd_loss_bwd", [fallback])
         # A healthy entry beside a bypassed continuation has nothing to refuse,
         # and neither has an empty capture.
         reject("fwd_loss_bwd", [healthy, dead_cont])
@@ -717,6 +730,41 @@ class TestPrecompile(TestCase):
         }
         exec(inspect.getsource(driver._build_multigraph_forward), ns)
         return ns["_build_multigraph_forward"]
+
+    def test_multigraph_driver_runs_an_eager_fallback_miss_eagerly(self):
+        # A frame the capture flagged eager_fallback: a miss of its variant runs
+        # it as plain Python and warns once for the frame, not once per miss.
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _multigraph_frames
+
+        def step(x, scale=2.0):
+            return x.sin() * scale + int(torch.compiler.is_compiling())
+
+        x = torch.randn(3)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        expected = compiled(x)
+        frames = _multigraph_frames(package.cache_entry())
+        frames[0]["eager_fallback"] = True
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        self._scrub_minted(step.__globals__)
+        binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+        forward = self._multigraph_driver(frames, backends, binding)()
+        torch._logging._internal.warning_once.cache_clear()
+        with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+            self.assertEqual(forward(x, 3.0), x.sin() * 3.0)
+            self.assertEqual(forward(x, 4.0), x.sin() * 4.0)
+        self.assertEqual(len(logs.output), 1, logs.output)
+        self.assertIn("no captured variant of step", logs.output[0])
+        self.assertEqual(forward(x), expected)
 
     def test_multigraph_driver_dispatches_entry_frame(self):
         # The driver rebuilds the entry frame's f_locals (a keyword-only default
@@ -4695,6 +4743,68 @@ def records_stance(model, x):
 def tags_compiled(model, x):
     # Adds 1 only in a compiled frame, so a result shows how the call was served.
     return breaking_helper(model(x)) + int(torch.compiler.is_compiling())
+
+
+@torch._dynamo.disable
+def opaque(y):
+    return y + 0
+
+
+def dispatch(y, opaque_layers):
+    # Traces whole for opaque_layers=0. For more, the graph break inside the loop
+    # is one Dynamo cannot resume from, so it runs every later call of this code
+    # object eagerly. Adds 1 only when compiled, like tags_compiled.
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return y.sin() + int(torch.compiler.is_compiling())
+
+
+@torch._dynamo.disable(recursive=False)
+def call_dispatch(y, opaque_layers):
+    # An eager caller, so dispatch is always a frame of its own.
+    return dispatch(y, opaque_layers)
+
+
+def falls_back_on_a_branch(model, x, opaque_layers=0):
+    return call_dispatch(model(x), opaque_layers) + 1
+
+
+def falls_back_after_a_break(model, x, opaque_layers=0):
+    # The continuation is reachable from the entry, so the artifact stays
+    # standalone, and its recompile for opaque_layers=1 falls back like dispatch.
+    y = model(x)
+    torch._dynamo.graph_break()
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return y.sin() + int(torch.compiler.is_compiling())
+
+
+def falls_back_in_the_entry(model, x, opaque_layers=0, scale=1):
+    # The graph break gives the entry a continuation, so the artifact is
+    # standalone; the entry's recompile for opaque_layers=1 falls back before
+    # reaching it. model is unused: its forward would be a frame of its own
+    # once the entry runs eagerly. scale is a default only the eager run reads.
+    y = x * 2
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    torch._dynamo.graph_break()
+    return y.sin() * scale + int(torch.compiler.is_compiling())
+
+
+def tagged_helper(y):
+    y = y.sin()
+    torch._dynamo.graph_break()
+    return y.cos() + int(torch.compiler.is_compiling())
+
+
+def falls_back_around_a_helper(model, x, opaque_layers=0):
+    # Under nested_graph_breaks=False, tagged_helper is a frame the entry cannot
+    # reach, so the artifact is installed. The entry's recompile for
+    # opaque_layers=1 falls back; its eager run still calls tagged_helper.
+    y = x * 2
+    for _ in range(opaque_layers):
+        y = opaque(y)
+    return tagged_helper(y) + int(torch.compiler.is_compiling())
 """
 
 _GOLDEN_LOADER = """
@@ -4713,12 +4823,18 @@ for args, kwargs, expected in saved["calls"]:
     torch.testing.assert_close(f(model, *args, **kwargs), expected)
 for name, grad in saved["grads"].items():
     torch.testing.assert_close(model.get_parameter(name).grad, grad)
-try:
-    f(model, saved["calls"][0][0][0].double())
-except torch.compiler.PrecompileError as e:
-    assert "no captured variant" in str(e), e
+miss = saved["calls"][0][0][0].double()
+if saved["eager_miss"] is not None:
+    torch.testing.assert_close(f(model, miss), saved["eager_miss"])
 else:
-    raise AssertionError("an uncovered call was served")
+    try:
+        f(model, miss)
+    except torch.compiler.PrecompileError as e:
+        assert "no captured variant" in str(e), e
+        refused = saved.get("refused_frame")
+        assert refused is None or repr(refused) in str(e), e
+    else:
+        raise AssertionError("an uncovered call was served")
 print("served", mod.STANCES)
 """
 
@@ -4751,12 +4867,19 @@ class TestPrecompileDynamoCapture(TestCase):
     def _capture(self, fn, **kwargs):
         return capture(fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs)
 
-    def _serve_in_fresh_process(self, calls, grads=None, mode="standalone"):
+    def _serve_in_fresh_process(
+        self, calls, grads=None, mode="standalone", eager_miss=None, refused_frame=None
+    ):
+        # eager_miss: the result of an uncovered call that the entry runs
+        # eagerly; by default the loader expects that call refused, by
+        # refused_frame if given.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "state_dict": self.model.state_dict(),
             "calls": calls,
             "grads": grads or {},
+            "eager_miss": eager_miss,
+            "refused_frame": refused_frame,
         }
         torch.save(saved, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state, mode]
@@ -4896,6 +5019,199 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn("refused", out.stdout)
         # \b keeps "breaking_helper" from matching inside "calls_breaking_helper".
         self.assertRegex(out.stdout, rf"onto \([^)]*\b{compiled}\b")
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_runs_a_frames_eager_fallback_eagerly(self):
+        # dispatch compiles for opaque_layers=0. Its recompile for 1 graph-breaks
+        # inside a loop, so the capturing process runs every later call of it
+        # eagerly. A load serves the compiled variant and runs the call it
+        # misses eagerly too, rather than refusing it.
+        fn = self.mod.falls_back_on_a_branch
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = torch.relu(self.model.lin(self.x2)).sin().detach()
+        self.assertEqual(compiled, base + 2)
+        self.assertEqual(eager, base + 1)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(summary.eager_fallbacks[0].startswith("dispatch ("), summary)
+        self.assertIn("1 eager fallback: ", str(summary))
+        self.assertTrue(summary.complete, summary)
+        with open(self.artifact) as f:
+            self.assertIn("('dispatch', 1),  # eager fallback", f.read())
+        # The capture skipped every call after the fallback; a load still serves
+        # the variant after the miss.
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1], mode="installed")
+
+    @skipIfCrossRef
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_installed_artifact_runs_an_entrys_eager_fallback_eagerly(self):
+        # The entry compiles for opaque_layers=0 and falls back for 1. A load
+        # serves its variant, runs its miss eagerly, and the eager run's callee
+        # still dispatches to its own variant and refuses a miss of its own (the
+        # loader's dtype miss reaches tagged_helper with a float64 input).
+        fn = self.mod.falls_back_around_a_helper
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = (self.x2 * 2).sin().cos()
+        self.assertEqual(compiled, base + 2)
+        # The entry ran eagerly; only tagged_helper's served variant adds 1.
+        self.assertEqual(eager, base + 1)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(
+            summary.eager_fallbacks[0].startswith("falls_back_around_a_helper ("),
+            summary,
+        )
+        self.assertTrue(summary.complete, summary)
+        with open(self.artifact) as f:
+            code = f.read()
+        self.assertIn('SERVING_MODE = "installed"', code)
+        self.assertIn("('falls_back_around_a_helper', 1),  # eager fallback", code)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(
+            calls + calls[:1], mode="installed", refused_frame="tagged_helper"
+        )
+
+    @skipIfCrossRef
+    def test_a_standalone_artifact_runs_a_continuations_eager_fallback_eagerly(self):
+        fn = self.mod.falls_back_after_a_break
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = torch.relu(self.model.lin(self.x2)).sin().detach()
+        self.assertEqual(compiled, base + 1)
+        self.assertEqual(eager, base)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(summary.complete, summary)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        self._serve_in_fresh_process(calls + calls[:1])
+
+    @skipIfCrossRef
+    def test_a_standalone_artifact_runs_an_entrys_eager_fallback_eagerly(self):
+        # The driver rebuilds the entry with its recorded defaults to run a miss
+        # eagerly, so the missed call that leaves scale to its default works.
+        fn = self.mod.falls_back_in_the_entry
+        with self._capture(fn, backend="eager") as cap:
+            compiled = cap(self.model, self.x2)
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        base = (self.x2 * 2).sin()
+        self.assertEqual(compiled, base + 1)
+        self.assertEqual(eager, base)
+        self.assertEqual(len(summary.eager_fallbacks), 1, summary)
+        self.assertTrue(
+            summary.eager_fallbacks[0].startswith("falls_back_in_the_entry ("), summary
+        )
+        self.assertTrue(summary.complete, summary)
+        calls = [((self.x2,), {}, compiled), ((self.x2, 1), {}, eager)]
+        # A dtype miss of the entry runs eagerly too, with both defaults.
+        miss = (self.x2.double() * 2).sin()
+        self._serve_in_fresh_process(calls + calls[:1], eager_miss=miss)
+
+    @skipIfCrossRef
+    def test_an_entry_dynamo_gave_up_on_at_its_first_call_is_uncovered(self):
+        # Unlike a callee, it has no variant to dispatch to, so it is a coverage
+        # gap: the capture is not complete. Its callee, model.forward, compiles.
+        opaque = torch._dynamo.disable(lambda y: y + 0)
+
+        def entry(model, x):
+            for _ in range(1):
+                x = opaque(x)
+            return model(x)
+
+        # The capture refuses it, naming the cause, before the build would.
+        with self.assertRaisesRegex(
+            PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(entry, backend="eager") as cap:
+                cap(self.model, self.x2)
+                summary = cap.summary()
+        self.assertEqual(summary.uncovered_frames, ("entry",), summary)
+        self.assertEqual(summary.eager_fallbacks, (), summary)
+        self.assertFalse(summary.complete, summary)
+        # require_complete=False does not get past it.
+        tracer = DynamoTracer(require_complete=False)
+        with self.assertRaisesRegex(
+            PrecompileError, r"'entry': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(entry, tracer=tracer, backend="eager") as cap:
+                cap(self.model, self.x2)
+
+    def test_a_lone_entry_dynamo_gave_up_on_names_the_cause(self):
+        # Nothing compiles, but the entry did run: the refusal says why rather
+        # than "the callable must actually be run".
+        opaque = torch._dynamo.disable(lambda y: y + 0)
+
+        def lone(x, fail=False):
+            for _ in range(1):
+                x = opaque(x)
+            if fail:
+                raise ValueError("boom")
+            return x.sin()
+
+        with self.assertRaisesRegex(
+            PrecompileError, r"'lone': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(lone, backend="eager") as cap:
+                cap(self.x2)
+        # Ahead of a raised call too, whose message suggests require_complete=False.
+        with self.assertRaisesRegex(
+            PrecompileError, r"'lone': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(lone, backend="eager") as cap:
+                cap(self.x2)
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    cap(self.x2, fail=True)
+                self.assertTrue(cap.summary().capture_errors)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "a 3.10 generator frame first runs at next(), outside the capture",
+    )
+    def test_a_generator_entry_is_refused_naming_the_cause(self):
+        # Dynamo refuses to trace a generator frame and suppresses that, so the
+        # entry is flagged rather than left a plain uncovered frame.
+        def gen(model, x):
+            yield model(x)
+
+        with self.assertRaisesRegex(
+            PrecompileError, r"'gen': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(gen, backend="eager") as cap:
+                next(cap(self.model, self.x2))
+                summary = cap.summary()
+        # Flagged before _compile, it still counts as a gap.
+        self.assertEqual(summary.uncovered_frames, ("gen",), summary)
+        self.assertFalse(summary.complete, summary)
+        tracer = DynamoTracer(require_complete=False)
+        with self.assertRaisesRegex(
+            PrecompileError, r"'gen': Dynamo gave up.*whatever require_complete"
+        ):
+            with self._capture(gen, tracer=tracer, backend="eager") as cap:
+                next(cap(self.model, self.x2))
+
+    @skipIfCrossRef
+    def test_a_frame_dynamo_gave_up_on_is_not_a_coverage_gap(self):
+        # dispatch falls back to eager on its first call and never compiles, so
+        # it holds no variant. It ran eager during capture and a load runs it
+        # eager too, so it is an eager fallback rather than an uncovered frame.
+        fn = self.mod.falls_back_on_a_branch
+        with self._capture(fn, backend="eager") as cap:
+            eager = cap(self.model, self.x2, 1)
+            summary = cap.summary()
+        self.assertEqual(eager, torch.relu(self.model.lin(self.x2)).sin() + 1)
+        self.assertTrue(summary.complete, summary)
+        self.assertNotIn("dispatch", summary.uncovered_frames)
+        self.assertTrue(
+            any(f.startswith("dispatch (") for f in summary.eager_fallbacks), summary
+        )
+        # Nothing of dispatch needs installing: it runs as plain Python.
+        self._serve_in_fresh_process([((self.x2, 1), {}, eager)])
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(nested_graph_breaks=False)
@@ -5207,6 +5523,47 @@ class TestPrecompileDynamoCapture(TestCase):
             counters.clear()
             self.assertEqual(lookup_fn(torch.nn.Module(), 3), 6)
             self.assertEqual(counters["frames"]["total"] > 0, compiles)
+
+    @skipIfCrossRef
+    def test_a_lossy_graphless_frame_that_falls_back_is_not_an_eager_fallback(self):
+        # lookup() holds no graph and drops G['op'], so the capture serves it as
+        # plain Python. Its recompile for k=1 then graph-breaks in a loop, which
+        # flags it, but a frame served as plain Python has no variant to miss.
+        name = f"{self.module_name}_lossy_fallback"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\n"
+                "def _double(module, n):\n    return 2 * n\n\n"
+                "op = type(_double)(_double.__code__, {'__builtins__': __builtins__})\n\n"
+                "@torch._dynamo.disable\n"
+                "def opaque():\n    pass\n\n"
+                "def lookup(module, n, k):\n"
+                "    for _ in range(k):\n        opaque()\n"
+                "    return op(module, n)\n\n"
+                "@torch._dynamo.disable(recursive=False)\n"
+                "def scale(x, k):\n    return x * lookup(torch.nn.Module(), 3, k)\n\n"
+                "def step(x, k=0):\n    return scale(x.sin(), k)\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(require_no_risky_drops=False)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        x = torch.randn(4)
+        capturing = self._capture(mod.step, tracer=tracer, backend="eager")
+        with build as built, capturing as cap:
+            self.assertEqual(cap(x, 0), x.sin() * 6)
+            self.assertEqual(cap(x, 1), x.sin() * 6)
+            summary = cap.summary()
+        self.assertEqual(summary.eager_fallbacks, (), summary)
+        self.assertNotIn("lookup", summary.uncovered_frames, summary)
+        codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
+        lookup = codes["lookup"]
+        self.assertEqual((lookup.guarded_codes, lookup.skip_recursive), ([], True))
+        self.assertFalse(lookup.eager_fallback)
 
     @skipIfCrossRef
     @parametrize("caching_precompile", [False, True])
