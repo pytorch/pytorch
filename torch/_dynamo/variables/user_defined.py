@@ -1232,7 +1232,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
-            if self.value is collections.OrderedDict:
+            # __new__'s first positional argument is the type to allocate. Only
+            # allocate a bare fresh OrderedDictVariable when that type really is
+            # collections.OrderedDict; a subclass type argument must be traced
+            # through the user-defined path below (never silently allocated as
+            # an exact OrderedDict).
+            new_type = (
+                args[0].as_python_constant()
+                if args and args[0].is_python_constant()
+                else None
+            )
+            if (
+                self.value is collections.OrderedDict
+                and new_type is collections.OrderedDict
+            ):
                 # Exact OrderedDict: represent as a bare OrderedDictVariable,
                 # mirroring dict.__new__(dict) -> ConstDictVariable. This is the
                 # only path that marks the container as created in this frame

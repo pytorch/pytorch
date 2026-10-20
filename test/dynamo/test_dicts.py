@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import copy
 import enum
 import itertools
 import operator
@@ -4079,6 +4080,406 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         f.d, f.e = 4, 5
         fn(f, x)
         self.assertEqual(cnts.frame_count, 1)
+
+
+class _ODAttrTuple(tuple):
+    """User object whose constructor observes an OrderedDict's contents."""
+
+    __slots__ = ()
+
+    def __new__(cls, od):
+        return super().__new__(cls, od)
+
+
+class OrderedDictInstanceAttrTests(torch._dynamo.test_case.TestCase):
+    """Instance attribute (``__dict__``) support for in-frame OrderedDicts (Phase 1)."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _check_compiles(self, fn, args, expected, frame_count=1):
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt(*args)
+        self.assertEqual(out, expected)
+        self.assertEqual(cnt.frame_count, frame_count)
+        return out, cnt, opt
+
+    # ---- A1: the two issue reproducers -------------------------------------
+    def test_issue_repro_state_dict_len(self):
+        m = torch.nn.Linear(2, 2)
+
+        def f(x):
+            return x + len(m.state_dict())
+
+        x = torch.zeros(1)
+        expected = f(x)
+        out, cnt, opt = self._check_compiles(f, (x,), expected)
+        self.assertEqual(out, x + 2)
+        # A second invocation must reuse the compiled graph.
+        opt(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_issue_repro_in_frame_attr(self):
+        def g(x):
+            d = OrderedDict()
+            d._metadata = 1
+            return x + d._metadata
+
+        x = torch.zeros(1)
+        expected = g(x)
+        out, cnt, opt = self._check_compiles(g, (x,), expected)
+        self.assertEqual(out, x + 1)
+        opt(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    # ---- A2: nn.Module.state_dict() end to end -----------------------------
+    def test_state_dict_escape_matches_eager(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.arange(4.0).reshape(2, 2))
+                self.sub = torch.nn.Linear(2, 2)
+                self.register_buffer("inner_buf", torch.ones(2))
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+                self.linear = torch.nn.Linear(2, 2)
+                self.register_buffer("buf", torch.full((3,), 2.0))
+
+        m = Outer()
+        eager_sd = m.state_dict()
+        self.assertEqual(
+            list(eager_sd._metadata.keys()), ["", "inner", "inner.sub", "linear"]
+        )
+
+        def fn(x):
+            return x, m.state_dict()
+
+        x = torch.zeros(1)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+        out_x, sd = opt(x)
+        self.assertEqual(out_x, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # type, key order, contents and metadata match eager exactly.
+        self.assertIs(type(sd), OrderedDict)
+        self.assertEqual(list(sd.keys()), list(eager_sd.keys()))
+        for key in eager_sd:
+            self.assertIs(type(sd[key]), type(eager_sd[key]))
+            self.assertEqual(sd[key], eager_sd[key])
+        self.assertIs(type(sd._metadata), OrderedDict)
+        self.assertEqual(list(sd._metadata.keys()), list(eager_sd._metadata.keys()))
+        self.assertEqual(sd._metadata[""], {"version": 1})
+        self.assertEqual(sd._metadata["inner"], {"version": 1})
+        self.assertEqual(sd._metadata["inner.sub"], {"version": 1})
+        self.assertEqual(sd._metadata, eager_sd._metadata)
+
+        # Repeated invocation keeps a single frame.
+        _, sd2 = opt(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(sd2._metadata, eager_sd._metadata)
+
+    # ---- B1: formatting must not observe the empty shell -------------------
+    def test_str_format_of_attributed_od_not_empty_shell(self):
+        # Escaping attributed OrderedDicts are materialized as an empty shell and
+        # their contents replayed by the side effects pass. String formatting
+        # defers the format() call to the restored stack, so a formatted
+        # attributed container would render 'OrderedDict()'. It must decline
+        # instead, in both the already-attributed and format-before-write order.
+        m = torch.nn.Linear(2, 2)
+        fmt = "{}"
+
+        def format_fresh(x):
+            d = OrderedDict()
+            d["k"] = x + 1
+            d.a = 1
+            return x, fmt.format(d)
+
+        def fstring_fresh(x):
+            d = OrderedDict()
+            d["k"] = x - 1
+            d.a = 1
+            return x, f"{d}"
+
+        def format_state_dict(x):
+            return x, fmt.format(m.state_dict())
+
+        def format_before_attr_write(x):
+            d = OrderedDict()
+            d["k"] = x + 1
+            rendered = fmt.format(d)
+            d.a = 1
+            return x, rendered
+
+        def format_nested(x):
+            d = OrderedDict()
+            d["k"] = x + 1
+            d.a = 1
+            return x, fmt.format((d,))
+
+        x = torch.zeros(1)
+        for fn in (
+            format_fresh,
+            fstring_fresh,
+            format_state_dict,
+            format_before_attr_write,
+            format_nested,
+        ):
+            eager = fn(x)
+            self.assertNotEqual(eager[1], "OrderedDict()")
+            torch._dynamo.reset()
+            with self.assertRaises(Unsupported) as ctx:
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(
+                ctx.exception.gb_type,
+                "string formatting of an attributed OrderedDict",
+            )
+            torch._dynamo.reset()
+            out = torch.compile(fn, backend="eager", fullgraph=False)(x)
+            self.assertEqual(out, eager)
+
+    # ---- A3: fresh OrderedDict attribute semantics -------------------------
+    def test_fresh_attr_write_read(self):
+        def fn(x):
+            x = x + 1
+            d = OrderedDict()
+            before = hasattr(d, "_metadata")
+            d._metadata = 1
+            d.a = 2
+            # The builtin setattr() dispatches to the same __setattr__ slot.
+            attr = "b"
+            setattr(d, attr, 3)
+            return (
+                x,
+                before,
+                hasattr(d, "_metadata"),
+                hasattr(d, "a"),
+                hasattr(d, "missing"),
+                d._metadata,
+                d.a,
+                hasattr(d, "keys"),
+                getattr(d, "missing", 5),
+                d.__getattribute__("a"),
+                d.b,
+                hasattr(d, attr),
+                hasattr(d, "__module__"),
+            )
+
+        x = torch.zeros(1)
+        out, cnt, _ = self._check_compiles(fn, (x,), fn(x))
+        self.assertEqual(
+            out[1:],
+            (False, True, True, False, 1, 2, True, 5, 2, 3, True, False),
+        )
+        # `__module__` is a metaclass attribute: eager instance lookup does not
+        # see it either (this build's OrderedDict is the C implementation), so
+        # matching eager means reporting it absent.
+        self.assertFalse(hasattr(OrderedDict(), "__module__"))
+
+    # ---- A4: escape replay -------------------------------------------------
+    def test_escape_replay_contents_attrs_identity(self):
+        def fn(x):
+            x = x + 1
+            d = OrderedDict()
+            inner = OrderedDict()
+            inner.b = 2
+            d.a = 1
+            d["k"] = x + 1
+            d["inner"] = inner
+            return x, d, d, inner
+
+        x = torch.zeros(1)
+        out, cnt, _ = self._check_compiles(fn, (x,), fn(x))
+        self.assertIs(type(out[1]), OrderedDict)
+        self.assertIs(out[1], out[2])
+        self.assertEqual(list(out[1].keys()), ["k", "inner"])
+        self.assertEqual(out[1]["k"], x + 2)
+        self.assertEqual(out[1].a, 1)
+        # A second shell keeps its own attributes and its identity.
+        self.assertIs(type(out[1]["inner"]), OrderedDict)
+        self.assertIs(out[1]["inner"], out[3])
+        self.assertEqual(out[3].b, 2)
+
+    def test_constructor_read_of_attributed_od_is_sound(self):
+        def fn(x):
+            d = OrderedDict()
+            d["k"] = 1
+            d.a = 1
+            t = _ODAttrTuple(d)
+            return x, t, d
+
+        x = torch.zeros(1)
+        eager = fn(x)
+        self.assertEqual(tuple(eager[1]), ("k",))
+        torch._dynamo.reset()
+        try:
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        except Unsupported as exc:
+            self.assertEqual(
+                exc.gb_type,
+                "attributed OrderedDict captured by a constructor",
+            )
+        else:
+            self.assertEqual(out, eager)
+            self.assertEqual(tuple(out[1]), ("k",))
+
+        torch._dynamo.reset()
+        out = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(out, eager)
+        self.assertEqual(tuple(out[1]), ("k",))
+
+    # ---- N1/N3/N4/N5: automated-review regressions -------------------------
+    def test_dict_copy_is_fresh(self):
+        def copy_fresh(x):
+            x = x + 1
+            d = OrderedDict()
+            d.a = 1
+            d["k"] = x
+            c = d.copy()
+            missing = getattr(c, "missing", 42)  # the copy's __dict__ is empty
+            c.b = 2
+            return x, missing, c.b, list(c.keys()), hasattr(d, "b"), hasattr(c, "a")
+
+        x = torch.zeros(1)
+        out, _, _ = self._check_compiles(copy_fresh, (x,), copy_fresh(x))
+        self.assertEqual(out[1:], (42, 2, ["k"], False, False))
+
+        od = OrderedDict({"k": 1})
+
+        def copy_source_backed(x):
+            x = x + 1
+            c = od.copy()
+            c.b = 2
+            return x, c.b, list(c.keys()), getattr(c, "missing", 42)
+
+        out, _, _ = self._check_compiles(
+            copy_source_backed, (x,), copy_source_backed(x)
+        )
+        self.assertEqual(out[1:], (2, ["k"], 42))
+
+    def test_new_with_subclass_type_arg_stays_subclass(self):
+        class SubOD(OrderedDict):
+            pass
+
+        def fn(x):
+            d = OrderedDict.__new__(SubOD)
+            d.x = 1
+            return x, type(d).__name__, d.x
+
+        x = torch.zeros(1)
+        eager = fn(x)
+        self.assertEqual(eager[1], "SubOD")
+        torch._dynamo.reset()
+        try:
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        except Unsupported:
+            pass
+        else:
+            self.assertEqual(out, eager)
+            self.assertEqual(out[1], "SubOD")
+
+        torch._dynamo.reset()
+        out = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(out, eager)
+
+        # Normal exact construction still goes through the fresh fast path.
+        def exact(x):
+            x = x + 1
+            d = OrderedDict()
+            d.x = 1
+            return x, type(d).__name__, d.x
+
+        out, _, _ = self._check_compiles(exact, (x,), exact(x))
+        self.assertEqual(out[1:], ("OrderedDict", 1))
+
+    def test_getattribute_consults_instance_dict_for_shadowed_method(self):
+        def fn(x):
+            x = x + 1
+
+            def shadow():
+                return 5
+
+            d = OrderedDict()
+            d.keys = shadow
+            return (
+                x,
+                d.keys(),
+                d.__getattribute__("keys")(),
+                type(d).__getattribute__(d, "keys")(),
+            )
+
+        x = torch.zeros(1)
+        out, _, _ = self._check_compiles(fn, (x,), fn(x))
+        self.assertEqual(out[1:], (5, 5, 5))
+
+        # Unbound object.__getattribute__ is a pre-existing generic graph break
+        # (it also declines for plain dict/str), so a sound decline is allowed
+        # here; the eager fallback must be correct.
+        def unbound(x):
+            def shadow():
+                return 5
+
+            d = OrderedDict()
+            d.keys = shadow
+            return x, object.__getattribute__(d, "keys")()
+
+        torch._dynamo.reset()
+        eager = unbound(x)
+        try:
+            out = torch.compile(unbound, backend="eager", fullgraph=True)(x)
+        except Unsupported:
+            pass
+        else:
+            self.assertEqual(out, eager)
+        torch._dynamo.reset()
+        out = torch.compile(unbound, backend="eager", fullgraph=False)(x)
+        self.assertEqual(out, eager)
+
+    def test_reduce_ex_plug_declines_for_attributed_od(self):
+        # The __reduce_ex__ constant-fold plug must be reached (and skip the
+        # fold) for an attributed OrderedDict, so a rebuild cannot drop the
+        # instance __dict__.
+        def reduce_ex(x):
+            d = OrderedDict()
+            d.a = 1
+            d["k"] = 1
+            return x, d.__reduce_ex__(2)
+
+        x = torch.zeros(1)
+        eager = reduce_ex(x)
+        self.assertEqual(eager[1][2], {"a": 1})
+        torch._dynamo.reset()
+        with self.assertRaises(Unsupported) as ctx:
+            torch.compile(reduce_ex, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ctx.exception.gb_type, "Unsupported method call")
+
+        torch._dynamo.reset()
+        out = torch.compile(reduce_ex, backend="eager", fullgraph=False)(x)
+        self.assertEqual(out[1][0], eager[1][0])
+        self.assertEqual(out[1][2], eager[1][2])
+        self.assertEqual(list(out[1][4]), list(eager[1][4]))
+
+        def copy_copy(x):
+            d = OrderedDict()
+            d.a = 1
+            d["k"] = 1
+            return x, copy.copy(d)
+
+        torch._dynamo.reset()
+        eager = copy_copy(x)
+        self.assertEqual(eager[1].a, 1)
+        with self.assertRaises(Unsupported) as ctx:
+            torch.compile(copy_copy, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ctx.exception.gb_type, "Unsupported method call")
+
+        torch._dynamo.reset()
+        out = torch.compile(copy_copy, backend="eager", fullgraph=False)(x)
+        self.assertEqual(out[1].a, 1)
+        self.assertEqual(out[1]["k"], 1)
 
 
 instantiate_parametrized_tests(DictGuardTests)

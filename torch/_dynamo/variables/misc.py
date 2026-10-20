@@ -2089,6 +2089,28 @@ class StringFormatVariable(VariableTracker):
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)
+        # An attributed OrderedDict built in this frame is reconstructed as an
+        # empty shell whose contents are replayed by the side-effects pass after
+        # the deferred format() call is emitted, so formatting it would render
+        # the empty shell. Constant-only contents were folded above, which is
+        # sound because an OrderedDict repr never shows instance attributes.
+        from .dicts import OrderedDictVariable
+
+        vts: list[VariableTracker] = []
+        for arg in itertools.chain(sym_args, sym_kwargs.values()):
+            VariableTracker.visit(vts.append, arg)
+        for vt in vts:
+            if not (istype(vt, OrderedDictVariable) and vt.fresh):
+                continue
+            if vt.check_deferred_format_observation(tx):
+                unimplemented(
+                    gb_type="string formatting of an attributed OrderedDict",
+                    context="OrderedDict observed by a deferred format()/f-string",
+                    explanation="A deferred format()/f-string observes this "
+                    "OrderedDict before its contents/attributes replay, where it "
+                    "is still an empty shell; formatting it would render the shell.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(
