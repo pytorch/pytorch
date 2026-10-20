@@ -30,17 +30,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 using namespace std::literals;
 
-// expand potential 3d to 4d tensor
-static inline Tensor ensure_4d(const Tensor& x) {
-  if (x.dim() == 3) {
-    return x.unsqueeze(0);
-  } else if (x.dim() > 4) {
-    auto batchSize = c10::multiply_integers(x.sizes().begin(), x.sizes().end() - 3);
-    return x.reshape({batchSize, x.size(-3), x.size(-2), x.size(-1)});
-  }
-  return x;
-}
-
 static uint32_t u32(int64_t x) {
   return c10::safe_conv<uint32_t>(x, "uint32_t");
 }
@@ -59,12 +48,8 @@ static void merge_partials(id<MTLComputeCommandEncoder> encoder,
   const auto dv = out.size(-1);
   const auto pso = lib.getPipelineStateForFunc("sdpa_merge_partials_" + scalarToMetalTypeString(out));
   [encoder setComputePipelineState:pso];
-  mtl_setArgs(encoder,
-              partials,
-              sums,
-              maxs,
-              out,
-              std::array<uint32_t, 4>{u32(dv), u32(partials.size(-2)), u32(out.stride(-2)), u32(partials.size(-1))});
+  const std::array<uint32_t, 4> dims{u32(dv), u32(partials.size(-2)), u32(out.stride(-2)), u32(partials.size(-1))};
+  mtl_setArgs(encoder, partials, sums, maxs, out, dims);
   // Threadgroups of kMergeLanes x columns: a decode merge has few rows and
   // should still spread across the GPU cores.
   const auto cols = std::min<NSUInteger>(dv, [pso maxTotalThreadsPerThreadgroup] / kMergeLanes);
@@ -130,12 +115,13 @@ static void sdpa_vector_mps(const Tensor& q,
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
       [computeEncoder setComputePipelineState:lib.getPipelineStateForFunc(kname)];
-      mtl_setArgs(computeEncoder, q, k, v, out, params);
+      // Two-pass blocks write their partial rows in place of the output.
+      mtl_setArgs(computeEncoder, q, k, v, two_pass ? partials : out, params);
       if (mask) {
         mtl_setArgs<5>(computeEncoder, *mask);
       }
       if (two_pass) {
-        mtl_setArgs<6>(computeEncoder, partials, sums, maxs);
+        mtl_setArgs<6>(computeEncoder, sums, maxs);
       }
       const auto simdgroups = two_pass ? kDecodeBlockSimdgroups : kDecodeSimdgroups;
       [computeEncoder dispatchThreadgroups:MTLSizeMake(rows, two_pass ? kDecodeBlocks : 1, 1)
@@ -236,24 +222,19 @@ static void sdpa_prefill_mps(const Tensor& q,
   MPSStream* mpsStream = getCurrentMPSStream();
   auto launch = [&](Stage stage, const Tensor& vs, const Tensor& os) {
     const bool has_mask = mask && stage != Stage::pv;
+    const bool chunked = stage != Stage::pv && d > bd;
+    const bool split = stage != Stage::scores && n_splits > 1;
     const int64_t slabs = stage == Stage::scores ? 1 : c10::metal::ceil_div(vs.size(3), bd);
     const int64_t splits = stage == Stage::scores ? n_score_splits : n_splits;
     const MTLSize grid = MTLSizeMake(nq, q.size(1), q.size(0) * splits * slabs);
     Tensor partials;
-    if (n_splits > 1 && stage != Stage::scores) {
+    if (split) {
       // The simdgroup fused kernel writes tile-wide partial rows.
       partials = at::empty({rows, n_splits, use_mpp || stage == Stage::pv ? vs.size(3) : bd}, float_opts);
     }
-    const auto kname = fmt::format("prefill_attention{}{}_{}_bd{}_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}",
-                                   family,
-                                   kStageSuffix[size_t(stage)],
-                                   dtype,
-                                   bd,
-                                   has_mask,
-                                   is_causal,
-                                   stage != Stage::pv && d > bd,
-                                   stage != Stage::scores && n_splits > 1,
-                                   has_mask ? scalarToMetalTypeString(*mask) : dtype);
+    const auto mask_dtype = has_mask ? scalarToMetalTypeString(*mask) : dtype;
+    auto kname = fmt::format("prefill_attention{}{}_{}_bd{}", family, kStageSuffix[size_t(stage)], dtype, bd);
+    kname += fmt::format("_hm{:d}_dc{:d}_ck{:d}_split{:d}_mask{}", has_mask, is_causal, chunked, split, mask_dtype);
     const auto pso = lib.getPipelineStateForFunc(kname);
     const PrefillAttnParams params{
         .B = i32(q.size(0)),
@@ -277,23 +258,24 @@ static void sdpa_prefill_mps(const Tensor& q,
         auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         // Split-K launches write their partial rows in place of the output.
-        mtl_setArgs(computeEncoder, q, k, vs, partials.defined() ? partials : os, params, mask_params);
+        mtl_setArgs(computeEncoder, q, k, vs, split ? partials : os, params, mask_params);
         // The kernels reference the mask and row-stats buffers in every
-        // instantiation; Metal validation wants them bound even when unused.
-        mtl_setArgs<6>(computeEncoder, uint32_t(0), uint32_t(0), uint32_t(0));
+        // instantiation; Metal validation wants them bound even when unused, and
+        // the writable row stats bound to a real buffer (the output stands in).
+        mtl_setArgs<6>(computeEncoder, uint32_t(0), os, os);
         if (has_mask) {
           mtl_setArgs<6>(computeEncoder, *mask);
         }
         if (stage == Stage::scores) {
           mtl_setArgs<7>(computeEncoder, score_sums, score_maxs);
-        } else if (n_splits > 1) {
+        } else if (split) {
           mtl_setArgs<7>(computeEncoder, sums, maxs);
         }
         if (staged) {
           mtl_setArgs<9>(computeEncoder, scores, score_maxs);
         }
         [computeEncoder dispatchThreadgroups:grid threadsPerThreadgroup:threadgroup];
-        if (n_splits > 1 && stage != Stage::scores) {
+        if (split) {
           merge_partials(computeEncoder, partials, sums, maxs, os);
         }
       }
@@ -347,11 +329,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   auto batch_dims = [](const Tensor& t) { return t.sym_sizes().slice(0, t.dim() - 3); };
   auto batch_shape = at::infer_size_symdimvector(batch_dims(query), batch_dims(key_));
   batch_shape = at::infer_size_symdimvector(batch_shape, batch_dims(value_));
-  // Kernels load head-dim elements linearly, so stride(-1) == 1 is the only layout requirement.
+  // Broadcasts the batch dims and flattens them into one. Kernels load head-dim
+  // elements linearly, so stride(-1) == 1 is the only layout requirement.
   auto expand_batch = [&](const Tensor& t) {
     auto shape = batch_shape;
     shape.append(t.sym_sizes().end() - 3, t.sym_sizes().end());
-    auto t4d = ensure_4d(t.expand_symint(shape));
+    const auto t4d = t.expand_symint(shape).reshape_symint({-1, t.sym_size(-3), t.sym_size(-2), t.sym_size(-1)});
     return t4d.stride(-1) == 1 ? t4d : t4d.contiguous();
   };
   const auto q_ = expand_batch(query);
@@ -371,7 +354,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
         attn_mask->scalar_type() == kBool || attn_mask->scalar_type() == dtype ? *attn_mask : attn_mask->to(dtype);
     auto mask_shape = out_shape;
     mask_shape.back() = key_.sym_size(-2);
-    mask = ensure_4d(m.expand_symint(mask_shape));
+    mask = m.expand_symint(mask_shape).reshape_symint({-1, query.sym_size(-3), query.sym_size(-2), key_.sym_size(-2)});
   }
 
   const int64_t q_len = q_.size(2), d = q_.size(3), dv = v_.size(3);

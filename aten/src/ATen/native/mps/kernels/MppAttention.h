@@ -584,20 +584,6 @@ struct MPPTile {
       }
     }
   }
-
-  // Stores the tile clipped to the first n_rows x n_cols.
-  template <typename U>
-  METAL_FUNC void store(
-      device U* dst,
-      const int ld,
-      const short n_rows,
-      const short n_cols) const {
-    if (n_rows >= kRows && n_cols >= kCols) {
-      store(dst, ld);
-    } else {
-      store_safe(dst, ld, n_rows, n_cols);
-    }
-  }
 };
 
 // Flash-attention prefill via matmul2d. Mirrors prefill_attention's contract
@@ -618,7 +604,7 @@ prefill_attention_mpp(
     const device T* Q [[buffer(0)]],
     const device T* K [[buffer(1)]],
     const device T* V [[buffer(2)]],
-    device PrefillOutT<T, SPLIT>* O [[buffer(3)]],
+    device SplitOutT<T, SPLIT>* O [[buffer(3)]],
     const constant PrefillAttnParams* params [[buffer(4)]],
     const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
     const device MaskType* mask [[buffer(6)]],
@@ -1020,7 +1006,11 @@ prefill_attention_mpp(
   if (o_rows <= 0) {
     return;
   }
-  Otile.store(O, o_seq_stride, o_rows, o_cols);
+  if (o_rows >= otile_t::kRows && o_cols >= otile_t::kCols) {
+    Otile.store(O, o_seq_stride);
+  } else {
+    Otile.store_safe(O, o_seq_stride, o_rows, o_cols);
+  }
 }
 
 #define instantiate_mpp_attn_arch(                                           \

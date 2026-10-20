@@ -65,6 +65,11 @@ struct PrefillAttnMaskParams {
 };
 
 #ifdef __METAL__
+// Output element type: the input dtype, or fp32 partial rows when the keys
+// are split across threadgroups (two-pass decode, split-K prefill), written
+// in place of the output and merged by sdpa_merge_partials.
+template <typename T, bool SPLIT>
+using SplitOutT = metal::conditional_t<SPLIT, float, T>;
 #define instantiate_kernel(name, func, ...) \
   template [[host_name(                     \
       name)]] [[kernel]] decltype(func<__VA_ARGS__>) func<__VA_ARGS__>

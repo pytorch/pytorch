@@ -530,17 +530,12 @@ PREFILL_CONST int kFragSize = 8;
 PREFILL_CONST int kPrefillThreads = kPrefillSimdgroups * 32;
 PREFILL_CONST int kThreadgroupMemoryBytes = 32768; // per threadgroup
 
-// Output element type: the input dtype, or fp32 partial rows under split-K.
-template <typename T, bool SPLIT>
-using PrefillOutT = metal::conditional_t<SPLIT, float, T>;
-
 // State of one prefill threadgroup: the Q block of a (batch, head) at `tid`,
 // its share of the K blocks under split-K, and the running softmax of this
-// simdgroup's kFragSize rows. The kernels below compose the fused pass and
-// the staged score-writing / P @ V passes from its steps.
+// simdgroup's kFragSize rows. prefill_attention below composes its passes
+// from these steps.
 template <
     typename T,
-    int BK,
     int BD,
     bool HAS_MASK,
     bool DO_CAUSAL,
@@ -550,12 +545,13 @@ template <
     typename MaskType>
 struct PrefillBlock {
   using AccumType = c10::metal::accum_t<T>;
-  using OutT = PrefillOutT<T, SPLIT>;
+  using OutT = SplitOutT<T, SPLIT>;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
   using MaskElem =
       metal::conditional_t<is_same_v<MaskType, bool>, bool, AccumType>;
   using MaskFrag = BaseMMAFrag<MaskElem, kFragSize, kFragSize>;
   PREFILL_CONST int BQ = kPrefillBQ;
+  PREFILL_CONST int BK = prefill_bk(BD);
   PREFILL_CONST int TK = BK / kFragSize;
   PREFILL_CONST int TD = BD / kFragSize;
   using STile = MMATile<AccumType, 1, TK, MMAFrag_acc_t>;
@@ -969,176 +965,146 @@ struct PrefillBlock {
   }
 };
 
-#define PREFILL_ATTN_ARGS                                                 \
-  const device T *Q [[buffer(0)]], const device T *K [[buffer(1)]],       \
-      const device T *V [[buffer(2)]],                                    \
-      device PrefillOutT<T, SPLIT>*O [[buffer(3)]],                       \
-      const constant PrefillAttnParams *params [[buffer(4)]],             \
-      const constant PrefillAttnMaskParams *mask_params [[buffer(5)]],    \
-      const device MaskType *mask [[buffer(6)]],                          \
-      device float *sums [[buffer(7)]], device float *maxs [[buffer(8)]], \
-      uint simd_lane_id [[thread_index_in_simdgroup]],                    \
-      uint simd_group_id [[simdgroup_index_in_threadgroup]],              \
-      uint3 tid [[threadgroup_position_in_grid]]
+// Prefill passes: the fused kernel runs the online softmax and P @ V in one
+// pass over the keys. For a V/O wider than the tile, the scores pass writes
+// the scaled, masked scores and the row stats once (with no partials to merge
+// it may split the keys further), so that each V/O slab only runs the P @ V
+// pass instead of recomputing the scores.
+enum PrefillStage { kFusedStage, kScoresStage, kPVStage };
 
-#define PREFILL_BLOCK(block, pv)     \
-  using Block = PrefillBlock<        \
-      T,                             \
-      BK,                            \
-      BD,                            \
-      HAS_MASK,                      \
-      DO_CAUSAL,                     \
-      CHUNKED,                       \
-      SPLIT,                         \
-      pv,                            \
-      MaskType>;                     \
-  threadgroup T Qs[Block::kQSmem];   \
-  threadgroup T KVs[Block::kKVSmem]; \
-  Block block(                       \
-      Q,                             \
-      K,                             \
-      V,                             \
-      O,                             \
-      params,                        \
-      mask_params,                   \
-      mask,                          \
-      Qs,                            \
-      KVs,                           \
-      simd_lane_id,                  \
-      simd_group_id,                 \
-      tid);                          \
-  if (block.q_block_size <= 0) {     \
-    return;                          \
-  }
-
-// Flash attention: one threadgroup per (Q block, head, batch, split).
+// One threadgroup per (Q block, head, batch, split), and per V/O slab in the
+// P @ V pass.
 template <
     typename T,
-    int BK,
     int BD,
     bool HAS_MASK,
     bool DO_CAUSAL,
     bool CHUNKED,
     bool SPLIT,
+    PrefillStage STAGE,
     typename MaskType>
 [[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
-prefill_attention(PREFILL_ATTN_ARGS) {
-  PREFILL_BLOCK(block, false);
-  if IF_CONSTEXPR (!CHUNKED) {
-    block.stage_q(0);
-  }
-  for (int kb = block.kb0; kb < block.kb1; kb++) {
-    block.scores(kb);
-    block.stage_v(kb);
-    block.softmax_update();
-    block.pv();
-  }
-  block.store(sums, maxs);
-}
-
-// Staged pass 1 for a V/O wider than the tile: writes the scaled, masked
-// scores and the row stats once, so each V slab only runs P @ V (pass 2)
-// instead of recomputing the scores. It has no partials to merge, so it may
-// split the keys further than pass 2 does.
-template <
-    typename T,
-    int BK,
-    int BD,
-    bool HAS_MASK,
-    bool DO_CAUSAL,
-    bool CHUNKED,
-    bool SPLIT,
-    typename MaskType>
-[[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
-prefill_attention_scores(
-    PREFILL_ATTN_ARGS,
-    device float* scores [[buffer(9)]]) {
-  PREFILL_BLOCK(block, false);
-  if IF_CONSTEXPR (!CHUNKED) {
-    block.stage_q(0);
-  }
-  for (int kb = block.kb0; kb < block.kb1; kb++) {
-    block.scores(kb);
-    block.store_scores(scores, kb);
-    block.softmax_update();
-  }
-  block.store_stats(sums, maxs);
-}
-
-template <
-    typename T,
-    int BK,
-    int BD,
-    bool HAS_MASK,
-    bool DO_CAUSAL,
-    bool CHUNKED,
-    bool SPLIT,
-    typename MaskType>
-[[kernel, max_total_threads_per_threadgroup(kPrefillThreads)]] void
-prefill_attention_pv(
-    PREFILL_ATTN_ARGS,
+prefill_attention(
+    const device T* Q [[buffer(0)]],
+    const device T* K [[buffer(1)]],
+    const device T* V [[buffer(2)]],
+    device SplitOutT<T, SPLIT>* O [[buffer(3)]],
+    const constant PrefillAttnParams* params [[buffer(4)]],
+    const constant PrefillAttnMaskParams* mask_params [[buffer(5)]],
+    const device MaskType* mask [[buffer(6)]],
+    device float* sums [[buffer(7)]],
+    device float* maxs [[buffer(8)]],
     device float* scores [[buffer(9)]],
-    const device float* score_maxs [[buffer(10)]]) {
-  PREFILL_BLOCK(block, true);
-  block.load_max(score_maxs, params->n_score_splits);
-  for (int kb = block.kb0; kb < block.kb1; kb++) {
-    block.load_scores(scores, kb);
-    block.stage_v(kb);
-    block.exp_scores();
-    block.pv();
+    const device float* score_maxs [[buffer(10)]],
+    uint simd_lane_id [[thread_index_in_simdgroup]],
+    uint simd_group_id [[simdgroup_index_in_threadgroup]],
+    uint3 tid [[threadgroup_position_in_grid]]) {
+  using Block = PrefillBlock<
+      T,
+      BD,
+      HAS_MASK,
+      DO_CAUSAL,
+      CHUNKED,
+      SPLIT,
+      STAGE == kPVStage,
+      MaskType>;
+  threadgroup T Qs[Block::kQSmem];
+  threadgroup T KVs[Block::kKVSmem];
+  Block block(
+      Q,
+      K,
+      V,
+      O,
+      params,
+      mask_params,
+      mask,
+      Qs,
+      KVs,
+      simd_lane_id,
+      simd_group_id,
+      tid);
+  if (block.q_block_size <= 0) {
+    return;
   }
-  block.store(sums, maxs);
+  if IF_CONSTEXPR (STAGE != kPVStage && !CHUNKED) {
+    block.stage_q(0); // a chunked pass re-stages Q with every chunk
+  }
+  if IF_CONSTEXPR (STAGE == kFusedStage) {
+    for (int kb = block.kb0; kb < block.kb1; kb++) {
+      block.scores(kb);
+      block.stage_v(kb);
+      block.softmax_update();
+      block.pv();
+    }
+    block.store(sums, maxs);
+  } else if IF_CONSTEXPR (STAGE == kScoresStage) {
+    for (int kb = block.kb0; kb < block.kb1; kb++) {
+      block.scores(kb);
+      block.store_scores(scores, kb);
+      block.softmax_update();
+    }
+    block.store_stats(sums, maxs);
+  } else {
+    block.load_max(score_maxs, params->n_score_splits);
+    for (int kb = block.kb0; kb < block.kb1; kb++) {
+      block.load_scores(scores, kb);
+      block.stage_v(kb);
+      block.exp_scores();
+      block.pv();
+    }
+    block.store(sums, maxs);
+  }
 }
 
-#define instantiate_attn(func, dtype, bd, hm, dc, ck, sp, mtype)            \
-  instantiate_kernel(                                                       \
-      #func "_" #dtype "_bd" #bd "_hm" #hm "_dc" #dc "_ck" #ck "_split" #sp \
-            "_mask" #mtype,                                                 \
-      func,                                                                 \
-      dtype,                                                                \
-      prefill_bk(bd),                                                       \
-      bd,                                                                   \
-      hm,                                                                   \
-      dc,                                                                   \
-      ck,                                                                   \
-      sp,                                                                   \
+#define instantiate_attn(suffix, stage, dtype, bd, hm, dc, ck, sp, mtype) \
+  instantiate_kernel(                                                     \
+      "prefill_attention" suffix "_" #dtype "_bd" #bd "_hm" #hm "_dc" #dc \
+      "_ck" #ck "_split" #sp "_mask" #mtype,                              \
+      prefill_attention,                                                  \
+      dtype,                                                              \
+      bd,                                                                 \
+      hm,                                                                 \
+      dc,                                                                 \
+      ck,                                                                 \
+      sp,                                                                 \
+      stage,                                                              \
       mtype)
 
 // The fused kernel also comes in a split-K variant writing fp32 partials.
-#define instantiate_attn_fused(dtype, bd, hm, dc, ck, mtype)            \
-  instantiate_attn(prefill_attention, dtype, bd, hm, dc, ck, 0, mtype); \
-  instantiate_attn(prefill_attention, dtype, bd, hm, dc, ck, 1, mtype)
+#define instantiate_attn_fused(dtype, bd, hm, dc, ck, mtype)          \
+  instantiate_attn("", kFusedStage, dtype, bd, hm, dc, ck, 0, mtype); \
+  instantiate_attn("", kFusedStage, dtype, bd, hm, dc, ck, 1, mtype)
 
 // Head dims above 192 are chunked / sliced on the 128 tile, so only it gets
 // the chunked and the staged (wide V/O) variants. Keep the tiles in sync with
 // kPrefillTiles in Attention.mm.
-#define instantiate_attn_tiles(dtype, hm, dc, mtype)                           \
-  instantiate_attn_fused(dtype, 192, hm, dc, 0, mtype);                        \
-  instantiate_attn_fused(dtype, 160, hm, dc, 0, mtype);                        \
-  instantiate_attn_fused(dtype, 128, hm, dc, 1, mtype);                        \
-  instantiate_attn_fused(dtype, 128, hm, dc, 0, mtype);                        \
-  instantiate_attn(prefill_attention_scores, dtype, 128, hm, dc, 1, 0, mtype); \
-  instantiate_attn(prefill_attention_scores, dtype, 128, hm, dc, 0, 0, mtype); \
-  instantiate_attn_fused(dtype, 96, hm, dc, 0, mtype);                         \
-  instantiate_attn_fused(dtype, 80, hm, dc, 0, mtype);                         \
-  instantiate_attn_fused(dtype, 72, hm, dc, 0, mtype);                         \
-  instantiate_attn_fused(dtype, 64, hm, dc, 0, mtype);                         \
+#define instantiate_attn_tiles(dtype, hm, dc, mtype)                          \
+  instantiate_attn_fused(dtype, 192, hm, dc, 0, mtype);                       \
+  instantiate_attn_fused(dtype, 160, hm, dc, 0, mtype);                       \
+  instantiate_attn_fused(dtype, 128, hm, dc, 1, mtype);                       \
+  instantiate_attn_fused(dtype, 128, hm, dc, 0, mtype);                       \
+  instantiate_attn("_scores", kScoresStage, dtype, 128, hm, dc, 1, 0, mtype); \
+  instantiate_attn("_scores", kScoresStage, dtype, 128, hm, dc, 0, 0, mtype); \
+  instantiate_attn_fused(dtype, 96, hm, dc, 0, mtype);                        \
+  instantiate_attn_fused(dtype, 80, hm, dc, 0, mtype);                        \
+  instantiate_attn_fused(dtype, 72, hm, dc, 0, mtype);                        \
+  instantiate_attn_fused(dtype, 64, hm, dc, 0, mtype);                        \
   instantiate_attn_fused(dtype, 32, hm, dc, 0, mtype)
 
 // P @ V reads scores the scores pass already masked, so it has no mask
 // variants; without a mask the mask name is the query dtype. Under split-K
 // it writes fp32 partials like the fused kernel.
-#define instantiate_attn_masks(dtype)                                    \
-  instantiate_attn_tiles(dtype, 0, 0, dtype);                            \
-  instantiate_attn_tiles(dtype, 0, 1, dtype);                            \
-  instantiate_attn_tiles(dtype, 1, 0, dtype);                            \
-  instantiate_attn_tiles(dtype, 1, 1, dtype);                            \
-  instantiate_attn_tiles(dtype, 1, 0, bool);                             \
-  instantiate_attn_tiles(dtype, 1, 1, bool);                             \
-  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 0, 0, 0, dtype); \
-  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 1, 0, 0, dtype); \
-  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 0, 0, 1, dtype); \
-  instantiate_attn(prefill_attention_pv, dtype, 128, 0, 1, 0, 1, dtype)
+#define instantiate_attn_masks(dtype)                               \
+  instantiate_attn_tiles(dtype, 0, 0, dtype);                       \
+  instantiate_attn_tiles(dtype, 0, 1, dtype);                       \
+  instantiate_attn_tiles(dtype, 1, 0, dtype);                       \
+  instantiate_attn_tiles(dtype, 1, 1, dtype);                       \
+  instantiate_attn_tiles(dtype, 1, 0, bool);                        \
+  instantiate_attn_tiles(dtype, 1, 1, bool);                        \
+  instantiate_attn("_pv", kPVStage, dtype, 128, 0, 0, 0, 0, dtype); \
+  instantiate_attn("_pv", kPVStage, dtype, 128, 0, 1, 0, 0, dtype); \
+  instantiate_attn("_pv", kPVStage, dtype, 128, 0, 0, 0, 1, dtype); \
+  instantiate_attn("_pv", kPVStage, dtype, 128, 0, 1, 0, 1, dtype)
 
 instantiate_attn_masks(half);
 instantiate_attn_masks(bfloat);

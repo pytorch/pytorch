@@ -1,49 +1,15 @@
 // SDPA decode kernel, one query row per (batch, head). sdpa_vector<.., BLOCKS
 // = 1> writes the normalized output in one pass; the kDecodeBlocks variant
-// splits the keys across kDecodeBlocks threadgroups that write unnormalized
-// fp32 partial rows for sdpa_merge_partials. Head dims are padded to BD: a
-// lane's
-// window of BD / 32 columns is clamped inside the real dims so its loads stay
-// unconditional, and the columns a clamped window shares with the previous
-// lane are zeroed in q and skipped at the store.
+// splits the keys across kDecodeBlocks threadgroups, which write unnormalized
+// fp32 partial rows in place of the output for sdpa_merge_partials. Head dims
+// are padded to BD: a lane's window of BD / 32 columns is clamped inside the
+// real dims so its loads stay unconditional, and the columns a clamped window
+// shares with the previous lane are zeroed in q and skipped at the store.
 //
 // Adapted from MLX:
 //   https://github.com/ml-explore/mlx/blob/main/mlx/backend/metal/kernels/scaled_dot_product_attention.metal
 #pragma once
 #include <ATen/native/mps/kernels/Attention.h>
-
-// Sums the simdgroups' partial rows into dst (scaled by inv_sum). Per column,
-// the exchange through `outputs` puts simdgroup s's value of lane window w in
-// slot [w][s]; thread t = (w, s) = (t / BN, t % BN) picks it up, the BN
-// threads of a window reduce with xor shuffles and the s == 0 one stores.
-template <int per_lane, int BN, typename U, typename DstT>
-METAL_FUNC void decode_store(
-    device DstT* dst,
-    const thread U* o,
-    threadgroup U* outputs,
-    U lane_factor,
-    U inv_sum,
-    int Dv,
-    uint simd_gid,
-    uint simd_lid) {
-  const int t = simd_gid * 32 + simd_lid;
-  const int w = t / BN;
-  const int s = t % BN;
-  const int w_off = min(w * per_lane, Dv - per_lane);
-  const U factor = simd_shuffle(lane_factor, ushort(s));
-  for (int i = 0; i < per_lane; i++) {
-    outputs[simd_lid * BN + simd_gid] = o[i];
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    U val = outputs[w * BN + s] * factor;
-    for (int k = 1; k < BN; k <<= 1) {
-      val += simd_shuffle_xor(val, ushort(k));
-    }
-    if (s == 0 && i >= w * per_lane - w_off) {
-      dst[w_off + i] = static_cast<DstT>(val * inv_sum);
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
-}
 
 template <
     typename T,
@@ -52,17 +18,17 @@ template <
     bool HAS_MASK,
     typename MaskType,
     int BLOCKS,
-    int BN>
+    int BN = BLOCKS == 1 ? kDecodeSimdgroups : kDecodeBlockSimdgroups,
+    typename OutT = SplitOutT<T, (BLOCKS > 1)>>
 [[kernel, max_total_threads_per_threadgroup(BN * 32)]] void sdpa_vector(
     const device T* queries [[buffer(0)]],
     const device T* keys [[buffer(1)]],
     const device T* values [[buffer(2)]],
-    device T* out [[buffer(3)]],
+    device OutT* out [[buffer(3)]],
     const constant DecodeAttnParams& params [[buffer(4)]],
     const device MaskType* mask [[buffer(5)]],
-    device float* partials [[buffer(6)]],
-    device float* sums [[buffer(7)]],
-    device float* maxs [[buffer(8)]],
+    device float* sums [[buffer(6)]],
+    device float* maxs [[buffer(7)]],
     uint2 tid [[threadgroup_position_in_grid]],
     uint simd_gid [[simdgroup_index_in_threadgroup]],
     uint simd_lid [[thread_index_in_simdgroup]]) {
@@ -182,32 +148,40 @@ template <
   const U sum =
       simd_sum((simd_lid < BN ? sum_exp_scores[simd_lid] : U(0)) * lane_factor);
 
-  // Two-pass blocks hand their row max (log2 units) and sum to the merge.
-  if (BLOCKS > 1 && simd_gid == 0 && simd_lid == 0) {
-    sums[part] = sum;
-    maxs[part] = new_max * M_LOG2E_F;
-  }
-  // A fully masked row has sum == 0 and all-zero o; keep it 0 instead of NaN.
+  // Two-pass blocks write unnormalized partial rows in place of the output
+  // and hand their row max (log2 units) and sum to the merge. A fully masked
+  // row has sum == 0 and all-zero o; keep it 0 instead of NaN.
+  U inv_sum = 1;
   if IF_CONSTEXPR (BLOCKS == 1) {
-    decode_store<per_lane, BN>(
-        out + bh_idx * long(Dv),
-        o,
-        outputs,
-        lane_factor,
-        1 / (sum == 0 ? U(1) : sum),
-        Dv,
-        simd_gid,
-        simd_lid);
+    out += bh_idx * long(Dv);
+    inv_sum = 1 / (sum == 0 ? U(1) : sum);
   } else {
-    decode_store<per_lane, BN>(
-        partials + part * BD,
-        o,
-        outputs,
-        lane_factor,
-        U(1),
-        Dv,
-        simd_gid,
-        simd_lid);
+    out += part * BD;
+    if (simd_gid == 0 && simd_lid == 0) {
+      sums[part] = sum;
+      maxs[part] = new_max * M_LOG2E_F;
+    }
+  }
+  // Sum the simdgroups' partial rows into out. Per column, the exchange
+  // through `outputs` puts simdgroup s's value of lane window w in slot
+  // [w][s]; thread t = (w, s) = (t / BN, t % BN) picks it up, the BN threads
+  // of a window reduce with xor shuffles and the s == 0 one stores.
+  const int t = simd_gid * 32 + simd_lid;
+  const int w = t / BN;
+  const int s = t % BN;
+  const int w_off = min(w * per_lane, Dv - per_lane);
+  const U factor = simd_shuffle(lane_factor, ushort(s));
+  for (int i = 0; i < per_lane; i++) {
+    outputs[simd_lid * BN + simd_gid] = o[i];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    U val = outputs[w * BN + s] * factor;
+    for (int off = 1; off < BN; off <<= 1) {
+      val += simd_shuffle_xor(val, ushort(off));
+    }
+    if (s == 0 && i >= w * per_lane - w_off) {
+      out[w_off + i] = static_cast<OutT>(val * inv_sum);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 }
 
@@ -254,52 +228,26 @@ template <typename T>
   }
 }
 
-#define instantiate_decode(name, blocks, bn, dtype, bd) \
-  instantiate_kernel(                                   \
-      name "_" #dtype "_" #bd "_masknone",              \
-      sdpa_vector,                                      \
-      dtype,                                            \
-      bd,                                               \
-      false,                                            \
-      false,                                            \
-      float,                                            \
-      blocks,                                           \
-      bn);                                              \
-  instantiate_kernel(                                   \
-      name "_" #dtype "_" #bd "_masknone_causal",       \
-      sdpa_vector,                                      \
-      dtype,                                            \
-      bd,                                               \
-      true,                                             \
-      false,                                            \
-      float,                                            \
-      blocks,                                           \
-      bn);                                              \
-  instantiate_kernel(                                   \
-      name "_" #dtype "_" #bd "_maskbool",              \
-      sdpa_vector,                                      \
-      dtype,                                            \
-      bd,                                               \
-      false,                                            \
-      true,                                             \
-      bool,                                             \
-      blocks,                                           \
-      bn);                                              \
-  instantiate_kernel(                                   \
-      name "_" #dtype "_" #bd "_mask" #dtype,           \
-      sdpa_vector,                                      \
-      dtype,                                            \
-      bd,                                               \
-      false,                                            \
-      true,                                             \
-      dtype,                                            \
-      blocks,                                           \
-      bn)
+#define instantiate_decode(suffix, blocks, dtype, bd, mask, ...) \
+  instantiate_kernel(                                            \
+      "sdpa_vector" suffix "_" #dtype "_" #bd "_mask" #mask,     \
+      sdpa_vector,                                               \
+      dtype,                                                     \
+      bd,                                                        \
+      __VA_ARGS__,                                               \
+      blocks)
 
-#define instantiate_decode_tile(dtype, bd)                            \
-  instantiate_decode("sdpa_vector", 1, kDecodeSimdgroups, dtype, bd); \
-  instantiate_decode(                                                 \
-      "sdpa_vector_2pass", kDecodeBlocks, kDecodeBlockSimdgroups, dtype, bd)
+// The mask variants (is_causal, HAS_MASK, MaskType): none, causal without a
+// mask, boolean and additive in the query dtype.
+#define instantiate_decode_pass(suffix, blocks, dtype, bd)                 \
+  instantiate_decode(suffix, blocks, dtype, bd, none, 0, 0, float);        \
+  instantiate_decode(suffix, blocks, dtype, bd, none_causal, 1, 0, float); \
+  instantiate_decode(suffix, blocks, dtype, bd, bool, 0, 1, bool);         \
+  instantiate_decode(suffix, blocks, dtype, bd, dtype, 0, 1, dtype)
+
+#define instantiate_decode_tile(dtype, bd)   \
+  instantiate_decode_pass("", 1, dtype, bd); \
+  instantiate_decode_pass("_2pass", kDecodeBlocks, dtype, bd)
 
 // Keep the tiles in sync with decode_bucket in Attention.mm.
 #define instantiate_decode_tiles(dtype) \
