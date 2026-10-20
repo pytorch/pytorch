@@ -14,6 +14,8 @@
 #include <cuda_runtime_api.h>
 namespace c10::cuda {
 
+class CUDAStream;
+
 // NB: In the past, we were inconsistent about whether or not this reported
 // an error if there were driver problems are not.  Based on experience
 // interacting with users, it seems that people basically ~never want this
@@ -30,6 +32,9 @@ C10_CUDA_API DeviceIndex current_device();
 C10_CUDA_API void set_device(DeviceIndex device, const bool force = false);
 
 C10_CUDA_API void device_synchronize();
+
+// Streams must be on one device and in compatible capture states.
+C10_CUDA_API void stream_wait_stream(CUDAStream waiter, CUDAStream source);
 
 C10_CUDA_API void warn_or_error_on_sync();
 
