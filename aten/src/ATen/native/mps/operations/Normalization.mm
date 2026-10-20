@@ -87,8 +87,7 @@ static std::string get_mem_string(c10::MemoryFormat memory_format) {
 }
 
 static std::string_view batch_norm_variant(const Tensor& x, const Tensor& out) {
-  if (!canUse32BitIndexMath(x, std::numeric_limits<uint32_t>::max()) ||
-      !canUse32BitIndexMath(out, std::numeric_limits<uint32_t>::max())) {
+  if (!offsetsFitIn<uint32_t>(x, out)) {
     return "strided64_";
   }
   return x.is_non_overlapping_and_dense() && out.strides() == x.strides() ? "" : "strided_";
