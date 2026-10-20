@@ -94,9 +94,14 @@ if triton is not None:
     try:
         from triton.runtime.errors import IntelGPUError
     except ImportError:
+        try:
+            from triton.backends.intel.errors import (
+                IntelGPUError,  # type: ignore[no-redef]
+            )
+        except ImportError:
 
-        class IntelGPUError(Exception):  # type: ignore[no-redef]
-            pass
+            class IntelGPUError(Exception):  # type: ignore[no-redef]
+                pass
 
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
