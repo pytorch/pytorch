@@ -69,7 +69,7 @@ class _LocalizationContext:
     mempools that ``_LocalizedTensor`` instances on a device share.
 
     Heavyweight: each ``GreenContext`` claims an SM partition and each
-    ``LocalizedMemPool`` reserves caching-allocator state.  Create
+    ``MemPool`` reserves caching-allocator state. Create
     one per device and reuse it across all LocalizedTensors on that device.
     ``_LocalizationContext.for_device(...)`` does this caching for you.
 
@@ -86,7 +86,7 @@ class _LocalizationContext:
 
     def __init__(
         self,
-        green_contexts: list[Any],
+        green_contexts: Sequence[Any],
         mempools: list[Any],
         device: int,
     ) -> None:
@@ -106,7 +106,7 @@ class _LocalizationContext:
         fork/join sync events.  torch.cuda.Event is created lazily on first
         record, so recording a branch event inside ``torch.cuda.stream(green
         stream)`` associates it with the right context -- no context push
-        needed (same pattern as ``execute_in_green_contexts``)."""
+        needed (same pattern as ``execute_on_streams``)."""
         streams = tuple(gc.Stream() for gc in self.green_contexts)
         default_event = torch.cuda.Event()
         branch_events = [torch.cuda.Event() for _ in self.green_contexts]
@@ -135,7 +135,7 @@ class _LocalizationContext:
             GreenContext,
             is_localization_supported,
         )
-        from torch.cuda.memory import LocalizedMemPool
+        from torch.cuda.memory import LocalizedAllocator, MemPool
 
         if not is_localization_supported(device):
             raise RuntimeError(
@@ -145,11 +145,15 @@ class _LocalizationContext:
             )
 
         num_domains = get_num_locality_domains(device)
-        gcs = [
-            GreenContext.create(locality_domain_id=i, device_id=device)
-            for i in range(num_domains)
-        ]
-        pools = [LocalizedMemPool(i, device=device) for i in range(num_domains)]
+        gcs = GreenContext.split(
+            locality_domain_ids=tuple(range(num_domains)), device_id=device
+        )
+        # Native pools belong to the current device, independently of allocator.device_id.
+        with torch.cuda.device(device):
+            pools = [
+                MemPool(LocalizedAllocator(i, device=device).allocator())
+                for i in range(num_domains)
+            ]
 
         from torch._inductor.cudagraph_trees import register_external_mem_pool
 
@@ -274,7 +278,7 @@ class _LocalizedTensor(torch.Tensor):
     """Tensor subclass that splits a weight across CUDA locality domains.
 
     The halves are plain ``torch.Tensor`` objects allocated in different
-    ``LocalizedMemPool``s.  ``__torch_dispatch__`` runs the ops registered
+    ``MemPool``s. ``__torch_dispatch__`` runs the ops registered
     in :data:`_LOCALIZABLE_OPS` as parallel branches on green-context-backed
     streams and concatenates the results. Concatenation always happens along
     dimension 0.
@@ -536,7 +540,7 @@ class _LocalizedTensor(torch.Tensor):
 
         # Mark non-localized inputs as ready on the calling stream so each
         # branch can wait on this event before reading them.
-        default_stream = torch.cuda.current_stream()
+        default_stream = torch.cuda.current_stream(primary._ctx.device)
         primary._default_event.record(default_stream)
 
         outputs: list[torch.Tensor] = []
@@ -557,9 +561,12 @@ class _LocalizedTensor(torch.Tensor):
                 else:
                     per_branch_kwargs[keyword] = per_branch[b]
 
+            # Stream contexts supply Dynamo's per-branch stream metadata to Inductor.
             with torch.cuda.stream(stream):
                 stream.wait_event(primary._default_event)
-                with torch.cuda.use_mem_pool(primary._ctx.mempools[b]):
+                with torch.cuda.use_mem_pool(
+                    primary._ctx.mempools[b], device=primary._ctx.device
+                ):
                     h = func(*per_branch_args, **per_branch_kwargs)
                 evt.record(stream)
             outputs.append(h)
@@ -645,7 +652,7 @@ def _localize_tensor(
     slices = list(torch.tensor_split(tensor, num_partitions, dim=0))
     halves: list[torch.Tensor] = []
     for slice_, pool in zip(slices, ctx.mempools):
-        with torch.cuda.use_mem_pool(pool):
+        with torch.cuda.use_mem_pool(pool, device=device):
             half = torch.empty_like(slice_)
         # Fill under no_grad so the copy does not make the half a non-leaf
         # view of the source, then take the source's autograd flag: the

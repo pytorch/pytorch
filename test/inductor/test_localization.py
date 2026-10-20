@@ -59,7 +59,7 @@ def _requires_green_contexts(test_func):
                 raise unittest.SkipTest(
                     "Localized green contexts not supported on this device"
                 )
-            gc = GreenContext.create(locality_domain_id=0, device_id=0)
+            (gc,) = GreenContext.split(locality_domain_ids=(0,), device_id=0)
             del gc
         except unittest.SkipTest:
             raise
