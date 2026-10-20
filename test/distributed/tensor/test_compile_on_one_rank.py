@@ -549,6 +549,12 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(graph0, graph1)
         self.assertNotIn("index=0", graph0)
 
+    @staticmethod
+    def _rng_fn(x):
+        a = torch.nn.functional.dropout(x, 0.5, True)
+        b = torch.rand_like(x) * torch.randn_like(x)
+        return a + b + torch.randint_like(x, 0, 10)
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @parametrize("align_random_eager", (False, True))
     def test_rng_ops_compile_under_coor(self, align_random_eager):
@@ -563,11 +569,6 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         # current_device() nodes still fuse into one seed; otherwise the values shift.
         from torch._inductor.utils import fresh_cache, run_and_get_code
 
-        def f(x):
-            a = torch.nn.functional.dropout(x, 0.5, True)
-            b = torch.rand_like(x) * torch.randn_like(x)
-            return a + b + torch.randint_like(x, 0, 10)
-
         x = torch.randn(64, 128, device="cuda", requires_grad=True)
 
         def run(coor):
@@ -578,12 +579,97 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 fresh_cache(),
             ):
                 torch.manual_seed(0)
-                return run_and_get_code(torch.compile(f, backend="inductor"), x)
+                compiled = torch.compile(self._rng_fn, backend="inductor")
+                return run_and_get_code(compiled, x)
 
         out, codes = run(True)
         ref, _ = run(False)
         self.assertEqual(out, ref)
         self._assert_no_baked_device("\n".join(codes))
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("align_random_eager", (False, True))
+    def test_rng_replacements_rank_agnostic_before_post_grad(self, align_random_eager):
+        # The fx graph cache key hashes the graph before post_grad respecializes
+        # current_device(), so a replacement that bakes the compiling rank's device
+        # there is invisible in the output code but still splits the cache per rank.
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+        from torch._inductor.utils import fresh_cache
+
+        graphs = []
+
+        class Capture(CustomGraphPass):
+            def __call__(self, graph):
+                graphs.append(graph.python_code("self").src)
+
+            def uuid(self):
+                return None
+
+        def graphs_on(dev):
+            graphs.clear()
+            torch._dynamo.reset()
+            cfg = torch._inductor.config.patch(
+                align_random_eager=align_random_eager,
+                post_grad_custom_pre_pass=Capture(),
+            )
+            with torch.cuda.device(dev), cfg, fresh_cache():
+                x = torch.randn(64, 128, device=f"cuda:{dev}", requires_grad=True)
+                torch.compile(self._rng_fn, backend="inductor")(x).sum().backward()
+            return "\n".join(graphs)
+
+        graph0, graph1 = graphs_on(0), graphs_on(1)
+        self.assertIn("coor.current_device", graph0)
+        self.assertNotIn("index=0", graph0)
+        self.assertEqual(graph0, graph1)
+
+    @requires_multigpu
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_constant_folding_and_sdpa_fusion_under_coor(self):
+        # The masked_fill fill value only matches the sfdp pattern once joint_graph's
+        # uniform-value constant folding has turned it into a full(); both the folding
+        # and the pattern's exact recheck have to accept a current_device() operand.
+        from torch._dynamo.utils import counters
+        from torch._inductor.custom_graph_pass import CustomGraphPass
+        from torch._inductor.utils import fresh_cache
+
+        graphs = []
+
+        class Capture(CustomGraphPass):
+            def __call__(self, graph):
+                graphs.append(graph.python_code("self").src)
+
+            def uuid(self):
+                return None
+
+        def f(query, key, value):
+            q, k, v = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
+            bs, k_len = q.size(0), k.size(-2)
+            mask = torch.ones(bs, k_len, dtype=torch.bool, device=query.device).tril()
+            scores = torch.matmul(q, k.transpose(-2, -1)) / 3.0
+            mask = (mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+            scores = scores.masked_fill(mask, -float("inf"))
+            return torch.matmul(torch.softmax(scores, dim=-1), v)
+
+        def graphs_on(dev):
+            graphs.clear()
+            counters.clear()
+            torch._dynamo.reset()
+            cfg = torch._inductor.config.patch(post_grad_custom_pre_pass=Capture())
+            args = [
+                torch.randn(4, 2, 4, 16, device=f"cuda:{dev}", dtype=torch.half)
+                for _ in range(3)
+            ]
+            with torch.cuda.device(dev), cfg, fresh_cache(), torch.no_grad():
+                out = torch.compile(f, backend="inductor")(*args)
+            self.assertEqual(out, f(*args), atol=1e-2, rtol=1e-2)
+            self.assertEqual(counters["inductor"]["fuse_attention"], 1)
+            return "\n".join(graphs)
+
+        graph0, graph1 = graphs_on(0), graphs_on(1)
+        self.assertIn("coor.current_device", graph0)
+        self.assertNotIn("index=0", graph0)
+        self.assertEqual(graph0, graph1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @compiler_config.patch(compile_on_one_rank=True)
@@ -1752,8 +1838,13 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         with device_module.device(0):
             compiled(torch.zeros(1, device=f"{device_type}:0"))
         with device_module.device(1):
+            # f reads x and writes its result on a side stream that is not
+            # ordered with the default stream, so sync on both sides.
             x = torch.zeros(1, device=f"{device_type}:1")
-            self.assertEqual(compiled(x), f(x))
+            device_module.synchronize()
+            actual, expected = compiled(x), f(x)
+            device_module.synchronize()
+            self.assertEqual(actual, expected)
 
         self.assertEqual(cnt.frame_count, 1)
 

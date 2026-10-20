@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
-import builtins
 import collections.abc
 import contextlib
 import ctypes
@@ -14,7 +13,6 @@ import os
 import pickle
 import sys
 import time
-import traceback
 import types
 import warnings
 from collections.abc import Callable, Sequence
@@ -319,19 +317,6 @@ def _pg_options_to_hints(pg_options: object) -> dict[str, str] | None:
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
-
-# Object collectives can serialize via torch.save/torch.load(weights_only=True)
-# by passing weights_only=True. Exceptions and stack summaries are commonly
-# transmitted for error propagation (e.g. torch.distributed.checkpoint), so
-# allowlist them.
-torch.serialization.add_safe_globals(
-    [
-        t
-        for t in vars(builtins).values()
-        if isinstance(t, type) and issubclass(t, BaseException)
-    ]
-    + [traceback.StackSummary, traceback.FrameSummary]
-)
 
 GroupName = NewType("GroupName", str)
 
@@ -874,6 +859,7 @@ def _create_nccl2_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -902,6 +888,7 @@ def _create_nccl_lazy_process_group(
     pg_options._timeout = opts.timeout
     pg_options.global_ranks_in_group = opts.global_ranks_in_group
     pg_options.group_name = opts.group_id
+    pg_options.group_desc = opts.group_desc
     if opts.enable_reconfigure:
         pg_options.enable_reconfigure = True
     if opts.split_from:
@@ -1559,7 +1546,12 @@ class _WorldMeta(type):
 
 
 class group(metaclass=_WorldMeta):
-    """Group class. Placeholder."""
+    """
+    Namespace for the default process group.
+
+    ``group.WORLD`` is the default :class:`ProcessGroup` created by
+    :func:`init_process_group`, or ``None`` before initialization.
+    """
 
 
 class GroupMember(metaclass=_WorldMeta):
@@ -3133,6 +3125,7 @@ def _new_process_group_helper(
                 # pyrefly: ignore [bad-argument-type]
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
+                dist_backend_opts.group_desc = group_desc
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
                 dist_backend_opts.process_group = pg
                 dist_backend_opts.split_from = split_from
@@ -6246,6 +6239,9 @@ def reduce_scatter_single(
             (ii) a stack of the output tensors along the primary dimension.
             For definition of "concatenation", see ``torch.cat()``.
             For definition of "stack", see ``torch.stack()``.
+        op (optional): One of the values from
+            ``torch.distributed.ReduceOp``
+            enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
@@ -7271,9 +7267,9 @@ def new_group(
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams. For other available options to config nccl,
-            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-tuse_local_synchronization
-            (bool, optional): perform a group-local barrier at the end of the process group creation.
-            This is different in that non-member ranks don't need to call into API and don't
+            See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+        use_local_synchronization (bool, optional): perform a group-local barrier
+            at the end of the process group creation. This is different in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
         device_id (torch.device, optional): a single, specific device
