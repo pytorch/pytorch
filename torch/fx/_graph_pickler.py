@@ -22,7 +22,12 @@ import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+    is_fake_tensor,
+    Tensor,
+)
 from torch._subclasses.meta_utils import (
     MetaConverter,
     MetaTensorDesc,
@@ -150,7 +155,7 @@ class GraphPickler(pickle.Pickler):
         if type(obj) in self._PASSTHROUGH_TYPES:
             return NotImplemented
 
-        if isinstance(obj, FakeTensor):
+        if is_fake_tensor(obj):
             return _TensorPickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch.fx.GraphModule):
             return _GraphModulePickleData.reduce_helper(self, obj)
@@ -163,10 +168,10 @@ class GraphPickler(pickle.Pickler):
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
         elif isinstance(obj, FakeScriptObject):
-            from torch._library.opaque_object import is_opaque_value_type
+            from torch._library.opaque_object import is_opaque_constant_type
 
             real_obj = object.__getattribute__(obj, "real_obj")
-            if real_obj is not None and is_opaque_value_type(type(real_obj)):
+            if real_obj is not None and is_opaque_constant_type(type(real_obj)):
                 # Use default pickling; value-type opaques are picklable.
                 return NotImplemented
             # Reference-type FakeScriptObjects can't be default-pickled.
@@ -509,7 +514,7 @@ class _TensorPickleData:
 
     @classmethod
     def reduce_helper(
-        cls, pickler: GraphPickler, obj: FakeTensor
+        cls, pickler: GraphPickler, obj: Tensor
     ) -> tuple[
         Callable[[Self, _UnpickleState], FakeTensor], tuple[Self, _UnpickleStateToken]
     ]:
@@ -535,6 +540,16 @@ class _TensorPickleData:
                 f"{type(metadata.view_func)}"
             )
         self.metadata = dataclasses.replace(metadata, fake_mode=None)
+
+        # A view's base carries its own fake_mode, which drags in the whole
+        # FakeTensorMode -> FakeTensorConverter -> MetaConverter.storage_memo
+        # graph and dies on a meta storage's data_ptr(). unpickle() restores
+        # fake_mode on the base, so clearing it here keeps the two symmetric.
+        if self.metadata.is_view and self.metadata.base is not None:
+            self.metadata = dataclasses.replace(
+                self.metadata,
+                base=dataclasses.replace(self.metadata.base, fake_mode=None),
+            )
 
         # Some debugging/verification
         for k in MetaTensorDesc._UNSERIALIZABLE:

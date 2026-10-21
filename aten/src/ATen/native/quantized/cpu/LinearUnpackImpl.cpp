@@ -8,6 +8,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -45,14 +46,14 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeight::unpack() {
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
 
   // packB->printPackedMatrix("packedB inside fbgemm_unpack
   // (QLinearUnpackWeightInt8): ");
   packB->unpack(weight_ptr_int8);
 
   return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-      weight_origin, bias_);
+      std::move(weight_origin), bias_);
 }
 #endif // USE_FBGEMM
 
@@ -70,7 +71,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
     // points with padding & casting etc
     at::Tensor weight_origin;
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
+    float* weight_scales_data = w_scales.mutable_data_ptr<float>();
     if (q_scheme == c10::kPerTensorAffine) {
       weight_origin = at::_empty_affine_quantized(
           weight_sizes,
@@ -99,7 +100,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
       TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
     }
     int8_t* weight_ptr_int8 =
-        reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
+        reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
     w->unpackWeights(w_zero_points.data(), weight_ptr_int8);
     // See for the subtraction 128
     // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp#L319
@@ -109,7 +110,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightsQnnp::
     }
 
     return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-        weight_origin, bias_);
+        std::move(weight_origin), bias_);
   }
 }
 #endif // USE_PYTORCH_QNNPACK
@@ -125,7 +126,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightFp16::
   at::Tensor unpacked_weight =
       at::empty({ncols, nrows}, at::kHalf, c10::MemoryFormat::Contiguous);
   packed_weight_ptr->unpack(
-      static_cast<fbgemm::float16*>(unpacked_weight.data_ptr()),
+      static_cast<fbgemm::float16*>(unpacked_weight.mutable_data_ptr()),
       fbgemm::matrix_op_t::Transpose);
 
   return std::make_tuple(unpacked_weight.to(at::kFloat), bias_);

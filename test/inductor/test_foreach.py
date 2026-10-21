@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -87,7 +86,6 @@ foreach_map_copy = foreach_map_wrapper(aten.copy)
 # More general functions
 foreach_map_add_fn = foreach_map_wrapper(add_op)
 foreach_map_add_inplace = foreach_map_wrapper(add_inplace_op)
-foreach_map_recipaddmul = foreach_map_wrapper(addrecip_op)
 foreach_map_addcmul = foreach_map_wrapper(addcmul_op)
 foreach_map_recipaddmul = foreach_map_wrapper(recipaddmul_op)
 
@@ -771,6 +769,41 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    def test_fuse_concat_dynamic_shapes(self):
+        # The number of inputs has to exceed config.max_pointwise_cat_inputs, or cat
+        # is lowered as a single pointwise kernel with masked loads and never builds a
+        # ConcatKernel, so the foreach grouping is never exercised.
+        n = config.max_pointwise_cat_inputs + 4
+
+        def fn(*args):
+            return torch.stack(args)
+
+        args = tuple(torch.rand(5, 4, device=GPU_TYPE) for _ in range(n))
+
+        self.check_model_gpu(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", False)
+    def test_fuse_concat_dynamic_shapes_fallback(self):
+        n = config.max_pointwise_cat_inputs + 4
+
+        def fn(*args):
+            return torch.stack(args)
+
+        args = tuple(torch.rand(5, 4, device=GPU_TYPE) for _ in range(n))
+
+        self.check_model_gpu(fn, args)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, n)
+
+    @requires_gpu
     def test_zero_elems(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -924,6 +957,65 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def _nodes_pre_fusion(self, fn, *args):
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.compile(fn)(*args)
+        return torch._inductor.metrics.ir_nodes_pre_fusion
+
+    @parametrize("case", ("add", "mul_self", "sgd_momentum"))
+    @parametrize("device", ("cpu", GPU_TYPE))
+    def test_inplace_foreach_computed_into_target(self, device, case):
+        # The value of an in-place foreach op that reads its target only where
+        # it writes it is computed straight into the target, not into a
+        # buffer of its own that is then copied. The scheduler would fuse
+        # such a copy back into one kernel, so count the nodes before fusion.
+        if device != "cpu" and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        if case == "sgd_momentum":
+            params = [
+                torch.randn(8, 8, device=device, requires_grad=True) for _ in range(3)
+            ]
+            for p in params:
+                p.grad = torch.randn_like(p)
+            opt = torch.optim.SGD(params, lr=0.1, momentum=0.9, foreach=True)
+            opt.step()  # creates the momentum buffers
+            # Per parameter: the new momentum buffer, its copy into the old
+            # one, and the update computed straight into the parameter.
+            self.assertEqual(self._nodes_pre_fusion(opt.step), 3 * len(params))
+            return
+
+        def fn(x, y):
+            if case == "add":
+                torch._foreach_add_([x], [y])
+            else:
+                torch._foreach_mul_([x], [x])
+
+        x = torch.randn(64, 64, device=device)
+        y = torch.randn(64, 64, device=device)
+        x_eager = x.clone()
+        fn(x_eager, y)
+        self.assertEqual(self._nodes_pre_fusion(fn, x, y), 1)
+        self.assertEqual(x, x_eager)
+
+    @parametrize("device", ("cpu", GPU_TYPE))
+    def test_inplace_foreach_reads_target_elsewhere(self, device):
+        # https://github.com/pytorch/pytorch/issues/198033: computed straight
+        # into x, the value would read rows of x that it has already written
+        # (on a GPU, that another block has). It gets a buffer of its own,
+        # which is then copied into x: two nodes.
+        if device != "cpu" and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x):
+            torch._foreach_add_([x], [x.flip(0)])
+
+        x = torch.randn(1024, 1024, device=device)
+        expected = x + x.flip(0)
+        self.assertEqual(self._nodes_pre_fusion(fn, x), 2)
+        self.assertEqual(x, expected)
+
     @requires_gpu
     def test_multi_device(self):
         def test_foreach_add(a0, a1, b0, b1):
@@ -988,24 +1080,28 @@ class ForeachTests(TestCase):
 
     @requires_gpu
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
+    @config.patch({"combo_kernel_per_subkernel_blocks": True})
     def test_2d_block_mixed_sizes_with_mask(self):
         """2D blocking with mixed sizes should have mask"""
+        from torch._inductor.utils import run_and_get_code
 
         def fn(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
 
-        self.check_model_gpu(
-            fn,
-            (
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 2048, device=GPU_TYPE),
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-                torch.rand(2048, 2048, device=GPU_TYPE).t(),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-            ),
+        inputs = (
+            torch.rand(1024, 2048, device=GPU_TYPE),
+            torch.rand(2048, 2048, device=GPU_TYPE),
+            torch.rand(1024, 2048, device=GPU_TYPE),
+            torch.rand(2048, 1024, device=GPU_TYPE).t(),
+            torch.rand(2048, 2048, device=GPU_TYPE).t(),
+            torch.rand(2048, 1024, device=GPU_TYPE).t(),
         )
-
+        fn_c = torch.compile(fn)
+        compiled_out, code = run_and_get_code(fn_c, *inputs)
+        code = " ".join(code)
+        self.assertEqual(compiled_out, fn(*inputs))
+        self.assertIn("@triton_heuristics.foreach", code)
+        self.assertNotIn("SequentialFlattenComboKernelGrid", code)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu
@@ -1244,7 +1340,6 @@ class ForeachTests(TestCase):
         for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @skipIfRocm
     @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
@@ -1390,7 +1485,6 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
-    @skipIfRocm
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self):
@@ -1419,6 +1513,20 @@ class ForeachTests(TestCase):
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
     @requires_gpu
+    def test_foreach_sub(self):
+        def fn(a, b):
+            return torch._foreach_sub(a, b, alpha=2.0)
+
+        torch.manual_seed(42)
+        a = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+        b = [torch.randn(4, device=GPU_TYPE) for _ in range(3)]
+
+        eager = fn(a, b)
+        compiled = torch.compile(fn, fullgraph=True)(a, b)
+
+        self.assertEqual(eager, compiled)
+
+    @requires_gpu
     def test_foreach_reorder_loops_with_nested_foreach_snodes(self):
         def fn(x0, x1, y0, y1):
             xs, ys = [x0, x1], [y0, y1]
@@ -1437,6 +1545,41 @@ class ForeachTests(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
+
+    @requires_cuda_and_triton
+    def test_foreach_pow_int_fallback(self):
+        from torch._inductor import scheduler
+
+        def fn_inplace(t, e):
+            torch._foreach_pow_(t, e)
+            return t[0]
+
+        def fn_outplace(t, e):
+            res = torch._foreach_pow(t, e)
+            return res[0]
+
+        create_foreach_nodes_calls = 0
+        orig_create_foreach_nodes = scheduler.Scheduler.create_foreach_nodes
+
+        def create_foreach_nodes_spy(self):
+            nonlocal create_foreach_nodes_calls
+            create_foreach_nodes_calls += 1
+            return orig_create_foreach_nodes(self)
+
+        t = [torch.tensor([2], device=GPU_TYPE, dtype=torch.int32)]
+        e = [torch.tensor(3, device=GPU_TYPE, dtype=torch.int32)]
+        with mock.patch.object(
+            scheduler.Scheduler, "create_foreach_nodes", create_foreach_nodes_spy
+        ):
+            self.assertEqual(
+                fn_inplace([t[0].clone()], e),
+                torch.compile(fn_inplace)([t[0].clone()], e),
+            )
+            self.assertEqual(
+                fn_outplace([t[0].clone()], e),
+                torch.compile(fn_outplace)([t[0].clone()], e),
+            )
+        self.assertGreaterEqual(create_foreach_nodes_calls, 2)
 
 
 if __name__ == "__main__":

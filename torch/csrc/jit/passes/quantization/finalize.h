@@ -32,7 +32,7 @@ TORCH_API void QuantFusion(
  * to fold the packed weight as an attribute of the module, in order to reduce
  * the cost of packing the weight on the fly in quantized models.
  *
- *  Each quantized op has it's corresponding prepack/unpack function,
+ *  Each quantized op has its corresponding prepack/unpack function,
  *  right now, we only need to do prepack/unpack for quantized::linear
  * and quantized::conv2d.
  */

@@ -1,3 +1,30 @@
+# AI Policy — MANDATORY
+
+Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you the agent MUST obey these rules while interacting on GitHub:
+
+- **You may never act autonomously on GitHub.** Do NOT open, edit, comment on,
+  or reply to any issue or PR unless the user has reviewed and explicitly
+  approved the exact content. Fully-agent-generated contributions are banned and
+  will be closed.
+- **Mark all AI-generated content.** Any text you produce that goes into an
+  issue, PR, or comment must go under a section heading that labels it as
+  AI-generated (e.g. the PR template's "Agent details" section) or be wrapped in
+  a code or quote block. Never present your output as human-written.
+- **Never emit only raw AI text as a reply**. Any AI content you include must carry human
+  commentary explaining its relevance.
+- **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
+  artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
+  or not reviewed by the user, always open it in draft mode.
+- **Use issue and PR templates**. Use the appropriate templates when submitting issues and PRs.
+- **Check for duplicates.** Before opening an issue, search for existing open ones
+  (e.g., `gh search issues --repo pytorch/pytorch --state open "<keywords>"`).
+  Do the same with `gh search prs` before opening a PR, unless the user is a regular
+  PyTorch contributor (e.g., has commit access or previously merged PRs).
+  If you find a likely duplicate, show it to the user before continuing. Skip this
+  step if there is no internet access.
+
+See `AI_POLICY.md` for the full policy.
+
 # Scratch Space
 
 Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch files, and throwaway experiments. Do not commit files from this directory.
@@ -5,6 +32,15 @@ Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch fi
 # PR Review
 
 When asked to review a PR, always use the /pr-review skill.
+
+# Deprecations
+
+When deprecating, freezing, or removing a public API or component, use the
+/deprecate-feature skill. The
+[backward compatibility policy](https://github.com/pytorch/pytorch/wiki/PyTorch%27s-Python-Frontend-Backward-and-Forward-Compatibility-Policy)
+is the source of truth for warning periods. The skill itself is a provisional
+process that we are evaluating in practice, not a rule: if the human driving
+the change thinks a step does not apply, skip it and say so.
 
 # Environment
 
@@ -46,6 +82,11 @@ To test Tensor equality, use assertEqual.
 For tests over multiple inputs, use the `@parametrize` decorator.
 For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
+# Type Stubs
+
+Many `.pyi` files are generated from corresponding `.pyi.in` templates. Always
+edit the `.pyi.in` file, not the generated `.pyi`.
+
 # Linting
 
 Only use commands provided via `spin` for linting.
@@ -54,6 +95,44 @@ Generally, use `spin lint` as to run the lint and `spin fixlint` to apply automa
 
 When the user asks you to commit or amend, run `lintrunner -a` before creating
 the commit. Fix any lint errors it reports, then commit.
+
+## Never silence S101 with a noqa
+
+Ruff's S101 (`Use of assert detected`) must be fixed by rewriting the assert,
+never by adding `# noqa: S101`. The lint message itself suggests the noqa; ignore
+that suggestion. Plain `assert` is stripped by `python -O`, so a suppressed
+assert is a check that silently does nothing in an optimized run.
+
+```python
+# Bad - silences the rule; the check disappears under `python -O`
+assert isinstance(x, Foo)  # noqa: S101
+
+# Good
+if not isinstance(x, Foo):
+    raise AssertionError(f"expected Foo, got {type(x)}")
+```
+
+Preserve the original message when there is one (`assert cond, msg` ->
+`if not cond: raise AssertionError(msg)`); otherwise synthesize a short one that
+names what was expected and shows the actual value. Invert the condition rather
+than wrapping it in `not (...)` when there is a clean inverse (`is not None` ->
+`is None`, `in` -> `not in`, `==` -> `!=`). Do not invert `<`/`>`/`<=`/`>=` on
+floats: `not (a < b)` is not `a >= b` when a value is NaN, so keep those as
+`if not (a < b)`.
+
+# Git
+
+This refines the Bash tool's `# Git` guidance to "branch first" when on the
+default branch:
+
+- If HEAD is detached, that is intentional (the ghstack workflow). Do NOT
+  create a new branch; commit directly onto the current detached HEAD.
+- If you are on an actual branch (including `main`), follow the default
+  guidance and branch first before committing.
+- **Pulling CI status.** A PR has hundreds of check-runs, so a single
+  `check-runs?per_page=100` call silently truncates and makes red look green.
+  Use `gh pr checks <PR> --json name,state,workflow,link,bucket,completedAt`
+  (already head-only, no paging).
 
 # Commit messages
 
@@ -64,11 +143,16 @@ changes. Instead, if the PR is large, explain the order to review changes
 (e.g., the logical progression), or if it's short just omit the bullet list
 entirely.
 
-Disclose that the PR was authored with an AI assistant. Do this informally in
-the commit body (e.g., "Authored by Claude." or a similar attribution for
-whichever assistant was used). NEVER add a `Co-authored-by:` trailer
-attributing the AI assistant, as it interferes with the Linux Foundation CLA
-bot.
+The commit message should be clear, informative, and have a Test Plan section
+that describes how you tested the change. If you are fixing a bug, the commit
+message must explain the root cause of the bug and how the fix works.
+If there were multiple potential paths you could have taken, please call them
+out succinctly and justify the one you took.
+
+When describing the testing strategy in a commit message, include the literal
+commands that were run in fenced Markdown code blocks.
+
+Disclose that the PR was authored with an AI assistant.
 
 When the user asks you to amend a commit, check whether the commit message
 still accurately describes the changes. If it doesn't and the commit is not a
@@ -134,6 +218,13 @@ Follow these rules for all code changes in this repository:
 - Assume the reader has familiarity with PyTorch. They may not be the expert
   on the code that is being read, but they should have some experience in the
   area.
+- Splitting code across multiple lines (due to ruff’s column limit rule) is less
+  readable than having code on a single line. When the linter splits your
+  code across multiple lines, please try to put it back on a single line by
+  changing variable names or by using helper local variables. For tests that assert
+  against a golden string, keep just the golden string on one line instead of
+  splitting it across multiple lines and opt-out of the ruff column limit rule
+  via `noqa: B950`.
 - ASCII only in newly added code comments. Do not introduce Unicode characters
   (e.g., smart quotes, em dashes, arrows, non-ASCII letters) in new comments.
   Leave preexisting Unicode in untouched comments alone; only enforce this for
@@ -145,6 +236,19 @@ If uncertain, choose the simpler, more concise implementation.
 
 Use `torch.cuda._utils._check_cuda_bindings` to error-check `cuda.bindings`
 runtime calls. Do not write inline error-checking helpers.
+
+# cuda.bindings Raw Handles
+
+`cuda.bindings` runtime functions accept a raw handle passed as a Python `int`
+directly as their handle argument. Whenever you already have an int handle --
+from `CUDAGraph.raw_cuda_graph()` / `raw_cuda_graph_exec()`, a stream's
+`.cuda_stream`, `int(node)`, or any other source -- pass it straight in. Do NOT
+construct a typed wrapper (`cudaGraph_t(init_value=...)`,
+`cudaGraphExec_t(init_value=...)`, `cudaStream_t(init_value=...)`, etc.) just to
+hand an int you already have to a bindings call. For example
+`_cuda_runtime.cudaGraphGetId(g.raw_cuda_graph())`, not
+`cudaGraphGetId(cudaGraph_t(init_value=g.raw_cuda_graph()))`. Only build the
+typed object when you genuinely need it as a value in its own right.
 
 # Dynamo Config
 
@@ -254,3 +358,8 @@ When using `<cuda/ptx>` typed wrappers for PTX instructions:
   `ptx::n32_t<N>{}`, not a runtime integer.
 - **Mbarrier smem**: Mbarrier memory must never alias with data targeted by TMA
   operations. Place mbarriers in a separate smem region from data buffers.
+
+# Distributed changes
+
+Before changing `torch/distributed/`, `torch/csrc/distributed/`, or
+`test/distributed/`, read and follow `torch/distributed/AGENTS.md`.

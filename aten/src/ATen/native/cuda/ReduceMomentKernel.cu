@@ -4,7 +4,6 @@
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 

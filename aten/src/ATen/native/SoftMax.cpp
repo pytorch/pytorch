@@ -8,7 +8,6 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
-#include <ATen/NamedTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -174,7 +173,7 @@ void host_softmax(
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   const scalar_t* input_data_base = input.const_data_ptr<scalar_t>();
-  scalar_t* output_data_base = output.data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.mutable_data_ptr<scalar_t>();
   const bool* mask_data_base = mask;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
@@ -261,7 +260,7 @@ void host_softmax_backward(
   }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
+  scalar_t* gradInput_data_base = gI.mutable_data_ptr<scalar_t>();
   const scalar_t* output_data_base = output.const_data_ptr<scalar_t>();
   const scalar_t* gradOutput_data_base = grad.const_data_ptr<scalar_t>();
   const bool* mask_data_base = mask;
@@ -410,15 +409,13 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
-    NoNamesGuard guard;
-    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+    if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_softmax(input_, dim_, true);
     } else {
         Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
         return at::_softmax(converted, dim_, false);
     }
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
@@ -428,7 +425,7 @@ Tensor& softmax_out(
     std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+  if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half &&
       dtype == ScalarType::Float) {
     if (!output_.is_contiguous()) {
       auto options =
@@ -466,15 +463,13 @@ Tensor special_softmax(const Tensor& input_, const int64_t dim_, std::optional<S
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
-    NoNamesGuard guard;
-    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+    if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
         return at::_log_softmax(input_, dim_, true);
     } else {
         Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
         return at::_log_softmax(converted, dim_, false);
     }
   }();
-  namedinference::propagate_names(result, input_);
   return result;
 }
 
@@ -484,7 +479,7 @@ Tensor& log_softmax_out(
     std::optional<ScalarType> dtype,
     Tensor& output_) {
   Tensor output_temp;
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half &&
+  if ((input_.is_cuda() || input_.is_xpu()) && input_.scalar_type() == ScalarType::Half &&
       dtype == ScalarType::Float) {
     if (!output_.is_contiguous()) {
       auto options =
@@ -528,14 +523,6 @@ DEFINE_DISPATCH(softmax_kernel);
 DEFINE_DISPATCH(log_softmax_kernel);
 DEFINE_DISPATCH(softmax_backward_kernel);
 DEFINE_DISPATCH(log_softmax_backward_kernel);
-
-Tensor softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::softmax(self, dimname_to_position(self, dim), dtype);
-}
-
-Tensor log_softmax(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::log_softmax(self, dimname_to_position(self, dim), dtype);
-}
 
 Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
 

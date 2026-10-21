@@ -52,6 +52,7 @@ class ShardingStrategy(Enum):
       :class:`DistributedDataParallel` API. For gradients, this strategy
       synchronizes them (via all-reduce) after the backward computation. The
       unsharded optimizer states are updated locally per rank.
+      Deprecated; use :class:`~torch.nn.parallel.DistributedDataParallel` instead.
     - ``HYBRID_SHARD``: Apply ``FULL_SHARD`` within a node, and replicate parameters across
       nodes. This results in reduced communication volume as expensive all-gathers and
       reduce-scatters are only done within a node, which can be more performant for medium
@@ -249,15 +250,16 @@ class StateDictType(Enum):
 
     .. note::
         FSDP currently supports three types of ``state_dict``:
-            1. ``state_dict/load_state_dict`: this pair of APIs return and load
+            1. ``state_dict/load_state_dict``: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the
                same as using DDP.
             2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
                and load local sharded, flattened parameters. The values returned
                by ``_local_state_dict`` can be directly used by FSDP and is only
                meaningful to FSDP (because parameters are flattened). Note that
-               these APIs are meant for use via the :func:`state_dict_type`
+               these APIs are meant for use via the :meth:`FullyShardedDataParallel.state_dict_type`
                context manager as follows:
+
                    >>> # xdoctest: +SKIP("undefined variables")
                    >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
                    ...     state = fsdp.state_dict()  # loads local state dict

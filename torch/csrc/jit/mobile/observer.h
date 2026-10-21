@@ -37,7 +37,7 @@ class MobileDebugInfo : public c10::DebugInfoBase {
   std::string model_name_;
   std::string method_name_;
   // TODO: Kimish
-  // If we launch a thread such as for at::launch, interepter continuation
+  // If we launch a thread such as for at::launch, interpreter continuation
   // and if the caching allocator is enabled in the base thread
   // then, in order to propagate this information, that is caching allocator
   // is enabled, across thread boundaries we can use the mechanism provided

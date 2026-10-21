@@ -19,12 +19,34 @@ from torch.distributed.fsdp import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
+
+
+def _restore_blas_workspace_sizes(cublas_size: int, cublaslt_size: int) -> None:
+    torch._C._cuda_clearCublasWorkspaces()
+    torch.backends.cuda.cublas_workspace_size(cublas_size)
+    torch.backends.cuda.cublaslt_workspace_size(cublaslt_size)
+
+
+def _disable_blas_workspaces(dev: torch.device, add_cleanup) -> None:
+    # MemTracker accounts for tensor storages, while BLAS workspaces are raw
+    # caching-allocator allocations. ROCm allocates them per operation by
+    # default, up to 128 MiB each on gfx942 and gfx950, which distorts the
+    # accelerator peak used as ground truth, so disable both workspace kinds
+    # there.
+    if dev.type != "cuda" or not torch.version.hip:
+        return
+    cublas_size = torch.backends.cuda.cublas_workspace_size()
+    cublaslt_size = torch.backends.cuda.cublaslt_workspace_size()
+    add_cleanup(_restore_blas_workspace_sizes, cublas_size, cublaslt_size)
+    torch._C._cuda_clearCublasWorkspaces()
+    torch.backends.cuda.cublas_workspace_size(0)
+    torch.backends.cuda.cublaslt_workspace_size(0)
 
 
 def _init_cublas_workspace(dev: torch.device):
@@ -47,6 +69,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/129390")
     @skip_if_lt_x_gpu(2)
     def test_tracker_multi_group_eager(self):
         """
@@ -78,6 +101,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
     ):
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
+        _disable_blas_workspaces(dev, self.addCleanup)
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
@@ -123,7 +147,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del model
         del inp
@@ -136,6 +160,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
         """
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
+        _disable_blas_workspaces(dev, self.addCleanup)
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
@@ -173,7 +198,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model
@@ -248,6 +273,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
             )
         debug = False
         dev = torch.device(torch.accelerator.current_device_index())
+        _disable_blas_workspaces(dev, self.addCleanup)
         _init_cublas_workspace(dev)
         gc.collect()
         _reset_mem_stats(dev)
@@ -312,7 +338,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
             accuracy,
             1.0,
             delta=0.1,
-            msg=f"Tracker Max:{tracker_max} Accelerator Max:{acc_max}",
+            msg=lambda msg: f"{msg}\nTracker Max:{tracker_max} Accelerator Max:{acc_max}",
         )
         del inp
         del model

@@ -122,7 +122,7 @@ class WindowsCrossCompilationTestFramework:
 
                 self.assertTrue(
                     os.path.exists(package_path),
-                    f"Package file should exist at {package_path}",
+                    lambda msg: f"{msg}\nPackage file should exist at {package_path}",
                 )
 
         return compile_test

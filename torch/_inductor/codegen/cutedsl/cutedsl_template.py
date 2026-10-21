@@ -1,13 +1,13 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
+import logging
 from collections.abc import Iterable
 from typing import Any
 from unittest.mock import patch
 
 from torch._inductor.utils import Placeholder, unique
 from torch._inductor.virtualized import V
-from torch._logging import getArtifactLogger
 
 from ...autotune_process import CuteDSLBenchmarkRequest, TensorMeta
 from ...ir import Buffer, ChoiceCaller, CuteDSLTemplateBuffer, IRNode, Layout, TensorBox
@@ -15,13 +15,19 @@ from ..common import KernelTemplate
 from .cutedsl_kernel import CuteDSLTemplateKernel
 
 
-log = getArtifactLogger(__name__, "output_code")
+log = logging.getLogger(__name__)
 
 
 class CuteDSLTemplate(KernelTemplate):
-    """Template for generating CuteDSL (CUTLASS Python DSL) kernels."""
+    """Template for generating CuteDSL (CUTLASS Python DSL) kernels.
+
+    Subclasses may override ``caller_type`` to attach template-specific
+    metadata or precompile behavior while reusing the common render and
+    benchmark request construction.
+    """
 
     kernel_type: type[Any] = CuteDSLTemplateKernel
+    caller_type: type[Any] | None = None
     index_counter = itertools.count()
     all_templates: dict[str, "CuteDSLTemplate"] = {}
 
@@ -37,7 +43,13 @@ class CuteDSLTemplate(KernelTemplate):
         self.subgraph_fn = subgraph_fn
         self.mask_fn = mask_fn
         self.template = CuteDSLTemplate._template_from_string(source)
-        assert name not in self.all_templates, f"duplicate template name, {name}"
+        # A module that registers templates can be initialized more than once in
+        # a single process (e.g. a double-import path). Tolerate re-registration
+        # under an existing name as long as the template source matches, but
+        # reject a genuine name collision between different templates.
+        existing = self.all_templates.get(name)
+        if existing is not None and existing.source != self.source:
+            raise AssertionError(f"duplicate template name, {name}")
         CuteDSLTemplate.all_templates[name] = self
 
     @staticmethod
@@ -89,8 +101,6 @@ class CuteDSLTemplate(KernelTemplate):
             )
             code = kernel.render(self.template, **kwargs)
 
-            log.debug("Generated CuteDSL Code:\n%s", code)
-
             input_call_args = tuple(kernel.args.input_buffers.keys())
             expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
             if input_call_args[: len(expected_input_args)] != expected_input_args:
@@ -116,12 +126,25 @@ class CuteDSLTemplate(KernelTemplate):
             input_nodes = list(input_nodes) + extra_capture_nodes
 
             kernel.set_capture_input_nodes(capture_nodes_by_name)
+            with kernel._patch_get_dtype_for_captures():
+                _, call_args, _, _ = kernel.args.python_argdefs()
+            expected_args = list(input_call_args)
+            expected_args.append(self.output_node.get_name())
+            if list(call_args)[: len(expected_args)] != expected_args:
+                raise RuntimeError(
+                    "CuteDSL template benchmark argument order changed while "
+                    "collecting dynamic scalar args. Expected prefix "
+                    f"{expected_args}, got {list(call_args)}."
+                )
+            extra_args = tuple(
+                V.graph.sizevars.optimization_hints(call_args[len(expected_args) :])
+            )
 
             bmreq = CuteDSLBenchmarkRequest(
                 kernel_name=kernel_name,
                 input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
                 output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-                extra_args=tuple(),
+                extra_args=extra_args,
                 source_code=code,
             )
 
@@ -146,7 +169,8 @@ class CuteDSLTemplate(KernelTemplate):
 
                 return render_kernel, render
 
-            return CuteDSLTemplateCaller(
+            caller_type = self.caller_type or CuteDSLTemplateCaller
+            return caller_type(
                 name=kernel_name,
                 input_nodes=input_nodes,
                 layout=layout,

@@ -44,10 +44,10 @@ void updateNodeTargetIfNeeded(Node& node) {
 
 std::unique_ptr<torch::aot_inductor::ProxyExecutor> make_proxy_executor(
     const std::string& filename,
-    bool is_cpu,
+    const std::string& device_str,
     std::optional<std::unordered_map<std::string, c10::IValue>> custom_objs) {
   return std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
-      filename, is_cpu, std::move(custom_objs));
+      filename, device_str, std::move(custom_objs));
 }
 } // namespace
 
@@ -71,9 +71,9 @@ void register_kernel_handlers() {
             },
             [](const Node& node,
                // NOLINTNEXTLINE(performance-unnecessary-value-param)
-               std::shared_ptr<Weights> weights,
-               const torch::nativert::ExecutorConfig& executorConfig,
-               caffe2::serialize::PyTorchStreamReader* packageReader)
+               std::shared_ptr<Weights> /*weights*/,
+               const torch::nativert::ExecutorConfig& /*executorConfig*/,
+               caffe2::serialize::PyTorchStreamReader* /*packageReader*/)
                 -> std::pair<OpKernelPtr, DelegateExecutorPtr> {
               updateNodeTargetIfNeeded(const_cast<Node&>(node));
 

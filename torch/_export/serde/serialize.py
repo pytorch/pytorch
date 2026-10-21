@@ -28,7 +28,8 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, is_fake_tensor
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
 from torch.fx.traceback import NodeSource
@@ -375,7 +376,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
 _CURRENT_DESERIALIZER: Optional["GraphModuleDeserializer"] = None
 
 
-def _reduce_fake_tensor(fake_tensor: FakeTensor):
+def _reduce_fake_tensor(fake_tensor: torch.Tensor):
     is_parameter = isinstance(fake_tensor, torch.nn.Parameter)
     tensor_meta = serialize_tensor_meta(fake_tensor)
     tensor_meta_bytes = json.dumps(
@@ -408,8 +409,17 @@ def serialize_torch_artifact(
 
     if FakeTensor in copyreg.dispatch_table:
         raise AssertionError("Refusing to stomp on existing FakeTensor reducer")
+    if torch.Tensor in copyreg.dispatch_table:
+        raise AssertionError("Refusing to stomp on existing Tensor reducer")
+
+    def reduce_tensor(t: torch.Tensor):
+        if is_fake_tensor(t):
+            return _reduce_fake_tensor(t)
+        return t.__reduce_ex__(pickle_protocol)
+
     try:
         copyreg.pickle(FakeTensor, _reduce_fake_tensor)
+        copyreg.pickle(torch.Tensor, reduce_tensor)
         buffer = io.BytesIO()
         # This is a workaround for backend's tensor deserialization problem:
         # unpickleTensor() always create a tensor on the device where it was originally saved
@@ -421,6 +431,7 @@ def serialize_torch_artifact(
         return buffer.getvalue()
     finally:
         del copyreg.dispatch_table[FakeTensor]
+        del copyreg.dispatch_table[torch.Tensor]
 
 
 def deserialize_torch_artifact(
@@ -442,6 +453,7 @@ def deserialize_torch_artifact(
             "Fallback to weights_only=False succeeded. "
             "Loaded object of type %s after initial failure: %s",
             type(artifact),
+            e,
             exc_info=e,
         )
     if not isinstance(artifact, (tuple, dict)):
@@ -552,7 +564,8 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             f"expected triton_kernel_wrapper_functional, got {node.target}"
         )
 
-    if not has_triton():
+    # Triton kernel serialization also supports the CPU backend.
+    if not has_triton(include_cpu=True):
         raise AssertionError("triton required to serialize triton kernels")
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
@@ -706,7 +719,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state = GraphState()
         self.graph_signature = graph_signature
         self.module_call_graph = module_call_graph
-        self.custom_objs: dict[str, torch._C.ScriptObject] = {}
+        self.custom_objs: dict[str, Any] = {}
         self.duplicate_getitem_nodes: dict[str, str] = {}
         self.treespec_namedtuple_fields: dict[str, NamedTupleDef] = {}
 
@@ -1415,6 +1428,16 @@ class GraphModuleSerializer(metaclass=Final):
                         return Argument.create(as_strings=[])
                     elif isinstance(elem_type, torch.TensorType):
                         return Argument.create(as_tensors=[])
+                    elif isinstance(elem_type, torch.ListType):
+                        inner_elem_type = elem_type.getElementType()
+                        if isinstance(inner_elem_type, torch.IntType):
+                            return Argument.create(as_int_lists=[])
+                        elif isinstance(inner_elem_type, torch.FloatType):
+                            return Argument.create(as_float_lists=[])
+                        else:
+                            raise SerializeError(
+                                f"Empty list with nested type {elem_type} nyi."
+                            )
                     else:
                         # I believe empty symint lists default to ints, but
                         # please file an issue if this is not the case
@@ -1542,9 +1565,10 @@ class GraphModuleSerializer(metaclass=Final):
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             elif all(
-                isinstance(a, tuple) and all(type(x) is int for x in a) for a in arg
+                isinstance(a, (list, tuple)) and all(type(x) is int for x in a)
+                for a in arg
             ):
-                # list of int tuples
+                # list of int lists (List[List[int]])
                 return Argument.create(as_int_lists=[list(t) for t in arg])
             elif all(
                 isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
@@ -1585,6 +1609,13 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(
                 as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
             )
+        elif is_custom_class_obj(arg):
+            custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
+            self.custom_objs[custom_obj_name] = arg
+            class_fqn = get_opaque_type_name(type(arg))
+            return Argument.create(
+                as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
+            )
         elif isinstance(arg, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return Argument.create(as_operator=self.serialize_operator(arg))
         else:
@@ -1610,7 +1641,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
-    def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
+    def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
@@ -2376,7 +2407,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 # str(expr) is key for self.symbol_name_to_range
                 expr_str = str(sym)
                 for arg in sym.args:
-                    self._parse_sym_expr(arg)
+                    _process_sym_expr(arg)
                 # symbol caching
                 if expr_str in self.symbol_name_to_symbol:
                     sym = self.symbol_name_to_symbol[expr_str]
@@ -2387,7 +2418,11 @@ class GraphModuleDeserializer(metaclass=Final):
                     ):
                         self.unbacked_symbols.add(sym)
                 # hints
-                if hint is not None and sym not in self.shape_env.backed_var_to_val:
+                if (
+                    hint is not None
+                    and isinstance(sym, sympy.Symbol)
+                    and sym not in self.shape_env.backed_var_to_val
+                ):
                     self.shape_env.add_backed_var_to_val(sym, hint)  # type: ignore[arg-type]
                 # ValueRanges
                 if vr := self.symbol_name_to_range.get(expr_str):
@@ -2942,10 +2977,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants)
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
@@ -2976,6 +3007,13 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
                 self.shape_env.unbacked_symint_counter += 1
+
+            # Fake tensor constants may reconstruct symbolic sizes, which need
+            # the symbol range map initialized above.
+            self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(
+                serialized_graph_module.signature
+            )
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)
@@ -4212,7 +4250,11 @@ def canonicalize(
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output
     )
-    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    if len(sorted_outs) > 0:
+        sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    else:
+        sorted_outputs = ()
+        output_specs = ()
 
     sorted_graph, replace_table = _canonicalize_graph(
         sorted_inputs, sorted_outputs, graph, constants
@@ -4404,7 +4446,7 @@ def _registered_extension_types():
 
 
 # Registry to store all custom serialization implementations.
-# The registry maps a operation to its serialization function (a callable), in their own
+# The registry maps an operation to its serialization function (a callable), in their own
 # namespace to avoid conflicts.
 # Serialization: Op type --> custom handler.
 # De-serialization: Namespace --> custom handler.

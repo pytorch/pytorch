@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import ast
 import inspect
-import sys
 import textwrap
 import warnings
+from typing_extensions import Format, get_annotations
 
 import torch
 
@@ -75,16 +75,12 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         init_ast = ast.parse(textwrap.dedent(source_lines))
 
         # Get items annotated in the class body
-        if sys.version_info >= (3, 14):
-            import annotationlib
-
-            self.class_level_annotations = list(
-                annotationlib.get_annotations(
-                    nn_module, format=annotationlib.Format.FORWARDREF
-                ).keys()
-            )
-        else:
-            self.class_level_annotations = list(nn_module.__annotations__.keys())
+        self.class_level_annotations = []
+        for cls in type(nn_module).__mro__:
+            annotations = get_annotations(cls, format=Format.FORWARDREF)
+            if annotations:
+                self.class_level_annotations = list(annotations)
+                break
 
         # Flag for later
         self.visiting_class_level_ann = False
@@ -158,7 +154,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         # TODO @ansley: add `Union` once landed
 
         # NB: Even though `Tuple` is a "container", we don't want to
-        # check for it here. `Tuple` functions as an type with an
+        # check for it here. `Tuple` functions as a type with an
         # "infinite" number of subtypes, in the sense that you can have
         # `Tuple[())]`, `Tuple[T1]`, `Tuple[T2]`, `Tuple[T1, T2]`,
         # `Tuple[T2, T1]` and so on, and none of these subtypes can be

@@ -158,7 +158,7 @@ inline scalar_t* optional_data(const Tensor& source) {
   if constexpr (std::is_const_v<scalar_t>) {
     return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
   } else {
-    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+    return source.defined() ? source.mutable_data_ptr<scalar_t>() : nullptr;
   }
 }
 
@@ -174,7 +174,7 @@ void nll_loss_out_frame(
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
 
-  scalar_t* total_weight_data = total_weight.data_ptr<scalar_t>();
+  scalar_t* total_weight_data = total_weight.mutable_data_ptr<scalar_t>();
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
@@ -300,7 +300,7 @@ void nll_loss_out_frame(
   }
 
   // write result to output tensors
-  *output.data_ptr<scalar_t>() = output_val;
+  *output.mutable_data_ptr<scalar_t>() = output_val;
   *total_weight_data = total_weight_val;
 }
 
@@ -502,14 +502,14 @@ static Tensor cross_entropy_loss_prob_target(
     int64_t reduction,
     double label_smoothing) {
   const auto class_dim = self.dim() == 1 ? 0 : 1;
-  const auto n_classes = self.size(class_dim);
+  const auto n_classes = self.sym_size(class_dim);
   TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      !weight.defined() || (weight.dim() == 1 && weight.sym_numel() == n_classes),
       "cross_entropy: weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
       " but got weight tensor of shape: ",
-      weight.sizes());
+      weight.sym_sizes());
 
   auto input = at::log_softmax(self, class_dim, self.scalar_type());
   Tensor target;
@@ -621,7 +621,7 @@ static Tensor cross_entropy_loss_label_smoothing(
         ret = smooth_loss.sum();
         break;
       case Reduction::None:
-        ret = smooth_loss;
+        ret = std::move(smooth_loss);
         break;
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);

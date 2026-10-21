@@ -692,6 +692,9 @@ def split_module(
             )
 
     ret = _make_graph_module(base_mod_attrs, base_mod_graph)
+    # Record which children are partitions (vs hoisted attributes like HOP
+    # body subgraphs) so callers can distinguish them.
+    ret.meta["partition_names"] = {p.submod_name for p in partitions.values()}
     log.debug(
         "%s",
         lazy_format_graph_code("post split_module", ret, colored=True),

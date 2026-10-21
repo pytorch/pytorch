@@ -61,7 +61,7 @@ def _all_gather_sharded_tensor(
         dtype=local_tensor.dtype,
         device=pg_device,
     )
-    dist.all_gather_into_tensor(tensor, local_tensor, group=pg)
+    dist.all_gather_single(tensor, local_tensor, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
     return tensor

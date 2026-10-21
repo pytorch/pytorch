@@ -250,8 +250,8 @@ def TensorMeta(
             raise AssertionError(
                 f"tensorlike must be torch.Tensor, got {type(tensorlike)}"
             )  # mypy
-        inferred_shape = tuple(tensorlike.shape)
-        inferred_strides = tuple(tensorlike.stride())
+        inferred_shape = tensorlike.shape
+        inferred_strides = tensorlike.stride()
         inferred_dtype = tensorlike.dtype
         inferred_device = tensorlike.device
     else:
@@ -349,9 +349,7 @@ def _make_prim(
     if tags:
         _prim._tags = tags
     elif aten_packet := getattr(torch.ops.aten, name, None):
-        overload_tags = [
-            getattr(aten_packet, overload).tags for overload in aten_packet.overloads()
-        ]
+        overload_tags = [overload.tags for overload in aten_packet.op_overloads()]
         tags_intersection = set(overload_tags[0])
         tags_intersection.intersection_update(*overload_tags[1:])
 
@@ -384,6 +382,10 @@ def _make_prim(
         p.prim_impl = _prim_impl
         p.prim_meta_impl = meta
         p.impl_aten = impl_aten
+
+    torch._C._fake_dispatch_register_prim_meta(
+        _prim._schema.name, _prim._schema.overload_name
+    )
 
     return _prim
 
@@ -659,7 +661,7 @@ def _cbrt_aten(a: torch.Tensor) -> Tensor:
         lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
     )
     # Returns the real cubic root of the number.
-    # Note that if a < 0, pow(a, (1. / 3.)) returns th complex number
+    # Note that if a < 0, pow(a, (1. / 3.)) returns the complex number
     # exp(1/3 * log(a)) = exp(1/3 * (log(abs(a)) + pi*i)) = cbrt(abs(a)) * e^{pi/3*i}
     # which is a complex number.
     # For more info see the section Note in
@@ -1273,6 +1275,8 @@ as_strided = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_as_strided_doc,
 )
+prim.impl("as_strided", torch.library.fallthrough_kernel, "Conjugate")
+prim.impl("as_strided", torch.library.fallthrough_kernel, "Negative")
 
 
 def _broadcast_in_dim_meta(
@@ -1470,7 +1474,7 @@ def _collapse_view_helper(
             if guard_or_false(valid_op is False):
                 break
 
-    # for unbacked this become a runtime assertion.
+    # for unbacked this becomes a runtime assertion.
     valid_op = sym_or(valid_op, a.numel() == 0)
 
     if must_be_valid:
@@ -1882,7 +1886,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = torch.sym_sum(sym_sum_args)
+    new_shape[dim] = torch.sym_sum(sym_sum_args)  # type: ignore[call-overload]
     return TensorMeta(
         tensors[0],
         shape=new_shape,
@@ -1999,6 +2003,7 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
         raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
     if not isinstance(dtype, torch.dtype):
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
+    utils.check_shell_dtype_cast(a.dtype, dtype)
 
     # dtype conversion preserves dense strides
     if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
@@ -2388,7 +2393,7 @@ def _prod_aten(
             inp = torch.prod(inp, d, dtype=dtype)
         return inp
     else:
-        return torch.prod(inp, dims, dtype=dtype)
+        return torch.prod(inp, dtype=dtype)
 
 
 prod = _make_reduction_prim(
@@ -2890,6 +2895,14 @@ _uniform_helper = _make_prim(
 #
 
 
+def _fft_aten_result(result: TensorLikeType) -> TensorLikeType:
+    # FFT prims promise contiguous strides, unlike backend-dependent ATen layouts.
+    result = result.contiguous()
+    return result.as_strided_(
+        result.shape, utils.make_contiguous_strides_for(result.shape)
+    )
+
+
 def _fft_r2c_meta(
     input: TensorLike,
     *,
@@ -2916,7 +2929,7 @@ def _fft_r2c_aten(
     onesided: bool,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_r2c(input, dim, normalization, onesided)
+    return _fft_aten_result(torch._fft_r2c(input, dim, normalization, onesided))
 
 
 _fft_r2c_doc = """
@@ -2956,7 +2969,7 @@ def _fft_c2c_aten(
     forward: bool,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_c2c(input, dim, normalization, forward)
+    return _fft_aten_result(torch._fft_c2c(input, dim, normalization, forward))
 
 
 _fft_c2c_doc = """
@@ -2996,7 +3009,7 @@ def _fft_c2r_aten(
     last_dim_size: int,
 ) -> TensorLikeType:
     normalization = 0  # No normalization
-    return torch._fft_c2r(input, dim, normalization, last_dim_size)
+    return _fft_aten_result(torch._fft_c2r(input, dim, normalization, last_dim_size))
 
 
 _fft_c2r_doc = """

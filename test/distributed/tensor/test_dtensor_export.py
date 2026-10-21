@@ -9,6 +9,7 @@ from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Partial, Replicate, Shard
 from torch.distributed.tensor._api import DTensor
@@ -26,7 +27,7 @@ from torch.nn.attention.flex_attention import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
+    requires_accelerator,
     run_tests,
     TestCase,
 )
@@ -175,7 +176,7 @@ register_pytree_node(
 )
 
 
-@requires_cuda
+@requires_accelerator
 class DTensorExportTest(TestCase):
     def tearDown(self):
         super().tearDown()
@@ -188,7 +189,7 @@ class DTensorExportTest(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = torch.accelerator.current_accelerator().type
 
     def _run_test(self, export_fn, test_annotation=False):
         dp_degree = 2
@@ -266,7 +267,7 @@ class DTensorExportTest(TestCase):
                 "all_reduce",
                 "wait_tensor",
                 "view_2",
-                "t_16",
+                "t_12",
             ]
             unmarked_nodes_fw = [
                 "view_3",
@@ -281,52 +282,52 @@ class DTensorExportTest(TestCase):
                 "all_reduce_1",
                 "wait_tensor_1",
                 "view_6",
-                "t_5",
-                "t_11",
+                "t_4",
+                "t_8",
             ]
 
             marked_nodes_bw = [
-                "view_13",
-                "mm_8",
-                "t_17",
+                "view_11",
+                "mm_4",
+                "t_13",
                 "view_1",
-                "mm_9",
-                "t_18",
-                "sum_5",
-                "view_14",
-                "t_19",
+                "mm_5",
+                "t_14",
+                "sum_3",
+                "view_12",
+                "t_15",
                 "detach",
                 "detach_3",
                 "threshold_backward_1",
-                "view_15",
-                "t_20",
-                "mm_10",
-                "t_21",
-                "sum_6",
-                "view_16",
-                "t_22",
+                "view_13",
+                "t_16",
+                "mm_6",
+                "t_17",
+                "sum_4",
+                "view_14",
+                "t_18",
             ]
             unmarked_nodes_bw = [
                 "view_7",
-                "mm_1",
-                "t_7",
+                "mm",
+                "t_5",
                 "view_5",
-                "mm_3",
-                "t_8",
-                "sum_2",
-                "view_9",
-                "t_9",
+                "mm_1",
+                "t_6",
+                "sum_1",
+                "view_8",
+                "t_7",
                 "detach_1",
                 "detach_2",
                 "threshold_backward",
+                "view_9",
+                "mm_2",
+                "t_9",
+                "mm_3",
+                "t_10",
+                "sum_2",
                 "view_10",
-                "mm_5",
-                "t_13",
-                "mm_7",
-                "t_14",
-                "sum_4",
-                "view_12",
-                "t_15",
+                "t_11",
                 "all_reduce_2",
                 "wait_tensor_2",
             ]
@@ -409,7 +410,7 @@ class DTensorExportTest(TestCase):
                 if "val" not in node.meta:
                     raise AssertionError(f"Expected 'val' in node.meta for {node}")
                 fake_val = node.meta["val"]
-                if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
+                if is_fake_tensor(fake_val):
                     res.append(list(fake_val.shape))
 
         self.assertEqual(str(res), answer)
@@ -543,8 +544,8 @@ graph():
     %max_1 : [num_users=1] = call_method[target=max](args = (%l_x_,), kwargs = {})
     %clamp : [num_users=1] = call_function[target=torch.clamp](args = (%max_1,), kwargs = {min: 1})
     %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
-    %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
-    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
+    %ge : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
+    %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge, Runtime assertion failed for expression u0 >= 1 on node 'ge'), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
     return (getitem,)""",
         )

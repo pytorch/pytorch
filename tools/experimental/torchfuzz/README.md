@@ -561,18 +561,22 @@ class MyOperator(Operator):
         return f"{output_name} = torch.my_op({', '.join(input_names)})"
 ```
 
-### Step 2: Register Operator
+### Step 2: Register Your Module
 
-Add your operator to `operators/registry.py`:
+Add your module name to the `_OPERATOR_MODULES` list in `operators/registry.py`:
 
 ```python
-from torchfuzz.operators.my_op import MyOperator
-
-class OperatorRegistry:
-    def _register_default_operators(self):
-        # ... existing registrations ...
-        self.register(MyOperator())
+_OPERATOR_MODULES: list[str] = [
+    # ... existing modules ...
+    "my_op",
+]
 ```
+
+The registry automatically discovers all concrete `Operator` subclasses in each listed module using introspection. Your operator class must:
+- Be a concrete (non-abstract) subclass of `Operator`
+- Be defined in the module (not re-exported from elsewhere)
+- NOT have a class name ending with `Base` (reserved for abstract bases)
+- Have a parameterless constructor (or all-defaulted parameters)
 
 ### Step 3: Add to Template (Optional)
 

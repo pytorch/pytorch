@@ -199,10 +199,8 @@ class Vectorized<c10::Half> : public Vectorized16<
     if (count == size()) {
       return vld1q_f16(reinterpret_cast<const float16_t*>(ptr));
     }
-    __at_align__ float16_t tmp_values[size()];
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
-    }
+    // Zero tail past `count`.
+    __at_align__ float16_t tmp_values[size()] = {};
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float16_t*>(ptr),

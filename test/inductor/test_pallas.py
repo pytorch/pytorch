@@ -12,8 +12,13 @@ import torch._dynamo
 import torch._inductor.async_compile
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor import config
+from torch._inductor.graph import GraphLowering
+from torch._inductor.ir import FallbackKernel
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
@@ -63,6 +68,8 @@ def make_pallas(cls):
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
+        (config, "test_configs.runtime_triton_dtype_assert", False),
+        (config, "test_configs.runtime_triton_shape_assert", False),
     ]
     cls_prefix = "Pallas"
     suffix = "_pallas"
@@ -2625,6 +2632,36 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
 
+class PallasLoweringTests(TestCase):
+    def test_low_precision_nextafter_falls_back(self):
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            x = torch.ones(2, dtype=torch.float16)
+            y = torch.full((2,), 2.0, dtype=torch.float16)
+            gm = make_fx(torch.ops.prims.nextafter.default, tracing_mode="fake")(x, y)
+
+        with config.patch(cpu_backend="pallas"), V.set_fake_mode(fake_mode):
+            graph = GraphLowering(gm, example_inputs=[x, y])
+            with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                graph.run(x, y)
+
+        self.assertIsInstance(graph.graph_outputs[0].data, FallbackKernel)
+
+    def test_nextafter_halide_config_does_not_affect_mtia(self):
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            x = torch.ones(2, device="mtia", dtype=torch.float32)
+            y = torch.full((2,), 2.0, device="mtia", dtype=torch.float32)
+            gm = make_fx(torch.ops.prims.nextafter.default, tracing_mode="fake")(x, y)
+
+        with config.patch(cuda_backend="halide"), V.set_fake_mode(fake_mode):
+            graph = GraphLowering(gm, example_inputs=[x, y])
+            with V.set_graph_handler(graph), V.set_extern_kernel_nodes([]):
+                graph.run(x, y)
+
+        self.assertNotIsInstance(graph.graph_outputs[0].data, FallbackKernel)
+
+
 if test_torchinductor.RUN_CPU and has_cpu_pallas():
 
     class PallasTestsCPU(PallasTestsMixin, TestCase):
@@ -2643,9 +2680,6 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class PallasTestsTPU(PallasTestsMixin, TestCase):
         DEVICE = "tpu"

@@ -37,6 +37,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     FSDP_WRAPPED_MODULE,
 )
+from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.tensor import DTensor
 from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -452,6 +453,25 @@ def _state_dict_fn(obj: nn.Module | torch.optim.Optimizer, api: str) -> Callable
     return call
 
 
+def _get_fsdp_process_group(
+    model: nn.Module, info: _StateDictInfo
+) -> dist.ProcessGroup | None:
+    if isinstance(model, FSDP):
+        fsdp_module = model
+    elif info.fsdp_modules:
+        fsdp_module = cast(FSDP, info.fsdp_modules[0])
+    else:
+        return None
+
+    if fsdp_module.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+        return None
+
+    process_group = fsdp_module.process_group
+    if isinstance(process_group, tuple):
+        return None
+    return process_group
+
+
 def _maybe_full_or_cpu_state_dict(
     state_dict: dict[str, Any], info: _StateDictInfo
 ) -> dict[str, Any]:
@@ -576,7 +596,7 @@ def _load_model_state_dict(
             if torch.is_tensor(value) and value.dim() > 0:
                 devices.add(value.device)
         # In lora state_dict, there could be multiple devices, with meta device inside.
-        # Take the other device in the broadcast/distribtue, and set assign to True
+        # Take the other device in the broadcast/distribute, and set assign to True
         if torch.device("meta") in devices:
             devices.remove(torch.device("meta"))
             assign = True
@@ -815,7 +835,7 @@ def _unflatten_optim_state_dict(
     for param_group in optim.param_groups:
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
-            for fqn in info.fqn_param_mapping[param]:
+            for fqn in cast(FQNS_T, info.fqn_param_mapping[param]):
                 # If a parameter is shared, only one of the FQN will be used.
                 # So we need to verify which if this fqn is actually used in
                 # the state_dict.
@@ -843,27 +863,34 @@ def _unflatten_optim_state_dict(
                 if not param.requires_grad:
                     continue
 
-                # Reconstruct state for this parameter
-                # pyrefly: ignore [unsupported-operation]
-                state[fqn] = {}
-                for state_name in optim.state[param]:
+                # Reconstruct state for this parameter.
+                param_state_names = optim.state[param]
+                if not param_state_names:
+                    continue
+
+                param_state: DictValueType = {}
+                for state_name in param_state_names:
                     flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
 
-                    if flattened_state_key not in state_dict:
-                        # Try to reconstruct the value
-                        reconstructed_value = _reconstruct_nested_dict(
-                            flattened_state_key, state_dict
-                        )
-                        # pyrefly: ignore [bad-index]
-                        cast(DictValueType, state[fqn])[state_name] = (
-                            reconstructed_value
-                        )
-                    else:
+                    if flattened_state_key in state_dict:
                         # Existing keys mean no nesting, directly use the value.
-                        # pyrefly: ignore [bad-index]
-                        cast(DictValueType, state[fqn])[state_name] = state_dict[
-                            flattened_state_key
-                        ]
+                        param_state[state_name] = state_dict[flattened_state_key]
+                        continue
+
+                    reconstructed_value = _reconstruct_nested_dict(
+                        flattened_state_key, state_dict
+                    )
+                    if reconstructed_value:
+                        param_state[state_name] = reconstructed_value
+
+                if param_state:
+                    state[fqn] = param_state
+                elif info.strict:
+                    raise RuntimeError(
+                        f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                        "The parameter requires gradients but has no saved optimizer state. "
+                        "To load anyway, use StateDictOptions(strict=False)."
+                    )
 
         first_param_fqn = cast(list[str], pg_state[-1][_PARAMS])[0]
         for k in param_group:
@@ -897,7 +924,12 @@ def _get_optim_state_dict(
         osd = _state_dict_fn(optim, "state_dict")()
         if info.fsdp_modules:
             with info.fsdp_context():
-                osd = FSDP.optim_state_dict(model, optim, osd)
+                osd = FSDP.optim_state_dict(
+                    model,
+                    optim,
+                    osd,
+                    group=_get_fsdp_process_group(model, info),
+                )
 
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
@@ -986,7 +1018,7 @@ def _split_optim_state_dict(
     for param_group in optim.param_groups:
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
-            for fqn in info.fqn_param_mapping[param]:
+            for fqn in cast(FQNS_T, info.fqn_param_mapping[param]):
                 if fqn in info.shared_params_mapping:
                     in_params = False
                     for loaded_param_group in cast(
@@ -1107,7 +1139,10 @@ def _load_optim_state_dict(
 
             with info.fsdp_context():
                 optim_state_dict = FSDP.optim_state_dict_to_load(
-                    model, optim, optim_state_dict
+                    model,
+                    optim,
+                    optim_state_dict,
+                    group=_get_fsdp_process_group(model, info),
                 )
         elif info.full_state_dict:
             info.full_state_dict = False

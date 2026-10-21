@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
@@ -159,15 +160,24 @@ __global__ void nccl_wait_for_signal_kernel(
         }
     }
 }
+
+// "0" is WORLD's name under the default init_process_group.
+static std::string group_or_default(
+    const std::optional<std::string>& group_name) {
+  return group_name.value_or("0");
+}
 #endif
 
-void nccl_put(at::Tensor& tensor, const int64_t peer) {
+void nccl_put(
+    at::Tensor& tensor,
+    const int64_t peer,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
-  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, group);
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;
   c10::cuda::CUDAGuard guard(tensor.device());
@@ -185,11 +195,16 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
-void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
+void nccl_wait_for_signal(
+    at::Tensor& sigpad,
+    int64_t signal,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
-  auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, group);
+  GroupStreamGuard stream_guard(symm_mem->get_group_name());
 
   // Always use device-side kernel because this function waits for a SPECIFIC signal value.
   // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
@@ -205,14 +220,19 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
 #endif
 }
 
-void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
+void nccl_put_with_signal(
+    at::Tensor& tensor,
+    int64_t signal,
+    int64_t peer,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
-  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, group);
   c10::cuda::CUDAGuard guard(tensor.device());
+  GroupStreamGuard stream_guard(symm_mem->get_group_name());
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Always use device-side kernel because this function writes a SPECIFIC signal value.
@@ -261,13 +281,16 @@ __global__ void lsa_get_kernel(
 }
 #endif
 
-void nccl_get(at::Tensor& tensor, const int64_t peer) {
+void nccl_get(
+    at::Tensor& tensor,
+    const int64_t peer,
+    const std::optional<std::string>& group_name) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
-  // TODO: rendezvous should remember the group name
-  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
+  const auto group = group_or_default(group_name);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, group);
   c10::cuda::CUDAGuard guard(tensor.device());
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;
@@ -282,6 +305,68 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
+#endif
+}
+
+void nccl_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer) {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  TORCH_CHECK(dst.is_cuda(), "symm_mem.get: expected a CUDA tensor");
+  TORCH_CHECK(
+      dst.device() == hdl->get_device(),
+      "symm_mem.get: dst must be on the same device as hdl");
+  TORCH_CHECK(
+      dst.is_contiguous(),
+      "symm_mem.get: dst must be backed by contiguous memory");
+  TORCH_CHECK(offset >= 0, "symm_mem.get: offset must be non-negative");
+  TORCH_CHECK(size >= 0, "symm_mem.get: size must be non-negative");
+  TORCH_CHECK(
+      dst.numel() >= size,
+      "symm_mem.get: dst must contain at least `size` elements");
+  TORCH_CHECK(
+      peer >= 0 && peer < hdl->get_world_size(), "symm_mem.get: invalid peer");
+  auto element_size = static_cast<size_t>(dst.element_size());
+  auto buffer_offset = hdl->get_offset();
+  TORCH_CHECK(
+      buffer_offset % element_size == 0,
+      "symm_mem.get: handle offset is not element-aligned");
+  auto buffer_size = hdl->get_buffer_size();
+  TORCH_CHECK(
+      buffer_offset <= buffer_size,
+      "symm_mem.get: handle offset exceeds symmetric allocation");
+  auto available_bytes = buffer_size - buffer_offset;
+  TORCH_CHECK(
+      static_cast<size_t>(offset) <= available_bytes / element_size &&
+          static_cast<size_t>(size) <=
+              (available_bytes - static_cast<size_t>(offset) * element_size) /
+                  element_size,
+      "symm_mem.get: requested range exceeds symmetric allocation");
+  auto nbytes = static_cast<size_t>(size) * element_size;
+  if (nbytes == 0) {
+    return;
+  }
+
+  c10::cuda::CUDAGuard guard(dst.device());
+  int threads = THREADS_PER_BLOCK;
+  int blocks = (nbytes + threads - 1) / threads;
+  size_t src_byte_offset =
+      buffer_offset + static_cast<size_t>(offset) * element_size;
+
+  lsa_get_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      hdl->get_buffer_ptrs_dev(),
+      peer,
+      src_byte_offset,
+      dst.mutable_data_ptr(),
+      nbytes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+  TORCH_CHECK(
+      false,
+      "NCCL symmetric memory get is not supported. Requires NCCL >= 2.28.0");
 #endif
 }
 
@@ -309,7 +394,7 @@ void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemor
   auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
   auto window = nccl_hdl->get_window();
   TORCH_CHECK(window != nullptr, "window is nullptr");
-  auto offset = nccl_hdl->get_offset();
+  auto offset = nccl_hdl->get_window_offset();
   auto byte_size = tensor.numel() * tensor.element_size();
 
   // Get the NCCL communicator
@@ -396,6 +481,19 @@ void nccl_wait_signal_boxed(
       c10d::symmetric_memory::SymmetricMemory>();
   c10d::nccl_extension::nccl_wait_signal(hdl, peer);
 }
+
+void nccl_get_out_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto size = torch::jit::pop(*stack).toInt();
+  auto offset = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack).toCustomClass<
+      c10d::symmetric_memory::SymmetricMemory>();
+  auto dst = torch::jit::pop(*stack).toTensor();
+  c10d::nccl_extension::nccl_get_out(dst, hdl, offset, size, peer);
+}
 } // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
@@ -405,10 +503,13 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   // TODO: rename with more descriptive name
   m.impl("nccl_wait_for_signal", c10d::nccl_extension::nccl_wait_for_signal);
   m.impl("nccl_put_with_signal", c10d::nccl_extension::nccl_put_with_signal);
-  // API that uses internal signal mechanism and accepts handle
+  // APIs that accept a handle
   m.impl("nccl_put_signal",
       torch::CppFunction::makeFromBoxedFunction<&nccl_put_signal_boxed>());
+  m.impl("nccl_get_out",
+      torch::CppFunction::makeFromBoxedFunction<&nccl_get_out_boxed>());
   m.impl("nccl_reduce_scatter_offset", c10d::nccl_extension::nccl_reduce_scatter_offset);
+  m.impl("nccl_all_to_all_nd", c10d::nccl_extension::nccl_all_to_all_nd);
 }
 
 // Use CompositeExplicitAutograd as key since ops do not accept tensor as input

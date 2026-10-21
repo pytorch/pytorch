@@ -7,7 +7,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_fused_adagrad.h>
 #include <ATen/ops/_fused_adagrad_native.h>
 #endif
 

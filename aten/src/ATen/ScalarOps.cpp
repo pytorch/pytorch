@@ -2,6 +2,7 @@
 #include <ATen/Dispatch_v2.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 namespace {
@@ -39,7 +40,7 @@ Tensor& scalar_fill(Tensor& self, const Scalar& value) {
   AT_DISPATCH_V2(
       self.scalar_type(), "fill_out", AT_WRAP([&]() {
         fill_inplace<scalar_t>(self, value);
-      }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      }), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return self;
 }
 

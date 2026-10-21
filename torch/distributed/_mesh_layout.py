@@ -31,7 +31,7 @@ class _FlatLayout:
     A canonical CuTe layout for a single dimension of a DeviceMesh
 
     Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
-    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
+    See https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/cute/02_layout_algebra.md for more details.
 
     Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
     of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
@@ -156,10 +156,10 @@ class _FlatLayout:
 
     def all_ranks_from_zero(self) -> list[int]:
         """
-        This function computes the all ranks specified by the layout staring from zero.
+        This function computes the all ranks specified by the layout starting from zero.
 
         How it works:
-        1. we enumerates every possible coordinate (like a nested for-loop).
+        1. we enumerate every possible coordinate (like a nested for-loop).
         If sizes = (2, 3), we get the following coordinates:
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 

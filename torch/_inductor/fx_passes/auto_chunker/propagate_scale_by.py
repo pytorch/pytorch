@@ -30,9 +30,11 @@ def _register_propagate_rule(
     if not isinstance(aten_op, (list, tuple)):
         aten_op = [aten_op]  # type: ignore[assignment, list-item]
 
-    assert isinstance(aten_op, (list, tuple)), f"{type(aten_op)=}"
+    if not isinstance(aten_op, (list, tuple)):
+        raise AssertionError(f"{type(aten_op)=}")
     for op in aten_op:
-        assert isinstance(op, torch._ops.OpOverload)
+        if not isinstance(op, torch._ops.OpOverload):
+            raise AssertionError(f"expected OpOverload, got {type(op)}")
         propagate_rules[op] = handler
     return handler
 
@@ -60,7 +62,8 @@ def propagate_scale_by(nodes_with_chunking_meta: Sequence[Node]) -> None:
             print("Propagate scale_by:")
             format_node_with_chunking_meta(node, True)
 
-        assert all(arg_meta is not None for arg_meta in arg_metas), node.format_node()
+        if not all(arg_meta is not None for arg_meta in arg_metas):
+            raise AssertionError(node.format_node())
 
         # None of the input has scale_by set
         if all(arg_meta.scale_by is None for arg_meta in arg_metas):  # type: ignore[union-attr]
@@ -88,7 +91,8 @@ def propagate_scale_by(nodes_with_chunking_meta: Sequence[Node]) -> None:
 )
 def propagate_div(div_node: Node) -> bool:
     lhs_node, rhs_node = div_node.args[:2]
-    assert isinstance(lhs_node, Node)
+    if not isinstance(lhs_node, Node):
+        raise AssertionError(f"expected lhs_node to be Node, got {type(lhs_node)}")
     lhs_scale_by = get_scale_by_from_node(lhs_node)
 
     # When gradient accumulation is enabled, rhs_node can be a constant
@@ -109,23 +113,29 @@ def propagate_div(div_node: Node) -> bool:
 )
 def propagate_where(where_node: Node) -> bool:
     cond_node, true_node, false_node = where_node.args
-    assert isinstance(cond_node, Node)
-    assert isinstance(true_node, Node)
-    assert isinstance(false_node, Node)
+    if not isinstance(cond_node, Node):
+        raise AssertionError(f"expected cond_node to be Node, got {type(cond_node)}")
+    if not isinstance(true_node, Node):
+        raise AssertionError(f"expected true_node to be Node, got {type(true_node)}")
+    if not isinstance(false_node, Node):
+        raise AssertionError(f"expected false_node to be Node, got {type(false_node)}")
     cond_meta, true_meta, false_meta = get_chunking_metas(
         [cond_node, true_node, false_node]
     )
     out_meta = get_chunking_meta(where_node)
 
-    assert true_meta is not None
-    assert false_meta is not None
+    if true_meta is None:
+        raise AssertionError("expected true_meta to be not None")
+    if false_meta is None:
+        raise AssertionError("expected false_meta to be not None")
     if true_meta.scale_by and not false_meta.scale_by:
         # the false_node must be all zero
         if false_node.target != aten.full.default:
             return False
         if false_node.args[1] != 0.0:
             return False
-        assert out_meta is not None
+        if out_meta is None:
+            raise AssertionError("expected out_meta to be not None")
         out_meta.scale_by = true_meta.scale_by
         return True
     return False
@@ -151,10 +161,12 @@ def propagate_requires_no_scaling(out_node: Node) -> bool:
     out_meta = get_chunking_meta(out_node)
 
     scale_by = get_scale_by_from_metas(*args_meta)  # type: ignore[arg-type]
-    assert scale_by is None, (
-        f"Nonlinear op {out_node.target} requires scale_by=None, got {scale_by}"
-    )
-    assert out_meta is not None
+    if scale_by is not None:
+        raise AssertionError(
+            f"Nonlinear op {out_node.target} requires scale_by=None, got {scale_by}"
+        )
+    if out_meta is None:
+        raise AssertionError("expected out_meta to be not None")
     out_meta.scale_by = None
     return True
 
@@ -188,7 +200,8 @@ def propagate_general_copy(out_node: Node) -> bool:
     out_meta = get_chunking_meta(out_node)
 
     scale_by = get_scale_by_from_metas(*args_meta)  # type: ignore[arg-type]
-    assert out_meta is not None
+    if out_meta is None:
+        raise AssertionError("expected out_meta to be not None")
     out_meta.scale_by = scale_by
     return True
 
@@ -214,11 +227,15 @@ def propagate_add_sub(out_node: Node) -> bool:
     The scale_by node of the two arguments must be the same.
     """
     lhs_node, rhs_node = get_args_of_node_type(out_node)
-    assert isinstance(lhs_node, Node)
-    assert isinstance(rhs_node, Node)
+    if not isinstance(lhs_node, Node):
+        raise AssertionError(f"expected lhs_node to be Node, got {type(lhs_node)}")
+    if not isinstance(rhs_node, Node):
+        raise AssertionError(f"expected rhs_node to be Node, got {type(rhs_node)}")
     lhs_meta, rhs_meta = get_chunking_metas([lhs_node, rhs_node])
-    assert lhs_meta is not None
-    assert rhs_meta is not None
+    if lhs_meta is None:
+        raise AssertionError("expected lhs_meta to be not None")
+    if rhs_meta is None:
+        raise AssertionError("expected rhs_meta to be not None")
     if lhs_meta.scale_by is rhs_meta.scale_by:
         update_chunking_meta(out_node, scale_by=lhs_meta.scale_by)
         return True
@@ -232,16 +249,22 @@ def propagate_add_sub(out_node: Node) -> bool:
 )
 def propagate_fma(out_node: Node) -> bool:
     mul_lhs, mul_rhs, add_rhs = out_node.args[:3]
-    assert isinstance(mul_lhs, Node)
-    assert isinstance(mul_rhs, Node)
-    assert isinstance(add_rhs, Node)
+    if not isinstance(mul_lhs, Node):
+        raise AssertionError(f"expected mul_lhs to be Node, got {type(mul_lhs)}")
+    if not isinstance(mul_rhs, Node):
+        raise AssertionError(f"expected mul_rhs to be Node, got {type(mul_rhs)}")
+    if not isinstance(add_rhs, Node):
+        raise AssertionError(f"expected add_rhs to be Node, got {type(add_rhs)}")
     mul_lhs_meta, mul_rhs_meta, add_rhs_meta = get_chunking_metas(
         [mul_lhs, mul_rhs, add_rhs]
     )
-    assert mul_lhs_meta is not None
-    assert mul_rhs_meta is not None
+    if mul_lhs_meta is None:
+        raise AssertionError("expected mul_lhs_meta to be not None")
+    if mul_rhs_meta is None:
+        raise AssertionError("expected mul_rhs_meta to be not None")
     add_lhs_scale_by = get_scale_by_from_metas(mul_lhs_meta, mul_rhs_meta)
-    assert add_rhs_meta is not None
+    if add_rhs_meta is None:
+        raise AssertionError("expected add_rhs_meta to be not None")
     if add_lhs_scale_by is add_rhs_meta.scale_by:
         update_chunking_meta(out_node, scale_by=add_lhs_scale_by)
         return True

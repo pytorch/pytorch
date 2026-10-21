@@ -1,11 +1,22 @@
 import hashlib
+import importlib.util
+import re
+import shutil
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
-from tempfile import mktemp
+from tempfile import gettempdir, mktemp
 
 import click
 import spin
+
+
+# tomllib is built in on Python 3.11+, and spin depends on tomli for older versions.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 CWD = Path(__file__).absolute().parent.parent
@@ -141,7 +152,10 @@ VERY_FAST_LINTERS = {
     "C10_NODISCARD",
     "C10_UNUSED",
     "CALL_ONCE",
+    "CMAKE_INSTALL_PREFIX_ROOT",
     "CMAKE_MINIMUM_REQUIRED",
+    "CMAKE_PLATLIB_DESTINATION",
+    "CODEOWNERS_TAXONOMY",
     "CONTEXT_DECORATOR",
     "COPYRIGHT",
     "CUBINCLUDE",
@@ -151,6 +165,7 @@ VERY_FAST_LINTERS = {
     "HEADER_ONLY_LINTER",
     "IMPORT_LINTER",
     "INCLUDE",
+    "ISINSTANCE_FAKE_TENSOR",
     "LINTRUNNER_VERSION",
     "MERGE_CONFLICTLESS_CSV",
     "META_NO_CREATE_UNBACKED",
@@ -166,10 +181,12 @@ VERY_FAST_LINTERS = {
     "RAWCUDADEVICE",
     "RAWTHROW",
     "ROOT_LOGGING",
+    "SYMPY_MINMAX",
     "TABS",
     "TESTOWNERS",
     "TYPEIGNORE",
     "TYPENOSKIP",
+    "UNSPECIFIED_BACKEND",
     "WORKFLOWSYNC",
 }
 
@@ -196,15 +213,18 @@ SLOW_LINTERS = {
     "CLANGFORMAT",
     "CLANGTIDY",
     "CODESPELL",
+    "CPYTHON_DIFF_SYNC",
     "FLAKE8",
     "GB_REGISTRY",
     "GENERATED_SHIMS_VERSION",
+    "LICENSE_FILES",
     "PYFMT",
     "STABLE_SHIM_USAGE",
     "STABLE_SHIM_VERSION",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
     "SCOPED_LIBRARY",
+    "TEST_LINTER",
 }
 
 
@@ -229,6 +249,31 @@ LINTRUNNER_BASE_CMD = [
 ]
 
 
+def _check_linter_python_versions():
+    invalid_linters = []
+
+    with Path(".lintrunner.toml").open("rb") as config_file:
+        config = tomllib.load(config_file)
+    for linter in config["linter"]:
+        command = linter.get("command", [])
+        if command[:2] != ["uv", "run"] or "--script" not in command:
+            continue
+        try:
+            python_index = command.index("--python")
+        except ValueError:
+            python_index = -1
+        if python_index == -1 or command[python_index + 1 : python_index + 2] != [
+            "3.10"
+        ]:
+            invalid_linters.append(linter["code"])
+
+    if invalid_linters:
+        raise click.ClickException(
+            "Linters using `uv run --script` must specify `--python 3.10`: "
+            + ", ".join(invalid_linters)
+        )
+
+
 @click.command()
 def setup_lint():
     """Set up lintrunner with current CI version."""
@@ -237,6 +282,7 @@ def setup_lint():
 
 
 def _check_linters():
+    _check_linter_python_versions()
     cmd = LINTRUNNER_BASE_CMD + ["list"]
     ret = spin.util.run(cmd, output=False, stderr=subprocess.PIPE)
     linters = {l.strip() for l in ret.stdout.decode().strip().split("\n")[1:]}
@@ -400,12 +446,15 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
+    # Slow linters default to changed files only so a bare `spin lint` stays
+    # fast locally, but must honor an explicit --all-files (e.g. trunk CI) so
+    # they continuously check the whole tree rather than just the merge-base diff.
     lint_found_changed, json_output_changed = _run_lintrunner(
         changed_files_linters,
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=False,
+        all_files=has_all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
@@ -457,3 +506,222 @@ def regenerate_github_workflows():
     """Regenerate GitHub workflows from templates."""
     cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
     spin.util.run(cmd, cwd="./.github")
+
+
+#: Canary imports for the docs build environment. If any of these are missing
+#: in the active env, the `make` invocation in spin docs would fail deep inside
+#: a Sphinx extension or a figure-generation script with an unhelpful traceback.
+#: Listing them up-front lets us surface a single actionable hint instead.
+_DOCS_DEP_CANARIES = ("sphinx", "matplotlib")
+
+
+@click.command(context_settings={"ignore_unknown_options": True})
+@click.argument("make_args", nargs=-1, type=click.UNPROCESSED)
+def docs(make_args):
+    """Build documentation.
+
+    Wraps `make` in `docs/`. With no arguments runs `make html`. Pass any
+    Make target or argument through, e.g.
+
+    \b
+        spin docs                     # html (default)
+        spin docs doctest             # run doctests
+        spin docs coverage            # API coverage report
+        spin docs html-stable         # release-style build
+        spin docs serve               # local http server on build/html
+        spin docs html O="-D katex_prerender=0"  # no Node.js needed
+
+    Requires the docs build dependencies (`docs/requirements.txt`) to be
+    installed in the active environment. The default build also prerenders
+    math with KaTeX, which needs Node.js (`node`) on PATH; pass
+    `O="-D katex_prerender=0"` to render math in the browser instead. (Use
+    `O=` rather than `SPHINXOPTS=` so the Makefile's default options are kept.)
+    """
+    missing = [
+        name for name in _DOCS_DEP_CANARIES if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        raise click.ClickException(
+            f"Docs build dependencies missing: {', '.join(missing)}.\n"
+            f"Install them with:\n\n"
+            f"    pip install -r docs/requirements.txt"
+        )
+
+    # docs/source/conf.py sets katex_prerender=True, so sphinxcontrib-katex
+    # spawns a Node.js server to prerender math. Missing node otherwise fails
+    # deep in the Sphinx run with a bare "No such file or directory: 'node'".
+    # Only a warning: node is unnecessary when the user disables prerender.
+    prerender_disabled = any("katex_prerender=0" in arg for arg in make_args)
+    if not prerender_disabled and shutil.which("node") is None:
+        click.echo(
+            "Warning: `node` not found on PATH. The docs build prerenders math "
+            "with KaTeX (katex_prerender=True), which needs Node.js. Either "
+            "install nodejs, or skip prerender with:\n\n"
+            '    spin docs html O="-D katex_prerender=0"\n',
+            err=True,
+        )
+    cmd = ["make", *(make_args or ("html",))]
+    spin.util.run(cmd, cwd="docs")
+
+
+def _pip_install_cmd(editable):
+    """Build the pip install command, preferring uv when available."""
+    if shutil.which("uv"):
+        cmd = ["uv", "pip", "install"]
+    else:
+        cmd = [sys.executable, "-m", "pip", "install"]
+    if editable:
+        cmd += ["-e"]
+    return cmd + [".", "-v", "--no-build-isolation"]
+
+
+def _native_aot_stage2():
+    # Post-install: the kernel builders import the installed torch, and
+    # scikit-build-core has no post-build hook inside the PEP 517 backend. Skips when
+    # AOT does not apply, but a machine with an exportable GPU needs the DSL wheels
+    # installed, or TORCH_NATIVE_AOT=0.
+    spin.util.run([sys.executable, "tools/native_aot/build_stage2.py"])
+
+
+@click.command()
+def develop():
+    """Build PyTorch (editable install).
+
+    Runs an editable pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin develop`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    """
+    spin.util.run(_pip_install_cmd(editable=True))
+    _native_aot_stage2()
+
+
+# Alias so `spin editable` also works.
+editable = click.command(name="editable")(develop.callback)
+editable.help = develop.help
+
+
+@click.command()
+def install():
+    """Install PyTorch (non-editable).
+
+    Runs a regular pip install using uv when available, falling back to
+    regular pip.  Build configuration comes from the environment, e.g.
+    `BUILD_CONFIG spin install`.  The build stages are documented at the top of
+    CMakeLists.txt and the supported env vars in cmake/EnvVarForwarding.cmake.
+    """
+    spin.util.run(_pip_install_cmd(editable=False))
+    _native_aot_stage2()
+
+
+@click.command(context_settings={"ignore_unknown_options": True})
+@click.option(
+    "--ci",
+    is_flag=True,
+    help="Run through test/run_test.py, the orchestrator CI uses, instead of pytest.",
+)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def test(ctx, ci, args):
+    """Run tests.
+
+    `spin test ARGS` is `pytest ARGS`, so test files, `-k` expressions and
+    any pytest option pass through unchanged. `spin test --ci ARGS` is
+    `python test/run_test.py ARGS` instead: the orchestrator CI uses, with
+    suite selection by name, sharding, the distributed and cpp_extension
+    handlers, retries and the CI pytest plugins. Examples:
+
+    \b
+        spin test test/test_nn.py                  # one file
+        spin test test/test_nn.py -k Linear -x     # pytest -k, stop at first failure
+        spin test test/test_nn.py --lf             # rerun the last failures
+        spin test --ci -i test_nn test_torch       # suites by name, as CI runs them
+        spin test --ci --core                      # the core suites only
+        spin test --ci                             # the runner's help, which lists the suites
+
+    Without arguments this prints this help; the full suite takes hours.
+    Needs an importable torch (`spin develop` or `spin install`). The runner
+    checks for its pytest plugins itself and names the requirements file that
+    provides them.
+    """
+    if not args and not ci:
+        click.echo(ctx.get_help())
+        return
+    if ci:
+        cmd = [sys.executable, "test/run_test.py", *(args or ("--help",))]
+    else:
+        # The pytest entry point, not `python -m pytest`: `-m` puts the cwd
+        # first on sys.path, so from the repository root the source tree would
+        # shadow a non-editable install of torch.
+        pytest_exe = shutil.which("pytest", path=sysconfig.get_path("scripts"))
+        if pytest_exe is None:
+            raise click.ClickException(
+                "pytest is not installed in this environment; install the dev "
+                "dependencies with `pip install --group dev`."
+            )
+        cmd = [pytest_exe, *args]
+    p = spin.util.run(cmd, sys_exit=False)
+    if p.returncode == 0:
+        return
+    # Both runners import torch while collecting, so a missing build surfaces
+    # as a bare traceback; run_test.py even needs it for --help. Probe from
+    # outside the checkout so the source tree cannot shadow an installed torch.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import torch"],
+        cwd=gettempdir(),
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        last = probe.stderr.strip().splitlines()[-1:]
+        raise click.ClickException(
+            "torch is not importable in this environment; build it first with "
+            "`spin develop` or `spin install`." + "".join(f"\n{line}" for line in last)
+        )
+    raise SystemExit(p.returncode)
+
+
+PYREFLY_LINTER_SCRIPT = CWD / "tools" / "linter" / "adapters" / "pyrefly_linter.py"
+PYREFLY_CONFIG = CWD / "pyrefly.toml"
+
+
+def _pyrefly_version() -> str:
+    """Read the pyrefly version pinned in the linter adapter so spin stays in sync."""
+    text = PYREFLY_LINTER_SCRIPT.read_text()
+    match = re.search(r'"pyrefly==([^"]+)"', text)
+    if not match:
+        raise RuntimeError(
+            f"Could not find pinned pyrefly version in {PYREFLY_LINTER_SCRIPT}"
+        )
+    return match.group(1)
+
+
+def _pyrefly_base_cmd() -> list[str]:
+    return ["uvx", "--python", "3.12", f"pyrefly@{_pyrefly_version()}"]
+
+
+def _pyrefly_init():
+    cmd = _pyrefly_base_cmd() + ["init"]
+    spin.util.run(cmd)
+
+
+@click.group()
+def pyrefly():
+    """Commands for managing PyRefly stubs and checks."""
+    click.echo("Starting Pyrefly...")
+
+
+@pyrefly.command()
+@click.argument("files", metavar="", nargs=-1)
+def infer(files):
+    """Infer type annotations using `pyrefly infer`.
+
+    Note: pyrefly's `infer` is still under development and has a known bug
+    around imports. Review generated annotations before committing.
+    """
+    click.echo(
+        "Warning: `pyrefly infer` is experimental and has a known bug with "
+        "imports. Review the generated annotations carefully."
+    )
+    cmd = _pyrefly_base_cmd() + ["infer", "--config", str(PYREFLY_CONFIG)] + list(files)
+    spin.util.run(cmd)

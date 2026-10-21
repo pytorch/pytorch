@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.placement_types import (
     _is_shard_like,
     _StridedShard,
+    _StridedShardOffsetMode,
     Partial,
     Placement,
     Replicate,
@@ -163,7 +164,13 @@ def _get_shard_size_and_offsets(
         "rank": rank,
     }
     if isinstance(placement, _StridedShard):
-        kwargs["return_first_offset"] = False
+        kwargs["offset_mode"] = (
+            _StridedShardOffsetMode.NONE if skip_offset else _StridedShardOffsetMode.ALL
+        )
+        # _StridedShard.local_shard_size_and_offset materializes the offsets list
+        # via .tolist() on a (potentially fake) index tensor; under FakeTensorMode
+        # that allocates one unbacked SymInt per element. Skip when the caller
+        # discards the offsets anyway.
     shard_size, shard_offsets = placement._local_shard_size_and_offset(**kwargs)
     if skip_offset:
         return shard_size, None

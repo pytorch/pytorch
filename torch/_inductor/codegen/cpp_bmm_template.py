@@ -132,7 +132,8 @@ class CppBmmTemplate(CppGemmTemplate):
 
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
-        assert isinstance(W, ir.IRNode)
+        if not isinstance(W, ir.IRNode):
+            raise AssertionError(f"expected W to be an ir.IRNode, got {type(W)}")
         _, n = W.get_size()[-2:]
         result = (
             not W.get_layout().is_contiguous()
@@ -167,16 +168,17 @@ class CppBmmTemplate(CppGemmTemplate):
             call = f"{function_name}({', '.join(x.full_name() for x in arg_defs)});"
             return call
 
-        assert placeholder not in kernel.render_hooks
+        if placeholder in kernel.render_hooks:
+            raise AssertionError(f"render hook already registered for {placeholder}")
         kernel.render_hooks[placeholder] = hook
         return placeholder
 
-    def get_default_reindexers(self, epilogue_nodes):
+    def get_default_reindexers(self, epilogues):
         def reindexer(args):
             # if epilogue nodes exist, they have 3D ranges but args are 2D, so add 0 index
             return [self.b_index] + args
 
-        return [reindexer] * len(epilogue_nodes)
+        return [reindexer] * len(epilogues)
 
     def get_options(
         self,

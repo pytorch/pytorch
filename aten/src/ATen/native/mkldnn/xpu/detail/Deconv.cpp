@@ -1,5 +1,6 @@
-#include <ATen/ATen.h>
-#include <c10/xpu/XPUFunctions.h>
+#include <ATen/Context.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
@@ -191,6 +192,8 @@ sycl::event deconvolution(
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
+  at::native::onednn::apply_tf32_if_allowed(pattr);
+
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
@@ -273,6 +276,8 @@ sycl::event deconvolution_backward_data(
       at::globalContext().deterministicMkldnn())
     pattr.set_deterministic(true);
 #endif
+
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding_l = padding.vec();
@@ -376,6 +381,7 @@ sycl::event deconvolution_backward_weights(
     pattr.set_deterministic(true);
 #endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  at::native::onednn::apply_tf32_if_allowed(pattr);
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,

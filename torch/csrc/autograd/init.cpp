@@ -1,5 +1,7 @@
+#include <ATen/core/functional.h>
 #include <torch/csrc/python_headers.h>
 
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/SequenceNumber.h>
@@ -8,7 +10,6 @@
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -25,12 +26,14 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
-#include <torch/csrc/utils.h>
+#ifdef USE_KINETO
+#include <ActivityType.h>
+#include <ITraceActivity.h>
+#endif
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -257,15 +260,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(
           "concrete_inputs",
           [](const KinetoEvent& e) {
-            std::vector<py::object> as_pyobj;
-            std::transform(
-                e.concreteInputs().begin(),
-                e.concreteInputs().end(),
-                std::back_inserter(as_pyobj),
-                [](const c10::IValue& val) {
-                  return torch::jit::toPyObject(val);
-                });
-            return as_pyobj;
+            return c10::fmap(e.concreteInputs(), [](const c10::IValue& val) {
+              return torch::jit::toPyObject(val);
+            });
           })
       .def(
           "kwinputs",
@@ -330,6 +327,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
                 static_cast<libkineto::ActivityType>(e.activityType()));
           })
       .def("extra_meta", [](const KinetoEvent& e) { return e.extraMeta(); })
+      .def(
+          "typed_metadata",
+          [](const KinetoEvent& e) {
+            py::dict metadata;
+            for (const auto& [key, value] : e.typedMetadata()) {
+              metadata[py::str(key)] = torch::jit::toPyObject(value);
+            }
+            return metadata;
+          })
       // Like shapes/strides, but also contains TensorList input shapes.
       .def(
           "structured_input_shapes",
@@ -368,12 +374,64 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
 
+#ifdef USE_KINETO
+  py::class_<libkineto::ITraceActivity>(m, "_ITraceActivity")
+      .def("name", &libkineto::ITraceActivity::name)
+      .def("timestamp", &libkineto::ITraceActivity::timestamp)
+      .def("duration", &libkineto::ITraceActivity::duration)
+      .def("device_id", &libkineto::ITraceActivity::deviceId)
+      .def("resource_id", &libkineto::ITraceActivity::resourceId)
+      .def("correlation_id", &libkineto::ITraceActivity::correlationId)
+      .def("flow_id", &libkineto::ITraceActivity::flowId)
+      .def("flow_type", &libkineto::ITraceActivity::flowType)
+      .def("flow_start", &libkineto::ITraceActivity::flowStart)
+      .def(
+          "type",
+          [](const libkineto::ITraceActivity& a) {
+            return libkineto::toString(a.type());
+          })
+      .def("metadata_json", &libkineto::ITraceActivity::metadataJson)
+      .def(
+          "linked_correlation_id",
+          [](const libkineto::ITraceActivity& a) -> int64_t {
+            auto* linked = a.linkedActivity();
+            return linked ? linked->correlationId() : 0;
+          })
+      .def(
+          "linked_activity",
+          [](const libkineto::ITraceActivity& a)
+              -> const libkineto::ITraceActivity* {
+            return a.linkedActivity();
+          },
+          py::return_value_policy::reference);
+#endif
+
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_ns", &ProfilerResult::trace_start_ns)
       .def("events", &ProfilerResult::events)
       .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
       .def("save", &ProfilerResult::save)
+      .def(
+          "trace_activities",
+          [](py::object self) {
+            auto& r = self.cast<ProfilerResult&>();
+            auto* activities = r.traceActivities();
+            if (!activities) {
+              return py::list();
+            }
+            py::list result(activities->size());
+            for (size_t i = 0; i < activities->size(); i++) {
+              // reference_internal ties each element's lifetime to self,
+              // preventing use-after-free if the list outlives the
+              // ProfilerResult.
+              result[i] = py::cast(
+                  (*activities)[i],
+                  py::return_value_policy::reference_internal,
+                  self);
+            }
+            return result;
+          })
 #endif // USE_KINETO
       ;
 
@@ -383,13 +441,23 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("config"),
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
-  m.def("_disable_profiler", disableProfiler);
+  m.def(
+      "_disable_profiler",
+      disableProfiler,
+      py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
-      prepareProfiler,
+      [](const ProfilerConfig& config,
+         const std::set<ActivityType>& activities,
+         const ActivityFilter& activity_filter,
+         const ProfilerExtensionMap& profiler_extensions) {
+        prepareProfiler(
+            config, activities, activity_filter, profiler_extensions);
+      },
       py::arg("config"),
       py::arg("activities"),
-      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
+      py::arg("activity_filter") = ActivityFilter{},
+      py::arg("profiler_extensions") = ProfilerExtensionMap{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",
@@ -551,6 +619,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   );
 
+  m.def("_push_node_creation_hook", [](py::function& hook) {
+    at::impl::NodeCreationHooks::push_hook(
+        c10::SafePyObject(hook.release().ptr(), getPyInterpreter()));
+  });
+  m.def("_pop_node_creation_hook", []() {
+    at::impl::NodeCreationHooks::pop_hook();
+  });
+
   m.def("_get_creation_meta", [](const at::Tensor& t) {
     auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
     TORCH_CHECK(meta != nullptr);
@@ -648,19 +724,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             // of the hook functions for us
             s.register_hooks(
                 std::make_unique<torch::autograd::PySavedVariableHooks>(
-                    pack_hook, unpack_hook));
+                    std::move(pack_hook), std::move(unpack_hook)));
           })
       .def_property_readonly(
           "data",
           [](const torch::autograd::SavedVariable& s) -> py::object {
             if (s.has_hooks()) {
+              // has_hooks() guarantees a value here (or a throw).
               auto opt = s.retrieve_unpack_hook_data();
-              TORCH_INTERNAL_ASSERT(opt.has_value());
               py::gil_scoped_acquire gil;
               const auto& [_unpack_fn, data_obj] = *opt;
-              PyObject* raw = data_obj.ptr(getPyInterpreter());
-              TORCH_INTERNAL_ASSERT(raw != nullptr);
-              return py::reinterpret_borrow<py::object>(raw);
+              return py::reinterpret_borrow<py::object>(
+                  data_obj.ptr(getPyInterpreter()));
             } else {
               return py::cast(s.get_raw_data().value());
             }
@@ -668,14 +743,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def_property_readonly(
           "unpack_hook",
           [](const torch::autograd::SavedVariable& s) -> py::object {
-            auto opt = s.retrieve_unpack_hook_data();
+            auto opt = s.retrieve_unpack_hook();
             if (!opt.has_value()) {
               return py::none();
             }
             py::gil_scoped_acquire gil;
-            const auto& [unpack_safe, _unused_data] = *opt;
-            auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
-            return py::reinterpret_borrow<py::function>(unpack_ptr);
+            return py::reinterpret_borrow<py::function>(
+                opt->ptr(getPyInterpreter()));
           });
 
   m.def(
@@ -707,7 +781,7 @@ static PyObject* set_autocast_enabled(
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   int enabled_id = 0;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
@@ -730,7 +804,7 @@ static PyObject* is_autocast_enabled(
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
-  at::DeviceType device_type = at::kCUDA;
+  auto device_type = at::accelerator::getAccelerator(false).value_or(at::kCUDA);
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
   }
@@ -1192,7 +1266,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!cp) {
       return false;
     }
-    if (s.find(cp) != s.end()) {
+    if (s.contains(cp)) {
       ret = true;
       return true;
     }

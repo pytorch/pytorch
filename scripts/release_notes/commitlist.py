@@ -151,8 +151,11 @@ class CommitList:
         if category in common.quantization.categories:
             category = common.quantization.name
             return category
-        if category in common.distributed.categories:
-            category = common.distributed.name
+        if category in common.optimizer.categories:
+            category = common.optimizer.name
+            return category
+        if category in common.aotdispatcher.categories:
+            category = common.aotdispatcher.name
             return category
         return category
 
@@ -179,7 +182,7 @@ class CommitList:
             ("[nn]", "nn_frontend"),
             ("[complex]", "complex_frontend"),
             ("[mps]", "mps"),
-            ("[optimizer]", "optimizer_frontend"),
+            ("[optimizer]", "optim"),
             ("[xla]", "xla"),
         ]
         title_lower = title.lower()

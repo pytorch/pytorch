@@ -1,12 +1,13 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
+#include <torch/csrc/Exceptions.h>
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,13 +71,6 @@ std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
 
 } // namespace
 
-// see https://github.com/pytorch/pytorch/pull/34845
-static void throw_python_error() {
-  python_error err;
-  err.persist();
-  throw std::move(err);
-}
-
 // RuntimeState contains arbitrary callables created during the forward pass.
 // e.g. .retains_grad(). It is created during the compiled_args stage, and is
 // used at runtime.  The lifetime of RuntimeState is a single backward pass.
@@ -111,7 +105,9 @@ struct RuntimeStateGuard {
   std::unique_ptr<RuntimeState> _state;
 };
 
-static PyObject* call_cpp_tensor_pre_hooks(PyObject* dummy, PyObject* args) {
+static PyObject* call_cpp_tensor_pre_hooks(
+    PyObject* /*dummy*/,
+    PyObject* args) {
   HANDLE_TH_ERRORS;
   int idx = -1;
   PyObject* grad = nullptr;
@@ -289,17 +285,20 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     py::object proxy = handle.attr("unpack_hook")(hook_id, hook_input_id);
     auto tmp = py::cast<std::optional<at::Tensor>>(std::move(proxy));
     TORCH_INTERNAL_ASSERT(tmp.has_value());
-    return tmp.value();
+    return std::move(tmp).value();
   }
-  void call_accumulate_grad(
+  at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const override {
     py::handle handle(py_compiler);
-    py::object stuff =
-        handle.attr("accumulate_grad")(variable, grad, has_post_hooks);
-    TORCH_INTERNAL_ASSERT(stuff.is_none());
+    py::object stuff = handle.attr("accumulate_grad")(
+        variable, variable_grad, grad, has_post_hooks);
+    auto tmp = py::cast<std::optional<at::Tensor>>(std::move(stuff));
+    TORCH_INTERNAL_ASSERT(tmp.has_value());
+    return std::move(tmp).value();
   }
 };
 
@@ -404,7 +403,7 @@ struct VerboseLogger : public PythonLogger {
 
   std::string log_node_check(
       const Node& fn,
-      size_t size_inputs_num,
+      size_t /*size_inputs_num*/,
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       size_t node_idx) {
@@ -418,11 +417,12 @@ struct VerboseLogger : public PythonLogger {
       const std::unordered_set<CacheKey>& cached_keys,
       const CacheKey& key,
       const std::string& node_name) const {
-    auto matching_sizes = cached_keys |
-        std::views::filter([&](const CacheKey& k) {
-                            return k.node_type == node_type;
-                          }) |
-        std::views::transform(&CacheKey::key_size);
+    std::vector<size_t> matching_sizes;
+    for (const auto& k : cached_keys) {
+      if (k.node_type == node_type) {
+        matching_sizes.push_back(k.key_size);
+      }
+    }
     std::string compile_reason = fmt::format(
         "Cache miss due to new autograd node: {} with key size {}, previous key sizes=[{}]",
         node_name,
@@ -620,14 +620,14 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
-static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
+static PyObject* clear_cache(PyObject* /*dummy*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS;
   CacheNode::root()->clear();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
+static PyObject* is_cache_empty(PyObject* /*dummy*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS;
   if (CacheNode::root()->is_empty()) {
     Py_RETURN_TRUE;
@@ -636,7 +636,7 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* set_verbose_logger(PyObject* dummy, PyObject* args) {
+static PyObject* set_verbose_logger(PyObject* /*dummy*/, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* logger = nullptr;
   if (!PyArg_ParseTuple(args, "O", &logger)) {
@@ -830,7 +830,7 @@ static TraceState call_begin_capture(
     TORCH_INTERNAL_ASSERT(!Py_IsNone(compile_id_str));
     std::string formatted_compile_reason = unwrap_string(compile_id_str) +
         ": " + std::move(compile_reason.value());
-    cache.compile_reasons.emplace_back(formatted_compile_reason);
+    cache.compile_reasons.emplace_back(std::move(formatted_compile_reason));
     THPObjectPtr py_compile_reasons(wrap_string_list(cache.compile_reasons));
     static PyObject* log_compile_reasons =
         PyUnicode_InternFromString("log_compile_reasons");
@@ -927,7 +927,7 @@ static CacheNode* _compiled_autograd_impl(
         for (const auto& [k, _] : cache->next) {
           cached_keys.emplace(k);
         }
-        if (cached_keys.find(key) == cached_keys.end()) {
+        if (!cached_keys.contains(key)) {
           // new autograd node found, compile
           compile_reason = vlogger->log_node_check(
               *fn, compiler_call.all_size_inputs.size(), cached_keys, key, i);
@@ -1236,7 +1236,7 @@ static variable_list compiled_autograd(
   return outputs;
 }
 
-static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
+static PyObject* set_autograd_compiler(PyObject* /*dummy*/, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* obj = nullptr;
   int b = 0;

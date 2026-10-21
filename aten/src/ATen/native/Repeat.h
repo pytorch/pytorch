@@ -21,8 +21,12 @@ static inline Tensor repeat_interleave_common(
   TORCH_CHECK(
       repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
   TORCH_CHECK(
-      repeats.scalar_type() == at::kLong || repeats.scalar_type() == at::kInt,
-      "repeats has to be Long or Int tensor");
+      repeats.scalar_type() == at::kLong ||
+          repeats.scalar_type() == at::kInt ||
+          repeats.scalar_type() == at::kShort ||
+          repeats.scalar_type() == at::kChar ||
+          repeats.scalar_type() == at::kByte,
+      "repeats has to be Long, Int, Short, Char, or Byte tensor");
   if (repeats.size(0) == 0) {
     return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
@@ -34,7 +38,7 @@ static inline Tensor repeat_interleave_common(
   } else {
     total = cumsum[-1].item<int64_t>();
     TORCH_CHECK(
-        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
+        repeats.min().item<int64_t>() >= 0, "repeats can not be negative");
   }
 
   Tensor result = at::empty({total}, repeats.options());

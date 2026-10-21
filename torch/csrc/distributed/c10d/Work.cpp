@@ -146,7 +146,7 @@ void Work::blockCurrentStream() {
       c10d::cuda::block_stream(std::chrono::milliseconds(0));
 
   getFuture()->addCallback(
-      [handle](c10::ivalue::Future& future) { handle->abort(); });
+      [handle](c10::ivalue::Future& /*future*/) { handle->abort(); });
 }
 
 void Work::abort() {
@@ -191,6 +191,14 @@ float Work::getDuration() const {
 
 uint64_t Work::getSequencenumber() const {
   TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
+}
+
+std::chrono::milliseconds Work::getTimeout() const {
+  TORCH_CHECK(false, "This Backend doesn't support getTimeout.");
+}
+
+uint64_t Work::getCompletionKey() const {
+  return reinterpret_cast<uintptr_t>(this);
 }
 
 class FutureWrappingWork : public Work {

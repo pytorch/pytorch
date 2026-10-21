@@ -5,6 +5,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/strides.h>
+#include <unordered_map>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -76,11 +77,11 @@ using AttrFunction = std::function<ideep::attr_t(
     torch::List<std::optional<at::Scalar>>,
     std::optional<std::string_view>)>;
 
-const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map();
+const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
-const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 }

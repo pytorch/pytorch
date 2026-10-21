@@ -1,15 +1,31 @@
 # Owner(s): ["oncall: export"]
+import json
+import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import torch
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._inductor.package import load_package
 from torch.export import Dim
 from torch.export.experimental import _ExportPackage
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.export.pt2_archive._package import _load_aoti
+from torch.testing._internal.common_utils import (
+    decorateIf,
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestPackage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return x + 1
@@ -88,6 +104,139 @@ class TestPackage(TestCase):
         self.assertEqual(exporter(x3), x3 + 2)
         self.assertEqual(len(package.methods), 1)
         self.assertEqual(len(package.methods["fn"].overloads), 3)
+
+
+class TestAOTIPackageStreamAffinity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_aoti_load_package_forwards_stream_affinity_options(self):
+        compiled_model = object()
+        with mock.patch(
+            "torch._inductor.package.load_package", return_value=compiled_model
+        ) as load_package_mock:
+            result = torch._inductor.aoti_load_package(
+                "model.pt2",
+                run_single_threaded=False,
+                device_index=2,
+                num_runners=4,
+                use_stream_affinity=True,
+            )
+
+        self.assertIs(result, compiled_model)
+        load_package_mock.assert_called_once_with(
+            "model.pt2",
+            run_single_threaded=False,
+            num_runners=4,
+            device_index=2,
+            use_stream_affinity=True,
+        )
+
+    def test_load_aoti_forwards_stream_affinity_to_cpp_loader(self):
+        loader_type = mock.MagicMock()
+        loader_type.load_metadata_from_package.return_value = {
+            "AOTI_DEVICE_KEY": "cuda"
+        }
+        loader = loader_type.return_value
+
+        with (
+            mock.patch.object(torch._C._aoti, "AOTIModelPackageLoader", loader_type),
+            mock.patch(
+                "torch._inductor.codecache.get_device_information", return_value={}
+            ),
+        ):
+            compiled_model = _load_aoti(
+                "model.pt2",
+                "model",
+                False,
+                4,
+                2,
+                use_stream_affinity=True,
+            )
+
+        self.assertIs(compiled_model.loader, loader)
+        loader_type.assert_called_once_with("model.pt2", "model", False, 4, 2, True)
+
+
+class TestAOTIPackageDeviceValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_aoti_load_uses_cpp_device_validation_before_device_info(self):
+        class FakeAOTIModelPackageLoader:
+            @staticmethod
+            def load_metadata_from_package(file, model_name):
+                return {"AOTI_DEVICE_KEY": "cuda"}
+
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError(
+                    "Cannot load AOTInductor package for device 'cuda' because "
+                    "CUDA is not available in this process."
+                )
+
+        with (
+            mock.patch.object(
+                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
+            ),
+            mock.patch("torch._inductor.codecache.get_device_information") as get_info,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot load AOTInductor package.*CUDA is not available",
+            ):
+                _load_aoti("model.pt2", "model", False, 1, -1)
+
+            get_info.assert_not_called()
+
+    def test_load_package_does_not_fallback_on_device_validation_error(self):
+        class FakeAOTIModelPackageLoader:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("AOTI fallback loader should not be constructed")
+
+        with (
+            mock.patch(
+                "torch._inductor.package.package.load_pt2",
+                side_effect=RuntimeError(
+                    "Cannot load AOTInductor package for device 'cuda' because "
+                    "CUDA is not available in this process."
+                ),
+            ),
+            mock.patch.object(
+                torch._C._aoti, "AOTIModelPackageLoader", FakeAOTIModelPackageLoader
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot load AOTInductor package.*CUDA is not available",
+            ):
+                load_package("model.pt2")
+
+    @parametrize("device_type", ["cuda", "xpu"])
+    @decorateIf(
+        unittest.skip("https://github.com/intel/torch-xpu-ops/issues/5156"),
+        lambda params: params["device_type"] == "xpu",
+    )
+    def test_cpp_aoti_package_loader_validates_accelerator_availability(
+        self, device_type
+    ):
+        if torch.get_device_module(device_type).is_available():
+            self.skipTest(f"Requires {device_type} to be unavailable in this process.")
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp) / "data" / "aotinductor" / "model"
+            model_dir.mkdir(parents=True)
+            extension = ".pyd" if sys.platform == "win32" else ".so"
+            (model_dir / f"model{extension}").touch()
+            (model_dir / "model_metadata.json").write_text(
+                json.dumps({"AOTI_DEVICE_KEY": device_type}), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Cannot load AOTInductor package"
+                f".*({device_type.upper()}|ROCm) is not available",
+            ):
+                torch._C._aoti.AOTIModelPackageLoader(str(tmp), "model", False, 1, -1)
+
+
+instantiate_parametrized_tests(TestAOTIPackageDeviceValidation)
 
 
 if __name__ == "__main__":

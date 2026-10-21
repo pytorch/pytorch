@@ -1,13 +1,17 @@
 # mypy: allow-untyped-defs
+import functools
 import logging
 import os
+import re
 import shutil
+import subprocess
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.cpp_builder import _set_gpu_runtime_env, _transform_cuda_paths
 from torch._inductor.utils import is_linux
+from torch.utils._ordered_set import OrderedSet
 
 
 if config.is_fbcode():
@@ -80,9 +84,47 @@ def _cuda_compiler() -> str | None:
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
-    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
+    if (cuda_home := os.getenv("CUDA_HOME")) and cuda_env.nvcc_exist(
+        candidate := os.path.join(cuda_home, "bin/nvcc")
+    ):
+        return os.path.realpath(candidate)
     return "nvcc"
+
+
+@functools.lru_cache(None)
+def _cuda_driver_lib_dirs() -> list[str]:
+    """
+    Find directories containing the versioned CUDA driver library.
+
+    CUDA driver installs commonly expose libcuda.so.1 to the runtime loader
+    without an unversioned libcuda.so linker symlink. Linking by the soname
+    avoids requiring users to create that symlink.
+    """
+    dirs: list[str] = []
+
+    try:
+        libs = subprocess.check_output(
+            ["/sbin/ldconfig", "-p"], stderr=subprocess.DEVNULL
+        ).decode(errors="ignore")
+    except (FileNotFoundError, subprocess.SubprocessError):
+        libs = ""
+
+    for line in libs.splitlines():
+        if "libcuda.so.1" not in line or "=>" not in line:
+            continue
+        lib_path = line.rsplit("=>", 1)[1].strip()
+        if os.path.basename(lib_path).startswith("libcuda.so.1"):
+            dirs.append(os.path.dirname(lib_path))
+
+    env_ld_library_path = os.getenv("LD_LIBRARY_PATH")
+    if env_ld_library_path:
+        dirs.extend(
+            path
+            for path in env_ld_library_path.split(":")
+            if path and os.path.exists(os.path.join(path, "libcuda.so.1"))
+        )
+
+    return list(dict.fromkeys(dirs))
 
 
 def _cuda_lib_options() -> list[str]:
@@ -111,7 +153,14 @@ def _cuda_lib_options() -> list[str]:
             # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
             if os.path.basename(path) != "stubs":
                 extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
-        extra_ldflags.append("-lcuda")
+        cuda_driver_lib_dirs = _cuda_driver_lib_dirs()
+        if cuda_driver_lib_dirs:
+            extra_ldflags.extend(
+                f"-L{path}" for path in cuda_driver_lib_dirs if path not in lpaths
+            )
+            extra_ldflags.append("-l:libcuda.so.1")
+        else:
+            extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
         raise NotImplementedError(
@@ -129,8 +178,8 @@ def _nvcc_host_compiler_options() -> list[str]:
     ]
 
 
-def _nvcc_arch_as_compile_option() -> str:
-    arch = cuda_env.get_cuda_arch()
+def _cuda_arch_with_compile_suffix(arch: str) -> str:
+    arch = _normalize_cuda_arch(arch)
     if arch == "90":
         # Required by cutlass compilation.
         return "90a"
@@ -140,6 +189,8 @@ def _nvcc_arch_as_compile_option() -> str:
         return "101a"
     if arch == "103":
         return "103a"
+    if arch == "107":
+        return "107a"
     if arch == "110":
         return "110a"
     if arch == "120":
@@ -149,8 +200,152 @@ def _nvcc_arch_as_compile_option() -> str:
     return arch
 
 
-def _nvcc_compiler_options() -> list[str]:
+def _nvcc_arch_as_compile_option() -> str | None:
+    arch = cuda_env.get_cuda_arch()
+    if arch is None:
+        return arch
+    return _cuda_arch_with_compile_suffix(arch)
+
+
+def _nvcc_arch_as_compile_option_or_raise() -> str:
     arch = _nvcc_arch_as_compile_option()
+    if arch is None:
+        raise RuntimeError("Unable to determine CUDA architecture")
+    return arch
+
+
+def _normalize_cuda_arch(arch: str) -> str:
+    arch = arch.removeprefix("sm_").removeprefix("compute_").replace(".", "")
+    if not re.fullmatch(r"\d+[a-z]?", arch):
+        raise ValueError(f"Unrecognized CUDA arch: {arch}")
+    return arch
+
+
+def _cuda_arch_number(arch: str) -> int:
+    arch = _normalize_cuda_arch(arch)
+    if arch[-1].isalpha():
+        arch = arch[:-1]
+    return int(arch)
+
+
+def _cuda_arch_suffix(arch: str) -> str:
+    arch = _normalize_cuda_arch(arch)
+    return arch[-1] if arch[-1].isalpha() else ""
+
+
+def _cuda_arch_same_generation(arch: str, other: str) -> bool:
+    arch = _normalize_cuda_arch(arch)
+    other = _normalize_cuda_arch(other)
+    if _cuda_arch_suffix(arch) or _cuda_arch_suffix(other):
+        return arch == other
+    return _cuda_arch_number(arch) == _cuda_arch_number(other)
+
+
+def _cuda_arch_is_compatible_with_current(arch: str, current_arch: str) -> bool:
+    if _cuda_arch_suffix(current_arch):
+        return _normalize_cuda_arch(arch) == _normalize_cuda_arch(current_arch)
+    return _cuda_arch_number(arch) >= _cuda_arch_number(current_arch)
+
+
+def _aoti_cuda_target_arch() -> str:
+    if config.cuda.arch is not None:
+        return _cuda_arch_with_compile_suffix(str(config.cuda.arch))
+    return _nvcc_arch_as_compile_option_or_raise()
+
+
+def _parse_gencode_options(flags: list[str]) -> OrderedSet[tuple[str, str]]:
+    options: OrderedSet[tuple[str, str]] = OrderedSet()
+    for flag in flags:
+        if flag.startswith("-gencode="):
+            option = flag.removeprefix("-gencode=")
+        elif flag.startswith("-gencode "):
+            option = flag.removeprefix("-gencode ")
+        else:
+            continue
+
+        try:
+            _, code = option.split(",code=", 1)
+        except ValueError:
+            continue
+        code = code.removeprefix("[").removesuffix("]")
+        for entry in code.split(","):
+            try:
+                kind, arch = entry.split("_", 1)
+            except ValueError:
+                continue
+            if kind in ("sm", "compute"):
+                options.add((kind, _normalize_cuda_arch(arch)))
+    return options
+
+
+def _cuda_multi_arch_gencode_options(current_arch: str | None = None) -> list[str]:
+    """
+    Return nvcc -gencode option payloads for AOTI CUDA fatbins.
+
+    AOTI captures PTX for the architecture Triton compiled on. That PTX can be
+    used for the current architecture and newer architectures, but not older
+    ones, so explicit TORCH_CUDA_ARCH_LIST entries below the current target are
+    intentionally ignored.
+    """
+    if not current_arch:
+        current_arch = _nvcc_arch_as_compile_option_or_raise()
+    current_arch = _normalize_cuda_arch(current_arch)
+    options: OrderedSet[tuple[str, str]] = OrderedSet()
+
+    arch_list = os.environ.get("TORCH_CUDA_ARCH_LIST")
+    if arch_list and arch_list != "native":
+        from torch.utils.cpp_extension import _get_cuda_arch_flags
+
+        for kind, arch in _parse_gencode_options(_get_cuda_arch_flags([])):
+            if kind == "sm" and _cuda_arch_is_compatible_with_current(
+                arch, current_arch
+            ):
+                options.add((kind, arch))
+            elif kind == "sm":
+                log.warning(
+                    "Ignoring TORCH_CUDA_ARCH_LIST entry sm_%s for AOTI CUDA "
+                    "multi-arch packaging because it is not compatible with "
+                    "target arch %s.",
+                    arch,
+                    current_arch,
+                )
+
+    if not any(
+        kind == "sm" and _cuda_arch_same_generation(arch, current_arch)
+        for kind, arch in options
+    ):
+        options.add(("sm", current_arch))
+
+    # Always keep a PTX image for the compile architecture as the fallback for
+    # GPUs newer than the generated SASS images.
+    options.add(("compute", current_arch))
+
+    def sort_key(option: tuple[str, str]) -> tuple[int, int, str]:
+        kind, arch = option
+        return (_cuda_arch_number(arch), 0 if kind == "sm" else 1, arch)
+
+    return [
+        f"arch=compute_{arch},code={kind}_{arch}"
+        for kind, arch in sorted(options, key=sort_key)
+    ]
+
+
+def _cuda_gencode_options_have_non_current_sass(
+    gencode_options: list[str], current_arch: str | None = None
+) -> bool:
+    if not current_arch:
+        current_arch = _nvcc_arch_as_compile_option_or_raise()
+    current_arch = _normalize_cuda_arch(current_arch)
+    for kind, arch in _parse_gencode_options(
+        [f"-gencode={option}" for option in gencode_options]
+    ):
+        if kind == "sm" and not _cuda_arch_same_generation(arch, current_arch):
+            return True
+    return False
+
+
+def _nvcc_compiler_options() -> list[str]:
+    arch = _nvcc_arch_as_compile_option_or_raise()
     code = [f"sm_{arch}", f"compute_{arch}"]
     if config.cuda.enable_cuda_lto:
         code += [f"lto_{arch}"]

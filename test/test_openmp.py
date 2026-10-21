@@ -53,7 +53,8 @@ class TestOpenMP_ParallelFor(TestCase):
                 continue
             is_increasing = is_increasing and (last_rss[idx] > last_rss[idx - 1])
         self.assertTrue(
-            not is_increasing, msg=f"memory usage is increasing, {str(last_rss)}"
+            not is_increasing,
+            msg=lambda msg: f"{msg}\nmemory usage is increasing, {str(last_rss)}",
         )
 
     def test_one_thread(self):

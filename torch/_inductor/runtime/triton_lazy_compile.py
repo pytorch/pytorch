@@ -18,10 +18,24 @@ import logging
 import re
 from typing import Any
 
+from .hints import (
+    TRITON_DEFAULT_BLOCK_SIZES,
+    TRITON_DEFAULT_RSPLIT,
+    TRITON_DEFAULT_RSPLIT_SIZE,
+)
 from .triton_heuristics import CachingAutotuner
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class TritonTmaDescriptorMetadata:
+    block_size: list[int]
+    elem_size: int
+    elem_type: int
+    swizzle: int
+    fp4_padded: bool
 
 
 @dataclasses.dataclass
@@ -39,6 +53,7 @@ class TritonKernelCompileResult:
     config_index: int | None
     global_scratch: int | None
     profile_scratch: int | None
+    tensordesc_meta: list[TritonTmaDescriptorMetadata]
 
 
 _async_compile: Any = None
@@ -142,7 +157,8 @@ def run_triton_kernel_with_autotune(
     else:
         raise RuntimeError(f"Unexpected kernel object type: {type(kernel_obj)}")
 
-    assert isinstance(kernel_fn, CachingAutotuner)
+    if not isinstance(kernel_fn, CachingAutotuner):
+        raise AssertionError(f"Expected CachingAutotuner, got {type(kernel_fn)}")
 
     inductor_meta = kernel_fn.inductor_meta
     inductor_meta["store_cubin"] = True
@@ -170,6 +186,13 @@ def run_triton_kernel_with_autotune(
                 f"{key_name} not found in cached params for {kernel_name}"
             )
     cubin_path = cached_params[cubin_path_name]
+    if not isinstance(cubin_path, str):
+        raise AssertionError(f"expected cubin_path to be str, got {type(cubin_path)}")
+    runtime_bin_path = cached_params.get("runtime_bin_path", cubin_path)
+    if not isinstance(runtime_bin_path, str):
+        raise AssertionError(
+            f"expected runtime_bin_path to be str, got {type(runtime_bin_path)}"
+        )
     mangled_name = cached_params["mangled_name"]
     num_warps = cached_params["num_warps"]
     shared_mem = cached_params["shared_mem"]
@@ -187,17 +210,29 @@ def run_triton_kernel_with_autotune(
     # Extract per-subkernel block sizes for combo kernels, or single block sizes.
     num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
     if num_kernels > 1 and "XBLOCK_0" in config:
-        xblocks = [config.get(f"XBLOCK_{i}", 128) for i in range(num_kernels)]
-        yblocks = [config.get(f"YBLOCK_{i}", 1) for i in range(num_kernels)]
-        zblocks = [config.get(f"ZBLOCK_{i}", 1) for i in range(num_kernels)]
-        r0blocks = [config.get(f"R0_BLOCK_{i}", 1) for i in range(num_kernels)]
+        xblocks = [
+            config.get(f"XBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])
+            for i in range(num_kernels)
+        ]
+        yblocks = [
+            config.get(f"YBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])
+            for i in range(num_kernels)
+        ]
+        zblocks = [
+            config.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+            for i in range(num_kernels)
+        ]
+        r0blocks = [
+            config.get(f"R0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
+            for i in range(num_kernels)
+        ]
     else:
-        xblocks = [config.get("XBLOCK", 128)]
-        yblocks = [config.get("YBLOCK", 1)]
-        zblocks = [config.get("ZBLOCK", 1)]
-        r0blocks = [config.get("R0_BLOCK", 1)]
-    rsplit = config.get("RSPLIT", 1)
-    rsplit_size = config.get("RSPLIT_SIZE", 1)
+        xblocks = [config.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
+        yblocks = [config.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
+        zblocks = [config.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+        r0blocks = [config.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])]
+    rsplit = config.get("RSPLIT", TRITON_DEFAULT_RSPLIT)
+    rsplit_size = config.get("RSPLIT_SIZE", TRITON_DEFAULT_RSPLIT_SIZE)
 
     config_index = None
     grid_type = inductor_meta.get("grid_type") if inductor_meta else None
@@ -213,12 +248,34 @@ def run_triton_kernel_with_autotune(
 
     global_scratch: int | None = cached_params.get("global_scratch")
     profile_scratch: int | None = cached_params.get("profile_scratch")
+    tensordesc_meta = []
+    for metadata in cached_params.get("tensordesc_meta") or []:
+        if metadata is None:
+            raise RuntimeError(f"Missing final TMA metadata for {kernel_name}")
+        if metadata.get("is_im2col", False):
+            raise RuntimeError("AOTInductor does not support TMA im2col descriptors")
+        if metadata.get("fp4_padded", False):
+            raise RuntimeError(
+                "Inductor C++ wrappers do not support fp4-padded TMA descriptors"
+            )
+        device_elem_type = int(metadata["elem_type"])
+        tensordesc_meta.append(
+            TritonTmaDescriptorMetadata(
+                block_size=[int(value) for value in metadata["block_size"]],
+                elem_size=int(metadata["elem_size"]),
+                elem_type={8: 10, 9: 8, 10: 9}.get(device_elem_type, device_elem_type),
+                swizzle=int(metadata["swizzle"]),
+                fp4_padded=bool(metadata.get("fp4_padded", False)),
+            )
+        )
 
     log.debug(
-        "Successfully autotuned Triton kernel: cubin_path=%s, mangled_name=%s, "
+        "Successfully autotuned Triton kernel: cubin_path=%s, "
+        "runtime_bin_path=%s, mangled_name=%s, "
         "num_warps=%d, shared_mem=%d, xblocks=%s, yblocks=%s, zblocks=%s, r0blocks=%s, "
         "rsplit=%d, rsplit_size=%d, config_index=%s, global_scratch=%s, profile_scratch=%s",
         cubin_path,
+        runtime_bin_path,
         mangled_name,
         num_warps,
         shared_mem,
@@ -234,7 +291,7 @@ def run_triton_kernel_with_autotune(
     )
 
     result = TritonKernelCompileResult(
-        cubin_path=cubin_path,
+        cubin_path=runtime_bin_path,
         mangled_name=mangled_name,
         num_warps=num_warps,
         shared_mem=shared_mem,
@@ -247,5 +304,6 @@ def run_triton_kernel_with_autotune(
         config_index=config_index,
         global_scratch=global_scratch,
         profile_scratch=profile_scratch,
+        tensordesc_meta=tensordesc_meta,
     )
     return result

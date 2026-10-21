@@ -4,6 +4,12 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
+#include <vector>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
@@ -12,6 +18,9 @@
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10d {
+
+class Backend;
+class ProcessGroup;
 
 // Base class for supplementary data potentially needed by ReduceOps
 struct TORCH_API _SupplementBase : torch::CustomClassHolder {
@@ -116,11 +125,15 @@ TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
+using OptionalCollectiveConfig =
+    std::optional<c10::Dict<std::string, c10::IValue>>;
+
 struct BroadcastOptions {
   int64_t rootRank = 0;
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllreduceOptions {
@@ -128,6 +141,7 @@ struct AllreduceOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
   std::optional<at::Tensor> sparseIndices = std::nullopt;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -138,17 +152,20 @@ struct ReduceOptions {
   int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct GatherOptions {
   int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct ScatterOptions {
@@ -161,11 +178,13 @@ struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct AllToAllOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
   bool asyncOp = true;
+  OptionalCollectiveConfig config = std::nullopt;
 };
 
 struct BarrierOptions {
@@ -181,7 +200,54 @@ struct DistributedBackendOptions {
   int group_size;
   std::chrono::duration<float> timeout;
   std::string group_id;
+  std::string group_desc;
   std::vector<int64_t> global_ranks_in_group;
+  c10::intrusive_ptr<ProcessGroup> process_group;
+  c10::intrusive_ptr<Backend> split_from;
+  bool enable_reconfigure = false;
+};
+
+// Fault tolerance / reconfigure API. A ReconfigureHandle is an opaque,
+// backend-specific string that encodes the information peers need to
+// (re)initialize a communicator instance via Backend::reconfigure().
+using ReconfigureHandle = std::string;
+
+struct ReconfigureOptions {
+  // Uniquely identifies this instance of the communicator. Must not have been
+  // used previously on this communicator; pass a fresh value on every
+  // (re)initialization.
+  int64_t uuid = 0;
+
+  // Members participating in the communicator, one handle per rank. A vector
+  // assigns ranks by position (ordered); an unordered_set lets the backend
+  // choose the rank assignment.
+  std::variant<
+      std::unordered_set<ReconfigureHandle>,
+      std::vector<ReconfigureHandle>>
+      handles;
+
+  // How long to allow reconfiguration before failing. nullopt uses the
+  // backend's default timeout.
+  std::optional<std::chrono::milliseconds> timeout = std::nullopt;
+
+  // Backend-specific configuration key-value pairs.
+  std::unordered_map<std::string, std::string> hints;
+};
+
+// One-sided (RMA) window operation options. See Window.hpp.
+struct PutOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct SignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
+};
+
+struct WaitSignalOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::unordered_map<std::string, std::string> hints;
 };
 
 } // namespace c10d

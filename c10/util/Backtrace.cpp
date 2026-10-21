@@ -111,7 +111,7 @@ class GetBacktraceImpl {
          << addr << "]\t" << std::endl;
     }
     free(demangled);
-    return os.str();
+    return std::move(os).str();
   }
 
  private:
@@ -278,7 +278,7 @@ class GetBacktraceImpl {
       }
     }
 
-    return stream.str();
+    return std::move(stream).str();
   }
 
  private:
@@ -427,7 +427,7 @@ class GetBacktraceImpl {
       stream << ']' << std::endl;
     }
 
-    return stream.str();
+    return std::move(stream).str();
   }
 
  private:

@@ -74,6 +74,10 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
         self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
+        # Reduce-scatter shares the shard PG (one NCCL communicator) by default;
+        # FSDPModule.set_separate_reduce_scatter_group assigns a dedicated PG
+        # here so reduce-scatter can overlap all-gather in backward.
+        self.reduce_scatter_process_group: dist.ProcessGroup | None = None
 
 
 @dataclass
@@ -122,6 +126,8 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
     return "replicate" not in registry
 
 
+# Unused within FSDP since the reduce-scatter buffer is sized from the padded
+# sharded parameters; kept for external callers that import it from here.
 def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
     padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
     return torch.Size([padded_dim0]) + tensor_size[1:]
