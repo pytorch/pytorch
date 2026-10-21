@@ -118,9 +118,11 @@
 #   CUDA_DEVICE_DEBUG        build CUDA device code with -g -G (read in
 #                            cmake/public/cuda.cmake; no effect on MSVC)
 #
+# Handled by scikit-build-core:
+#   CMAKE_FRESH              force a fresh configure; mapped to cmake.fresh by
+#                            the torch.cmake-fresh config-setting in pyproject.toml
+#
 # Removed with setup.py (no longer available):
-#   CMAKE_FRESH              force a fresh configure. Delete the build/ directory
-#                            to reconfigure from scratch instead.
 #   CMAKE_ONLY               configure without building; no equivalent (this was a
 #                            setup.py-only debugging aid).
 #   USE_NINJA                select the generator via CMAKE_GENERATOR=Ninja instead
