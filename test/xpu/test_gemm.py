@@ -1476,11 +1476,15 @@ class TestBasicGEMM(TestCase):
     @parametrize("q_group", [32, 64, 128])
     @parametrize("act_dtype", [torch.int8, torch.uint8])
     @parametrize("out_dtype", [torch.float32, torch.bfloat16, torch.float16])
-    def test_qlinear_w4a8_int(self, device, m, k, n, q_group, act_dtype, out_dtype):
+    @parametrize("use_bias", [True, False])
+    def test_qlinear_w4a8_int(
+        self, device, m, k, n, q_group, act_dtype, out_dtype, use_bias
+    ):
         inner_k_tiles = 2
         torch.manual_seed(1)
         a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
         b_fp32 = torch.rand((k, n), dtype=torch.float32, device=device)
+        bias = torch.rand(n, dtype=out_dtype, device=device) if use_bias else None
 
         mat_a, mat_a_scale, mat_a_zero_point = self._quantize_per_token(
             a_fp32, act_dtype
@@ -1499,7 +1503,7 @@ class TestBasicGEMM(TestCase):
             mat_b_zero_points,
             q_group,
             out_dtype,
-            None,
+            bias,
         )
         self.assertEqual(out.dtype, out_dtype)
         self.assertEqual(out.shape, (m, n))
@@ -1508,6 +1512,8 @@ class TestBasicGEMM(TestCase):
             mat_a.to(torch.float32) - mat_a_zero_point.unsqueeze(-1).to(torch.float32)
         ) * mat_a_scale.unsqueeze(-1)
         ref = torch.mm(a_dequant, b_fp32).to(out_dtype)
+        if use_bias:
+            ref = ref + bias
 
         self.assertEqual(out, ref, atol=1e-2, rtol=0.05)
 
