@@ -896,7 +896,6 @@ You can now define a new memory pool by passing this allocator to {class}`torch.
 pool = torch.cuda.MemPool(allocator)
 ```
 
-
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:
 
@@ -1004,6 +1003,54 @@ with torch.cuda.use_mem_pool(pool):
      requirements (`CU_MULTICAST_GRANULARITY_RECOMMENDED`, `CU_MULTICAST_GRANULARITY_MINIMUM`),
      and can cause your workload to run out of memory.
 ```
+
+
+(cuda-memory-python-allocators)=
+## Python-defined CUDA allocators
+
+Use {meth}`torch.cuda.MemPool.from_py_allocator` to implement a pool's segment
+allocator with Python callables:
+
+```python
+from cuda.bindings import runtime
+
+
+def alloc(size: int, _device: int, _stream: int) -> int | None:
+    err, ptr = runtime.cudaMalloc(size)
+    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+
+def free(ptr: int, _size: int, _device: int, _stream: int) -> None:
+    (err,) = runtime.cudaFree(ptr)
+    if err != runtime.cudaError_t.cudaSuccess:
+        raise RuntimeError(f"cudaFree failed with error {err}")
+
+
+pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+```
+
+The size passed to the free callback is the size of the backing segment.
+An allocator may use it when releasing the segment, as needed, or ignore it
+when the pointer alone is sufficient.
+
+Return `None` or zero when an allocation cannot be satisfied. This lets the
+caching allocator release cached blocks, retry the allocation, notify OOM
+observers, and report a normal {class}`torch.OutOfMemoryError` if recovery
+fails. Other exceptions raised by the allocation callback propagate normally.
+Exceptions raised by the free callback produce a warning and are swallowed.
+
+The ``device`` argument is the segment's CUDA device ordinal and ``stream`` is
+the raw address of its allocation stream. PyTorch does not make them current
+before entering the callback. Allocators using APIs that rely on current CUDA
+state are responsible for establishing the appropriate device and stream.
+
+Callbacks can be invoked concurrently from multiple threads, so their Python
+and native state must be thread-safe, including in a no-GIL Python build.
+
+During CUDA graph capture, the allocation callback runs in relaxed capture
+mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
+APIs, but it must not launch work on or synchronize the capturing stream,
+synchronize the device, or begin or end capture.
 
 
 ## Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
@@ -1131,14 +1178,18 @@ void customCudaFree(CustomAllocInfo* info) {
 
 ## cuBLAS workspaces
 
-For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
-if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
-In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
-`torch._C._cuda_clearCublasWorkspaces()` is called. The workspace size per allocation can be
-specified via the environment variable `CUBLAS_WORKSPACE_CONFIG` with the format `:[SIZE]:[COUNT]`.
-As an example, the default workspace size per allocation is `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8`
-which specifies a total size of `2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces,
-set `CUBLAS_WORKSPACE_CONFIG=:0:0`.
+By default, ATen allocates a cuBLAS workspace for each operation from the CUDA caching allocator
+and releases it when the operation returns. Set `TORCH_CUBLAS_WORKSPACE_CACHE=1` to instead retain
+one workspace for each cuBLAS handle and CUDA stream until
+`torch._C._cuda_clearCublasWorkspaces()` is called. Persistent workspaces must not be used when
+capturing multiple CUDA graphs on the same stream. Handles returned by
+`torch.cuda.current_blas_handle()` use cuBLAS's default workspace when ATen workspace caching is
+disabled.
+
+The workspace size per allocation can be specified via `CUBLAS_WORKSPACE_CONFIG` with the format
+`:[SIZE]:[COUNT]`. For example, `CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8` specifies a total size of
+`2 * 4096 + 8 * 16 KiB`. To force cuBLAS to avoid using workspaces, set
+`CUBLAS_WORKSPACE_CONFIG=:0:0`.
 
 (cufft-plan-cache)=
 

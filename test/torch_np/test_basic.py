@@ -678,6 +678,9 @@ class TestExport(TestCase):
             # The following methods are removed in NumPy 2.
             # See https://numpy.org/devdocs/numpy_2_0_migration_guide.html#main-namespace
             exported_fns -= {"product", "round_", "sometrue", "cumproduct", "alltrue"}
+        if _np.__version__ >= "2.5.0":
+            # row_stack was removed in NumPy 2.5.0
+            exported_fns -= {"row_stack"}
 
         diff = exported_fns.difference(set(dir(_np)))
         if len(diff) != 0:

@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import unittest
 from functools import partial, wraps
 
 import torch
@@ -549,6 +548,104 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(grad_input, expected_grad_input)
 
     @parametrize("device", devices)
+    def test_broadcast(self, device):
+        """Test broadcast forward and that backward reduces the grads onto src."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        src = 1
+
+        input_tensor = torch.full(
+            (3, 3), float(rank + 1), requires_grad=True, device=device
+        )
+        output = fcols.broadcast(input_tensor, src, group=group_name)
+        self.assertEqual(output, torch.full_like(output, src + 1))
+
+        output.backward(torch.full_like(output, float(rank + 1)))
+        total = sum(range(1, self.world_size + 1))
+        self.assertEqual(
+            input_tensor.grad,
+            torch.full_like(input_tensor, total if rank == src else 0.0),
+        )
+
+    @parametrize("device", devices)
+    @parametrize("reduce_op_name, reduce_op", reduce_ops[:4])
+    def test_reduce(self, device, reduce_op_name, reduce_op):
+        """Test reduce forward and that backward broadcasts the dst grad."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        dst = 1
+        scale = 1 / self.world_size if reduce_op_name == "avg" else 1.0
+
+        input_tensor = torch.full(
+            (3, 3), float(rank + 1), requires_grad=True, device=device
+        )
+        output = fcols.reduce(input_tensor, dst, reduce_op, group=group_name)
+        total = sum(range(1, self.world_size + 1)) * scale
+        self.assertEqual(output, torch.full_like(output, total if rank == dst else 0.0))
+
+        output.backward(torch.full_like(output, float(rank + 1)))
+        self.assertEqual(
+            input_tensor.grad, torch.full_like(input_tensor, (dst + 1) * scale)
+        )
+
+    def test_reduce_backward_unsupported_op(self):
+        group_name = dist.group.WORLD.group_name
+        input_tensor = torch.ones(3, requires_grad=True)
+        output = fcols.reduce(input_tensor, 0, "max", group=group_name)
+        with self.assertRaisesRegex(RuntimeError, "only supports 'sum' and 'avg'"):
+            output.sum().backward()
+
+    def test_scatter_meta_checks_divisibility(self):
+        group_name = dist.group.WORLD.group_name
+        input_tensor = torch.ones(self.world_size + 1, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "divisible by the group size"):
+            torch.ops._c10d_functional.scatter(input_tensor, 0, group_name)
+
+    @parametrize("device", devices)
+    def test_gather(self, device):
+        """Test gather forward and that backward scatters the dst grad."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        dst = 1
+
+        input_tensor = torch.full(
+            (2, 3), float(rank), requires_grad=True, device=device
+        )
+        output = fcols.gather(input_tensor, dst, group=group_name)
+        expected = torch.arange(self.world_size, device=device).repeat_interleave(2)
+        expected = expected[:, None].expand(-1, 3).float()
+        self.assertEqual(
+            output, expected if rank == dst else torch.zeros_like(expected)
+        )
+
+        grad_output = (
+            torch.arange(output.numel(), device=device).view_as(output).float()
+        )
+        output.backward(grad_output + 100 * rank)
+        self.assertEqual(
+            input_tensor.grad, grad_output.chunk(self.world_size)[rank] + 100 * dst
+        )
+
+    @parametrize("device", devices)
+    def test_scatter(self, device):
+        """Test scatter forward and that backward gathers the grads onto src."""
+        group_name = dist.group.WORLD.group_name
+        rank = dist.get_rank()
+        src = 1
+
+        base = torch.arange(2 * self.world_size * 3, device=device).view(-1, 3).float()
+        input_tensor = (base + 100 * rank).requires_grad_()
+        output = fcols.scatter(input_tensor, src, group=group_name)
+        self.assertEqual(output, base.chunk(self.world_size)[rank] + 100 * src)
+
+        output.backward(torch.full_like(output, float(rank)))
+        expected = torch.arange(self.world_size, device=device).repeat_interleave(2)
+        expected = expected[:, None].expand(-1, 3).float()
+        self.assertEqual(
+            input_tensor.grad, expected if rank == src else torch.zeros_like(expected)
+        )
+
+    @parametrize("device", devices)
     @parametrize("reduce_op_name, reduce_op", reduce_ops)
     def test_all_reduce_coalesced_backward(self, device, reduce_op_name, reduce_op):
         """Test all_reduce_coalesced backward aggregates each per-rank gradient."""
@@ -802,6 +899,18 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         )
 
     @parametrize("test_utils", test_utils)
+    @parametrize("op", ["broadcast", "reduce", "gather", "scatter"])
+    def test_rooted_opcheck(self, test_utils, op):
+        group_name = dist.group.WORLD.group_name
+        input_tensor = torch.ones(2 * self.world_size, 3, requires_grad=True)
+        args = (input_tensor, 0, "sum") if op == "reduce" else (input_tensor, 0)
+        torch.library.opcheck(
+            getattr(torch.ops._c10d_functional, op),
+            (*args, group_name),
+            test_utils=test_utils,
+        )
+
+    @parametrize("test_utils", test_utils)
     def test_all_to_all_single_opcheck(self, test_utils):
         """Test all_to_all_single op registration with torch.library.opcheck.
 
@@ -1028,6 +1137,35 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                 self.assertEqual(input_tensor.grad, expected_grad)
 
     @with_comms
+    def test_all_reduce_coalesced_compile(self):
+        """Test that all_reduce_coalesced backward works with torch.compile.
+
+        Test sum/avg only and leave min/max in the dedicated coalesced test.
+        """
+        shape = (3, 3)
+        group_name = dist.group.WORLD.group_name
+
+        for reduce_op in ["sum", "avg"]:
+            with self.subTest(reduce_op=reduce_op):
+
+                @torch.compile(fullgraph=True)
+                def compiled_fn(a, b):
+                    outs = fcols.all_reduce_coalesced(
+                        [a, b], reduce_op, group=group_name
+                    )
+                    return outs[0].sum() + outs[1].sum()
+
+                a = torch.randn(*shape, device=self.device, requires_grad=True)
+                b = torch.randn(*shape, device=self.device, requires_grad=True)
+
+                compiled_fn(a, b).backward()
+
+                fill = float(self.world_size) if reduce_op == "sum" else 1.0
+                expected_grad = torch.full(shape, fill_value=fill, device=self.device)
+                self.assertEqual(a.grad, expected_grad)
+                self.assertEqual(b.grad, expected_grad)
+
+    @with_comms
     def test_all_reduce_min_max_ties_compile(self):
         """min/max backward splits grad evenly across tied holders under compile.
 
@@ -1062,22 +1200,9 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
                 self.assertIsNotNone(input_tensor.grad)
                 self.assertEqual(input_tensor.grad, expected_grad)
 
-    # Known-broken: under torch.compile the coalesced min/max backward returns
-    # all-zero grads (eager is correct). The AOT joint graph is right, but
-    # Inductor's lowering of the multi-output wait_tensors op mishandles waiting
-    # the forward's coalesced output again in the backward: unlike the
-    # single-tensor wait_tensor (which gets an alias inserted), the re-wait
-    # yields wrong data, so the `input == output` extremum mask is all-False.
-    # Fixing that lives in torch/_inductor comm lowering, out of scope here.
-    @unittest.expectedFailure
     @with_comms
     def test_all_reduce_coalesced_min_max_ties_compile(self):
-        """coalesced min/max backward splits grad evenly across ties under compile.
-
-        Mirrors the single-tensor compile test for all_reduce_coalesced, whose
-        schema and Inductor lowering this PR touches, so the coalesced min/max
-        backward is traced and lowered.
-        """
+        """coalesced min/max backward splits grad evenly across ties under compile."""
         group_name = dist.group.WORLD.group_name
         ws = self.world_size
         rank = self.rank

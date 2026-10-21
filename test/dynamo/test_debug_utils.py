@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import ast
+import itertools
 import math
 import os
 from unittest.mock import patch
@@ -18,7 +19,7 @@ from torch._dynamo.debug_utils import (
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 f32 = torch.float32
@@ -27,6 +28,8 @@ i32 = torch.int32
 
 
 class TestDebugUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_serialize_symbolic_storage_nbytes(self):
         from sympy import floor
 
@@ -174,6 +177,44 @@ def forward(self, x_1):
     """,
         )
 
+    def test_cast_model_to_fp64_disables_half_to_float(self):
+        for op_name, overload, use_kwargs in itertools.product(
+            ("_softmax", "_log_softmax"),
+            ("default", "out"),
+            (False, True),
+        ):
+            with self.subTest(
+                op_name=op_name, overload=overload, use_kwargs=use_kwargs
+            ):
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                op = getattr(getattr(torch.ops.aten, op_name), overload)
+                kwargs = {}
+                inputs = [torch.randn(2, 4, dtype=torch.float16)]
+                if overload == "out":
+                    kwargs["out"] = graph.placeholder("out")
+                    inputs.append(torch.empty(2, 4, dtype=torch.float16))
+                if use_kwargs:
+                    kwargs["half_to_float"] = True
+                    output = graph.call_function(op, args=(x, 1), kwargs=kwargs)
+                else:
+                    output = graph.call_function(op, args=(x, 1, True), kwargs=kwargs)
+                graph.output(output)
+                model = torch.fx.GraphModule({}, graph)
+
+                fp64_model, fp64_inputs = debug_utils.cast_to_fp64(model, inputs)
+                softmax = next(
+                    node
+                    for node in fp64_model.graph.nodes
+                    if node.op == "call_function"
+                )
+                half_to_float = (
+                    softmax.kwargs["half_to_float"] if use_kwargs else softmax.args[2]
+                )
+
+                self.assertFalse(half_to_float)
+                self.assertEqual(fp64_model(*fp64_inputs).dtype, torch.float64)
+
     @patch.dict(
         os.environ,
         {
@@ -244,6 +285,8 @@ def forward(self, x_1):
 
 
 class TestDebugUtilsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_aot_graph_parser(self, device):
         def forward(
             self,
@@ -354,6 +397,8 @@ class TestDebugUtilsDevice(TestCase):
 
 
 class TestNNModuleToStringBufferDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_nn_module_to_string_buffer_device(self, device):
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
         gm.register_buffer("test_buf", torch.empty(5, device=device))
@@ -365,7 +410,7 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'.to("{expected_device}")', result)
-            self.assertNotIn(f".{GPU_TYPE}()", result)
+            self.assertNotIn(f".{self.device_type}()", result)
 
     def test_nn_module_to_string_param_device(self, device):
         gm = torch.fx.symbolic_trace(torch.nn.Identity())
@@ -380,14 +425,12 @@ class TestNNModuleToStringBufferDevice(TestCase):
         else:
             expected_device = str(torch.empty(1, device=device).device)
             self.assertIn(f'device="{expected_device}"', result)
-            self.assertNotIn(f', device="{GPU_TYPE}")', result)
+            self.assertNotIn(f', device="{self.device_type}")', result)
 
 
 instantiate_device_type_tests(
     TestNNModuleToStringBufferDevice, globals(), allow_xpu=True
 )
-
-instantiate_device_type_tests(TestDebugUtils, globals())
 
 instantiate_device_type_tests(
     TestDebugUtilsDevice, globals(), except_for="mps", allow_xpu=True
@@ -395,6 +438,8 @@ instantiate_device_type_tests(
 
 
 class TestBackendOverrideIntegration(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -560,6 +605,8 @@ instantiate_device_type_tests(
 
 
 class TestInductorConfigOverrideIntegration(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
@@ -963,12 +1010,13 @@ class TestInductorConfigOverrideIntegration(TestCase):
 instantiate_device_type_tests(
     TestInductorConfigOverrideIntegration,
     globals(),
-    only_for=["cpu", "cuda", "xpu"],
     allow_xpu=True,
 )
 
 
 class TestConfigOverrideValidation(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         from torch._dynamo.graph_id_filter import (
@@ -1018,6 +1066,8 @@ class TestConfigOverrideValidation(TestCase):
 
 
 class TestDynamoConfigOverrideIntegration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()

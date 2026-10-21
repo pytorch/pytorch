@@ -9,7 +9,7 @@ with control_deps to make dependencies explicit.
 """
 
 from operator import attrgetter
-from typing import Any
+from typing import cast
 
 import torch.fx as fx
 import torch.utils._pytree as pytree
@@ -108,8 +108,8 @@ def get_subgraph_name(gm: fx.GraphModule, name):
 
 
 def _extract_unique_nodes(
-    args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> tuple[list[fx.Node], list[Any], Any]:
+    args: tuple[fx.node.Argument, ...], kwargs: dict[str, fx.node.Argument]
+) -> tuple[list[fx.Node], list[fx.node.Argument], pytree.TreeSpec]:
     """Extract unique fx.Node instances from args/kwargs using pytree.
 
     Args:
@@ -122,6 +122,7 @@ def _extract_unique_nodes(
         - The pytree spec for reconstructing the original structure
     """
     flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
+    flat_args_kwargs = cast(list[fx.node.Argument], flat_args_kwargs)
     unique_nodes: list[fx.Node] = []
     seen: OrderedSet[fx.Node] = OrderedSet()
     for item in flat_args_kwargs:
@@ -264,7 +265,7 @@ def _create_subgraph_for_node(
         node_to_placeholder[orig_node] = placeholder
 
     # Replace fx.Node instances with their placeholders
-    def replace_nodes(item: Any) -> Any:
+    def replace_nodes(item: fx.node.Argument) -> fx.node.Argument:
         if isinstance(item, fx.Node):
             return node_to_placeholder[item]
         return item
@@ -277,7 +278,10 @@ def _create_subgraph_for_node(
         additional_deps_placeholders.append(placeholder)
 
     new_flat = [replace_nodes(item) for item in flat_args_kwargs]
-    new_args, new_kwargs = pytree.tree_unflatten(new_flat, spec)
+    new_args, new_kwargs = cast(
+        tuple[tuple[fx.node.Argument, ...], dict[str, fx.node.Argument]],
+        pytree.tree_unflatten(new_flat, spec),
+    )
 
     # Recreate the exact original operation in the subgraph
     if not callable(node.target):
@@ -285,7 +289,7 @@ def _create_subgraph_for_node(
     result = subgraph.call_function(
         node.target,
         tuple(new_args),
-        new_kwargs,  # type: ignore[arg-type]
+        new_kwargs,
     )
 
     # Copy metadata from the original node

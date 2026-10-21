@@ -71,10 +71,8 @@ template <>
 void listSort<at::Tensor>(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<at::Tensor> list = pop(stack).toTensorList();
-  std::sort(
-      list.begin(),
-      list.end(),
-      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+  std::ranges::sort(
+      list, [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
         // "strict weak ordering" issue - see other sort
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
@@ -87,12 +85,9 @@ template <>
 void listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   auto list_copied = list.copy();
-  std::sort(
-      list_copied.begin(),
-      list_copied.end(),
-      [](const at::Tensor& a, const at::Tensor& b) {
-        return at::native::is_nonzero(a.lt(b));
-      });
+  std::ranges::sort(list_copied, [](const at::Tensor& a, const at::Tensor& b) {
+    return at::native::is_nonzero(a.lt(b));
+  });
   push(stack, list_copied);
 }
 
@@ -131,8 +126,8 @@ void checkDoubleInRange(double a) {
   if (std::isnan(a) || std::isinf(a) ||
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
-    throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer");
+    TORCH_CHECK(
+        false, "Cannot convert float ", std::to_string(a), " to integer");
   }
 }
 
@@ -166,9 +161,7 @@ int nminussumofbits(int v) {
 }
 
 int64_t factorial(int n) {
-  if (n < 0) {
-    throw std::runtime_error("factorial() not defined for negative values");
-  }
+  TORCH_CHECK(n >= 0, "factorial() not defined for negative values");
   int64_t p = 1, r = 1;
   loop(n, p, r);
   return r << nminussumofbits(n);
@@ -192,7 +185,7 @@ void listAppend(Stack& stack) {
 void listReverse(Stack& stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  std::reverse(list.begin(), list.end());
+  std::ranges::reverse(list);
 }
 
 void listPopImpl(Stack& stack, const char* empty_message) {

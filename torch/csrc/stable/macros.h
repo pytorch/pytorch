@@ -1,7 +1,9 @@
 #pragma once
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Exception.h>
 
+#include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -39,6 +41,46 @@
 #define STD_CUDA_KERNEL_LAUNCH_CHECK() STD_CUDA_CHECK(cudaGetLastError())
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+#ifdef DISABLE_WARN
+#define STABLE_TORCH_WARN(...) ((void)0)
+#else
+#ifdef STRIP_ERROR_MESSAGES
+#define STABLE_TORCH_WARN(...) \
+  aoti_torch_warn(__func__, __FILE__, static_cast<uint32_t>(__LINE__), "")
+#else
+#define STABLE_TORCH_WARN(...)                                                \
+  aoti_torch_warn(                                                            \
+      __func__,                                                               \
+      __FILE__,                                                               \
+      static_cast<uint32_t>(__LINE__),                                        \
+      std::string(                                                            \
+          torch::headeronly::detail::stdTorchCheckMsgImpl("", ##__VA_ARGS__)) \
+          .c_str())
+#endif // STRIP_ERROR_MESSAGES
+#endif // DISABLE_WARN
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+#ifndef DISABLE_WARN
+#define STABLE_TORCH_WARN_ONCE_IMPL(...)                     \
+  [[maybe_unused]] static const bool C10_ANONYMOUS_VARIABLE( \
+      stable_torch_warn_once_) = [&] {                       \
+    STABLE_TORCH_WARN(__VA_ARGS__);                          \
+    return true;                                             \
+  }()
+
+#define STABLE_TORCH_WARN_ONCE(...)           \
+  if (torch_is_warn_always_enabled()) {       \
+    STABLE_TORCH_WARN(__VA_ARGS__);           \
+  } else {                                    \
+    STABLE_TORCH_WARN_ONCE_IMPL(__VA_ARGS__); \
+  }
+#else
+#define STABLE_TORCH_WARN_ONCE(...) ((void)0)
+#endif // DISABLE_WARN
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 // Look up a symbol already loaded in the current process. Used to reach
