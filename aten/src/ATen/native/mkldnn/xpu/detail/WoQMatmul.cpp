@@ -10,24 +10,6 @@
 
 namespace at::native::onednn {
 
-static inline void set_quant_primitive_attr(
-    primitive_attr& pattr,
-    const Tensor& scale,
-    const Tensor& zp,
-    const int64_t group_size) {
-  // set scale and zero point for matmul args
-  pattr.set_scales(
-      DNNL_ARG_WEIGHTS,
-      /* mask */ (1 << 0) + (1 << 1),
-      {group_size, 1},
-      get_onednn_dtype(scale));
-  pattr.set_zero_points(
-      DNNL_ARG_WEIGHTS,
-      /* mask */ (1 << 0) + (1 << 1),
-      {group_size, 1},
-      memory::data_type::s8);
-}
-
 void matmul_int4_impl(
     Tensor& result,
     const Tensor& mat1_,
@@ -46,31 +28,11 @@ void matmul_int4_impl(
       quantized_act == mat1_zero_point.has_value(),
       "matmul_int4_impl: mat1_scale and mat1_zero_point must be defined together");
 
-  Tensor m1 = quantized_act ? mat1_.contiguous() : mat1_;
+  Tensor m1 = mat1_;
   Tensor m2 = mat2_;
   Tensor scale_ = mat2_scale;
   Tensor zp_ = mat2_zero_point;
   Tensor dst = result;
-  Tensor mat1_scale_f32, mat1_zp_s32;
-  TORCH_CHECK(
-      m2.scalar_type() == at::kInt,
-      "matmul_int4_impl: weight must be int32 (packed int4), but got ",
-      m2.scalar_type());
-  TORCH_CHECK(
-      group_size > 0 && m1.size(-1) % group_size == 0,
-      "matmul_int4_impl: K (",
-      m1.size(-1),
-      ") must be divisible by group_size (",
-      group_size,
-      ")");
-  if (quantized_act) {
-    TORCH_CHECK(
-        m1.scalar_type() == at::kChar || m1.scalar_type() == at::kByte,
-        "matmul_int4_impl: quantized activation must be int8 or uint8, but got ",
-        m1.scalar_type());
-    mat1_scale_f32 = mat1_scale->to(at::kFloat).contiguous();
-    mat1_zp_s32 = mat1_zero_point->to(at::kInt).contiguous();
-  }
 
   int m = m1.size(-2); // M
   int n = dst.size(-1); // N
@@ -176,7 +138,18 @@ void matmul_int4_impl(
   }
 #endif
 
-  set_quant_primitive_attr(pattr, scale_, zp_, group_size);
+  // Set scales with multiple scales along K dimension and with groups along  K.
+  pattr.set_scales(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      scale_dt);
+  // Set a single zero point with s8 data type.
+  pattr.set_zero_points(
+      DNNL_ARG_WEIGHTS,
+      (1 << 0) + (1 << 1),
+      {group_size, 1},
+      dnnl::memory::data_type::s8);
 
   if (quantized_act) {
     pattr.set_scales(
@@ -196,9 +169,14 @@ void matmul_int4_impl(
   }
 
   bool with_bias = bias.has_value() && bias->defined();
-  Tensor b = with_bias ? bias->contiguous() : Tensor();
+  Tensor b = with_bias ? bias.value() : Tensor();
   dnnl::memory::desc b_md;
   if (with_bias) {
+    // oneDNN matmul requires bias to have the same number of dims as dst;
+    // reshape a 1D [N] bias to [1, N] (see QMatmul.cpp's _scaled_mm_v2).
+    if (b.dim() == 1) {
+      b = b.reshape({1, b.size(0)});
+    }
     b_md = dnnl::memory::desc(
         get_onednn_dims(b), get_onednn_dtype(b), get_onednn_strides(b));
   }
@@ -234,18 +212,36 @@ void matmul_int4_impl(
     dnnl::memory::desc act_sc_md(
         {m}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
     auto act_sc_m =
-        make_onednn_memory(act_sc_md, engine, mat1_scale_f32.data_ptr());
+        make_onednn_memory(act_sc_md, engine, mat1_scale->data_ptr());
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, act_sc_m});
 
     dnnl::memory::desc act_zp_md(
         {m}, dnnl::memory::data_type::s32, dnnl::memory::format_tag::x);
     auto act_zp_m =
-        make_onednn_memory(act_zp_md, engine, mat1_zp_s32.data_ptr());
+        make_onednn_memory(act_zp_md, engine, mat1_zero_point->data_ptr());
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, act_zp_m});
   }
   dnnl::sycl_interop::execute(matmul_p, stream, args);
   if (!dst.is_same(result))
     result.copy_(dst);
+}
+
+static inline void set_quant_primitive_attr(
+    primitive_attr& pattr,
+    const Tensor& scale,
+    const Tensor& zp,
+    const int64_t group_size) {
+  // set scale and zero point for matmul args
+  pattr.set_scales(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      get_onednn_dtype(scale));
+  pattr.set_zero_points(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      memory::data_type::s8);
 }
 
 void woq_matmul_int4_impl_cache(
