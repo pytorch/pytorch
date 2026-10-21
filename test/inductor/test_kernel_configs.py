@@ -10,10 +10,11 @@ from unittest import mock
 
 import torch
 from torch._dynamo.utils import counters
-from torch._inductor import config
+from torch._inductor import compile_to_python, config, load_from_python
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.runtime.autotune_cache import (
     _comment_stripped_hash,
     AutotuneCacheBundler,
@@ -32,6 +33,7 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -213,23 +215,81 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(config_to_dict(launcher.config), pinned)
 
     @requires_gpu_and_triton
-    @config.patch(coordinate_descent_tuning=True)
-    def test_inductor_keeps_the_pool_kernel_in_process(self):
+    @parametrize("cache_hit", [False, True])
+    @config.patch(coordinate_descent_tuning=True, fx_graph_cache=True)
+    def test_inductor_keeps_the_pool_kernel_in_process(self, cache_hit):
         # compiled_kernels_for_load binds the pool-built kernel ahead of the
-        # KERNEL_CONFIGS lookup, so inductor's own load does not pin.
-        launched = []
+        # KERNEL_CONFIGS lookup, so inductor's own load does not pin, from the FX graph
+        # cache too.
+        fn = lambda x: x.sum(-1)  # noqa: E731
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        if cache_hit:
+            _code_for(fn, x)
+        counters.clear()
+        launched, in_block = [], [False]
+        block = PythonWrapperCodegen.generate_and_run_autotune_block
         run = CachingAutotuner.run
 
+        def block_spy(self, *args, **kwargs):
+            in_block[0] = True
+            try:
+                return block(self, *args, **kwargs)
+            finally:
+                in_block[0] = False
+
         def run_spy(self, *args, **kwargs):
-            launched.append(self.heuristic_type)
+            # Only the module's own launches, not the autotune block's.
+            if not in_block[0]:
+                launched.append(self.heuristic_type)
             return run(self, *args, **kwargs)
 
-        x = torch.randn(64, 3000, device=GPU_TYPE)
-        with mock.patch.object(CachingAutotuner, "run", run_spy):
-            _, code = _code_for(lambda x: x.sum(-1), x)
+        name = "generate_and_run_autotune_block"
+        with (
+            mock.patch.object(PythonWrapperCodegen, name, block_spy),
+            mock.patch.object(CachingAutotuner, "run", run_spy),
+        ):
+            _, code = _code_for(fn, x)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], int(cache_hit))
         self.assertIn("KERNEL_CONFIGS = {", code)
         self.assertIn(HeuristicType.REDUCTION, launched)
         self.assertNotIn(HeuristicType.FIXED, launched)
+
+    @requires_gpu_and_triton
+    def test_compile_to_python_artifact_launches_pinned(self):
+        # compile_to_python (as standalone_compile) turns triton.autotune_at_compile_time
+        # on, so its module carries the table and its kernels load pinned.
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        decomps = select_decomp_table()
+        gm = make_fx(lambda x: (x.sum(-1),), decomps, tracing_mode="fake")(x)
+        src, _ = compile_to_python(gm, [x])
+        with _no_runtime_tuning():
+            call = load_from_python(src)
+            self.assertEqual(call([x])[0], x.sum(-1), atol=1e-3, rtol=1e-3)
+        ns = getattr(call, "__func__", call).__globals__
+        ((kernel, cfg),) = ns["KERNEL_CONFIGS"].items()
+        self.assertEqual(ns[kernel].heuristic_type, HeuristicType.FIXED)
+        (launcher,) = ns[kernel].launchers
+        self.assertEqual(config_to_dict(launcher.config), cfg)
+
+    @requires_gpu_and_triton
+    def test_a_kernel_the_block_did_not_launch_is_not_pinned(self):
+        # async_compile precompiles every kernel, so a single-config kernel has one
+        # launcher even if the autotune block never ran it.
+        block = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def launch_nothing(self, *args, **kwargs):
+            self.kernel_configs_tuned.clear()
+            return block(self, *args, **kwargs)
+
+        fn = lambda x: (x.sin() * 2).relu()  # noqa: E731
+        x = torch.randn(4096, device=GPU_TYPE)
+        name = "generate_and_run_autotune_block"
+        with mock.patch.object(PythonWrapperCodegen, name, launch_nothing):
+            _, code = _code_for(fn, x)
+        (kernel,) = _kernels(code)
+        ns = _load_from_file(code)
+        self.assertEqual(ns["KERNEL_CONFIGS"], {})
+        self.assertEqual(ns[kernel].heuristic_type, HeuristicType.POINTWISE)
 
     @requires_gpu_and_triton
     def test_bundled_autotune_cache_key_ignores_the_winners(self):
@@ -425,11 +485,13 @@ class TestKernelConfigs(TestCase):
         tuned.assert_called_once()
 
     @requires_gpu_and_triton
-    @parametrize("num_stages", [1, 2])
-    def test_a_pinned_config_that_does_not_fit_falls_back_to_tuning(self, num_stages):
+    @parametrize("failure", ["compile", "load", "load_pipelined"])
+    def test_a_pinned_config_that_does_not_fit_falls_back_to_tuning(self, failure):
         # As on a GPU with less shared memory than the one the module was tuned on: Triton
         # raises OutOfResources when it loads the binary, and with num_stages > 1 the
-        # launcher is first retried with pipelining disabled.
+        # launcher is first retried with pipelining disabled. A config that does not
+        # compile fails on the module's own precompile threads instead.
+        num_stages = 2 if failure == "load_pipelined" else 1
         fn = lambda x: x.sum(-1)  # noqa: E731
         x = torch.randn(64, 3000, device=GPU_TYPE)
         cfg = {"autotune_local_cache": False, "max_autotune": True}
@@ -441,30 +503,57 @@ class TestKernelConfigs(TestCase):
         no_stages = lambda c: {k: v for k, v in c.items() if k != "num_stages"}  # noqa: E731
         failed = []
 
-        def does_not_fit(cls):
-            make_launcher = cls.make_launcher
+        def does_not_fit(cls, name, config_of):
+            orig = getattr(cls, name)
 
-            def make(self):
-                if no_stages(config_to_dict(self.config)) == no_stages(pinned):
-                    failed.append(self.config.num_stages)
+            def fail(self, *args):
+                c = config_of(self, *args)
+                if no_stages(config_to_dict(c)) == no_stages(pinned):
+                    failed.append(c.num_stages)
                     raise OutOfResources(1 << 20, 1 << 16, "shared memory")
-                return make_launcher(self)
+                return orig(self, *args)
 
-            return mock.patch.object(cls, "make_launcher", make)
+            return mock.patch.object(cls, name, fail)
 
+        if failure == "compile":
+            targets = [(CachingAutotuner, "_precompile_config", lambda s, c: c)]
+        else:
+            results = (TritonCompileResult, StaticTritonCompileResult)
+            targets = [(r, "make_launcher", lambda s: s.config) for r in results]
         tune = CachingAutotuner.autotune_to_one_config
         spy = mock.patch.object(
             CachingAutotuner, "autotune_to_one_config", autospec=True, side_effect=tune
         )
-        static = does_not_fit(StaticTritonCompileResult)
-        with does_not_fit(TritonCompileResult), static, spy as tuned:
+        with contextlib.ExitStack() as stack, spy as tuned:
+            for target in targets:
+                stack.enter_context(does_not_fit(*target))
             ns = _load_from_file(code)
             self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
         self.assertEqual(failed[:num_stages], [2, 1][-num_stages:])
         tuned.assert_called_once()
+        # It is the unpinned kernel now, which tunes as it did before pinning.
+        self.assertIsNone(ns[kernel].fallback)
+        self.assertEqual(ns[kernel].heuristic_type, HeuristicType.REDUCTION)
         (launcher,) = ns[kernel].launchers
         chosen = config_to_dict(launcher.config)
         self.assertNotEqual(no_stages(chosen), no_stages(pinned))
+
+    @requires_gpu_and_triton
+    def test_an_unrelated_error_in_a_pinned_kernel_does_not_fall_back(self):
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        _, code = _code_for(lambda x: x.sum(-1), x)
+        calls = []
+
+        def load_error(self):
+            calls.append(self.config)
+            raise RuntimeError("unrelated")
+
+        with contextlib.ExitStack() as stack:
+            for cls in (TritonCompileResult, StaticTritonCompileResult):
+                stack.enter_context(mock.patch.object(cls, "make_launcher", load_error))
+            with self.assertRaisesRegex(RuntimeError, "unrelated"):
+                _load_from_file(code)
+        self.assertEqual(len(calls), 1)
 
     # Nothing launches, so no GPU is needed.
     @unittest.skipIf(not has_triton_package(), "requires triton")
