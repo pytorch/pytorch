@@ -340,6 +340,7 @@ from .torch_function import (
     TorchFunctionModeVariable,
 )
 from .user_defined import (
+    _CONSTANT_BASE_TYPES,
     DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
@@ -643,6 +644,14 @@ def lookup_spec_from_dynamo_source(
 
     current_spec: IntermediateSpec = params._named_args.get(root.name)
     return _walk_spec(current_spec, full_path=path, start_index=1)
+
+
+def _enum_member_variable(value: Any, **kwargs: Any) -> UserDefinedObjectVariable:
+    # Mixin enums (IntEnum, StrEnum, ...) are instances of their base type, so
+    # unbound base methods like int.__eq__(member, x) need the base's impls.
+    if isinstance(value, _CONSTANT_BASE_TYPES):
+        return UserDefinedConstantVariable(value, **kwargs)
+    return UserDefinedObjectVariable(value, **kwargs)
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -1480,7 +1489,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             # _call_impl registers this object with SideEffects after _wrap returns,
             # so sourced enum members support attribute mutation.
-            return UserDefinedObjectVariable(value, source=self.source)
+            result = _enum_member_variable(value, source=self.source)
+            if isinstance(result, UserDefinedConstantVariable):
+                # _call_impl only tracks exact UserDefinedObjectVariable.
+                return self.tx.output.side_effects.track_object_existing(value, result)
+            return result
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled
             # along with other builtin debugging functions
@@ -5634,7 +5647,7 @@ class SourcelessBuilder:
                 return existing
             return tx.output.side_effects.track_mutable(
                 value,
-                UserDefinedObjectVariable(value),
+                _enum_member_variable(value),
                 AttributeMutationNew,
             )
         elif isinstance(value, (type, abc.ABCMeta)):
