@@ -21,13 +21,16 @@ from torch._inductor.runtime.autotune_cache import (
     AutotuneCacheBundler,
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
-from torch._inductor.runtime.hints import HeuristicType
+from torch._inductor.runtime.hints import HeuristicType, KERNEL_CONFIGS_NAME
 from torch._inductor.runtime.triton_compat import OutOfResources
 from torch._inductor.runtime.triton_heuristics import (
     AutotuneCache,
     cached_autotune,
     CachingAutotuner,
+    CachingAutotunerPlugin,
     config_to_dict,
+    DebugAutotuner,
+    DEFER,
     StaticTritonCompileResult,
     TritonCompileResult,
 )
@@ -404,7 +407,11 @@ class TestKernelConfigs(TestCase):
             ns = _load_from_file(code)
             for shape in [(64, 3000), (17, 5000), (200, 129)]:
                 y = torch.randn(shape, device=GPU_TYPE)
-                out = ns["call"]([y, *shape])[0]
+                # The size symbols come before or after the tensor, as get_args shows.
+                dims = iter(shape)
+                example = ns["get_args"]()
+                args = [y if torch.is_tensor(a) else next(dims) for a in example]
+                out = ns["call"](args)[0]
                 self.assertEqual(out, fn(y), atol=1e-3, rtol=1e-3)
         (cfg,) = ns["KERNEL_CONFIGS"].values()
         (kernel,) = _kernels(code)
@@ -424,7 +431,9 @@ class TestKernelConfigs(TestCase):
         self.assertNotIn(template, ns.get("KERNEL_CONFIGS", {}))
         self.assertEqual(ns[template].heuristic_type, HeuristicType.TEMPLATE)
         self.assertEqual(ns["call"]([a, b])[0], result)
-        # Naming it in a table by hand does not pin it either.
+        # Naming it in a table by hand does not pin it either. The module has no table
+        # of its own to replace this one.
+        self.assertNotIn(KERNEL_CONFIGS_NAME, code)
         row = {"num_warps": 1, "num_stages": 1}
         table = f"KERNEL_CONFIGS = {{{template!r}: {row!r}}}\n"
         ns = _load_from_file(table + code)
@@ -501,19 +510,23 @@ class TestKernelConfigs(TestCase):
         tuned.assert_called_once()
 
     @requires_gpu_and_triton
-    @parametrize("failure", ["compile", "load", "load_pipelined", "load_cached"])
+    @parametrize(
+        "failure", ["compile", "load", "load_pipelined", "load_cached", "load_profiled"]
+    )
     def test_a_pinned_config_that_does_not_fit_falls_back_to_tuning(self, failure):
         # As on a GPU with less shared memory than the one the module was tuned on: Triton
         # raises OutOfResources when it loads the binary, and with num_stages > 1 the
         # launcher is first retried with pipelining disabled. A config that does not
         # compile fails on the module's own precompile threads instead. With the local
-        # autotune cache on, the compile-time winner, the pinned config, is cached.
+        # autotune cache on, the compile-time winner, the pinned config, is cached. Under
+        # profile_bandwidth the kernel is a DebugAutotuner, which precompiles in run().
         num_stages = 2 if failure == "load_pipelined" else 1
         fn = lambda x: x.sum(-1)  # noqa: E731
         x = torch.randn(64, 3000, device=GPU_TYPE)
         cached = failure == "load_cached"
+        profiled = failure == "load_profiled"
         cfg = {"autotune_local_cache": cached, "max_autotune": True}
-        result, code = _code_for(fn, x, **cfg)
+        result, code = _code_for(fn, x, profile_bandwidth=profiled, **cfg)
         (kernel,) = _kernels(code)
         row = re.search(rf"^    '{kernel}': (.*),$", code, re.MULTILINE)
         tuned_row = ast.literal_eval(row[1])
@@ -571,8 +584,48 @@ class TestKernelConfigs(TestCase):
         # It is the unpinned kernel now, which tunes as it did before pinning.
         self.assertIsNone(ns[kernel].fallback)
         self.assertEqual(ns[kernel].heuristic_type, HeuristicType.REDUCTION)
+        self.assertEqual(isinstance(ns[kernel], DebugAutotuner), profiled)
         (launcher,) = ns[kernel].launchers
         self.assertIn(config_to_dict(launcher.config), candidates)
+
+    @requires_gpu_and_triton
+    def test_a_plugin_compiles_the_kernel_again_after_falling_back(self):
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        cfg = {"autotune_local_cache": False, "max_autotune": True}
+        result, code = _code_for(lambda x: x.sum(-1), x, **cfg)
+        (kernel,) = _kernels(code)
+        row = re.search(rf"^    '{kernel}': (.*),$", code, re.MULTILINE)
+        pinned = ast.literal_eval(row[1])
+        seen = []
+
+        class Plugin(CachingAutotunerPlugin):
+            def pre_compile(self, autotuner):
+                seen.append((autotuner.heuristic_type, hasattr(autotuner, "mark")))
+                autotuner.mark = True
+                return DEFER
+
+        def does_not_fit(orig):
+            def make_launcher(self):
+                if config_to_dict(self.config) == pinned:
+                    raise OutOfResources(1 << 20, 1 << 16, "shared memory")
+                return orig(self)
+
+            return make_launcher
+
+        plugins = mock.patch(
+            "torch._inductor.runtime.triton_heuristics.get_caching_autotuner_plugins",
+            lambda autotuner: [Plugin()],
+        )
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(plugins)
+            for cls in (TritonCompileResult, StaticTritonCompileResult):
+                fail = does_not_fit(cls.make_launcher)
+                stack.enter_context(mock.patch.object(cls, "make_launcher", fail))
+            ns = _load_from_file(code)
+            self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
+        # The unpinned kernel does not have what the plugin set on the pinned one.
+        fixed, reduction = HeuristicType.FIXED, HeuristicType.REDUCTION
+        self.assertEqual(seen, [(fixed, False), (reduction, False)])
 
     @requires_gpu_and_triton
     def test_falling_back_decides_on_every_attribute_set_after_init(self):
@@ -678,11 +731,14 @@ class TestKernelConfigs(TestCase):
             fn = staticmethod(ns["triton_fn"])
 
         class BackendAutotuner:
-            def __init__(self, *args, configs, heuristic_type, **kwargs):
+            def __init__(self, *args, configs, heuristic_type, inductor_meta, **kwargs):
                 self.configs = configs
                 self.heuristic_type = heuristic_type
+                self.inductor_meta = inductor_meta
 
-        meta = {"kernel_name": "triton_poi_0"}
+        tuners = "coordinate_descent_tuning combo_tuning_groups incremental_autotune"
+        retuning = dict.fromkeys(tuners.split(), True)
+        meta = {"kernel_name": "triton_poi_0", **retuning}
         kernel = cached_autotune(
             [1024],
             [],
@@ -695,6 +751,14 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(kernel.heuristic_type, HeuristicType.FIXED)
         (cfg,) = kernel.configs
         self.assertEqual(cfg.kwargs, {"XBLOCK": 128})
+        # Tuning that would replace the pinned config is off.
+        self.assertEqual(kernel.inductor_meta.keys() & retuning.keys(), set())
+
+    def test_the_bundled_autotune_cache_key_is_the_same_with_no_rows(self):
+        empty = f"{KERNEL_CONFIGS_NAME} = {{\n}}\nx = 1\n"
+        row = "    'triton_poi_0': {'XBLOCK': 128},\n"
+        full = empty.replace("\n", "\n" + row, 1)
+        self.assertEqual(_comment_stripped_hash(empty), _comment_stripped_hash(full))
 
     @requires_gpu_and_triton
     def test_pinned_kernel_keeps_the_backends_extra_options(self):
@@ -718,10 +782,18 @@ class TestKernelConfigs(TestCase):
             self.assertNotIn("extra_options", launcher.config.kwargs, name)
 
     @requires_gpu_and_triton
-    def test_a_row_the_module_cannot_read_back_is_left_out(self):
+    @parametrize("field", ["extra_options", "num_ctas", "pre_hook"])
+    def test_a_row_the_module_cannot_read_back_is_left_out(self, field):
+        # An enum does not read back, and a row has no num_ctas or pre_hook.
+        value = {
+            "extra_options": {"opt": HeuristicType.FIXED},
+            "num_ctas": 2,
+            "pre_hook": lambda args: None,
+        }[field]
+
         def record(kernel, in_block):
             if in_block:
-                kernel.launchers[0].config.extra_options = {"opt": HeuristicType.FIXED}
+                setattr(kernel.launchers[0].config, field, value)
 
         x = torch.randn(64, 128, device=GPU_TYPE)
         with _spy_launches(record):
