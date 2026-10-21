@@ -2617,7 +2617,6 @@ class PythonWrapperCodegen(CodeGen):
                 "atexit.register(_proton_finalize_and_postprocess)"
             )
             self.header.writeline('pl.enable_semantic("triton")')
-        self.header.writeline(_KernelConfigs(self))
 
     def include_extra_header(self, header: str):
         pass
@@ -4569,6 +4568,11 @@ class PythonWrapperCodegen(CodeGen):
             # launches it with that one rather than tuning again on first launch.
             pin = f"'pinned_config': KERNEL_CONFIGS.get({kernel_name!r}), "
             src_code = src_code.replace("inductor_meta={", f"inductor_meta={{{pin}")
+            if not self.kernel_configs:
+                # Here rather than in write_header, which a subclass may replace. The
+                # root's header comes before every kernel, subgraphs' included.
+                root = self.get_root_graph()
+                root.header.writeline(_KernelConfigs(root))
             self.kernel_configs[kernel_name] = None
         self.define_kernel(
             kernel_name,
@@ -4594,6 +4598,15 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.splice(src_code, strip=True)
         compile_wrapper.writeline(f"''', device_str='{device_type}')")
         return compile_wrapper.getvalue()
+
+    def get_root_graph(self) -> PythonWrapperCodegen:
+        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
+        while isinstance(root, SubgraphPythonWrapperCodegen):
+            root = root.parent_wrapper
+
+        if not isinstance(root, PythonWrapperCodegen):
+            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
+        return root
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.write_omitted_from_scan(self.subgraph_definitions, subgraph_code.value)
@@ -6647,7 +6660,10 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
-        # Its code goes into the root unscanned, so it reports its own uses.
+        # Its code goes into the root unscanned, so it reports its own uses. The set is
+        # the root's, as kernel_sources is, so that a nested subgraph reports straight to
+        # the root rather than through each parent; a name reported for code the root
+        # does not splice in can only keep a preamble line, never drop one.
         self.names_used_unscanned = root.names_used_unscanned
         self.kernel_configs = root.kernel_configs
 
@@ -6669,7 +6685,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def scan_for_used_names(self, module: IndentedBuffer) -> None:
         """Add the names ``module``, this subgraph's code, uses to the set shared with
-        the root, which splices that code in unscanned."""
+        the root, which splices that code in unscanned. Unlike the root's scan, it sets
+        no ``used_names``: it keeps or drops no line of its own."""
         if self.conditional_lines:
             # Only the root keeps or drops them; this scan never would.
             name = self.subgraph_name
@@ -6783,15 +6800,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.parent_wrapper.write_get_raw_stream_header_once()
 
     @cache_on_self
-    def get_root_graph(self) -> PythonWrapperCodegen:
-        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
-        while isinstance(root, SubgraphPythonWrapperCodegen):
-            root = root.parent_wrapper
-
-        if not isinstance(root, PythonWrapperCodegen):
-            raise AssertionError(f"expected PythonWrapperCodegen, got {type(root)}")
-        return root
-
     def generate_and_run_autotune_block(self):
         # Only execute auto-tuning block in the main graph
         pass
