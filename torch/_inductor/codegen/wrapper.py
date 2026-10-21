@@ -994,7 +994,8 @@ class _KernelConfigs(DeferredLineBase):
         return (
             "# The config each kernel below launches with when this file is run on its own,\n"
             "# chosen by autotuning at compile time. A kernel missing here autotunes on its\n"
-            "# first launch, as does one whose config does not fit the GPU.\n"
+            "# first launch, as does one whose config does not fit the GPU (after a retry\n"
+            "# with pipelining off).\n"
             f"{KERNEL_CONFIGS_NAME} = {{\n{rows}}}"
         )
 
