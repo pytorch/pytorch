@@ -2342,6 +2342,30 @@ class Reduction(Loops):
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_numel = sympy_product(reduction_ranges)
         block_size = FloorDiv(reduction_numel + (split - 1), split)
+
+        # strict_reduction needs the classic lowering's fixed summation order.
+        if (
+            config.force_red_split_dim_as_grid_dim
+            and is_triton(device)
+            and not strict_reduction
+            and sum(
+                not V.graph.sizevars.statically_known_equals(rng, 1)
+                for rng in reduction_ranges
+            )
+            == 1
+        ):
+            return cls.create_multilayer_split_as_grid(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                split,
+                reduction_hint,
+            )
+
         default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader(
             inner_fn,
@@ -2366,6 +2390,101 @@ class Reduction(Loops):
             split,
             reduction_hint,
             strict_reduction,
+        )
+
+    @classmethod
+    def create_multilayer_split_as_grid(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
+        reduction_type: ReductionType,
+        split: _IntLike,
+        reduction_hint: ReductionHint,
+    ) -> TensorBox:
+        """
+        Split a reduction using an extra grid dimension for the split factor.
+
+        Stage-1 keeps the reduction axis at its true extent, with a mask selecting
+        one contiguous chunk for each split slot. Loads retain their real extent
+        for block pointers. Codegen can narrow the loop to the selected chunk;
+        stage-2 combines over the appended split axis.
+        """
+        intermediate_dtype = (
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
+        )
+        reduction_numel = sympy_product(reduction_ranges)
+        chunk = FloorDiv(reduction_numel + split - 1, split)
+        reduction_strides = [
+            sympy_product(reduction_ranges[i + 1 :])
+            for i in range(len(reduction_ranges))
+        ]
+        index_dtype = dtype_from_size(reduction_numel)
+        default = cls.default_value(reduction_type, intermediate_dtype)
+
+        def wrapper_fn(
+            index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+        ) -> OpsValue:
+            *new_index, split_block = index
+            rindex = ops.index_expr(
+                sympy_dot(reduction_index, reduction_strides), index_dtype
+            )
+            mask = ops.logical_and(
+                ops.ge(rindex, ops.index_expr(split_block * chunk, index_dtype)),
+                ops.lt(rindex, ops.index_expr((split_block + 1) * chunk, index_dtype)),
+            )
+            return ops.where(
+                mask,
+                inner_fn(new_index, reduction_index),
+                ops.constant(default, intermediate_dtype),
+            )
+
+        intermediate = TensorBox.create(
+            Reduction(
+                device=device,
+                dtype=intermediate_dtype,
+                inner_fn=wrapper_fn,
+                ranges=[*ranges, split],
+                reduction_ranges=[*reduction_ranges],
+                reduction_type=reduction_type,
+                src_dtype=src_dtype,
+                reduction_hint=reduction_hint,
+            )
+        )
+        intermediate.realize()
+        stage1_buf = V.graph.name_to_buffer.get(intermediate.get_name())
+        if not isinstance(stage1_buf, ComputedBuffer):
+            raise AssertionError(
+                "split-as-grid stage-1 must realize to a ComputedBuffer, got "
+                f"{type(stage1_buf).__name__}"
+            )
+        stage1_buf._grid_split_factor = split
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(
+            index: Sequence[_IntLike], reduction_index: Sequence[_IntLike]
+        ) -> OpsValue:
+            return intermediate_loader([*index, *reduction_index])
+
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
+        return TensorBox.create(
+            Reduction(
+                device=device,
+                dtype=dst_dtype,
+                inner_fn=intermediate_fn,
+                ranges=ranges,
+                reduction_ranges=[split],
+                reduction_type=reduction_type,
+                src_dtype=src_dtype,
+                reduction_hint=cls._multilayer_second_step_hint(
+                    split, numel_hint, reduction_hint
+                ),
+            )
         )
 
     @classmethod
@@ -5651,6 +5770,8 @@ class ComputedBuffer(OperationBuffer):
     _original_inner_fn: Callable[..., Any] | None = None
     _original_ranges: Sequence[_IntLike] | None = None
     _original_reduction_ranges: Sequence[_IntLike] | None = None
+    # See Reduction.create_multilayer_split_as_grid.
+    _grid_split_factor: int | None = None
 
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
