@@ -13,7 +13,6 @@ from torch.distributed._token_switch import (
     TokenSwitch,
     TokenSwitchNCCL,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -1142,18 +1141,16 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
         self.assertEqual(combined, expected)
 
 
-instantiate_device_type_tests(TokenSwitchNCCLTest, globals(), only_for="cuda")
+instantiate_parametrized_tests(TokenSwitchNCCLTest)
 
 
-if "TokenSwitchNCCLTestCUDA" in globals():
+class TokenSwitchNCCL2Test(TokenSwitchNCCLTest):
+    _cached_token_switch: TokenSwitchNCCL | None = None
+    _cached_contract_token_switch: TokenSwitchNCCL | None = None
 
-    class TokenSwitchNCCL2TestCUDA(globals()["TokenSwitchNCCLTestCUDA"]):
-        _cached_token_switch: TokenSwitchNCCL | None = None
-        _cached_contract_token_switch: TokenSwitchNCCL | None = None
-
-        @classmethod
-        def backend_str(cls):
-            return "nccl2"
+    @classmethod
+    def backend_str(cls):
+        return "nccl2"
 
 
 if __name__ == "__main__":
