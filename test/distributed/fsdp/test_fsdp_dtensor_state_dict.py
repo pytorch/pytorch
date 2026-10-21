@@ -15,11 +15,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.tensor import DTensor, Shard
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND
 from torch.testing._internal.common_utils import (
@@ -107,11 +103,6 @@ class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
 
     @with_comms
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
-    )
     @parametrize("is_even_sharded_model", [True, False])
     def test_fsdp_init_with_device_mesh(self, device, is_even_sharded_model):
         device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
@@ -142,11 +133,6 @@ class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
 
     @with_comms
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
-    )
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(
@@ -223,11 +209,6 @@ class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
 
     @with_comms
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
-    )
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(
@@ -279,11 +260,6 @@ class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
 
     @with_comms()
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
-    )
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_model_load_state_dict(
@@ -319,11 +295,6 @@ class TestFSDPWithDeviceMeshAndDTensor(FSDPDTensorStateDictTestBase):
 
     @with_comms
     @requires_world_size(4)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.dtensor,
-        Capability.distributed.fsdp,
-    )
     def test_raises_warning_or_errors(self, device):
         device_mesh = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         model, optim = self._create_model(
