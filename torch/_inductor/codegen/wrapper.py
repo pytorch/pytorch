@@ -3711,9 +3711,11 @@ class PythonWrapperCodegen(CodeGen):
                 if extra_options := getattr(launched, "extra_options", None):
                     row["extra_options"] = extra_options
                 # A row the module could not read back, such as one holding an enum, is
-                # left out, so that its kernel tunes on first launch.
+                # left out, so that its kernel tunes on first launch. So is a config with
+                # fields a row does not carry.
+                carried = launched.num_ctas == 1 and launched.pre_hook is None
                 with contextlib.suppress(ValueError, SyntaxError, TypeError):
-                    if ast.literal_eval(repr(row)) == row:
+                    if carried and ast.literal_eval(repr(row)) == row:
                         self.kernel_configs[name] = row
 
     def memory_plan(self):
