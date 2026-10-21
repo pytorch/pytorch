@@ -959,7 +959,7 @@ class _OmittedFromScan(DeferredLineBase):
 class _KernelConfigs(DeferredLineBase):
     """``KERNEL_CONFIGS``: the config compile-time autotuning chose for each module-level
     kernel, which the kernel launches with when the module is run on its own (see
-    cached_autotune's pinned_config).
+    cached_autotune).
 
     It is written ahead of the kernels, which read it when they are defined, but is only
     known once the autotune block has run, after every kernel, subgraphs' included, has
@@ -2276,6 +2276,8 @@ class PythonWrapperCodegen(CodeGen):
         # Each module-level kernel that reads its launch config from KERNEL_CONFIGS, and
         # that config, which generate_and_run_autotune_block fills in.
         self.kernel_configs: dict[str, dict[str, Any] | None] = {}
+        # The kernels the autotune block launches, subgraphs' included.
+        self.kernel_configs_tuned: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -3679,7 +3681,9 @@ class PythonWrapperCodegen(CodeGen):
                 exec(tuning_code, scope)
             except Exception as e:
                 raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
-        for name in self.kernel_configs:
+        # Only the kernels the block launched: async_compile precompiles every kernel,
+        # so one launcher alone does not show that it was tuned.
+        for name in self.kernel_configs.keys() & self.kernel_configs_tuned:
             kernel = scope.get(name)
             if isinstance(kernel, CachingAutotuner) and len(kernel.launchers) == 1:
                 self.kernel_configs[name] = config_to_dict(kernel.launchers[0].config)
@@ -4562,12 +4566,9 @@ class PythonWrapperCodegen(CodeGen):
         # all of them, so _rename_kernel_module_globals makes each kernel-unique.
         src_code = _rename_kernel_module_globals(src_code, kernel_name, subs_name)
         if pin_config and config.triton.autotune_at_compile_time:
-            if src_code.count("inductor_meta={") != 1:
-                raise AssertionError(f"{kernel_name}: no single inductor_meta= to pin")
             # The autotune block below chooses this kernel's config, and the module
-            # launches it with that one rather than tuning again on first launch.
-            pin = f"'pinned_config': KERNEL_CONFIGS.get({kernel_name!r}), "
-            src_code = src_code.replace("inductor_meta={", f"inductor_meta={{{pin}")
+            # launches it with that one rather than tuning again on first launch:
+            # cached_autotune looks the kernel up in its module's KERNEL_CONFIGS.
             if not self.kernel_configs:
                 # Here rather than in write_header, which a subclass may replace. The
                 # root's header comes before every kernel, subgraphs' included.
@@ -5763,6 +5764,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 )
             self.kernel_autotune_names.add(kernel_name)
+            self.kernel_configs_tuned.add(kernel_name)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return
@@ -6667,6 +6669,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # does not splice in can only keep a preamble line, never drop one.
         self.names_used_unscanned = root.names_used_unscanned
         self.kernel_configs = root.kernel_configs
+        self.kernel_configs_tuned = root.kernel_configs_tuned
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
