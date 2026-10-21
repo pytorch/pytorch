@@ -24,6 +24,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple
 
+from conftest import STEPCURRENT_CACHE_DIR
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -215,7 +217,6 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "test_determination",
     "test_jit_legacy",
-    "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/pipelining/test_dtensor_pp_integration",
     "inductor/test_cpu_repro",  # excessive runtimes compared to CUDA
@@ -526,18 +527,28 @@ def get_executable_command(options, disable_coverage=False, is_cpp_test=False):
     return executable
 
 
-def _torchci_report_args(reports_dir: str | None) -> list[str]:
+def _torchci_report_args(
+    test_file: str, is_cpp_test: bool, reports_dir: str | None
+) -> list[str]:
     if not HAS_TORCHCI_REPORTS or not reports_dir:
         return []
-    return [f"--save-torchci-reports={reports_dir}"]
+    if not is_cpp_test:
+        return [f"--save-torchci-reports={reports_dir}"]
+    # C++ tests run under pytest-cpp, not run_tests, so register the plugin here.
+    from torch.testing._internal.torchci import plugin
+
+    prefix = Path(reports_dir) / sanitize_test_filename(test_file)
+    return ["-p", plugin.__name__, f"--torchci-report-prefix={prefix}"]
 
 
 def _torchci_reports_default() -> str | None:
-    # The CI jobs that write reports by default, widening until it's all of CI.
-    # upload-test-artifacts uploads this folder.
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
-        return str(REPO_ROOT / "test/torchci-reports")
-    return None
+    # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
+    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
+    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    if not in_pytorch_ci or torch.version.xpu:
+        return None
+    return str(REPO_ROOT / "test/torchci-reports")
 
 
 def run_test(
@@ -617,8 +628,8 @@ def run_test(
         replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
-    if not is_cpp_test:
-        unittest_args.extend(_torchci_report_args(options.save_torchci_reports))
+    reports_dir = options.save_torchci_reports
+    unittest_args += _torchci_report_args(test_file, is_cpp_test, reports_dir)
 
     if options.hw_classification:
         # forward hw classification filter to test subprocess
@@ -844,16 +855,40 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+    # pytest keeps cache values under <cache_dir>/v/<key>.
+    cache_dir = REPO_ROOT / ".pytest_cache/v" / STEPCURRENT_CACHE_DIR / stepcurrent_key
 
     def read_pytest_cache(key: str) -> Any:
-        cache_file = (
-            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
-        )
         try:
-            with open(cache_file) as f:
+            with open(cache_dir / key) as f:
                 return f.read()
         except FileNotFoundError:
             return None
+
+    def finish_torchci_report(ret_code: int, signal_name: str) -> None:
+        # The report writer publishes the run in flight next to lastrun; a process
+        # that died left it unrecorded (torchci/README.md).
+        if not HAS_TORCHCI_REPORTS:
+            return
+        try:
+            from torch.testing._internal.torchci import plugin
+
+            # An installed torch whose plugin predates the publication.
+            if not hasattr(plugin, "take_inflight"):
+                return
+            inflight = plugin.take_inflight(cache_dir)
+            # pytest's own exits (interrupted, internal error, usage error): the
+            # process didn't die, so the run is only consumed.
+            if inflight is None or ret_code in (2, 3, 4):
+                return
+            if ret_code == 124:
+                limit = f" after {timeout // 60}min" if timeout else ""
+                plugin.append_run(inflight, "timed_out", f"timed out{limit}")
+            else:
+                summary = f"exit code {ret_code}{signal_name}"
+                plugin.append_run(inflight, "crashed", summary)
+        except Exception as e:
+            print_to_file(f"Could not finish the test run report: {e}")
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -873,6 +908,8 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        if ret_code != 0:
+            finish_torchci_report(ret_code, signal_name)
 
         # Read what just failed/ran
         try:
@@ -992,6 +1029,7 @@ def run_gloo_test(test_module, test_directory, options):
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
             "ProcessGroupGlooFRTest",
+            "DistributedDataParallelTest",
         ),
     )
 
@@ -1006,6 +1044,15 @@ def run_common_test(test_module, test_directory, options):
             "ProcessGroupWithDispatchedCollectivesTests",
             "LocalRankTest",
         ),
+    )
+
+
+def run_nccl_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        ("DistributedDataParallelTest", "CommTest", "NCCLTraceTest", "WorkHookTest"),
     )
 
 
@@ -1510,7 +1557,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_nccl": run_nccl_test,
     "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_common_test,
@@ -1684,7 +1731,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",

@@ -4,6 +4,7 @@
 import collections
 import copy
 import gc
+import gzip
 import json
 import mmap
 import os
@@ -34,6 +35,7 @@ import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 from torch._inductor.utils import is_big_gpu
+from torch._utils import try_import
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -1373,6 +1375,24 @@ torch.ones(10) * 2
         ]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].input_shapes, [[2, 3], [], [3]])
+
+    def test_input_with_poisoned_storage(self):
+        # Metadata-only placeholders (e.g. released cudagraph-tree outputs)
+        # throw on data pointer access. Recording such an input must not leave
+        # the op without its inputs and shift every later op's inputs.
+        placeholder = torch.empty(4, 4)
+        torch._C._set_storage_data_ptr_access_error_msg(
+            placeholder.untyped_storage()._cdata, "placeholder has no data"
+        )
+        x = torch.ones(3, 5)
+        with profile(record_shapes=True) as prof:
+            placeholder.view(16)
+            torch.add(x, x)
+
+        (view,) = [e for e in prof.events() if e.name == "aten::view"]
+        (add,) = [e for e in prof.events() if e.name == "aten::add"]
+        self.assertEqual(view.input_shapes[0], [4, 4])
+        self.assertEqual(add.input_shapes[:2], [[3, 5], [3, 5]])
 
     def test_concrete_inputs_profiling(self):
         x = torch.rand(2, 6)
@@ -4773,6 +4793,59 @@ For a model PR to follow, see: https://github.com/pytorch/pytorch/pull/180100
 instantiate_device_type_tests(
     TestProfilerEventsParityCudaOnly, globals(), only_for=("cuda",)
 )
+
+
+@unittest.skipIf(not kineto_available(), "Kineto is required")
+@instantiate_parametrized_tests
+class TestProfilerTraceCompression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("use_python_export", [False, True])
+    @parametrize(
+        "suffix",
+        [".json", ".json.gz", ".json.zst", "", ".unknown", ".zst.bak", ".gz.bak"],
+    )
+    def test_export(self, use_python_export, suffix):
+        if suffix.endswith(".zst"):
+            zstd = try_import("pyzstd") or try_import("zstandard")
+            if zstd is None:
+                self.skipTest("requires zstandard or pyzstd")
+            opener = zstd.open
+        elif suffix.endswith(".gz"):
+            opener = gzip.open
+        else:
+            opener = open
+
+        value = "café 中"
+        escape_unicode = use_python_export and not suffix.endswith(".zst")
+        metadata = json.dumps(value, ensure_ascii=escape_unicode)
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            prof.add_metadata_json("compression_test", metadata)
+            torch.ones(8) + 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace" + suffix)
+            prof.export_chrome_trace(path, use_python_export=use_python_export)
+            with opener(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertEqual(trace["compression_test"], value)
+
+    @parametrize("use_python_export", [False, True])
+    def test_missing_zstd(self, use_python_export):
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            torch.ones(8) + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with patch.dict(sys.modules, {"zstandard": None, "pyzstd": None}):
+                message = "requires zstandard or pyzstd.*pip install zstandard.*pip install pyzstd"
+                with self.assertRaisesRegex(ImportError, message):
+                    prof.export_chrome_trace(path, use_python_export=use_python_export)
+                self.assertFalse(os.path.exists(path))
+                # A missing dependency must not consume the native trace.
+                gzip_path = os.path.join(tmpdir, "trace.json.gz")
+                prof.export_chrome_trace(gzip_path, use_python_export=use_python_export)
+                with gzip.open(gzip_path, "rt") as f:
+                    self.assertIn("traceEvents", json.load(f))
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
