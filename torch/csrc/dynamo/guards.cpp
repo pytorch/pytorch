@@ -2505,6 +2505,70 @@ class DEFAULT_DEVICE : public LeafGuard {
   py::object _device;
 };
 
+// Checks torch.fx.traceback._get_current_annotation() == expected without
+// calling into Python. That function returns None when current_meta["custom"]
+// is missing or empty, and a copy of it otherwise.
+class FX_ANNOTATION : public LeafGuard {
+ public:
+  FX_ANNOTATION(
+      RootGuardManager* root_guard_manager,
+      py::object expected,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        // traceback.py rebinds current_meta, so keep its module dict instead.
+        _traceback_dict(
+            py::module::import("torch.fx.traceback").attr("__dict__")),
+        _expected(std::move(expected)) {}
+
+  template <typename T>
+  bool check_nopybind_template(T* value) { // borrowed ref
+    static PyObject* current_meta_str = THPUtils_internString("current_meta");
+    py::object meta = get_item(_traceback_dict.ptr(), current_meta_str);
+    if (!meta || !PyDict_Check(meta.ptr())) {
+      return false;
+    }
+
+    static PyObject* custom_str = THPUtils_internString("custom");
+    py::object custom_ref = get_item(meta.ptr(), custom_str);
+    PyObject* custom = custom_ref.ptr();
+    if (!custom || (PyDict_Check(custom) && !PyDict_GET_SIZE(custom))) {
+      return _expected.is_none();
+    }
+
+    // If == raises (e.g. multi-element tensor values), the guard fails, so the
+    // frame recompiles.
+    return py_equals(custom, _expected.ptr(), /*false_on_error=*/true);
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    return check_nopybind_template(value);
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    return check_nopybind_template(value);
+  }
+
+ private:
+  // Returns an owned reference, or an empty object if key is missing. Owning it
+  // keeps a free-threaded build safe when another thread rebinds current_meta
+  // or custom mid-check.
+  static py::object get_item(PyObject* dict, PyObject* key) {
+    PyObject* item = nullptr;
+    if (PyDict_GetItemRef(dict, key, &item) < 0) {
+      PyErr_Clear();
+    }
+    return py::reinterpret_steal<py::object>(item);
+  }
+
+  py::object _traceback_dict;
+  // The annotation at compile time: a dict, or None when there was none.
+  py::object _expected;
+};
+
 class GLOBAL_STATE : public LeafGuard {
  public:
   GLOBAL_STATE(
@@ -8486,6 +8550,18 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<DEFAULT_DEVICE>(
                 self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fx_annotation_guard",
+          [](GuardManager& self,
+             py::object expected,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<FX_ANNOTATION>(
+                self.get_root(),
+                std::move(expected),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
