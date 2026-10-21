@@ -2304,7 +2304,13 @@ def gumbel_softmax(
         .exponential_()
         .log()
     )  # ~Gumbel(0,1)
-    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    gumbels = logits + gumbels
+    if gumbels.numel() > 0:
+        # softmax is shift-invariant; subtracting the max before dividing by tau
+        # keeps the division from overflowing to inf (and softmax returning NaN)
+        # in low-precision dtypes.
+        gumbels = gumbels - gumbels.detach().amax(dim, keepdim=True)
+    gumbels = gumbels / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
     if hard:

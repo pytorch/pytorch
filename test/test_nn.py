@@ -10831,6 +10831,15 @@ class TestNNDeviceType(NNTestCase):
         self._test_gumbel_softmax_straight_through(device, dtype)
         self._test_gumbel_softmax_grad(device, dtype)
 
+    @parametrize_test("hard", [False, True])
+    def test_gumbel_softmax_half_large_logits(self, device, hard):
+        # (logits + gumbels) / tau exceeds the half range here, but the result does not.
+        logits = torch.tensor([[1e4, -1e4, 0.5, -0.5]], device=device, dtype=torch.half, requires_grad=True)
+        out = F.gumbel_softmax(logits, tau=0.1, hard=hard)
+        self.assertEqual(out, torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device, dtype=torch.half))
+        (out * torch.randn_like(out)).sum().backward()
+        self.assertTrue(torch.isfinite(logits.grad).all())
+
     def _test_rnn_retain_variables(self, device, dtype):
         rnns = [nn.LSTM(10, 20, num_layers=2).to(device, dtype),
                 nn.GRU(10, 20, num_layers=2).to(device, dtype),
