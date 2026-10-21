@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, Optional
+from typing_extensions import deprecated
 from warnings import warn
 
 
@@ -258,16 +259,6 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
-        if (
-            experimental_config.profiler_metrics
-            or experimental_config.profiler_measure_per_kernel
-        ):
-            warn(
-                "profiler_metrics and profiler_measure_per_kernel are deprecated "
-                "and ignored. These options will be removed in a future release.",
-                FutureWarning,
-                stacklevel=2,
-            )
         if experimental_config.adjust_profiler_step:
             warn(
                 "adjust_profiler_step is deprecated and ignored. It will be "
@@ -757,7 +748,6 @@ class profile:
                 is_user_annotation=kineto_event.is_user_annotation(),
                 is_python_function=kineto_event.is_python_function(),
                 activity_type=kineto_event.activity_type(),
-                metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
                 typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),
@@ -1223,16 +1213,24 @@ class emit_nvtx:
         return False
 
 
+@deprecated(
+    "`torch.autograd.profiler.load_nvprof` is deprecated and will be removed "
+    "in PyTorch 2.17.",
+    category=FutureWarning,
+)
 def load_nvprof(path):
     """Open an nvprof trace file and parse autograd annotations.
+
+    .. deprecated::
+        This function is deprecated and will be removed in PyTorch 2.17.
 
     Args:
         path (str): path to nvprof trace
     """
-    return EventList(parse_nvprof_trace(path))
+    return EventList(_parse_nvprof_trace(path))
 
 
-class EnforceUnique:
+class _EnforceUnique:
     """Raises an error if a key is seen more than once."""
 
     def __init__(self):
@@ -1247,7 +1245,34 @@ class EnforceUnique:
         self.seen.add(key)
 
 
+@deprecated(
+    "`torch.autograd.profiler.EnforceUnique` is deprecated and will be removed "
+    "in PyTorch 2.17.",
+    category=FutureWarning,
+)
+class EnforceUnique(_EnforceUnique):
+    """Raises an error if a key is seen more than once.
+
+    .. deprecated::
+        This class is deprecated and will be removed in PyTorch 2.17.
+    """
+
+
+@deprecated(
+    "`torch.autograd.profiler.parse_nvprof_trace` is deprecated and will be "
+    "removed in PyTorch 2.17.",
+    category=FutureWarning,
+)
 def parse_nvprof_trace(path):
+    """Parse autograd annotations from an nvprof trace file.
+
+    .. deprecated::
+        This function is deprecated and will be removed in PyTorch 2.17.
+    """
+    return _parse_nvprof_trace(path)
+
+
+def _parse_nvprof_trace(path):
     import sqlite3
 
     conn = sqlite3.connect(path)
@@ -1270,7 +1295,7 @@ def parse_nvprof_trace(path):
     """
     functions = []
     functions_map = {}
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(marker_query):
         unique.see(row["marker_id"])
         evt = FunctionEvent(
@@ -1300,7 +1325,7 @@ def parse_nvprof_trace(path):
         INNER JOIN CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL AS kernel
             ON kernel.correlationId = runtime.correlationId
     """
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2
