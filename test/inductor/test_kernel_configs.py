@@ -423,6 +423,12 @@ class TestKernelConfigs(TestCase):
         self.assertNotIn(template, ns.get("KERNEL_CONFIGS", {}))
         self.assertEqual(ns[template].heuristic_type, HeuristicType.TEMPLATE)
         self.assertEqual(ns["call"]([a, b])[0], result)
+        # Naming it in a table by hand does not pin it either.
+        row = {"num_warps": 1, "num_stages": 1}
+        table = f"KERNEL_CONFIGS = {{{template!r}: {row!r}}}\n"
+        ns = _load_from_file(table + code)
+        self.assertEqual(ns[template].heuristic_type, HeuristicType.TEMPLATE)
+        self.assertEqual(ns["call"]([a, b])[0], result)
 
     @requires_cuda_and_triton
     def test_user_defined_kernel_keeps_its_autotuning(self):
@@ -494,20 +500,25 @@ class TestKernelConfigs(TestCase):
         tuned.assert_called_once()
 
     @requires_cuda_and_triton
-    @parametrize("failure", ["compile", "load", "load_pipelined"])
+    @parametrize("failure", ["compile", "load", "load_pipelined", "load_cached"])
     def test_a_pinned_config_that_does_not_fit_falls_back_to_tuning(self, failure):
         # As on a GPU with less shared memory than the one the module was tuned on: Triton
         # raises OutOfResources when it loads the binary, and with num_stages > 1 the
         # launcher is first retried with pipelining disabled. A config that does not
-        # compile fails on the module's own precompile threads instead.
+        # compile fails on the module's own precompile threads instead. With the local
+        # autotune cache on, the compile-time winner, the pinned config, is cached.
         num_stages = 2 if failure == "load_pipelined" else 1
         fn = lambda x: x.sum(-1)  # noqa: E731
         x = torch.randn(64, 3000, device="cuda")
-        cfg = {"autotune_local_cache": False, "max_autotune": True}
+        cached = failure == "load_cached"
+        cfg = {"autotune_local_cache": cached, "max_autotune": True}
         result, code = _code_for(fn, x, **cfg)
         (kernel,) = _kernels(code)
         row = re.search(rf"^    '{kernel}': (.*),$", code, re.MULTILINE)
-        pinned = {**ast.literal_eval(row[1]), "num_stages": num_stages}
+        tuned_row = ast.literal_eval(row[1])
+        # Unchanged when cached, so that the cached winner is the pinned config.
+        pinned = tuned_row if cached else {**tuned_row, "num_stages": num_stages}
+        num_stages = pinned["num_stages"]
         code = code.replace(row[0], f"    {kernel!r}: {pinned!r},")
         no_stages = lambda c: {k: v for k, v in c.items() if k != "num_stages"}  # noqa: E731
         failed = []
