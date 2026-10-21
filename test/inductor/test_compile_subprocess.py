@@ -23,7 +23,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
-    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
@@ -85,9 +84,6 @@ test_failures = {
     "test_regional_fallback_by_default_invoke_subgraph": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_regional_codegen_only_config_cpp_wrapper": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
     # This manually constructs an FX graph with an OpOverloadPacket target to
     # cover a legacy lowering table entry, which is outside the subprocess
     # compile serialization path this file exercises.
@@ -124,8 +120,6 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157788")
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/157724")
     @requires_gpu()
     @requires_triton()
     @unittest.skipIf(

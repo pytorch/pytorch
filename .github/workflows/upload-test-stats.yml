@@ -22,7 +22,7 @@ on:
       - rocm-mi200
       - rocm-mi300
       - rocm-mi350
-      - rocm-navi31
+      - rocm-rx7900
       - rocm-preview
       - inductor-micro-benchmark
       - inductor-micro-benchmark-x86

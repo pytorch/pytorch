@@ -1756,7 +1756,7 @@ class _LocalDist:
             return torch.SymInt(LocalIntNode({r: r for r in lm.ranks}))
         from ._c10d import _prepare_collective_groups
 
-        ranks, group_offsets, _ = _prepare_collective_groups(group)
+        ranks, group_offsets = _prepare_collective_groups(group)
         mapping: dict[int, int] = {}
         for group_offset in group_offsets:
             for local_rank, r in enumerate(ranks):
