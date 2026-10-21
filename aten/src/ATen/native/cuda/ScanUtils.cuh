@@ -312,8 +312,12 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
                                               const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
                                               const scalar_t init, BinaryOp binary_op)
 {
-  for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
-    for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+  // The host clamps gridDim to maxGridSize[1] and blockDim.x to 512, so both strides fit in uint32_t.
+  const uint32_t orow_stride = gridDim.x;
+  const uint32_t irow_stride = gridDim.y * blockDim.x;
+  // The loops break before incrementing so that no counter steps past its bound and wraps.
+  for (uint32_t orow = blockIdx.x; orow < num_orows;) {
+    for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows;) {
       const scalar_t *src = src_ + static_cast<index_t>(orow) * row_size * num_irows + irow;
       scalar_t *tgt = tgt_ + (index_t) orow * row_size * num_irows + irow;
       scalar_t acc = init;
@@ -325,7 +329,15 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
         src += num_irows;
         tgt += num_irows;
       }
+      if (num_irows - irow <= irow_stride) {
+        break;
+      }
+      irow += irow_stride;
     }
+    if (num_orows - orow <= orow_stride) {
+      break;
+    }
+    orow += orow_stride;
   }
 }
 

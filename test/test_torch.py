@@ -1889,14 +1889,33 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(indices[:, -1].max().item(), row_size - 1)
 
     @onlyCUDA
-    @largeTensorTest('16GB')
-    def test_cumsum_outer_dim_large_irows(self, device):
+    @largeTensorTest('20GB')
+    @parametrize(
+        "shape",
+        [
+            (2, 1, 2**31 + 1),
+            (1, 2, 2**32 - 2**24),
+            (1, 1, 2**32 - 1),
+            (2**32 - 1, 1, 1),
+        ],
+    )
+    def test_cumsum_outer_dim_large_rows(self, device, shape):
         # scan_outer_dim narrowed num_irows > INT_MAX to int when choosing
         # the block size, which produced an invalid launch configuration.
-        x = torch.zeros(2, 1, 2**31 + 1, dtype=torch.int8, device=device)
-        out = torch.ones_like(x)
-        torch.cumsum(x, dim=1, dtype=torch.int8, out=out)
-        self.assertEqual(out.max().item(), 0)
+        # Near UINT_MAX inner or outer rows, the uint32 grid-stride counters
+        # could wrap, which hung or rescanned rows. The in-place scan turns
+        # a rescanned row into wrong values; the poisoned out= buffer
+        # catches skipped writes.
+        x = torch.ones(shape, dtype=torch.int8, device=device)
+        expected = torch.arange(1, shape[1] + 1, dtype=torch.int8, device=device)
+        out = torch.zeros_like(x)
+        torch.cumsum(x, dim=1, out=out)
+        self.assertEqual(out.amin(dim=(0, 2)), expected)
+        self.assertEqual(out.amax(dim=(0, 2)), expected)
+        del out
+        x.cumsum_(1)
+        self.assertEqual(x.amin(dim=(0, 2)), expected)
+        self.assertEqual(x.amax(dim=(0, 2)), expected)
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
