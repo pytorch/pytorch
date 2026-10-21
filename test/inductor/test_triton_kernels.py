@@ -242,15 +242,7 @@ if HAS_TRITON:
         return f
 
 
-class _TritonDeviceTestCase(torch._inductor.test_case.TestCase):
-    def setUp(self):
-        if not HAS_TRITON:
-            self.skipTest("requires triton")
-
-        super().setUp()
-
-
-class _KernelTestsBase(_TritonDeviceTestCase):
+class _KernelTestsBase(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
             return f"launchKernel({kernel_name}" in code
@@ -3961,7 +3953,7 @@ def _run_triton_kernel_with_imported_symbol_with_custom_name(self, device):
 
 
 @requires_triton()
-class KernelTestsLibdeviceNvidia(_TritonDeviceTestCase):
+class KernelTestsLibdeviceNvidia(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_triton_kernel_with_imported_symbol(self, device):
@@ -3972,7 +3964,7 @@ class KernelTestsLibdeviceNvidia(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class KernelTestsLibdeviceIntel(_TritonDeviceTestCase):
+class KernelTestsLibdeviceIntel(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.XPU
 
     def test_triton_kernel_with_imported_symbol(self, device):
@@ -3984,7 +3976,6 @@ class KernelTestsLibdeviceIntel(_TritonDeviceTestCase):
 
 def make_mutation_test(fn):
     @onlyAccelerator
-    @requires_triton()
     def test_fn(self, device):
         from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
@@ -4014,7 +4005,8 @@ if HAS_TRITON:
         return x + y, out_ptr
 
 
-class MutationTests(_TritonDeviceTestCase):
+@requires_triton()
+class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -4224,7 +4216,6 @@ class MutationTests(_TritonDeviceTestCase):
         )
 
     @onlyAccelerator
-    @requires_triton()
     def test_triton_kernel_inference_mode(self, device):
         def f(x, y, out):
             n_elements = x.numel()
@@ -4852,7 +4843,6 @@ class MutationTests(_TritonDeviceTestCase):
         "requires TensorDescriptor API in Triton",
     )
     @onlyAccelerator
-    @requires_triton()
     def test_descriptor_load_store_read_write_detection(self, device):
         """
         Regression test: tl.make_tensor_descriptor + desc.load()/desc.store()
@@ -5195,7 +5185,7 @@ class MutationTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 @requires_triton()
-class MutationTestsTritonLauncher(_TritonDeviceTestCase):
+class MutationTestsTritonLauncher(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -5387,7 +5377,7 @@ if HAS_TRITON:
 
 
 @requires_triton()
-class CustomOpTests(_TritonDeviceTestCase):
+class CustomOpTests(torch._inductor.test_case.TestCase):
     """Tests for custom ops wrapping triton kernels"""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -5728,7 +5718,7 @@ class CustomOpTests(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class CustomOpTestsInterpretMode(_TritonDeviceTestCase):
+class CustomOpTestsInterpretMode(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
     def test_wrap_triton_triton_interpret_eager(self, device):
@@ -5823,7 +5813,7 @@ else:
 
 
 @requires_triton()
-class CustomOpTestsRuntime(_TritonDeviceTestCase):
+class CustomOpTestsRuntime(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -6785,7 +6775,7 @@ class CustomOpTestsGeneric(torch._inductor.test_case.TestCase):
 
 
 @requires_triton()
-class TestUserKernelEpilogueFusion(_TritonDeviceTestCase):
+class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @classmethod
@@ -7276,25 +7266,21 @@ if HAS_TRITON:
 instantiate_device_type_tests(
     KernelTests,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsCompilation,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsRuntime,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     KernelTestsPrecisionAndConstexpr,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
@@ -7326,25 +7312,21 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     CustomOpTests,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     CustomOpTestsRuntime,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     MutationTests,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     MutationTestsTritonLauncher,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
