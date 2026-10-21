@@ -3180,8 +3180,10 @@ class GraphLowering(torch.fx.Interpreter):
     ) -> CompiledModule:
         from .codecache import PyCodeCache
 
-        # A module that defines its kernels as code does not carry the string-form
-        # autotune block; generate_and_run_autotune_block logs it.
+        # Only a wrapper that keeps its kernels as strings, which the C++ wrapper still
+        # does, carries the autotune block. Otherwise the block is only the
+        # inductor_autotune_at_compile_time_code artifact and, with output_code at
+        # DEBUG, the file whose path generate_and_run_autotune_block logs.
         if (
             config.triton.autotune_at_compile_time
             and not self.wrapper_code.defines_triton_kernels_as_code()
