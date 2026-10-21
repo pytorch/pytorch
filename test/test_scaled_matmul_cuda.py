@@ -917,7 +917,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @skipIfRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
-    def test_mxfp8_tn_only_on_sm120(self, device) -> None:
+    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    def test_block_scaled_tn_only_on_sm120(self, device, recipe) -> None:
         # cuBLAS only has non-TN block-scaled kernels for compute capability 12.x
         # from 13.6.0 on, the cuBLAS that ships with CUDA 13.3 Update 1. Below
         # that, _scaled_mm rejects the other layouts itself rather than letting
@@ -926,44 +927,58 @@ class TestFP8Matmul(TestCase):
         major, _ = torch.cuda.get_device_capability(0)
         if major != 12:
             raise unittest.SkipTest("restriction only applies to compute capability 12.x")
-        cuda_version = _get_torch_cuda_version()
-        if cuda_version == (13, 3):
-            # CUDA 13.3.0 ships cuBLAS 13.5.1.27 and 13.3 Update 1 ships 13.6.0.2,
-            # and _get_torch_cuda_version() cannot tell the two apart.
-            raise unittest.SkipTest("support depends on the CUDA 13.3 update level")
-        tn_only = cuda_version < (13, 3)
 
         M, K, N = 128, 128, 128
-        x = torch.randn(M, K, device=device).to(e4m3_type)
-        y = torch.randn(N, K, device=device).to(e4m3_type)
-        # Unit scales keep the reference exact: the only quantization is the fp8 cast.
-        num_scales = 128 * ceil_div(ceil_div(K, 32), 4) * 4
-        x_scale = torch.ones(num_scales, device=device, dtype=torch.float8_e8m0fnu)
-        y_scale = torch.ones(num_scales, device=device, dtype=torch.float8_e8m0fnu)
+        if recipe == "mxfp8":
+            x = torch.randn(M, K, device=device).to(e4m3_type)
+            y = torch.randn(N, K, device=device).to(e4m3_type)
+            out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
+            scale_recipe, scale_dtype, block = ScalingType.BlockWise1x32, torch.float8_e8m0fnu, 32
+        else:
+            # Identity operands are exact in fp4.
+            x = _bfloat16_to_float4_e2m1fn_x2(torch.eye(M, K, device=device, dtype=torch.bfloat16))
+            y = _bfloat16_to_float4_e2m1fn_x2(torch.eye(N, K, device=device, dtype=torch.bfloat16))
+            out_ref = torch.eye(M, N, device=device, dtype=torch.bfloat16)
+            scale_recipe, scale_dtype, block = ScalingType.BlockWise1x16, torch.float8_e4m3fn, 16
+        # Unit scales keep the reference exact: the only quantization is the cast.
+        num_scales = 128 * ceil_div(ceil_div(K, block), 4) * 4
+        x_scale = torch.ones(num_scales, device=device, dtype=scale_dtype)
+        y_scale = torch.ones(num_scales, device=device, dtype=scale_dtype)
 
-        def mm(b):
+        def mm(a, b):
             return scaled_mm_wrap(
-                x,
+                a,
                 b,
                 scale_a=x_scale,
                 scale_b=y_scale,
-                scale_recipe_a=ScalingType.BlockWise1x32,
-                scale_recipe_b=ScalingType.BlockWise1x32,
+                scale_recipe_a=scale_recipe,
+                scale_recipe_b=scale_recipe,
                 swizzle_a=SwizzleType.SWIZZLE_32_4_4,
                 swizzle_b=SwizzleType.SWIZZLE_32_4_4,
                 out_dtype=torch.bfloat16,
             )
 
-        out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
         # TN -- row-major mat_a, column-major mat_b -- works on every cuBLAS version.
-        self.assertEqual(mm(y.t()), out_ref, atol=1e-2, rtol=1e-2)
+        self.assertEqual(mm(x, y.t()), out_ref, atol=1e-2, rtol=1e-2)
 
-        # Same operands, but mat_b row-major.
-        if tn_only:
-            with self.assertRaisesRegex(RuntimeError, "row-major mat_a and a column-major mat_b"):
-                mm(y.t().contiguous())
-        else:
-            self.assertEqual(mm(y.t().contiguous()), out_ref, atol=1e-2, rtol=1e-2)
+        # Same operands with mat_b row-major, then with mat_a column-major.
+        for a, b, layouts in [
+            (x, y.t().contiguous(), "mat_a row-major and mat_b row-major"),
+            (x.t().contiguous().t(), y.t(), "mat_a column-major and mat_b column-major"),
+        ]:
+            try:
+                out = mm(a, b)
+            except RuntimeError as e:
+                # Only cuBLAS older than 13.6.0 may reject these, and the error has to
+                # come from _scaled_mm, naming the runtime cuBLAS and both layouts.
+                match = re.search(rf"TN layout\).* with cuBLAS (\d+):.* Got {layouts}\.", str(e))
+                self.assertIsNotNone(match, str(e))
+                self.assertLess(int(match.group(1)), 130600)
+            else:
+                # fp4 packs element pairs along K, so a re-laid-out fp4 operand is a
+                # different matrix: only the fp8 result is comparable with TN.
+                if recipe == "mxfp8":
+                    self.assertEqual(out, out_ref, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:

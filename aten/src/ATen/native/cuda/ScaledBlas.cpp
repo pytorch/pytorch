@@ -255,15 +255,15 @@ bool is_narrow_precision_block_scaling(ScalingType scaling_type) {
       scaling_type == ScalingType::BlockWise1x32;
 }
 
-// How an operand reads to cuBLAS. Only used to make layout errors legible.
-const char* mm_operand_layout(const at::Tensor& mat) {
-  if (mat.stride(1) == 1) {
-    return "row-major";
-  }
-  if (mat.stride(0) == 1) {
-    return "column-major";
-  }
-  return "neither row- nor column-major";
+// How mat_a or mat_b reaches cuBLAS. Only used to make layout errors legible, so it
+// reads the layout back from args rather than from the strides: a layout check
+// decides on args, which see size-1 dims by contiguity and get non-dense operands
+// as row-major copies. args computes b.T @ a.T when the result is row-major, which
+// swaps the operands and flips their transpose flags.
+const char* mm_operand_layout(const cublasCommonArgs& args, bool is_mat_a) {
+  const char trans = is_mat_a != args.swapped_mn ? args.transa : args.transb;
+  const bool row_major = (trans != 'n') != args.swapped_mn;
+  return row_major ? "row-major" : "column-major";
 }
 #endif
 
@@ -529,17 +529,20 @@ _scaled_gemm(
   // inside cublasLtMatmulAlgoGetHeuristic, as a bare CUBLAS_STATUS_NOT_SUPPORTED
   // that says nothing about the layout. See the TN-format requirement under
   // "Narrow Precision Data Types Usage" in the cuBLAS documentation.
+  // The kernels come with the library, not the headers, so only the runtime
+  // version counts: a build against older headers can load a newer cuBLAS.
   if (is_narrow_precision_block_scaling(scaling_choice_a) ||
       is_narrow_precision_block_scaling(scaling_choice_b)) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    const bool block_scaled_tn_only = dprops->major == 12 &&
-        (CUBLAS_VERSION < 130600 || cublasLtGetVersion() < 130600);
+    const bool block_scaled_tn_only =
+        dprops->major == 12 && cublasLtGetVersion() < 130600;
     TORCH_CHECK(!block_scaled_tn_only || (args.transa == 't' && args.transb == 'n'),
         "Block-scaled scaled_mm requires a row-major mat_a and a column-major mat_b "
         "(the TN layout) on compute capability ", dprops->major, ".", dprops->minor,
         " with cuBLAS ", cublasLtGetVersion(), ": the other layouts need cuBLAS "
-        "13.6.0 (CUDA 13.3 Update 1) or newer. Got mat_a ", mm_operand_layout(mat1),
-        " and mat_b ", mm_operand_layout(mat2), ".");
+        "13.6.0 (CUDA 13.3 Update 1) or newer. Got mat_a ",
+        mm_operand_layout(args, /*is_mat_a=*/true), " and mat_b ",
+        mm_operand_layout(args, /*is_mat_a=*/false), ".");
   }
 #endif
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
