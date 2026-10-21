@@ -4422,7 +4422,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(3)
     def test_send_recv_non_dense_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device("cuda", self.rank % device_module.device_count())
+        device = torch.device(
+            f"{device_type}:{self.rank % device_module.device_count()}"
+        )
         dist.init_process_group(
             rank=self.rank, world_size=self.world_size, store=store, device_id=device
         )
@@ -6021,7 +6023,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
         device = torch.device(f"{device_type}:{self.rank}")
-        if sm_is_or_higher_than(device, 9, 0):
+        if not sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -6397,8 +6399,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
-        time.sleep(1)
+        pg._wait_for_pending_works()
         t = json.loads(_dump_fr_trace_json(includeCollectives=include_collectives))
         self._verify_trace(t, include_collectives, timing_enabled, True)
         dist.destroy_process_group()
@@ -7936,7 +7937,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
         backend = pg._get_backend(torch.device(device))
 
-        tensor = torch.full((1,), self.rank).to(f"{device_type}:{device}")
+        tensor = torch.full((1,), self.rank).to(device)
         ng1 = c10d.split_group(pg, [[0, 1], [2, 3, 4, 5, 6, 7]])
 
         # comm split happens eagerly since device_id is passed to init_process_group.
@@ -7954,7 +7955,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 2)
 
         if self.rank >= 5:
-            tensor2 = torch.full((1,), self.rank).to(f"{device_type}:{device}")
+            tensor2 = torch.full((1,), self.rank).to(device)
             dist.broadcast(tensor2, 7, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 7))
         else:
@@ -7973,7 +7974,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         backend = pg._get_backend(torch.device(device))
 
         # split the default PG into 2 subgroups, each subgroup (ng1) has 4 ranks.
-        tensor1 = torch.full((1,), self.rank).to(f"{device_type}:{device}")
+        tensor1 = torch.full((1,), self.rank).to(device)
         ng1 = c10d.split_group(pg, [[0, 1, 2, 3], [4, 5, 6, 7]])
         backend1 = ng1._get_backend(torch.device(device))
         if self.rank < 4:
@@ -7988,7 +7989,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         self.assertEqual(backend1.comm_split_count(), 0)
 
         # further split ng1 into 2 subgroups, each subgroup (ng2) has 2 ranks.
-        tensor2 = torch.full((1,), self.rank).to(f"{device_type}:{device}")
+        tensor2 = torch.full((1,), self.rank).to(device)
         ng2 = c10d.split_group(ng1, [[0, 1], [2, 3]])
         backend2 = ng2._get_backend(torch.device(device))
         self.assertEqual(backend.comm_split_count(), 1)
