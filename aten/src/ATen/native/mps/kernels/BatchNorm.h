@@ -1,19 +1,23 @@
 #pragma once
 #include <c10/metal/common.h>
 
-C10_METAL_CONSTEXPR uint32_t BN_MAX_THREADS = 1024;
 // Per-channel Welford partial (mean, M2, count), stored as packed_float3
 C10_METAL_CONSTEXPR uint32_t BN_PARTIAL_SIZE = 3;
-enum { BN_MEAN, BN_SCALE, BN_SHIFT, BN_NUM_STATS };
-enum {
-  BN_WEIGHT,
-  BN_BIAS,
-  BN_RUNNING_MEAN,
-  BN_RUNNING_VAR,
-  BN_SAVE_MEAN,
-  BN_SAVE_INVSTD,
-  BN_NUM_PARAMS
+enum class BNStat : uint32_t { Mean, Scale, Shift, NumStats };
+enum class BNParam : uint32_t {
+  Weight,
+  Bias,
+  RunningMean,
+  RunningVar,
+  SaveMean,
+  SaveInvstd,
+  NumParams
 };
+
+template <typename E>
+inline constexpr uint32_t bn_idx(E e) {
+  return static_cast<uint32_t>(e);
+}
 
 // Input viewed as [outer, C, inner], each dim as (size, input stride, output
 // stride). outer spans outer_ndim dims, innermost first.
@@ -27,11 +31,10 @@ struct BatchNormLayout {
   int32_t outer_ndim;
 };
 
-template <typename index_t = int64_t>
 struct BatchNormStatsParams {
-  index_t num_channels;
-  index_t num_partials;
+  uint32_t num_channels;
+  uint32_t num_partials;
   float eps;
   float momentum;
-  ::c10::metal::array<index_t, BN_NUM_PARAMS> strides;
+  ::c10::metal::array<int64_t, bn_idx(BNParam::NumParams)> strides;
 };

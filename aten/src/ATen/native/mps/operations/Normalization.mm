@@ -8,6 +8,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/BatchNorm.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -128,8 +129,9 @@ static Tensor batch_norm_reduce(const Tensor& x) {
   const int64_t C = layout.channel.x, inner = layout.inner.x, outer = layout.outer_numel;
   const bool channels_last = inner == 1;
   const auto threads = channels_last
-      ? BN_MAX_THREADS
-      : std::clamp<int64_t>(outer * inner / min_elems_per_thread, c10::metal::simdgroup_size, BN_MAX_THREADS);
+      ? c10::metal::max_threadgroup_size
+      : std::clamp<int64_t>(
+            outer * inner / min_elems_per_thread, c10::metal::simdgroup_size, c10::metal::max_threadgroup_size);
   const auto tx = channels_last ? c10::metal::simdgroup_size : std::min(inner, threads);
   const auto ty = std::clamp<int64_t>(outer, 1, threads / tx);
   const auto blocks = channels_last ? c10::metal::ceil_div(C, tx) : C;
@@ -150,21 +152,21 @@ static Tensor batch_norm_reduce(const Tensor& x) {
 
 static Tensor batch_norm_stats(const Tensor& x,
                                const std::optional<Tensor>& part,
-                               std::array<std::optional<Tensor>, BN_NUM_PARAMS> tensors,
+                               std::array<std::optional<Tensor>, bn_idx(BNParam::NumParams)> tensors,
                                double eps,
                                double momentum) {
-  const auto C = x.size(1);
-  const auto dtype = tensors[BN_SAVE_MEAN]->scalar_type();
+  const auto C = c10::safe_conv<uint32_t>(x.size(1), "batch_norm channels");
+  const auto dtype = tensors[bn_idx(BNParam::SaveMean)]->scalar_type();
   for (auto& t : tensors) {
     t = t.has_value() && t->defined() ? t : std::nullopt;
     TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "weight, bias, running and saved stats must share a dtype");
   }
-  BatchNormStatsParams<> params{.num_channels = C,
-                                .num_partials = part ? part->size(0) : 0,
-                                .eps = static_cast<float>(eps),
-                                .momentum = static_cast<float>(momentum)};
+  BatchNormStatsParams params{.num_channels = C,
+                              .num_partials = part ? c10::safe_conv<uint32_t>(part->size(0)) : 0u,
+                              .eps = static_cast<float>(eps),
+                              .momentum = static_cast<float>(momentum)};
   std::ranges::transform(tensors, params.strides.begin(), [](const auto& t) { return t ? t->stride(0) : 0; });
-  auto stats = at::empty({C, BN_NUM_STATS}, x.options().dtype(kFloat));
+  auto stats = at::empty({C, bn_idx(BNStat::NumStats)}, x.options().dtype(kFloat));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
     @autoreleasepool {
       auto encoder = getCurrentMPSStream()->commandEncoder();
