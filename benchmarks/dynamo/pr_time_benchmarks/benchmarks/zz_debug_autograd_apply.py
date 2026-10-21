@@ -169,6 +169,14 @@ PROBE = (
     HOOK
     + r"""
 import gc, runpy
+import torch
+
+# Each setattr on a type invalidates its version tag, and the lookup reassigns a new
+# one, so this shifts the tags (and method-cache slots) of every type tagged later.
+Burn = type("Burn", (), {})
+for k in range(int(sys.argv[4])):
+    Burn.x = k
+    Burn.x
 sys.path.insert(0, sys.argv[2])
 g = runpy.run_path(sys.argv[3], run_name="dbg")
 import torch._C._instruction_counter as ic
@@ -205,10 +213,10 @@ print("DEBUGJSON " + json.dumps(res))
 )
 
 
-def run_probe(config):
+def run_probe(config, burn=0):
     script = os.path.join(HERE, "autograd_function.py")
     out = subprocess.run(
-        [sys.executable, "-P", "-c", PROBE, config, HERE, script],
+        [sys.executable, "-P", "-c", PROBE, config, HERE, script, str(burn)],
         capture_output=True,
         text=True,
         env={**os.environ, "DEBUG_PRE_CONFIG": PRE_CONFIG},
@@ -224,6 +232,14 @@ def main():
     for config in ("cur", "pre"):
         for rep in range(2):
             print(f"DEBUG probe config={config} rep={rep}: {run_probe(config)}")
+    for config in ("cur", "pre"):
+        for burn in (1, 2, 3, 5, 8, 13, 50, 200, 950, 3000):
+            r = run_probe(config, burn)
+            try:
+                r = {k: min(v) for k, v in json.loads(r).items()}
+            except ValueError:
+                pass
+            print(f"DEBUG burn config={config} burn={burn}: {r}")
     for config in ("cur", "pre"):
         for rep in range(2):
             print(f"DEBUG real config={config} rep={rep}: {run_real(config)}")
