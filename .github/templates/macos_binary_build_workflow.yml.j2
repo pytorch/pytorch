@@ -100,6 +100,7 @@ jobs:
         run: |
           if ! xcrun --sdk macosx metal --version; then
             xcodebuild -downloadComponent MetalToolchain
+            xcrun --kill-cache
             xcrun --sdk macosx metal --version
           fi
       - name: Install uv
