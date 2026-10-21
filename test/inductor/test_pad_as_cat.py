@@ -29,7 +29,7 @@ class TestCatMultiConsumer(TestCase):
         result, (code,) = run_and_get_code(compiled, x)
 
         self.assertEqual(result, fn(x))
-        self.assertNotIn("reinterpret_tensor", code)
+        self.assertNotIn("reinterpret_tensor(", code)
 
     @torch._inductor.config.patch(fx_graph_cache=False)
     @requires_gpu()
@@ -48,7 +48,7 @@ class TestCatMultiConsumer(TestCase):
 
         self.assertEqual(result[0], ref[0])
         self.assertEqual(result[1], ref[1])
-        self.assertIn("reinterpret_tensor", code)
+        self.assertIn("reinterpret_tensor(", code)
 
     @torch._inductor.config.patch(fx_graph_cache=False)
     @requires_gpu()
