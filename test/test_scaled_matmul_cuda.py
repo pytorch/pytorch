@@ -3479,7 +3479,6 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
                     self.assertNotEqual(no_carveout, carveout_66)
                     self.assertNotEqual(carveout_66, carveout_0)
 
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_inplace_tunableop(self, device):
