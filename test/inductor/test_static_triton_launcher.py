@@ -803,7 +803,9 @@ class TestStaticTritonLauncher(TestCase):
     @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
     def test_xpu_load_kernel_unknown_name_raises(self):
         # zeKernelCreate failing is the one load error path reachable from
-        # python, and it unwinds while the Level Zero module is live.
+        # python. Whether the module was freed on the way out is not observable
+        # from python, so this only pins down that the failure surfaces as an
+        # exception; it passes without the fix too.
         @triton.jit
         def simple_kernel(arg0):
             tl.store(arg0, 1)
