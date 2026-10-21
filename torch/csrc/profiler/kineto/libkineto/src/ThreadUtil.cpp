@@ -254,9 +254,11 @@ static std::pair<int32_t, std::string> parentPidAndCommand(
   const auto start_bracket_pos = line.find('(');
   const auto end_bracket_pos = line.rfind(')');
   const bool in_brackets = start_bracket_pos != std::string::npos && end_bracket_pos != std::string::npos && start_bracket_pos < end_bracket_pos;
+  char state = 0;
   int32_t parent_pid = 0;
-  const bool is_parent_pid_present = std::istringstream(line.substr(end_bracket_pos + 1)) >> std::ignore >> parent_pid; // std::ignore is used to skip <state>
-  if (in_brackets && is_parent_pid_present) {
+  const bool parent_pid_parsed = static_cast<bool>(
+      std::istringstream(line.substr(end_bracket_pos + 1)) >> state >> parent_pid);
+  if (in_brackets && parent_pid_parsed) {
     return std::make_pair(parent_pid, line.substr(start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
