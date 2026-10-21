@@ -84,4 +84,11 @@ TORCH_API void nccl_ep_combine(
     const at::Tensor& expert_tokens,
     at::Tensor& out_tokens);
 
+TORCH_API void nccl_ep_combine_backward(
+    const c10::intrusive_ptr<NcclEpHandle>& handle,
+    const at::Tensor& grad_tokens,
+    const at::Tensor& grad_topk_weights,
+    at::Tensor& out_tokens,
+    at::Tensor& out_topk_weights);
+
 } // namespace c10d::nccl_ep
