@@ -438,6 +438,7 @@ def check_autotune_cache(
     filename: str | None,
     inductor_meta: InductorMeta,
     dynamic_scale_rblock_eligible: bool = False,
+    skip_read: bool = False,
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
     """
     Given a list of configs, checks autotune cache and return metadata
@@ -463,7 +464,7 @@ def check_autotune_cache(
         autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
         if autotune_cache:
             best_config = None
-            if not inductor_meta.get("autotune_cache_skip_read"):
+            if not skip_read:
                 best_config = autotune_cache.read_best(inductor_meta, configs)
             if best_config:
                 configs = [best_config]
@@ -3869,15 +3870,15 @@ def cached_autotune(
             **shared,
         )(fn)
 
-        def fallback(**extra):
+        def fallback(skip_cache_read=False):
             # Copies, since _cached_autotune pops from them and a failed build is retried.
-            meta = {**inductor_meta, **extra}
-            tuner = unpinned(triton_meta={**triton_meta}, inductor_meta=meta)(fn)
+            metas = {"triton_meta": {**triton_meta}, "inductor_meta": {**inductor_meta}}
+            tuner = unpinned(**metas, skip_cache_read=skip_cache_read)(fn)
             # A cached winner that is the config that did not fit, as tuned on another GPU:
             # tune again, and save the new winner over it.
             same = [*map(config_to_dict, tuner.configs)] == [config_to_dict(config)]
-            if same and not extra:
-                return fallback(autotune_cache_skip_read=True)
+            if same and not skip_cache_read:
+                return fallback(skip_cache_read=True)
             return tuner
 
         kernel.fallback = fallback
@@ -3896,6 +3897,7 @@ def _cached_autotune(
     custom_kernel,
     caching_autotuner_cls: type[CachingAutotuner],
     debug_autotuner_cls: type[DebugAutotuner],
+    skip_cache_read: bool = False,
 ):
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
@@ -3922,6 +3924,7 @@ def _cached_autotune(
         filename,
         inductor_meta,
         dynamic_scale_rblock_eligible=dynamic_scale_rblock_eligible,
+        skip_read=skip_cache_read,
     )
     mutated_arg_names = cast("list[str]", inductor_meta.pop("mutated_arg_names", ()))
     optimize_mem = inductor_meta.pop("optimize_mem", True)
