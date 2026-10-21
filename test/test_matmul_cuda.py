@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
 
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
+from torch._inductor.kernel.mm_grouped import has_grouped_mm_triton_support
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 
@@ -1052,7 +1053,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
     # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
-    @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(not has_grouped_mm_triton_support(), "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
