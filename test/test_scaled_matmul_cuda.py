@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     onlyOn,
     e4m3_type,
     e5m2_type,
@@ -1561,7 +1560,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             self.assertIs(compiled, compiled_input)
             self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @skipIfRocm
     def test_scaled_addmm_fake_tensor(self, device):
         with FakeTensorMode():
@@ -1622,7 +1621,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertIn("_scaled_addmm_", source)
         self.assertNotIn("triton_poi_fused_copy", source)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5775
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
