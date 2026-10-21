@@ -1054,6 +1054,21 @@ def index_put__impl(
     return ComplexTensor(out_re, out_im)
 
 
+@register_complex(aten.index_put)
+def index_put_impl(
+    self: ComplexTensor,
+    indices: tuple[torch.Tensor, ...],
+    values: ComplexTensor,
+    accumulate: bool = False,
+) -> ComplexTensor:
+    self_re, self_im = split_complex_arg(self)
+    values_re, values_im = split_complex_arg(values)
+    return ComplexTensor(
+        aten.index_put(self_re, indices, values_re, accumulate),
+        aten.index_put(self_im, indices, values_im, accumulate),
+    )
+
+
 @register_complex(aten.tanh_backward)
 def tanh_backward(out_grad: ComplexTensor, y: ComplexTensor) -> ComplexTensor:
     # pyrefly: ignore[bad-return]
