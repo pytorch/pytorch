@@ -235,7 +235,7 @@ inline vec<I, 2> batch_norm_offset(constant BatchNormLayout<>& layout, I o) {
 }
 
 template <typename T, bool STRIDED, typename I>
-[[max_total_threads_per_threadgroup(BN_MAX_THREADS)]]
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
 kernel void batch_norm_reduce(
     device const T* x [[buffer(0)]],
     device packed_float3* out [[buffer(1)]],
@@ -268,7 +268,7 @@ kernel void batch_norm_reduce(
     }
     acc = float3(shift + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
   }
-  threadgroup float3 buf[BN_MAX_THREADS];
+  threadgroup float3 buf[c10::metal::max_threadgroup_size];
   const uint tid = channels_last ? pos.y : pos.y * tptg.x + pos.x;
   const uint base = channels_last ? pos.x * tptg.y : 0;
   buf[base + tid] = acc;
@@ -283,7 +283,7 @@ template <typename P>
 kernel void batch_norm_stats(
     device const packed_float3* part [[buffer(0)]],
     device float* stats [[buffer(1)]],
-    constant BatchNormStatsParams<>& params [[buffer(2)]],
+    constant BatchNormStatsParams& params [[buffer(2)]],
     device const P* weight [[buffer(3)]],
     device const P* bias [[buffer(4)]],
     device P* running_mean [[buffer(5)]],
@@ -292,23 +292,25 @@ kernel void batch_norm_stats(
     device P* save_invstd [[buffer(8)]],
     uint c [[thread_position_in_grid]]) {
   constant auto& strides = params.strides;
-  device P* rm = running_mean + c * strides[BN_RUNNING_MEAN];
-  device P* rv = running_var + c * strides[BN_RUNNING_VAR];
+  device P* rm = running_mean + c * strides[bn_idx(BNParam::RunningMean)];
+  device P* rv = running_var + c * strides[bn_idx(BNParam::RunningVar)];
   float3 acc =
       part != nullptr ? float3(part[c]) : float3(float(*rm), float(*rv), 1);
   for (uint i = 1; i < params.num_partials; ++i) {
     acc = welford_combine(acc, float3(part[i * params.num_channels + c]));
   }
   const float invstd = metal::precise::rsqrt(acc.y / acc.z + params.eps);
-  device float* s = stats + BN_NUM_STATS * c;
-  s[BN_MEAN] = acc.x;
-  s[BN_SCALE] = weight != nullptr
-      ? invstd * float(weight[c * strides[BN_WEIGHT]])
+  device float* s = stats + bn_idx(BNStat::NumStats) * c;
+  s[bn_idx(BNStat::Mean)] = acc.x;
+  s[bn_idx(BNStat::Scale)] = weight != nullptr
+      ? invstd * float(weight[c * strides[bn_idx(BNParam::Weight)]])
       : invstd;
-  s[BN_SHIFT] = bias != nullptr ? float(bias[c * strides[BN_BIAS]]) : 0;
+  s[bn_idx(BNStat::Shift)] =
+      bias != nullptr ? float(bias[c * strides[bn_idx(BNParam::Bias)]]) : 0;
   if (part != nullptr) {
-    save_mean[c * strides[BN_SAVE_MEAN]] = static_cast<P>(acc.x);
-    save_invstd[c * strides[BN_SAVE_INVSTD]] = static_cast<P>(invstd);
+    save_mean[c * strides[bn_idx(BNParam::SaveMean)]] = static_cast<P>(acc.x);
+    save_invstd[c * strides[bn_idx(BNParam::SaveInvstd)]] =
+        static_cast<P>(invstd);
   }
   if (part != nullptr && running_mean != nullptr) {
     const float momentum = params.momentum;
@@ -325,7 +327,10 @@ kernel void batch_norm_elemt(
     constant BatchNormLayout<>& layout [[buffer(3)]],
     uint3 pos [[thread_position_in_grid]],
     uint3 size [[threads_per_grid]]) {
-  device const float* s = stats + pos.y * BN_NUM_STATS;
+  device const float* s = stats + pos.y * bn_idx(BNStat::NumStats);
+  const float mean = s[bn_idx(BNStat::Mean)];
+  const float scale = s[bn_idx(BNStat::Scale)];
+  const float shift = s[bn_idx(BNStat::Shift)];
   I o = pos.z;
   do {
     vec<I, 2> i = (o * size.y + pos.y) * size.x + pos.x;
@@ -333,8 +338,7 @@ kernel void batch_norm_elemt(
       i = batch_norm_offset(layout, o) + pos.y * vec<I, 2>(layout.channel.yz) +
           pos.x * vec<I, 2>(layout.inner.yz);
     }
-    out[i.y] = static_cast<T>(
-        (float(x[i.x]) - s[BN_MEAN]) * s[BN_SCALE] + s[BN_SHIFT]);
+    out[i.y] = static_cast<T>((float(x[i.x]) - mean) * scale + shift);
     o += size.z;
   } while (is_same_v<I, ulong> && o < I(layout.outer_numel));
 }
