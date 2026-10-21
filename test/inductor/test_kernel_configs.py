@@ -8,6 +8,7 @@ from unittest import mock
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_heuristics import (
     AutotuneCache,
@@ -61,6 +62,37 @@ def _no_runtime_tuning():
         yield
 
 
+@contextlib.contextmanager
+def _configs_tuned_at_compile_time():
+    """Each kernel's config after its launch inside the compile-time autotune block,
+    read from the kernel itself rather than from what the wrapper records."""
+    tuned, in_block = {}, [False]
+    block = PythonWrapperCodegen.generate_and_run_autotune_block
+    run = CachingAutotuner.run
+
+    def block_spy(self, *args, **kwargs):
+        in_block[0] = True
+        try:
+            return block(self, *args, **kwargs)
+        finally:
+            in_block[0] = False
+
+    def run_spy(self, *args, **kwargs):
+        out = run(self, *args, **kwargs)
+        name = self.inductor_meta.get("kernel_name")
+        if in_block[0] and name is not None and len(self.launchers) == 1:
+            tuned[name] = config_to_dict(self.launchers[0].config)
+        return out
+
+    with (
+        mock.patch.object(
+            PythonWrapperCodegen, "generate_and_run_autotune_block", block_spy
+        ),
+        mock.patch.object(CachingAutotuner, "run", run_spy),
+    ):
+        yield tuned
+
+
 def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
 
@@ -96,7 +128,8 @@ class TestKernelConfigs(TestCase):
     def test_kernels_launch_with_their_compile_time_config(self, case):
         _, fn, shape = case
         x = torch.randn(shape, device=GPU_TYPE)
-        _, code = _code_for(fn, x)
+        with _configs_tuned_at_compile_time() as tuned:
+            _, code = _code_for(fn, x)
         kernels = _kernels(code)
         self.assertTrue(kernels)
         with _no_runtime_tuning():
@@ -106,6 +139,7 @@ class TestKernelConfigs(TestCase):
                 self.assertEqual(ns["call"]([arg])[0], fn(arg), atol=1e-4, rtol=1e-4)
         self.assertEqual(set(ns["KERNEL_CONFIGS"]), kernels)
         for name, cfg in ns["KERNEL_CONFIGS"].items():
+            self.assertEqual(cfg, tuned[name], name)
             (launcher,) = ns[name].launchers
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
 
@@ -122,12 +156,15 @@ class TestKernelConfigs(TestCase):
             return a.relu(), b.sigmoid()
 
         a, b = (torch.randn(n, n, device=GPU_TYPE) for n in (10, 20))
-        _, code = _code_for(fn, a, b, combo_kernel_per_subkernel_blocks=per_subkernel)
+        per_subkernel_cfg = {"combo_kernel_per_subkernel_blocks": per_subkernel}
+        with _configs_tuned_at_compile_time() as tuned:
+            _, code = _code_for(fn, a, b, **per_subkernel_cfg)
         self.assertIn("combo_grid_meta", code)
         with _no_runtime_tuning():
             ns = _load_from_file(code)
             self.assertEqual(ns["call"]([a, b]), fn(a, b))
         ((name, cfg),) = ns["KERNEL_CONFIGS"].items()
+        self.assertEqual(cfg, tuned[name])
         (launcher,) = ns[name].launchers
         self.assertEqual(config_to_dict(launcher.config), cfg)
         if per_subkernel:
@@ -140,7 +177,9 @@ class TestKernelConfigs(TestCase):
         def fn(x):
             return x.sum(-1)
 
-        _, code = _code_for(fn, torch.randn(64, 3000, device=GPU_TYPE), dynamic=True)
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        with _configs_tuned_at_compile_time() as tuned:
+            _, code = _code_for(fn, x, dynamic=True)
         with _no_runtime_tuning():
             ns = _load_from_file(code)
             for shape in [(64, 3000), (17, 5000), (200, 129)]:
@@ -149,6 +188,7 @@ class TestKernelConfigs(TestCase):
                 self.assertEqual(out, fn(y), atol=1e-3, rtol=1e-3)
         (cfg,) = ns["KERNEL_CONFIGS"].values()
         (kernel,) = _kernels(code)
+        self.assertEqual(cfg, tuned[kernel])
         (launcher,) = ns[kernel].launchers
         self.assertEqual(config_to_dict(launcher.config), cfg)
 
