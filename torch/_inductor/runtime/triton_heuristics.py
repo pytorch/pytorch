@@ -3825,12 +3825,21 @@ def cached_autotune(
     if compiled is not None and (thunk := compiled.pop(name, None)) is not None:
         kernel = thunk()
         return lambda fn: kernel
-    cls_kwargs = {
+    shared = {
+        "filename": filename,
+        "custom_kernel": custom_kernel,
         "caching_autotuner_cls": caching_autotuner_cls,
         "debug_autotuner_cls": debug_autotuner_cls,
     }
-    args = (size_hints, configs, triton_meta, heuristic_type, filename, inductor_meta)
-    args += (custom_kernel,)
+    unpinned = functools.partial(
+        _cached_autotune,
+        size_hints=size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        heuristic_type=heuristic_type,
+        inductor_meta=inductor_meta,
+        **shared,
+    )
 
     def decorator(fn):
         # The config compile-time autotuning chose, which the kernel launches with instead
@@ -3839,14 +3848,19 @@ def cached_autotune(
         pinned = table.get(name) if isinstance(table, dict) else None
         # A user kernel keeps its own autotuning, even if a hand edit names it.
         if pinned is None or heuristic_type == HeuristicType.USER_AUTOTUNE:
-            return _cached_autotune(*args, **cls_kwargs)(fn)
+            return unpinned()(fn)
         config = config_from_dict(pinned)
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
         # A copy of triton_meta, which _cached_autotune pops from and the fallback reuses.
-        fixed = (None, [config], {**triton_meta}, HeuristicType.FIXED, filename, meta)
-        fixed += (custom_kernel,)
-        kernel = _cached_autotune(*fixed, **cls_kwargs)(fn)
-        kernel.fallback = lambda: _cached_autotune(*args, **cls_kwargs)(fn)
+        kernel = _cached_autotune(
+            size_hints=None,
+            configs=[config],
+            triton_meta={**triton_meta},
+            heuristic_type=HeuristicType.FIXED,
+            inductor_meta=meta,
+            **shared,
+        )(fn)
+        kernel.fallback = lambda: unpinned()(fn)
         return kernel
 
     return decorator
