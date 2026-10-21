@@ -19,12 +19,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
-)
-device_module = torch.get_device_module(device_type)
-
-
 @dataclass
 class ConvArgs:
     image_size: int
