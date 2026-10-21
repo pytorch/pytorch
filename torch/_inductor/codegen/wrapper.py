@@ -2362,7 +2362,7 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
                 empty_strided_mps = torch._C._dynamo.guards._empty_strided_mps
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
-                alloc_from_pool = torch.ops.inductor._alloc_from_pool
+                alloc_from_pool = torch._C._dynamo.guards._alloc_from_pool
                 async_compile = AsyncCompile()
             """,
             strip=True,
