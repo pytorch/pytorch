@@ -993,7 +993,7 @@ class TransformerEncoderLayer(Module):
         return self.dropout2(x)
 
 
-class TransformerEncoderLayerRoPE(TransformerEncoderLayer):
+class _TransformerEncoderLayerRoPE(TransformerEncoderLayer):
     def __init__(
         self,
         d_model: int,

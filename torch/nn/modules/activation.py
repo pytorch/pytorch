@@ -13,7 +13,7 @@ from .linear import NonDynamicallyQuantizableLinear
 from .module import Module
 
 
-class RotaryPositionalEmbeddings(Module):
+class _RotaryPositionalEmbeddings(Module):
     """
     This class implements Rotary Positional Embeddings (RoPE)
     proposed in https://arxiv.org/abs/2104.09864.
@@ -44,7 +44,7 @@ class RotaryPositionalEmbeddings(Module):
         super().__init__()
         if dim <= 0 or dim % 2 != 0:
             raise ValueError(
-                "RotaryPositionalEmbeddings requires a positive even dim, "
+                "_RotaryPositionalEmbeddings requires a positive even dim, "
                 f"got dim={dim}"
             )
         self.dim = dim
@@ -1329,7 +1329,7 @@ class MultiheadAttention(Module):
             raise AssertionError("embed_dim must be divisible by num_heads")
 
         if use_rotary:
-            rotary_pos_emb = RotaryPositionalEmbeddings(self.head_dim)
+            rotary_pos_emb = _RotaryPositionalEmbeddings(self.head_dim)
             if device is not None:
                 rotary_pos_emb = rotary_pos_emb.to(device=device)
             self.rotary_pos_emb = cast(

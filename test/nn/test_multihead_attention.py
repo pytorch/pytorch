@@ -867,16 +867,16 @@ class TestMultiheadAttentionNN(NNTestCase):
         self.assertEqual(scripted_weights, eager_weights)
 
     def test_rotary_positional_embeddings_cache_growth_and_odd_dim(self):
-        short_cache = nn.modules.activation.RotaryPositionalEmbeddings(
+        short_cache = nn.modules.activation._RotaryPositionalEmbeddings(
             4, max_seq_len=2
         )
-        long_cache = nn.modules.activation.RotaryPositionalEmbeddings(
+        long_cache = nn.modules.activation._RotaryPositionalEmbeddings(
             4, max_seq_len=3
         )
         x = torch.randn(2, 3, 2, 4)
         self.assertEqual(short_cache(x), long_cache(x))
         with self.assertRaisesRegex(ValueError, "even"):
-            nn.modules.activation.RotaryPositionalEmbeddings(3)
+            nn.modules.activation._RotaryPositionalEmbeddings(3)
 
     def test_multihead_attention_rotary_copy_and_old_state(self):
         import copy
@@ -899,10 +899,10 @@ class TestMultiheadAttentionNN(NNTestCase):
     def test_rotary_encoder_constructor_and_inference(self):
         from torch.nn.modules.transformer import (
             TransformerEncoder,
-            TransformerEncoderLayerRoPE,
+            _TransformerEncoderLayerRoPE,
         )
 
-        layer = TransformerEncoderLayerRoPE(
+        layer = _TransformerEncoderLayerRoPE(
             8,
             2,
             dim_feedforward=16,
