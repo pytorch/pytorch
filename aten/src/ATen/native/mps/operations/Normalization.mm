@@ -7,6 +7,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/BatchNorm.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -76,8 +77,9 @@ static Tensor batch_norm_reduce(const Tensor& x,
   const int64_t C = layout.channel.x, inner = layout.inner.x, outer = layout.outer_numel;
   const bool channels_last = inner == 1;
   const auto threads = channels_last
-      ? BN_MAX_THREADS
-      : std::clamp<int64_t>(outer * inner / min_elems_per_thread, c10::metal::simdgroup_size, BN_MAX_THREADS);
+      ? c10::metal::max_threadgroup_size
+      : std::clamp<int64_t>(
+            outer * inner / min_elems_per_thread, c10::metal::simdgroup_size, c10::metal::max_threadgroup_size);
   const auto tx = channels_last ? c10::metal::simdgroup_size : std::min(inner, threads);
   const auto ty = std::clamp<int64_t>(outer, 1, threads / tx);
   const auto blocks = channels_last ? c10::metal::ceil_div(C, tx) : C;
@@ -106,18 +108,19 @@ static Tensor batch_norm_stats(const Tensor& x,
                                double eps,
                                double momentum,
                                std::optional<bool> backward_train = std::nullopt) {
-  const auto C = x.size(1);
-  const auto dtype = (backward_train ? tensors[BN_BACKWARD_MEAN] : tensors[BN_SAVE_MEAN])->scalar_type();
+  const auto C = c10::safe_conv<uint32_t>(x.size(1), "batch_norm channels");
+  const auto dtype =
+      (backward_train ? tensors[bn_idx(BNBackwardParam::Mean)] : tensors[bn_idx(BNParam::SaveMean)])->scalar_type();
   for (auto& t : tensors) {
     t = t.has_value() && t->defined() ? t : std::nullopt;
     TORCH_CHECK_TYPE(!t || t->scalar_type() == dtype, "weight, bias, running and saved stats must share a dtype");
   }
-  BatchNormStatsParams<> params{.num_channels = C,
-                                .num_partials = part ? part->size(0) : 0,
-                                .eps = static_cast<float>(eps),
-                                .momentum = static_cast<float>(momentum)};
+  BatchNormStatsParams params{.num_channels = C,
+                              .num_partials = part ? c10::safe_conv<uint32_t>(part->size(0)) : 0u,
+                              .eps = static_cast<float>(eps),
+                              .momentum = static_cast<float>(momentum)};
   std::ranges::transform(tensors, params.strides.begin(), [](const auto& t) { return t ? t->stride(0) : 0; });
-  auto stats = at::empty({C, BN_NUM_STATS}, x.options().dtype(kFloat));
+  auto stats = at::empty({C, bn_idx(BNStat::NumStats)}, x.options().dtype(kFloat));
   const auto name =
       fmt::format("batch_norm_{}stats_{}", backward_train ? "backward_"sv : ""sv, scalarToMetalTypeString(dtype));
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
@@ -187,7 +190,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   save_mean.resize_({train ? self.size(1) : 0});
   save_var.resize_({train ? self.size(1) : 0});
   const auto part = train ? std::optional<Tensor>(mps::batch_norm_reduce(self)) : std::nullopt;
-  const auto stats = mps::batch_norm_stats<BN_NUM_PARAMS>(
+  const auto stats = mps::batch_norm_stats<bn_idx(BNParam::NumParams)>(
       self, part, {weight_opt, bias_opt, running_mean_opt, running_var_opt, save_mean, save_var}, epsilon, momentum);
   mps::batch_norm_elemt(output, self, stats);
   return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
@@ -355,7 +358,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   const auto part = train || grad_input_mask[1] || grad_input_mask[2]
       ? std::optional<Tensor>(mps::batch_norm_reduce(input, dy, mean->to(kFloat).contiguous()))
       : std::nullopt;
-  const auto stats = mps::batch_norm_stats<BN_NUM_BACKWARD_PARAMS>(
+  const auto stats = mps::batch_norm_stats<bn_idx(BNBackwardParam::NumParams)>(
       input, part, {weight_opt, mean, var, grad_weight, grad_bias}, epsilon, 0, train);
   if (grad_input.defined()) {
     train ? mps::batch_norm_elemt(grad_input, input, stats, dy) : mps::batch_norm_elemt(grad_input, dy, stats);
