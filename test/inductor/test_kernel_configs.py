@@ -149,6 +149,32 @@ class TestKernelConfigs(TestCase):
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
 
     @requires_gpu_and_triton
+    @config.patch(coordinate_descent_tuning=True)
+    def test_a_subgraph_kernel_pinned_first_writes_the_table(self):
+        # The predicate is an input, so the root launches no kernel: the first one
+        # pinned is in a branch nested in another branch.
+        def fn(p, x):
+            def outer(t):
+                return torch.cond(p, _softmax, lambda u: u.cos(), (t,))
+
+            return torch.cond(p, outer, lambda t: t.sin() * 2, (x,))
+
+        p, x = torch.tensor(True, device=GPU_TYPE), torch.randn(64, 128, device=GPU_TYPE)
+        with _configs_tuned_at_compile_time() as tuned:
+            _, code = _code_for(fn, p, x)
+        kernels = _kernels(code)
+        self.assertTrue(kernels)
+        self.assertNotIn(".run(", code.split("def call(")[-1])
+        with _no_runtime_tuning():
+            ns = _load_from_file(code)
+            for pred in (p, ~p):
+                expected = fn(pred, x)
+                self.assertEqual(ns["call"]([pred, x])[0], expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual(set(ns["KERNEL_CONFIGS"]), kernels)
+        for name, cfg in ns["KERNEL_CONFIGS"].items():
+            self.assertEqual(cfg, tuned[name], name)
+
+    @requires_gpu_and_triton
     @parametrize("per_subkernel", [False, True])
     @config.patch(
         combo_kernels=True,
