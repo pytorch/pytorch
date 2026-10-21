@@ -1922,8 +1922,9 @@ class TestTorchDeviceType(TestCase):
     @parametrize("num_rows,row_size", [(2**32 - 1, 1), (2**32 - 16, 2)])
     def test_cumsum_inner_dim_large_rows(self, device, num_rows, row_size):
         # Near UINT_MAX rows, the innermost scan's grid stride
-        # blockDim.y * gridDim.x overflowed to 0 in unsigned int and the row
-        # counter wrapped, so the kernel hung.
+        # blockDim.y * gridDim.x overflowed unsigned int; for these shapes it
+        # is exactly 2**32, so it became 0, the row loop never advanced, and
+        # the kernel hung.
         x = torch.ones(num_rows, row_size, dtype=torch.int8, device=device)
         expected = torch.arange(1, row_size + 1, dtype=torch.int8, device=device)
         out = torch.zeros_like(x)
