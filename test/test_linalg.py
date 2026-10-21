@@ -11930,6 +11930,10 @@ _GROUPED_MM_CASES = [
     subtest(((16, 256), (32, 256), [0, 128, 128, 256], False), name="2d_2d_zero_size"),
     subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
     subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
+    # N and the dW output divisible by 256 / 128 / only 64 select ROCm ck_tile's per-size tile configs
+    subtest(((256, 256), (2, 256, 256), [96, 256], True), name="2d_3d_n256"),
+    subtest(((256, 128), (2, 128, 128), [96, 256], True), name="2d_3d_n128"),
+    subtest(((256, 128), (2, 192, 128), [96, 256], True), name="2d_3d_n192"),
     subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
     subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
     subtest(
