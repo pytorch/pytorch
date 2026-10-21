@@ -1129,7 +1129,9 @@ def export_python(
     is below the dtype's own noise passes by construction. It compares values only, so
     it cannot see that the artifact's outputs carry no ``grad_fn``: a capture is
     forward-only, and calling ``.backward()`` on an artifact's output fails where the
-    eager function would have worked.
+    eager function would have worked. Only the CPU and CUDA generators are rewound for
+    the eager run and left where the artifact left them; on another accelerator a
+    checked call moves its generator.
 
     .. warning::
         This API is experimental and subject to change.
