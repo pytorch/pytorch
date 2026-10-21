@@ -2112,13 +2112,19 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.cache
 def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
         device = torch.device(get_gpu_type(), index_or_device)
 
+    # Resolve the threshold outside of the cache so that changing
+    # config.max_autotune_gemm_min_sms after the first call takes effect.
+    return _is_big_gpu(device, config.max_autotune_gemm_min_sms)
+
+
+@functools.cache
+def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
     prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
@@ -2131,7 +2137,9 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = min_sms_override
+    if min_sms is None:
+        min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
