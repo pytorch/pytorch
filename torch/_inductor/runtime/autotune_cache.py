@@ -638,10 +638,16 @@ class AutotuneCacheBundler:
             bundler.put(basename, data)
 
 
+# The python wrapper's KERNEL_CONFIGS (see _KernelConfigs in codegen/wrapper.py): the
+# config each kernel's compile-time autotuning picked, which timing noise can change.
+_KERNEL_CONFIGS = re.compile(r"(?m)^KERNEL_CONFIGS = \{\n(?:    .*\n)*\}$")
+
+
 # Remove the comments from the code (which include things like run ids and file
-# paths) and then hash the result.
+# paths) and the KERNEL_CONFIGS rows, and then hash the result.
 def _comment_stripped_hash(code: str) -> str:
     code = re.sub(r"#.*$", "", code, count=0, flags=re.MULTILINE)
+    code = _KERNEL_CONFIGS.sub("KERNEL_CONFIGS = {}", code)
     return torch._inductor.codecache.code_hash(code)
 
 
