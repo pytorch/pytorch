@@ -531,7 +531,13 @@ class TestKernelConfigs(TestCase):
                 (TritonCompileResult, "make_launcher", config_of, smem),
                 (StaticTritonCompileResult, "make_launcher", config_of, oom),
             ]
-        tune = CachingAutotuner.autotune_to_one_config
+        autotune = CachingAutotuner.autotune_to_one_config
+        candidates = []
+
+        def tune(kernel, *args, **kwargs):
+            candidates.extend(config_to_dict(c.config) for c in kernel.launchers)
+            return autotune(kernel, *args, **kwargs)
+
         spy = mock.patch.object(
             CachingAutotuner, "autotune_to_one_config", autospec=True, side_effect=tune
         )
@@ -546,8 +552,22 @@ class TestKernelConfigs(TestCase):
         self.assertIsNone(ns[kernel].fallback)
         self.assertEqual(ns[kernel].heuristic_type, HeuristicType.REDUCTION)
         (launcher,) = ns[kernel].launchers
-        chosen = config_to_dict(launcher.config)
-        self.assertNotEqual(no_stages(chosen), no_stages(pinned))
+        self.assertIn(config_to_dict(launcher.config), candidates)
+
+    @requires_cuda_and_triton
+    def test_falling_back_decides_on_every_attribute_set_after_init(self):
+        # Falling back replaces a pinned kernel's __dict__ with a fresh unpinned one's,
+        # so state set after __init__ is dropped unless _kept_on_fallback names it.
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(_softmax, x)
+        ns = _load_from_file(code)
+        ns["call"]([x])
+        for name in _kernels(code):
+            kernel = ns[name]
+            after_init = set(vars(kernel)) - set(vars(kernel.fallback()))
+            dropped = after_init - set(CachingAutotuner._kept_on_fallback)
+            # Both are the pinned kernel's own: its fallback, and a cached property.
+            self.assertEqual(dropped, {"fallback", "_could_rblock_scale"}, name)
 
     @requires_cuda_and_triton
     def test_an_unrelated_error_in_a_pinned_kernel_does_not_fall_back(self):
