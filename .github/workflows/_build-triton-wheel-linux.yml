@@ -123,13 +123,15 @@ jobs:
             RELEASE="--release"
           fi
 
-          yum install -y zlib-devel zip
+          # These packages come from the AlmaLinux repos. A broken EPEL mirror fails
+          # the whole yum/dnf run, so leave EPEL out.
+          yum install -y --disablerepo=epel zlib-devel zip
           "${PYTHON_EXECUTABLE}" -m pip install -U setuptools==78.1.0 pybind11==3.0.1 nanobind==2.10.2 auditwheel wheel
           "${PYTHON_EXECUTABLE}" -m pip install -U cmake --force-reinstall
 
           if [[ ("${{ inputs.device }}" == "cuda" || "${{ inputs.device }}" == "rocm" || "${{ inputs.device }}" == "aarch64" ) ]]; then
             # With this install, it gets clang 16.0.6.
-            dnf install clang lld -y
+            dnf install --disablerepo=epel clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
 
