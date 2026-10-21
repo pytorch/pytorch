@@ -12806,6 +12806,13 @@ class Scheduler:
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
 
+        if self.current_stream_idx is not None:
+            # Close the last stream context while still inside its device guard,
+            # as the device-switch path above does. Otherwise the guard's exit
+            # would close the stream block instead, misplacing the guard's
+            # finally: clause.
+            self.generate_stream_ctx_exit()
+
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
             # for graph partitions and all nodes must be on

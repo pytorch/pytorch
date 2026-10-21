@@ -7694,11 +7694,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         with result.indent():
             if coor_preamble:
                 result.writeline(coor_preamble)
-            result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
-            with result.indent():
-                result.writeline(
-                    V.graph.device_ops.set_device(index)
-                )  # no-op to ensure context
+            with V.graph.device_ops.python_device_guard(result, index):
                 stream_name = get_raw_stream_name(current_device.index)
                 result.writeline(f"{stream_name} = get_raw_stream({index})")
                 result.writeline(
@@ -7710,11 +7706,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         with result.indent():
             if coor_preamble:
                 result.writeline(coor_preamble)
-            result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
-            with result.indent():
-                result.writeline(
-                    V.graph.device_ops.set_device(index)
-                )  # no-op to ensure context
+            with V.graph.device_ops.python_device_guard(result, index):
                 result.writeline(
                     f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args)"
                 )
