@@ -3763,7 +3763,14 @@ def cached_autotune(
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
         # So that fixed_config does not come back here.
         del meta["pinned_config"]
-        return fixed_config(pinned, filename, triton_meta, meta)
+        return fixed_config(
+            pinned,
+            filename,
+            triton_meta,
+            meta,
+            caching_autotuner_cls=caching_autotuner_cls,
+            debug_autotuner_cls=debug_autotuner_cls,
+        )
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,
@@ -5310,7 +5317,12 @@ def config_from_dict(config: dict[str, Any]) -> Config:
 
 
 def fixed_config(
-    config, filename, triton_meta: TritonMeta, inductor_meta: InductorMeta
+    config,
+    filename,
+    triton_meta: TritonMeta,
+    inductor_meta: InductorMeta,
+    caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
+    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
 ):
     """
     Used when the configuration is already decided at compile time
@@ -5323,6 +5335,8 @@ def fixed_config(
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.FIXED,
         filename=filename,
+        caching_autotuner_cls=caching_autotuner_cls,
+        debug_autotuner_cls=debug_autotuner_cls,
     )
 
 
