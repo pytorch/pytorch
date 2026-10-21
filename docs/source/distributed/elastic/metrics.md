@@ -25,6 +25,10 @@ Below are the metric handlers that come included with torchelastic.
 .. autoclass:: NullMetricHandler
 ```
 
+```{eval-rst}
+.. autoclass:: MetricData
+```
+
 ## Methods
 
 ```{eval-rst}
