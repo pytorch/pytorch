@@ -35,6 +35,8 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
+    isRocmArchAnyOf,
+    NAVI4_ARCH,
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
@@ -6433,6 +6435,9 @@ class TestSDPAAccelerator(NNTestCase):
                         fudge_factors['grad_query'] = 1100.0
                 if dtype == torch.float32:
                     fudge_factors['grad_key'] = 90.0
+                # AOTriton bf16 grad_query error on gfx120x is ~6x gfx110x/gfx1151: ROCm/aotriton#259
+                if dtype == torch.bfloat16 and isRocmArchAnyOf(NAVI4_ARCH):
+                    fudge_factors['grad_query'] = max(fudge_factors['grad_query'], 520.0)
 
         check_out_and_grad(
             (out_ref, out_lp_ref, out),
