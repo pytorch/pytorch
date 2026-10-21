@@ -987,6 +987,13 @@ class _KernelConfigs(DeferredLineBase):
         return _KernelConfigs(self.wrapper)
 
 
+def strip_kernel_configs(code: str) -> str:
+    """``code`` with an empty KERNEL_CONFIGS, for a key that must not change with which
+    config won the compile-time autotuning."""
+    table = r"^KERNEL_CONFIGS = \{\n(?:    .*\n)*\}$"
+    return re.sub(table, "KERNEL_CONFIGS = {}", code, flags=re.MULTILINE)
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: sympy.Symbol
