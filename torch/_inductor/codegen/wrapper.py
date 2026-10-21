@@ -2239,7 +2239,8 @@ class PythonWrapperCodegen(CodeGen):
         # its own _generate, which never scans, so it keeps every line.
         self.conditional_lines: list[_LineIfNamesUsed] = []
         # The names used by code the scan leaves out, such as each subgraph's, which
-        # the subgraph scans itself.
+        # the subgraph scans itself, and names kept for what their lines do, such as
+        # async_compile, whose wait compiles the module-level kernels.
         self.names_used_unscanned: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
@@ -2460,6 +2461,7 @@ class PythonWrapperCodegen(CodeGen):
         return bool(self.conditional_lines)
 
     def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
+        """The names ``module`` uses, leaving out what write_omitted_from_scan wrote."""
         self.scanning_for_uses = True
         try:
             text = module.getvalue()
