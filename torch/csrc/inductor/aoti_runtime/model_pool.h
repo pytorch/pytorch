@@ -38,8 +38,6 @@ class ModelPool {
   // may still be in flight, so the model is reused only once it has finished.
   class Lease {
    public:
-    Lease(ModelPool& pool, Model* model) : pool_(&pool), model_(model) {}
-
     Lease(const Lease&) = delete;
     Lease& operator=(const Lease&) = delete;
     Lease(Lease&& other) noexcept : pool_(other.pool_), model_(other.model_) {
@@ -54,11 +52,13 @@ class ModelPool {
     }
 
     Model* operator->() const {
+      AOTI_RUNTIME_CHECK(
+          model_ != nullptr, "The lease no longer holds a model");
       return model_;
     }
 
     Model& operator*() const {
-      return *model_;
+      return *operator->();
     }
 
     void mark_pending() {
@@ -69,6 +69,9 @@ class ModelPool {
     }
 
    private:
+    friend class ModelPool;
+    Lease(ModelPool& pool, Model* model) : pool_(&pool), model_(model) {}
+
     ModelPool* pool_;
     Model* model_;
   };

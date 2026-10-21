@@ -251,15 +251,15 @@ class AOTInductorModelContainer {
       std::unique_lock constants_folding_lk(model_exec_mutex_);
       // Double locking to make sure constant folding is only ran once.
       if (const_folded == ConstantState::INITIALIZED) {
-        auto model = pool_.checkout();
-        auto folded_const_map = model->run_const_fold(
+        auto lease = pool_.checkout();
+        auto folded_const_map = lease->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
             std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         const_folded = ConstantState::FOLDED;
-        model.mark_pending();
+        lease.mark_pending();
       }
       constants_folding_lk.unlock();
       model_lk.lock();
@@ -270,9 +270,9 @@ class AOTInductorModelContainer {
     }
 
     [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-    auto model = pool_.checkout(stream);
-    model->run(input_handles, output_handles, stream, proxy_executor);
-    model.mark_pending();
+    auto lease = pool_.checkout(stream);
+    lease->run(input_handles, output_handles, stream, proxy_executor);
+    lease.mark_pending();
   }
 
   // Non-thread-aware variant of run(). Obviously unsafe to use in a threaded
@@ -434,28 +434,28 @@ class AOTInductorModelContainer {
       // We would need to acquire a unique lock if we want to run constant
       // folding on the active buffer.
       std::unique_lock constants_folding_lk(model_exec_mutex_);
-      auto model = pool_.checkout();
-      auto folded_const_map = model->run_const_fold(stream, proxy_executor);
+      auto lease = pool_.checkout();
+      auto folded_const_map = lease->run_const_fold(stream, proxy_executor);
       update_constant_buffer(
           std::move(folded_const_map),
           /* use_inactive = */ false,
           /* validate_full_update = */ false);
       const_folded = ConstantState::FOLDED;
-      model.mark_pending();
+      lease.mark_pending();
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
       [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
-      auto model = pool_.checkout(stream);
+      auto lease = pool_.checkout(stream);
 
       // We swap the constant mapping to the inactive buffer in the model to run
       // const run.
       auto inactive_map = inactive().map;
       auto inactive_array = inactive().array;
-      model->update_constants_map(
+      lease->update_constants_map(
           inactive_map, /* remap_constants_array= */ false);
-      model->update_constants_array(inactive_array);
+      lease->update_constants_array(inactive_array);
 
-      auto folded_const_map = model->run_const_fold(stream, proxy_executor);
+      auto folded_const_map = lease->run_const_fold(stream, proxy_executor);
       update_constant_buffer(
           std::move(folded_const_map),
           /* use_inactive = */ true,
@@ -464,12 +464,12 @@ class AOTInductorModelContainer {
       // Swap back the model's constants mapping
       auto active_map = active().map;
       auto active_array = active().array;
-      model->update_constants_map(
+      lease->update_constants_map(
           active_map, /* remap_constants_array= */ false);
-      model->update_constants_array(active_array);
+      lease->update_constants_array(active_array);
       const_folded = ConstantState::FOLDED;
 
-      model.mark_pending();
+      lease.mark_pending();
     }
   }
 

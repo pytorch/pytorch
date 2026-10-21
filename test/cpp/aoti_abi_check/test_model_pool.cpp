@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <torch/csrc/inductor/aoti_runtime/model_pool.h>
@@ -63,6 +64,12 @@ class FakeModel {
 using Stream = void*;
 using Pool = ModelPool<FakeModel, Stream>;
 
+// Only checkout() creates leases, so no caller can return a model to the pool
+// without having checked it out.
+static_assert(
+    !std::is_constructible_v<Pool::Lease, Pool&, FakeModel*>,
+    "Lease's constructor must stay private");
+
 struct TestPool {
   explicit TestPool(size_t num_models) : models(num_models) {
     pool.reserve(num_models);
@@ -85,12 +92,14 @@ Stream stream_handle(uintptr_t id) {
 
 constexpr auto kBlocked = std::chrono::milliseconds(100);
 
-// Pool bugs tend to show up as hangs; fail loudly instead of waiting for the
-// test runner's timeout.
+// Pool bugs tend to show up as hangs; fail loudly, naming the test, instead of
+// waiting for the test runner's timeout.
 template <typename T>
 T wait_or_abort(std::future<T>& future) {
   if (future.wait_for(std::chrono::seconds(30)) != std::future_status::ready) {
-    std::cerr << "ModelPool test timed out, likely a deadlock\n";
+    const auto* test = ::testing::UnitTest::GetInstance()->current_test_info();
+    std::cerr << "ModelPool test " << (test ? test->name() : "(none)")
+              << " timed out, likely a deadlock\n";
     std::abort();
   }
   return future.get();
@@ -165,6 +174,8 @@ TEST(ModelPoolTest, LeaseMarksPendingOnlyOnce) {
   auto lease = checkout(t.pool);
   lease.mark_pending();
   EXPECT_THROW(lease.mark_pending(), std::runtime_error);
+  EXPECT_THROW(lease.operator->(), std::runtime_error);
+  EXPECT_THROW((void)*lease, std::runtime_error);
 }
 
 TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
@@ -173,6 +184,8 @@ TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
   {
     auto lease = checkout(t.pool);
     holder.emplace(std::move(lease));
+    // NOLINTNEXTLINE(bugprone-use-after-move)
+    EXPECT_THROW(lease.operator->(), std::runtime_error);
   }
   auto waiter =
       std::async(std::launch::async, [&] { return t.pool.checkout(); });
@@ -183,7 +196,7 @@ TEST(ModelPoolTest, MovedFromLeaseDoesNotReturnModel) {
 
 // Every checkout must return a model that no other thread holds and whose
 // device work has finished.
-void run_concurrent_checkouts(bool use_stream_affinity) {
+int concurrent_checkout_violations(bool use_stream_affinity) {
   constexpr size_t kNumModels = 3;
   constexpr int kNumThreads = 8;
   constexpr int kNumIters = 500;
@@ -228,7 +241,15 @@ void run_concurrent_checkouts(bool use_stream_affinity) {
   }
   stop = true;
   device.join();
-  EXPECT_EQ(violations.load(), 0);
+  return violations.load();
+}
+
+// The stress test is the likeliest to deadlock, so it runs under the same
+// watchdog as every blocking call instead of hanging the binary in join().
+void run_concurrent_checkouts(bool use_stream_affinity) {
+  auto violations = std::async(
+      std::launch::async, concurrent_checkout_violations, use_stream_affinity);
+  EXPECT_EQ(wait_or_abort(violations), 0);
 }
 
 TEST(ModelPoolTest, ConcurrentCheckoutsNeverShareModel) {
@@ -266,6 +287,61 @@ TEST(ModelPoolTest, StreamAffinityRebindsWhenStreamsOutnumberModels) {
       t.pool.get_stream_affinity_model_index(stream_handle(1)),
       AOTI_STREAM_AFFINITY_UNBOUND);
   EXPECT_EQ(t.pool.get_stream_affinity_model_index(stream_handle(2)), 0);
+}
+
+// A failed run clears its model's stream binding, so the stream's next call
+// may choose another model. The run can fail before reaching the device, or its
+// device work can fail while a later call waits for it.
+TEST(ModelPoolTest, FailedRunClearsStreamBinding) {
+  {
+    TestPool t(1);
+    t.pool.set_use_stream_affinity(true);
+    start_run(t.pool, stream_handle(1))->finish();
+    EXPECT_EQ(t.pool.get_stream_affinity_model_index(stream_handle(1)), 0);
+    // Dropping the lease without mark_pending() is a failed run.
+    checkout(t.pool, stream_handle(1));
+    EXPECT_EQ(
+        t.pool.get_stream_affinity_model_index(stream_handle(1)),
+        AOTI_STREAM_AFFINITY_UNBOUND);
+  }
+  // The waiting call is stream 1's next one, or stream 2's, which finds no
+  // model and waits on the oldest pending run.
+  for (uintptr_t waiter : {1, 2}) {
+    SCOPED_TRACE(::testing::Message() << "stream " << waiter << " waits");
+    TestPool t(1);
+    t.pool.set_use_stream_affinity(true);
+    FakeModel* model = start_run(t.pool, stream_handle(1));
+    model->fail();
+    EXPECT_THROW(checkout(t.pool, stream_handle(waiter)), std::runtime_error);
+    EXPECT_EQ(
+        t.pool.get_stream_affinity_model_index(stream_handle(1)),
+        AOTI_STREAM_AFFINITY_UNBOUND);
+    EXPECT_EQ(&*checkout(t.pool), model);
+  }
+}
+
+// When every available model is bound, a checkout without a stream borrows
+// one. The binding survives: the owning stream waits for the borrower, then for
+// the borrowed run's device work, and gets its model back.
+TEST(ModelPoolTest, BorrowedModelKeepsStreamBinding) {
+  TestPool t(1);
+  t.pool.set_use_stream_affinity(true);
+  FakeModel* model = start_run(t.pool, stream_handle(1));
+  model->finish();
+  auto borrowed = checkout(t.pool);
+  EXPECT_EQ(&*borrowed, model);
+  EXPECT_EQ(t.pool.get_stream_affinity_model_index(stream_handle(1)), 0);
+  auto owner = std::async(
+      std::launch::async, [&] { return t.pool.checkout(stream_handle(1)); });
+  EXPECT_EQ(owner.wait_for(kBlocked), std::future_status::timeout);
+  borrowed->start();
+  borrowed.mark_pending();
+  // The borrowed run is still on the device.
+  EXPECT_EQ(owner.wait_for(kBlocked), std::future_status::timeout);
+  model->finish();
+  auto owned = wait_or_abort(owner);
+  EXPECT_EQ(&*owned, model);
+  EXPECT_EQ(t.pool.get_stream_affinity_model_index(stream_handle(1)), 0);
 }
 
 TEST(ModelPoolTest, StreamLockSerializesCallsOnSameStream) {
