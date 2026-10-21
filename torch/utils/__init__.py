@@ -33,10 +33,11 @@ def set_module(obj, mod):
 def _resolve_cmake_prefix_path() -> str:
     try:
         return _get_file_path("torch", "share", "cmake")
-    except OSError:
+    except Exception:
         # Some build systems ship torch without the CMake package files, and
-        # their get_file_path raises for a resource that is not there. Keep the
-        # historical __file__-derived path so importing torch.utils still works.
+        # their get_file_path raises for a resource that is not there; which
+        # exception is up to them. Keep the historical __file__-derived path so
+        # importing torch.utils still works.
         return _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
 
 

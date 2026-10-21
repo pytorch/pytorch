@@ -1348,11 +1348,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1398,8 +1393,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -2205,12 +2199,74 @@ def get_tma_workspace_arg(
     )
 
 
+def kpack_supported() -> bool:
+    """Whether to enable default kpack > 1 for the current ROCm arch.
+
+    Enabled on gfx908 (CDNA1), gfx90a (CDNA2) and gfx942 (CDNA3): the archs whose
+    MFMA K-extents are modeled by the dtype_size-keyed _MFMA_KDIM tables, so a
+    kpack > 1 pack can be checked against block_k for underfill. gfx950 (CDNA4)
+    is excluded because the Triton compiler forces kpack to 1 regardless
+    (triton/backends/amd/compiler.py), so a kpack > 1 default is a no-op.
+    """
+    return rocm_gfx_arch() in ("gfx908", "gfx90a", "gfx942")
+
+
 def get_default_kpack(block_k: int = 16) -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+    if rocm_gfx_arch() == "gfx942" and block_k <= 16:
         return 1
-    return 2
+    if kpack_supported() and block_k >= 16:
+        return 2
+    return 1
+
+
+# K-extent (kdim) of the CDNA MFMA instruction Triton selects, keyed by
+# (element_byte_width, matrix_instr_nonkdim).
+_MFMA_KDIM_CDNA3 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+# CDNA1 (gfx908) and CDNA2 (gfx90a) share this table: every (dtype_size, nonkdim)
+# entry resolves to the same K-extent on both, so they are merged.
+#   - CDNA2 is exact -- its bf16 MFMA (bf16_1k) matches f16 (16x16x16 / 32x32x8)
+#     and int8 is 16x16x16 / 32x32x8.
+#   - CDNA1 is exact for f16/int8/f32, but its bf16 MFMA is smaller (16x16x8 /
+#     32x32x4). dtype_size=2 cannot distinguish bf16 from f16, so it is keyed to
+#     the larger f16 extent: the underfill check stays conservative for CDNA1
+#     bf16 (may over-prune, never under-validate -> no packing garbage).
+# fp8 has no native instruction on either and is emulated with f16, landing on
+# the same K-extent as int8.
+_MFMA_KDIM_CDNA1_CDNA2 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 16,  # f8/i8    -> 16x16x16
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 8,  # f8/i8    -> 32x32x8
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """MFMA K-extent for the current CDNA arch, None for an unknown
+    (dtype_size, nonkdim) pair. Only gfx908/gfx90a/gfx942 are distinguished since
+    kpack > 1 (the sole consumer) is limited to those archs."""
+    arch = rocm_gfx_arch()
+    if arch in ("gfx908", "gfx90a"):
+        return _MFMA_KDIM_CDNA1_CDNA2.get((dtype_size, matrix_instr_nonkdim))
+    elif arch == "gfx942":
+        return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
+    else:
+        return None
 
 
 def _use_template_for_gpu(
@@ -4122,6 +4178,44 @@ def is_output_of_multi_outputs_template(
     )
 
 
+def get_collective_config(node: torch.fx.Node) -> dict[str, Any] | None:
+    """A functional collective's per-collective configuration, if any."""
+    target = node.target
+    if (
+        not isinstance(target, torch._ops.OpOverload)
+        or target.namespace != "_c10d_functional"
+    ):
+        return None
+    for index, arg in enumerate(target._schema.arguments):
+        if arg.name == "config":
+            if index < len(node.args):
+                return node.args[index]  # type: ignore[return-value]
+            return node.kwargs.get("config")  # type: ignore[return-value]
+    return None
+
+
+def _config_value_key(value: Any) -> Any:
+    # Types are part of the key so 1, 1.0 and True stay distinct.
+    if isinstance(value, dict):
+        return (
+            dict,
+            tuple(sorted((k, _config_value_key(v)) for k, v in value.items())),
+        )
+    if isinstance(value, (list, tuple)):
+        return (type(value), tuple(_config_value_key(v) for v in value))
+    return (type(value), value)
+
+
+def collective_config_value_key(config: dict[str, Any] | None) -> Any:
+    """A hashable form of a collective configuration."""
+    return None if config is None else _config_value_key(config)
+
+
+def collective_config_key(node: torch.fx.Node) -> Any:
+    """A hashable form of the collective's configuration."""
+    return collective_config_value_key(get_collective_config(node))
+
+
 def is_collective(
     node: Node | Operation | None,
     op: torch._ops.OperatorBase | None = None,
@@ -4339,14 +4433,11 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         self: PythonWrapperCodegen,
         kernel_name: str,
         kernel_code: str,
-        metadata: str | None = None,
-        gpu: bool = True,
-        cpp_definition: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, *args, **kwargs)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -4444,7 +4535,9 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    if dtype == torch.bfloat16 and torch.cuda.is_available():
+    if dtype == torch.bfloat16 and torch.version.hip:
+        return True
+    elif dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
     elif dtype == torch.bfloat16 and torch.xpu.is_available():
         return True
@@ -4724,6 +4817,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    if config.avoid_32bit_indexing_guards:
+        return False
 
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
@@ -5738,8 +5834,23 @@ def tlx_only_cuda_options() -> list[str]:
     return _tlx_registry_options("tlx_only_cuda_options")
 
 
+def forwarded_cuda_compile_options() -> list[str]:
+    """CUDA Triton compile options forwarded from kernel configs.
+
+    ``ctas_per_cga`` is also set by Meta autoWS 2CTA templates, so it must be
+    forwarded even when TLX is off.
+    """
+    return list(dict.fromkeys(["ctas_per_cga", *tlx_only_cuda_options()]))
+
+
 def tlx_only_hip_options() -> list[str]:
     return _tlx_registry_options("tlx_only_hip_options")
+
+
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP compiler options forwarded to Triton."""
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
 
 
 def _round_up(x: int, y: int) -> int:

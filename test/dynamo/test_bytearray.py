@@ -378,6 +378,191 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, self.type2test())
 
     @make_dynamo_test
+    def test_append(self):
+        b = self.type2test(b"hell")
+        b.append(ord("o"))
+        self.assertEqual(b, b"hello")
+        self.assertEqual(b.append(100), None)
+        b.append(Indexable(ord("A")))
+        self.assertEqual(b, b"hellodA")
+        self.assertRaises(TypeError, lambda: b.append(b"o"))
+        self.assertRaises(ValueError, lambda: b.append(256))
+        self.assertRaises(ValueError, lambda: b.append(-1))
+        self.assertEqual(b, b"hellodA")
+
+    @make_dynamo_test
+    def test_extend(self):
+        a = self.type2test(b"hello")
+        a.extend(a)
+        self.assertEqual(a, b"hellohello")
+        a = self.type2test()
+        a.extend(map(int, b"ab"))
+        a.extend(int(x) for x in b"cd")
+        a.extend([101, Indexable(102)])
+        self.assertEqual(a, b"abcdef")
+        self.assertRaises(ValueError, a.extend, [0, 1, 2, 256])
+        self.assertRaises(ValueError, a.extend, map(int, "X"))
+        self.assertEqual(a, b"abcdef")
+        self.assertRaises(TypeError, a.extend, "def")
+        with self.assertRaisesRegex(TypeError, "can't extend bytearray with float"):
+            a.extend(1.0)
+
+    def test_extend_consumes_iterator(self):
+        def f(ba):
+            it = iter([1, 2])
+            ba.extend(it)
+            return next(it, "done")
+
+        b, expected = bytearray(b"a"), bytearray(b"a")
+        out = torch.compile(f, backend="eager", fullgraph=True)(b)
+        self.assertEqual(out, f(expected))
+        self.assertEqual(b, expected)
+
+    def test_extend_stops_at_first_out_of_range_byte(self):
+        def f(ba):
+            seen = []
+
+            def gen():
+                for x in (1, 300, 2):
+                    seen.append(x)
+                    yield x
+                raise RuntimeError("drained past the bad byte")
+
+            try:
+                ba.extend(gen())
+            except ValueError as e:
+                return str(e), seen
+            return None, seen
+
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(bytearray()),
+            f(bytearray()),
+        )
+
+    def test_extend_leaves_iterator_tail_after_bad_byte(self):
+        def f(x):
+            y = x + 1
+            it = iter([1, 300, 2])
+            dst = bytearray()
+            try:
+                dst.extend(it)
+            except ValueError:
+                pass
+            return y, next(it, "done"), dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(x)[1:], f(x)[1:]
+        )
+
+    def test_extend_sees_list_growth_during_index(self):
+        class Grow:
+            def __init__(self, items):
+                self.items = items
+
+            def __index__(self):
+                if len(self.items) < 3:
+                    self.items.append(7)
+                return 1
+
+        def f(x):
+            y = x + 1
+            items = []
+            items.append(Grow(items))
+            dst = bytearray()
+            dst.extend(items)
+            return y, dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(x)[1], f(x)[1]
+        )
+
+    def test_extend_bytes_subclass_reads_the_buffer(self):
+        # CPython reads the buffer before it looks at __iter__.
+        class Raw(bytes):
+            def __iter__(self):
+                return iter((9,))
+
+        class RawArray(bytearray):
+            def __iter__(self):
+                return iter((9,))
+
+            def __len__(self):
+                return 1
+
+        def f(x, value):
+            y = x + 1
+            dst = bytearray(b"q")
+            dst.extend(value)
+            return y, dst
+
+        x = torch.ones(1)
+        for value in (Raw(b"ab"), RawArray(b"ab")):
+            self.assertEqual(
+                torch.compile(f, backend="eager")(x, value)[1], f(x, value)[1]
+            )
+
+    def test_extend_asks_for_a_length_hint_first(self):
+        class Items:
+            def __iter__(self):
+                return iter((1,))
+
+            def __length_hint__(self):
+                raise ValueError("hint failed")
+
+        def f(x, items):
+            y = x + 1
+            dst = bytearray()
+            try:
+                dst.extend(items)
+            except ValueError as e:
+                return y, str(e)
+            return y, dst
+
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(f, backend="eager", fullgraph=True)(x, Items())[1],
+            f(x, Items())[1],
+        )
+
+    def test_append_extend_arg_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(ba, x):
+            ba.append(ord("c"))
+            ba.extend(b"de")
+            return len(ba), x + 1
+
+        b = bytearray(b"ab")
+        out_len, out_y = f(b, torch.ones(1))
+        self.assertEqual(out_len, 5)
+        self.assertEqual(b, bytearray(b"abcde"))
+        self.assertEqual(out_y, torch.ones(1) + 1)
+
+    def test_append_graph_break(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(ba, x):
+            x = x + 1
+            ba.append(1)
+            x = x * 2
+            torch._dynamo.graph_break()
+            x = x + 3
+            ba.extend(ba)
+            return x - 1
+
+        b = bytearray(b"a")
+        self.assertEqual(f(b, torch.ones(1)), torch.full((1,), 6.0))
+        self.assertEqual(b, bytearray(b"a\x01a\x01"))
+        # One frame on each side of the explicit graph break: append and extend
+        # are traced, and their mutations are replayed on the input. Each
+        # mutation has a tensor op on both sides, so a graph break at either
+        # one would split its frame and add a third.
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
+
+    @make_dynamo_test
     def test_insert(self):
         b = self.type2test(b"msssspp")
         b.insert(1, ord("i"))
