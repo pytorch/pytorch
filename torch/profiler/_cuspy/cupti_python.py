@@ -38,7 +38,7 @@ except ModuleNotFoundError as exc:
 
 # Generated from the CUPTI ABI header (tools/gen_cupti_stubs.py): the
 # CUpti_ActivityAttribute selectors, so their (ABI-renumbered) ints are never hardcoded.
-from torch.profiler._cuspy._cupti_stubs import ActivityAttr
+from torch.profiler._cuspy._cupti_stubs import ActivityAttr, BUILD_CUPTI_API_VERSION
 
 
 if TYPE_CHECKING:
@@ -318,6 +318,23 @@ class _PyLibCupti:
 
     def __init__(self, lib: ctypes.CDLL) -> None:
         self._lib = lib
+        version = self.get_version()
+        if version // 10000 != BUILD_CUPTI_API_VERSION // 10000:
+            raise RuntimeError(
+                f"Cuspy requires CUPTI major version {BUILD_CUPTI_API_VERSION // 10000} "
+                f"(stubs API version {BUILD_CUPTI_API_VERSION}), but loaded "
+                f"{LIBCUPTI_SONAME} reports API version {version}."
+            )
+        if version < BUILD_CUPTI_API_VERSION:
+            logger.warning(
+                "Cuspy loaded %s with CUPTI API version %d, but its stubs were generated "
+                "with CUPTI API version %d. Profiling may fail because the runtime "
+                "does not support all generated fields or attributes. "
+                "Install a matching or newer CUPTI runtime within the same major version.",
+                LIBCUPTI_SONAME,
+                version,
+                BUILD_CUPTI_API_VERSION,
+            )
 
     def _result_string(self, rc: int) -> str:
         result = ctypes.c_char_p()

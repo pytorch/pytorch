@@ -1902,13 +1902,20 @@ bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
 }
 
 std::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
+  auto cache_it = wildcardTypeCache_.find(type);
+  if (cache_it != wildcardTypeCache_.end()) {
+    return cache_it->second;
+  }
+
   auto maybe_mut_types = mapTypeToAliasTypeSetPtr(type);
   if (!maybe_mut_types) {
+    wildcardTypeCache_.emplace(type, std::nullopt);
     return std::nullopt;
   }
   auto mut_type = toSingleType(*maybe_mut_types);
   auto existing_wildcard = wildcardIndex_.find(*mut_type);
   if (existing_wildcard != wildcardIndex_.end()) {
+    wildcardTypeCache_.emplace(type, existing_wildcard->second);
     return existing_wildcard->second;
   }
 
@@ -1919,6 +1926,7 @@ std::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
   } else {
     addContainedTypesToFreshElement(wildcard_elem, *maybe_mut_types);
   }
+  wildcardTypeCache_.emplace(type, wildcard_elem);
   return wildcard_elem;
 }
 

@@ -26,7 +26,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, MLP
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, MLP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.utils._pytree import tree_all_only
@@ -35,7 +35,7 @@ from torch.utils._pytree import tree_all_only
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
-class TestFullyShardWithDistributedStateDict(FSDPTest):
+class TestFullyShardWithDistributedStateDict(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.accelerator.device_count())

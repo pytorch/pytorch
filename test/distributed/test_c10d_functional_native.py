@@ -999,8 +999,9 @@ class CompileTestCPU(TestCase):
             for op in include_ops:
                 self.assertIn(op, code)
 
-        # Test aoti
-        AOTIRunnerUtil.run(func, (arg,))
+        # AOTI uses the same configuration for both wrapper variants.
+        if not cpp_wrapper:
+            AOTIRunnerUtil.run(func, (arg,))
         torch.cpu.synchronize()
 
     def test_inductor_all_reduce_cpu(self):
@@ -1026,6 +1027,21 @@ class CompileTestCPU(TestCase):
             ),
         ):
             torch.compile(func)(args)
+
+    @fresh_cache()
+    def test_inductor_rooted_collectives_cpu(self):
+        def func(arg: torch.Tensor) -> list[torch.Tensor]:
+            return [
+                funcol.wait_tensor(funcol.reduce(arg + 1, 1, "sum", "0")),
+                funcol.wait_tensor(funcol.gather(arg + 2, 1, "0")),
+                funcol.wait_tensor(funcol.scatter(arg + 3, 1, "0")),
+            ]
+
+        arg = torch.rand(4, 4)
+        out, (code,) = run_and_get_code(torch.compile(func), arg)
+        for op in ("reduce", "gather", "scatter"):
+            self.assertIn(f"torch.ops._c10d_functional.{op}.default", code)
+        self.assertEqual([o.shape for o in out], [(4, 4), (8, 4), (2, 4)])
 
 
 class CompileTest(TestCase):

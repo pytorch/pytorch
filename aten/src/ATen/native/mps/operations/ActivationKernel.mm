@@ -87,7 +87,44 @@ static void elu_backward_kernel(TensorIteratorBase& iter,
   });
 }
 
+static void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta, const Scalar& threshold) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "softplus not implemented for ", iter.dtype());
+  SoftplusParams params{beta.to<float>(), threshold.to<float>()};
+  lib.exec_unary_kernel_with_params(iter, "softplus", params, "SoftplusParams");
+}
+
+static void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta, const Scalar& threshold) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "softplus_backward not implemented for ", iter.dtype());
+  SoftplusParams params{beta.to<float>(), threshold.to<float>()};
+  lib.exec_binary_kernel_with_params(iter, "softplus_backward", params, "SoftplusParams");
+}
+
+static void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "hardtanh_backward not implemented for ", iter.dtype());
+  HardtanhParams params{min.to<float>(), max.to<float>()};
+  lib.exec_binary_kernel_with_params(iter, "hardtanh_backward", params, "HardtanhParams");
+}
+
+static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
+  AT_DISPATCH_ALL_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "threshold_mps", [&]() {
+    ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
+    lib.exec_binary_kernel_with_params(
+        iter,
+        "threshold",
+        params,
+        fmt::format("ThresholdParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
+  });
+}
+
+static void prelu_kernel(TensorIterator& iter) {
+  lib.exec_binary_kernel(iter, "prelu");
+}
+
 static void silu_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.common_dtype()) || isComplexType(iter.common_dtype()),
+                              "\"silu_mps\" not implemented for '",
+                              iter.common_dtype(),
+                              "'");
   if (isComplexType(iter.common_dtype())) {
     auto out = iter.output(0);
     auto self = iter.input(0);
@@ -338,8 +375,13 @@ REGISTER_DISPATCH(hardswish_stub, hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
 REGISTER_DISPATCH(elu_stub, elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, elu_backward_kernel);
+REGISTER_DISPATCH(softplus_stub, softplus_kernel);
+REGISTER_DISPATCH(softplus_backward_stub, softplus_backward_kernel);
+REGISTER_DISPATCH(hardtanh_backward_stub, hardtanh_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
+REGISTER_DISPATCH(threshold_stub, threshold_kernel);
+REGISTER_DISPATCH(prelu_stub, prelu_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, silu_backward_kernel);
 REGISTER_DISPATCH(mish_stub, mish_kernel);
