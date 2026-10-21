@@ -553,7 +553,6 @@ class TestDeviceTflopsTritonFallback(TestCase):
         not triton_utils.has_triton_package(),
         "requires Triton",
     )
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     def test_get_device_tflops_triton_fallback_magnitude(self, device):
         # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
         # helpers, which are dimensioned in kHz. Getting that wrong under-reports
