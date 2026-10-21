@@ -4299,8 +4299,9 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
 
-        The python wrapper defines the kernel as code. Wrappers that consume a kernel's
-        ``async_compile.triton(...)`` source themselves get that string form instead.
+        The default form hands the kernel to AsyncCompile as a source string, which is
+        what lets compilation fan out to the worker pool. When
+        ``defines_triton_kernels_as_code()`` the kernel is defined as code instead.
         """
         if not self.defines_triton_kernels_as_code():
             self.define_kernel(
@@ -4373,7 +4374,8 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def defines_triton_kernels_as_code(self) -> bool:
-        return True
+        # Off until module-level kernels compile as fast as string ones; tests patch it.
+        return False
 
     @staticmethod
     def async_compile_triton_body(

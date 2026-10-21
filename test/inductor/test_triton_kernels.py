@@ -33,7 +33,6 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import (
     fresh_cache,
     run_and_get_code,
-    run_and_get_kernels,
     triton_version_uses_attrs_dict,
 )
 from torch._library import capture_triton
@@ -2345,8 +2344,9 @@ def forward(self, x_1, output_1):
 
         n = 8
         eager_out = f(n)
-        compiled_out, kernels = run_and_get_kernels(torch.compile(f, fullgraph=True), n)
-        triton_code = "\n".join(kernels)
+        compiled_out, (triton_code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), n
+        )
 
         # Verify the generated code has proper imports
         self.assertIn("from triton.language.core import dtype as dtype", triton_code)
