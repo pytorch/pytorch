@@ -278,7 +278,10 @@ _RngState = tuple[torch.Tensor, list[torch.Tensor] | None]
 
 
 def _rng_state() -> _RngState:
-    """The CPU generator's state, and every CUDA generator's once CUDA is initialized."""
+    """The CPU generator's state, and every CUDA generator's once CUDA is initialized.
+
+    Other accelerators' generators (MPS, XPU) are neither rewound nor restored.
+    """
     cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None
     return torch.random.get_rng_state(), cuda
 
@@ -446,15 +449,16 @@ def _verify_against_eager(
         if draws is None:
             draws = _eager_draws(fn, reference_args, rng, path)
             if draws:
-                log.warning(
+                skipped = "; ".join(compared[i][0] for i in sorted(draws))
+                warning_once(
+                    log,
                     "%s: %s draws from the generator, and inductor lowers random ops "
                     "to its own philox, which differs from eager at the same seed by "
-                    "design -- so comparing the two says nothing. Skipping the check "
-                    "for the %d tensor(s) of %s that depend on it.",
+                    "design -- so comparing the two says nothing. Not checking the "
+                    "tensors that depend on it: %s.",
                     _CHECK_ENV,
                     name,
-                    len(draws),
-                    path,
+                    skipped,
                 )
         return k in draws
 
@@ -1175,8 +1179,10 @@ class ExportedPythonArtifact:
         live = pick_vec_isa()
         # Only the width is baked into loop strides, but a feature the live ISA lacks
         # may be an intrinsic the kernel emits (an AMX tile op compiles without
-        # -mamx-tile and then faults). Extra live features at the same width are safe.
-        if live.bit_width() != width or not features <= set(str(live).split()):
+        # -mamx-tile and then faults). Extra live features at the same width are safe,
+        # and a scalar capture (width 0) emits no vector code to mismatch.
+        missing = features - set(str(live).split())
+        if width and (live.bit_width() != width or missing):
             raise _precompile_error(
                 "torch.compiler.export_python: the artifact's C++ kernels were "
                 f"generated for CPU vector ISA {name!r} ({width}-bit), but the ISA "
@@ -1259,7 +1265,11 @@ class ExportedPythonArtifact:
         # precompile.load round-trip). A broken hand-edit and an environment or version
         # mismatch (an import that fails under the current torch) surface as distinct,
         # actionable PrecompileErrors rather than one catch-all "delete to regenerate".
-        from torch._precompile import _make_inlined_forward, PrecompileError
+        from torch._precompile import (
+            _make_inlined_forward,
+            _NoForwardError,
+            PrecompileError,
+        )
 
         if not from_disk:
             # Source this call just captured is precompile's own output, so a failure
@@ -1273,26 +1283,11 @@ class ExportedPythonArtifact:
         )
         try:
             return _make_inlined_forward(code, warn=False, filename=self._path)
+        except _NoForwardError as e:
+            msg = f"{e} A hand-edit may have dropped or renamed it."
+            raise PrecompileError(msg) from None
         except PrecompileError:
             raise
-        except SyntaxError as e:
-            if e.filename != self._path:
-                # Raised by code the artifact runs (an import, a nested exec); the
-                # line belongs to that file, so report it like any other failure.
-                raise PrecompileError(
-                    "torch.compiler.export_python: an unexpected error occurred running "
-                    f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it "
-                    "there, or delete it to regenerate."
-                ) from e
-            # Kernels are hoisted to module level, so Python reports a typo in one
-            # against this file at the right line. Say so: telling someone to delete an
-            # artifact they are midway through tuning is the wrong advice.
-            where = f" at line {e.lineno}" if e.lineno else ""
-            raise PrecompileError(
-                f"torch.compiler.export_python: the artifact at {self._path} does not "
-                f"parse{where}: {e.msg}. Fix it there, or delete the file to regenerate "
-                "from the original function."
-            ) from e
         except ImportError as e:
             raise PrecompileError(
                 f"torch.compiler.export_python: the artifact at {self._path} failed "
@@ -1301,6 +1296,17 @@ class ExportedPythonArtifact:
                 "to regenerate against the current torch."
             ) from e
         except Exception as e:
+            # Kernels are hoisted to module level, so Python reports a typo in one
+            # against this file at the right line. Say so: telling someone to delete an
+            # artifact they are midway through tuning is the wrong advice. A SyntaxError
+            # from a file the artifact runs (an import, a nested exec) is not this case.
+            if isinstance(e, SyntaxError) and e.filename == self._path:
+                where = f" at line {e.lineno}" if e.lineno else ""
+                raise PrecompileError(
+                    f"torch.compiler.export_python: the artifact at {self._path} does "
+                    f"not parse{where}: {e.msg}. Fix it there, or delete the file to "
+                    "regenerate from the original function."
+                ) from e
             # A C++ kernel is compiled out of a file in inductor's cache directory, so the
             # compiler names that file; point the reader back at this artifact instead.
             explanation = _explain_kernel_compile_error(code, self._path, e)
@@ -1474,9 +1480,15 @@ class ExportedPythonArtifact:
             return loaded(*args)
         # Copy BEFORE the call: the graph may mutate its inputs in place, and the eager
         # reference has to see what the artifact saw rather than what it left behind.
-        # The args are all of it: capture refuses any tensor fn closes over.
+        # The args are all of it: capture refuses any tensor fn closes over. A non-leaf
+        # tensor refuses deepcopy, so copy its detached data (sharing the storage memo, so
+        # aliasing survives) as a fresh leaf that requires grad.
+        memo: dict[int, Any] = {}
+        for t in pytree.tree_leaves(args):
+            if isinstance(t, torch.Tensor) and not t.is_leaf and id(t) not in memo:
+                memo[id(t)] = copy.deepcopy(t.detach(), memo).requires_grad_()
         try:
-            reference = copy.deepcopy(args)
+            reference = copy.deepcopy(args, memo)
         except Exception:
             warning_once(
                 log,
