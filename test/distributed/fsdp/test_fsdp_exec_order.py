@@ -9,11 +9,7 @@ from torch import distributed as dist
 from torch._utils import _get_device_module
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
@@ -144,10 +140,6 @@ class Model(torch.nn.Module):
 
 class TestFSDPExecOrder(ExecOrderTestBase):
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize(
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
@@ -173,10 +165,6 @@ class TestFSDPExecOrder(ExecOrderTestBase):
             fsdp_model(*inp)
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize(
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
@@ -229,10 +217,6 @@ class TestFSDPExecOrder(ExecOrderTestBase):
         fsdp_model.module.run_backward(loss)
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize(
         "sharding_strategy",
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
