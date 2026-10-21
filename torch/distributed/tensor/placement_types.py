@@ -278,15 +278,12 @@ class Shard(torch._C._distributed.Shard):
                 f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
             )
 
-        # chunk tensor over dimension `dim` into n slices
+        # Matching what _custom_chunk does:- clamp so trailing ranks can be partial or empty.
         dim_size = tensor.size(self.dim)
         split_size = (dim_size + num_chunks - 1) // num_chunks
-        # each split is split_size except (maybe) the last one...
-        last_split = dim_size - split_size * (num_chunks - 1)
-
-        start = split_size * index
-        length = torch.sym_ite(index == num_chunks - 1, last_split, split_size)
-        result = torch.narrow(tensor, self.dim, start, length)
+        start = torch.sym_min(split_size * index, dim_size)
+        end = torch.sym_min(split_size * (index + 1), dim_size)
+        result = torch.narrow(tensor, self.dim, start, end - start)
         if clone:
             result = result.clone()
         elif contiguous:
@@ -635,6 +632,33 @@ class Shard(torch._C._distributed.Shard):
             with_padding=False,
             clone=True,
         )
+
+    def _to_partial_tensor(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        current_logical_shape: Sequence[IntLikeType],
+    ) -> torch.Tensor:
+        """Embed a local shard in a zero-filled tensor pending sum reduction."""
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+        logical_dim_size = current_logical_shape[self.dim]
+        local_shard_size, local_offset = self.local_shard_size_and_offset(
+            logical_dim_size,
+            num_chunks,
+            mesh._sym_get_coordinate(mesh_dim),
+        )
+        torch._check(local_tensor.size(self.dim) == local_shard_size)
+        output_shape: list[IntLikeType] = list(local_tensor.shape)
+        output_shape[self.dim] = logical_dim_size
+        output = local_tensor.new_zeros(output_shape)
+        offset = torch.scalar_tensor(
+            local_offset, dtype=torch.int64, device=local_tensor.device
+        )
+        indices = torch.arange(
+            local_shard_size, dtype=torch.int64, device=local_tensor.device
+        )
+        return output.index_add(self.dim, indices + offset, local_tensor)
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -1014,7 +1038,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
                 f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
             )
 
-        # Essentially _StridedShard express the right-to-left sharding in the
+        # Essentially _StridedShard expresses the right-to-left sharding in the
         # reversed order. Here we perform first_split as the virtual "right" sharding,
         # and then second_split as the virtual "left" sharding, and finally assemble
         # results in the transposed left-first order.
@@ -1766,8 +1790,9 @@ class Partial(torch._C._distributed.Partial):
             * ``"bor"``: Bitwise OR across all ranks (integer tensors only).
             * ``"bxor"``: Bitwise XOR across all ranks (integer tensors only).
 
-    .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
-        and can only be used by the ``DTensor.from_local`` API.
+    .. note:: The ``Partial`` placement can be generated as a result of DTensor
+        operators, by ``DTensor.from_local``, or by redistributing a ``Shard``
+        placement to ``Partial("sum")``.
     """
 
     def _reduce_value(

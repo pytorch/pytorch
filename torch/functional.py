@@ -2040,6 +2040,11 @@ def _unravel_index(indices: Tensor, shape: int | Sequence[int]) -> Tensor:
         lambda: f"'shape' cannot have negative values, but got {tuple(shape)}",
     )
 
+    torch._check_value(
+        all(dim > 0 for dim in shape) or indices.numel() == 0,
+        lambda: f"'shape' cannot have zero dimensions when 'indices' is non-empty, but got {tuple(shape)}",
+    )
+
     coefs = list(
         reversed(
             list(
@@ -2180,6 +2185,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> warnings.filterwarnings("ignore", message=".*torch.lu is deprecated")  # docs: hide
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU

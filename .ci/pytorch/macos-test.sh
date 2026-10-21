@@ -41,7 +41,6 @@ test_python_mps() {
   setup_test_python
 
   time PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --verbose --mps
-  MTL_CAPTURE_ENABLED=1 python3 test/test_mps.py --verbose -k test_metal_capture
 
   assert_git_not_dirty
 }

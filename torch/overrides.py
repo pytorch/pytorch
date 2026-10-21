@@ -256,6 +256,8 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.grouped_mm,
+        torch.nn.functional.scaled_addmm,
+        torch.nn.functional.scaled_addmm_,
         torch.nn.functional.scaled_grouped_mm,
         torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
@@ -385,6 +387,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.to_padded_tensor,
         Tensor._use_count,
         Tensor._philox_normal_,
+        Tensor._philox_randint_,
         Tensor._philox_uniform_,
     }
 
@@ -563,7 +566,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.cos: lambda input, out=None: -1,
         torch.cosine_embedding_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction="mean": -1,
         torch.cosh: lambda input, out=None: -1,
-        torch.cosine_similarity: lambda x1, x2, dim=1, eps=1e-8, keepdim=False: -1,
+        torch.cosine_similarity: lambda x1, x2, dim=1, eps=1e-8: -1,
         torch.count_nonzero: lambda input: -1,
         torch.cross: lambda input, other, dim=None, out=None: -1,
         torch.linalg.cross: lambda input, other, dim=-1, out=None: -1,
@@ -1367,6 +1370,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor.grad_dtype.__get__: lambda self: -1,
+        Tensor._has_grad_dtype_override.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
@@ -1567,6 +1571,103 @@ def get_testing_overrides() -> dict[Callable, Callable]:
 
     ret.update(ret2)
 
+    # Foreach functions are added after the auto-generation loop above to avoid
+    # generating Tensor method entries for functions with matching names.
+    ret.update(
+        {
+            torch.foreach.abs: lambda inputs, /: -1,
+            torch.foreach.abs_: lambda inputs, /: -1,
+            torch.foreach.acos: lambda inputs, /: -1,
+            torch.foreach.acos_: lambda inputs, /: -1,
+            torch.foreach.add: lambda inputs, other, /, *, alpha=1: -1,
+            torch.foreach.add_: lambda inputs, other, /, *, alpha=1: -1,
+            torch.foreach.addcdiv: lambda inputs, tensor1, tensor2, /, *, value=1: -1,
+            torch.foreach.addcdiv_: lambda inputs, tensor1, tensor2, /, *, value=1: -1,
+            torch.foreach.addcmul: lambda inputs, tensor1, tensor2, /, *, value=1: -1,
+            torch.foreach.addcmul_: lambda inputs, tensor1, tensor2, /, *, value=1: -1,
+            torch.foreach.asin: lambda inputs, /: -1,
+            torch.foreach.asin_: lambda inputs, /: -1,
+            torch.foreach.atan: lambda inputs, /: -1,
+            torch.foreach.atan_: lambda inputs, /: -1,
+            torch.foreach.ceil: lambda inputs, /: -1,
+            torch.foreach.ceil_: lambda inputs, /: -1,
+            torch.foreach.clamp_max: lambda inputs, max, /: -1,
+            torch.foreach.clamp_max_: lambda inputs, max, /: -1,
+            torch.foreach.clamp_min: lambda inputs, min, /: -1,
+            torch.foreach.clamp_min_: lambda inputs, min, /: -1,
+            torch.foreach.clone: (lambda inputs, /, *, memory_format=None: -1),
+            torch.foreach.copy_: lambda inputs, src, /, *, non_blocking=False: -1,
+            torch.foreach.cos: lambda inputs, /: -1,
+            torch.foreach.cos_: lambda inputs, /: -1,
+            torch.foreach.cosh: lambda inputs, /: -1,
+            torch.foreach.cosh_: lambda inputs, /: -1,
+            torch.foreach.div: lambda inputs, other, /: -1,
+            torch.foreach.div_: lambda inputs, other, /: -1,
+            torch.foreach.erf: lambda inputs, /: -1,
+            torch.foreach.erf_: lambda inputs, /: -1,
+            torch.foreach.erfc: lambda inputs, /: -1,
+            torch.foreach.erfc_: lambda inputs, /: -1,
+            torch.foreach.exp: lambda inputs, /: -1,
+            torch.foreach.exp_: lambda inputs, /: -1,
+            torch.foreach.expm1: lambda inputs, /: -1,
+            torch.foreach.expm1_: lambda inputs, /: -1,
+            torch.foreach.floor: lambda inputs, /: -1,
+            torch.foreach.floor_: lambda inputs, /: -1,
+            torch.foreach.frac: lambda inputs, /: -1,
+            torch.foreach.frac_: lambda inputs, /: -1,
+            torch.foreach.lerp: lambda inputs, end, weight, /: -1,
+            torch.foreach.lerp_: lambda inputs, end, weight, /: -1,
+            torch.foreach.lgamma: lambda inputs, /: -1,
+            torch.foreach.lgamma_: lambda inputs, /: -1,
+            torch.foreach.log: lambda inputs, /: -1,
+            torch.foreach.log_: lambda inputs, /: -1,
+            torch.foreach.log10: lambda inputs, /: -1,
+            torch.foreach.log10_: lambda inputs, /: -1,
+            torch.foreach.log1p: lambda inputs, /: -1,
+            torch.foreach.log1p_: lambda inputs, /: -1,
+            torch.foreach.log2: lambda inputs, /: -1,
+            torch.foreach.log2_: lambda inputs, /: -1,
+            torch.foreach.max: lambda inputs, /: -1,
+            torch.foreach.maximum: lambda inputs, other, /: -1,
+            torch.foreach.maximum_: lambda inputs, other, /: -1,
+            torch.foreach.minimum: lambda inputs, other, /: -1,
+            torch.foreach.minimum_: lambda inputs, other, /: -1,
+            torch.foreach.mm: lambda inputs, mat2, /: -1,
+            torch.foreach.mul: lambda inputs, other, /: -1,
+            torch.foreach.mul_: lambda inputs, other, /: -1,
+            torch.foreach.neg: lambda inputs, /: -1,
+            torch.foreach.neg_: lambda inputs, /: -1,
+            torch.foreach.norm: lambda inputs, /, *, ord=2, dtype=None: -1,
+            torch.foreach.pow: lambda input, exponent, /: -1,
+            torch.foreach.pow_: lambda inputs, exponent, /: -1,
+            torch.foreach.reciprocal: lambda inputs, /: -1,
+            torch.foreach.reciprocal_: lambda inputs, /: -1,
+            torch.foreach.round: lambda inputs, /: -1,
+            torch.foreach.round_: lambda inputs, /: -1,
+            torch.foreach.rsqrt: lambda inputs, /: -1,
+            torch.foreach.rsqrt_: lambda inputs, /: -1,
+            torch.foreach.sigmoid: lambda inputs, /: -1,
+            torch.foreach.sigmoid_: lambda inputs, /: -1,
+            torch.foreach.sign: lambda inputs, /: -1,
+            torch.foreach.sign_: lambda inputs, /: -1,
+            torch.foreach.sin: lambda inputs, /: -1,
+            torch.foreach.sin_: lambda inputs, /: -1,
+            torch.foreach.sinh: lambda inputs, /: -1,
+            torch.foreach.sinh_: lambda inputs, /: -1,
+            torch.foreach.sqrt: lambda inputs, /: -1,
+            torch.foreach.sqrt_: lambda inputs, /: -1,
+            torch.foreach.sub: lambda inputs, other, /, *, alpha=1: -1,
+            torch.foreach.sub_: lambda inputs, other, /, *, alpha=1: -1,
+            torch.foreach.tan: lambda inputs, /: -1,
+            torch.foreach.tan_: lambda inputs, /: -1,
+            torch.foreach.tanh: lambda inputs, /: -1,
+            torch.foreach.tanh_: lambda inputs, /: -1,
+            torch.foreach.trunc: lambda inputs, /: -1,
+            torch.foreach.trunc_: lambda inputs, /: -1,
+            torch.foreach.zero_: lambda inputs, /: -1,
+        }
+    )
+
     # Distributed functions are added after the auto-generation loop above
     # to avoid generating spurious Tensor method entries (e.g., dist.reduce
     # would otherwise generate __reduce__ on Tensor).
@@ -1575,18 +1676,18 @@ def get_testing_overrides() -> dict[Callable, Callable]:
 
         ret.update(
             {
-                dist.broadcast: lambda tensor, src=None, group=None, async_op=False, group_src=None: -1,
-                dist.all_reduce: lambda tensor, op=None, group=None, async_op=False: -1,
-                dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None: -1,
-                dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False: -1,
-                dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False: -1,
-                dist.all_gather_single: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
-                dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False: -1,
+                dist.broadcast: lambda tensor, src=None, group=None, async_op=False, group_src=None, *, config=None: -1,
+                dist.all_reduce: lambda tensor, op=None, group=None, async_op=False, *, config=None: -1,
+                dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None, *, config=None: -1,
+                dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False, *, config=None: -1,
+                dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False, *, config=None: -1,
+                dist.all_gather_single: lambda output_tensor, input_tensor, group=None, async_op=False, *, config=None: -1,
+                dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False, *, config=None: -1,
                 dist.gather: lambda tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None: -1,
                 dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
-                dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
-                dist.reduce_scatter_single: lambda output, input, op=None, group=None, async_op=False: -1,
-                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,
+                dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False, *, config=None: -1,
+                dist.reduce_scatter_single: lambda output, input, op=None, group=None, async_op=False, *, config=None: -1,
+                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False, *, config=None: -1,
                 dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
                 dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
                 dist.irecv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
@@ -1871,6 +1972,7 @@ def _get_overridable_functions() -> tuple[
         ("torch.Tensor", torch.Tensor, dir(torch.Tensor)),
         ("torch.linalg", torch.linalg, dir(torch.linalg)),
         ("torch.fft", torch.fft, dir(torch.fft)),
+        ("torch.foreach", torch.foreach, torch.foreach.__all__),
         ("torch.special", torch.special, dir(torch.special)),
     ]
     for namespace_str, namespace, ns_funcs in tested_namespaces:
@@ -1882,7 +1984,7 @@ def _get_overridable_functions() -> tuple[
                     continue
                 elif func_name.startswith("_"):
                     ignore = True
-                elif func_name.endswith("_"):
+                elif func_name.endswith("_") and namespace is not torch.foreach:
                     ignore = True
                 elif not func_name[0].islower():
                     ignore = True

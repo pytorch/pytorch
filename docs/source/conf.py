@@ -20,6 +20,9 @@ import re
 import sys
 from os import path
 
+from sphinx.ext.autodoc import FunctionDocumenter
+from sphinx.util.inspect import stringify_signature
+
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
 import torch
@@ -77,8 +80,17 @@ extensions = [
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
+    "dollarmath",
     "html_image",
 ]
+
+# dollarmath's default delimiter matching treats any pair of `$` as an equation,
+# which swallows literal shell variables in prose: the `$XDG_CACHE_HOME` and
+# `$HOME` pair in notes/cuda.md parses as one formula. Requiring the delimiters
+# to sit flush against the content keeps those as text while every real formula
+# still renders.
+myst_dmath_allow_space = False
+myst_dmath_allow_digits = False
 
 # Don't execute notebooks during the docs build. Notebook correctness is
 # verified by the separate docs_test CI job; re-executing them here just
@@ -450,8 +462,6 @@ coverage_ignore_functions = [
     "unique_id",
     # torch.cuda.profiler
     "init",
-    # torch.distributed.checkpoint.default_planner
-    "create_default_local_load_plan",
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
@@ -463,8 +473,10 @@ coverage_ignore_functions = [
     "recv",
     "reduce",
     "reduce_scatter",
-    # deprecated aliases of all_gather_single / reduce_scatter_single
+    # back-compat aliases of all_gather_single / reduce_scatter_single /
+    # gather_single
     "all_gather_into_tensor",
+    "gather_into_tensor",
     "reduce_scatter_tensor",
     "scatter",
     "scatter_object_list",
@@ -544,8 +556,6 @@ coverage_ignore_functions = [
     # torch.distributed.rpc.internal
     "deserialize",
     "serialize",
-    # torch.distributed.tensor.parallel.style
-    "make_sharded_output_tensor",
     # torch.fx.passes.dialect.common.cse_pass
     "get_CSE_banned_ops",
     # torch.fx.passes.graph_manipulation
@@ -639,7 +649,6 @@ coverage_ignore_functions = [
     "rebuild_tensor",
     "rebuild_typed_storage",
     "rebuild_typed_storage_child",
-    "reduce_event",
     "reduce_storage",
     "reduce_tensor",
     "reduce_typed_storage",
@@ -1395,8 +1404,6 @@ coverage_ignore_classes = [
     # torch.distributed.argparse_util
     "check_env",
     "env",
-    # torch.distributed.checkpoint.api
-    "CheckpointException",
     # torch.distributed.checkpoint.default_planner
     "DefaultLoadPlanner",
     "DefaultSavePlanner",
@@ -1408,20 +1415,11 @@ coverage_ignore_classes = [
     "HuggingFaceStorageWriter",
     # torch.distributed.checkpoint.quantized_hf_storage
     "QuantizedHuggingFaceStorageReader",
-    # torch.distributed.checkpoint.metadata
-    "BytesStorageMetadata",
-    "ChunkStorageMetadata",
-    "Metadata",
-    "MetadataIndex",
     # torch.distributed.checkpoint.planner
-    "LoadItemType",
     "LoadPlanner",
     "SavePlanner",
-    "WriteItemType",
     # torch.distributed.checkpoint.state_dict
     "DistributedStateDictOptions",
-    # torch.distributed.checkpoint.storage
-    "WriteResult",
     # torch.distributed.collective_utils
     "SyncPayload",
     # torch.distributed.distributed_c10d
@@ -1450,10 +1448,8 @@ coverage_ignore_classes = [
     "WorkerSpec",
     # torch.distributed.elastic.events.api
     "Event",
-    "RdzvEvent",
     # torch.distributed.elastic.metrics.api
     "ConsoleMetricHandler",
-    "MetricData",
     "MetricHandler",
     "MetricStream",
     "MetricsConfig",
@@ -1462,8 +1458,6 @@ coverage_ignore_classes = [
     "MultiprocessContext",
     "PContext",
     "RunProcsResult",
-    "SignalException",
-    "Std",
     "SubprocessContext",
     "SubprocessHandler",
     # torch.distributed.elastic.multiprocessing.tail_log
@@ -1502,16 +1496,8 @@ coverage_ignore_classes = [
     "CyclingIterator",
     # torch.distributed.elastic.utils.data.elastic_distributed_sampler
     "ElasticDistributedSampler",
-    # torch.distributed.fsdp.api
-    "StateDictType",
     # torch.distributed.fsdp.fully_sharded_data_parallel
     "FullyShardedDataParallel",
-    "OptimStateKeyType",
-    # torch.distributed.fsdp.sharded_grad_scaler
-    "ShardedGradScaler",
-    # torch.distributed.fsdp.wrap
-    "CustomPolicy",
-    "ModuleWrapPolicy",
     # torch.distributed.launcher.api
     "LaunchConfig",
     "elastic_launch",
@@ -1534,8 +1520,6 @@ coverage_ignore_classes = [
     "RRefProxy",
     # torch.distributed.tensor.parallel.fsdp
     "DTensorExtensions",
-    # torch.distributed.tensor.parallel.style
-    "ParallelStyle",
     # torch.distributions.logistic_normal
     "LogisticNormal",
     # torch.distributions.one_hot_categorical
@@ -2170,7 +2154,8 @@ language = "en"
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = []
+# Stale autosummary stubs from before torchrun moved to generated/.
+exclude_patterns = ["distributed/elastic/generated"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"
@@ -2241,6 +2226,7 @@ autodoc_default_options = {
 
 html_css_files = [
     "css/jit.css",
+    "css/foreach.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
@@ -2343,7 +2329,7 @@ def coverage_post_process(app, exception):
     if "torch" not in modules:
         missing.add("torch")
 
-    for _, modname, ispkg in pkgutil.walk_packages(
+    for _, modname, _ in pkgutil.walk_packages(
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
@@ -2403,6 +2389,10 @@ def process_docstring(app, what_, name, obj, options, lines):
         # Remove all xdoctest directives
         re.compile(r"\s*>>>\s*#\s*x?doctest:\s*.*"),
         re.compile(r"\s*>>>\s*#\s*x?doc:\s*.*"),
+        # Remove lines marked `# docs: hide`. These run under the doctest
+        # runner but are hidden from rendered docs (e.g. a filterwarnings call
+        # that silences a warning an intentionally-deprecated example emits).
+        re.compile(r"\s*>>>.*#\s*docs:\s*hide\s*$"),
     ]
     filtered_lines = [
         line for line in lines if not any(pat.match(line) for pat in remove_directives)
@@ -2415,7 +2405,73 @@ def process_docstring(app, what_, name, obj, options, lines):
         lines.append("")
 
 
+def _foreach_annotation_name(annotation):
+    parsed_aliases = {
+        "_TensorList": "TensorList",
+        "_ScalarList[_ScalarT]": "ScalarList",
+        "_Scalar": "Scalar",
+        "Tensor": "Tensor",
+    }
+    if isinstance(annotation, str):
+        return parsed_aliases.get(annotation, annotation)
+    aliases = (
+        (torch.foreach._TensorList, "TensorList"),
+        (torch.foreach._ScalarList, "ScalarList"),
+        (torch.foreach._Scalar, "Scalar"),
+        (torch.Tensor, "Tensor"),
+    )
+    return next((name for alias, name in aliases if annotation == alias), annotation)
+
+
+class ForeachFunctionDocumenter(FunctionDocumenter):
+    def format_signature(self, **kwargs):
+        if not self.fullname.startswith("torch.foreach."):
+            return super().format_signature(**kwargs)
+
+        overloads = (
+            self.analyzer.overloads.get(".".join(self.objpath), ())
+            if self.analyzer is not None
+            else ()
+        )
+        actual = inspect.signature(self.object)
+        if overloads:
+            signatures = [
+                self.merge_default_value(actual, overload) for overload in overloads
+            ]
+        else:
+            signatures = [inspect.signature(self.object.__wrapped__, eval_str=True)]
+
+        formatted_signatures = []
+        for signature in signatures:
+            parameters = [
+                parameter.replace(
+                    annotation=_foreach_annotation_name(parameter.annotation)
+                )
+                for parameter in signature.parameters.values()
+            ]
+            returns_input_container = signature.return_annotation in (
+                "_TensorList",
+                torch.foreach._TensorList,
+            )
+            return_annotation = "tuple[Tensor, ...]"
+            if returns_input_container:
+                return_annotation += " | list[Tensor]"
+            signature = signature.replace(
+                parameters=parameters, return_annotation=return_annotation
+            )
+            if self.config.autodoc_typehints_format == "short":
+                kwargs.setdefault("unqualified_typehints", True)
+            formatted_signatures.append(stringify_signature(signature, **kwargs))
+        return "\n".join(formatted_signatures)
+
+    def add_directive_header(self, sig):
+        super().add_directive_header(sig)
+        if self.fullname.startswith("torch.foreach."):
+            self.add_line("   :single-line-parameter-list:", self.get_sourcename())
+
+
 def setup(app):
+    app.add_autodocumenter(ForeachFunctionDocumenter, override=True)
     app.connect("build-finished", coverage_post_process)
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)

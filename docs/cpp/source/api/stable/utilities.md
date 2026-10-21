@@ -115,6 +115,52 @@ STD_CUDA_KERNEL_LAUNCH_CHECK();
 
 Minimum compatible version: PyTorch 2.10.
 ```
+
+## Warning Macros
+
+These macros are the stable ABI counterparts of `TORCH_WARN` and
+`TORCH_WARN_ONCE`.
+
+They differ from `TORCH_WARN` and `TORCH_WARN_ONCE` in two ways:
+
+- Arguments are streamed through `std::ostringstream` rather than `c10::str`,
+  so `std::optional`, scoped enums without an `operator<<`, and wide strings
+  compile with `TORCH_WARN` but not with `STABLE_TORCH_WARN`.
+- The warning is always a `UserWarning`. There is not yet a stable ABI
+  equivalent of `TORCH_WARN_DEPRECATION`.
+
+### STABLE_TORCH_WARN
+
+```{c:macro} STABLE_TORCH_WARN(...)
+
+Emits a warning with the given message.
+
+**Example:**
+
+```cpp
+STABLE_TORCH_WARN("my_op got n=", n, ", which may be slow");
+```
+
+Minimum compatible version: PyTorch 2.9.
+Build time minimum version: PyTorch 2.16.
+```
+### STABLE_TORCH_WARN_ONCE
+
+```{c:macro} STABLE_TORCH_WARN_ONCE(...)
+
+Emits a warning the first time the call site is reached, or on every call while
+`torch.set_warn_always(True)` is in effect.
+
+**Example:**
+
+```cpp
+STABLE_TORCH_WARN_ONCE("my_op is deprecated, use my_new_op instead");
+```
+
+Minimum compatible version: PyTorch 2.16.
+Build time minimum version: PyTorch 2.16.
+```
+
 ## Header-Only Utilities
 
 The `torch::headeronly` namespace provides header-only versions of common
@@ -157,6 +203,17 @@ auto dtype = torch::headeronly::ScalarType::Float;
 auto device_type = torch::headeronly::DeviceType::CUDA;
 auto memory_format = torch::headeronly::MemoryFormat::Contiguous;
 auto layout = torch::headeronly::Layout::Strided;
+```
+
+### Accumulate Types
+
+`acc_type<T, is_cuda>` and `acc_type_device<T, DeviceType>` give the dtype a
+reduction over `T` should accumulate into, using the same tables as `at::acc_type`:
+
+```cpp
+#include <torch/headeronly/core/AccumulateType.h>
+
+using acc_t = torch::headeronly::acc_type<torch::headeronly::Half, /*is_cuda*/true>;
 ```
 
 ### TensorAccessor

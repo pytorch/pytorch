@@ -9,6 +9,7 @@ set(TORCH_SHIM_TEST_ROOT ${TORCH_ROOT}/test/cpp/shim)
 set(TORCH_SHIM_TEST_SRCS
   ${TORCH_SHIM_TEST_ROOT}/main.cpp
   ${TORCH_SHIM_TEST_ROOT}/test_stable_ivalue.cpp
+  ${TORCH_SHIM_TEST_ROOT}/test_pyobject_conversion.cpp
 )
 
 add_executable(test_shim

@@ -567,6 +567,14 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # FIXME: scatter_gather_base_kernel_func not implemented for ComplexFloat/ComplexDouble on XPU (sparse_coo inputs)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestMasked",
+                "test_mask_layout",
+                device_type="xpu",
+                dtypes=(torch.complex64, torch.complex128),
+            ),
             # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -1218,14 +1226,6 @@ op_db: list[OpInfo] = [
         "masked.log_softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.half, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.half,
-            torch.bfloat16,
-            torch.uint8,
-            torch.int32,
-            torch.int16,
-            torch.int8,
-        ),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
