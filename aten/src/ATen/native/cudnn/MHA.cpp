@@ -1420,7 +1420,9 @@ std::unique_ptr<fe::graph::Graph> build_graph_backward_nestedtensor(
                                    .set_attn_scale(attn_scale)
                                    .set_seq_len_q(SEQ_LEN_Q_)
                                    .set_seq_len_kv(SEQ_LEN_KV_)
-                                   .set_padding_mask(true);
+                                   .set_padding_mask(true)
+                                   .set_max_total_seq_len_q(q.size(0))
+                                   .set_max_total_seq_len_kv(k.size(0));
   if (dropout_probability != 0.0f) {
     auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
                                       .set_uid(SEED)
