@@ -452,10 +452,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     }
   }
 
-  ncclConfig_t config = options_c10d_->config;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name_.c_str();
-#endif
+  ncclConfig_t config = commConfig();
   populateNcclConfigFromHints(config, opts.hints, name_);
   // ReconfigureOptions::timeout must bound initialization even when the
   // process-group config normally uses blocking NCCL calls.

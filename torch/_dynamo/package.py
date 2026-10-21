@@ -330,17 +330,21 @@ class FunctionPicklerBase(pickle.Pickler):
         on this alone."""
         if "<locals>" in fn.__qualname__.split("."):
             return False
+        return FunctionPicklerBase._lookup(fn.__module__, fn.__qualname__) is fn
+
+    @staticmethod
+    def _lookup(module_name: object, dotted_name: str) -> object:
+        """What pickle's by-reference lookup of ``module_name.dotted_name``
+        finds among the imported modules, or None."""
         # __module__ need not be a str (a decorator can set anything); an
         # unhashable one must not TypeError out of the reducer.
-        module = (
-            sys.modules.get(fn.__module__) if isinstance(fn.__module__, str) else None
-        )
+        module = sys.modules.get(module_name) if isinstance(module_name, str) else None
         if module is None:
-            return False
+            return None
         resolved: object = module
-        for name in fn.__qualname__.split("."):
+        for name in dotted_name.split("."):
             resolved = getattr(resolved, name, None)
-        return resolved is fn
+        return resolved
 
     @staticmethod
     def _read_raw_annotations(obj: Any, *, evaluate: bool = False) -> dict[str, Any]:
@@ -633,6 +637,22 @@ class _DynamoCodeCacheEntry:
          uninstall(). Set on a frame a precompile capture serves as plain
          Python: its variants inlined its Python callees, which hold no entries
          of their own.
+      12. Whether Dynamo gave up on the frame during capture and skipped it for
+         the rest of the capture, for any of its soft reasons: an
+         ``Unsupported`` or ``UserError`` raised for the whole code object (a
+         graph break it could not resume from, such as one inside a loop, a
+         ``torch._dynamo.skip_frame()`` call, or an entry generator, which it
+         refuses to trace: a callee generator is refused before it gets an
+         entry, or a backend that failed on the graph with an error Dynamo
+         falls back on, such as ``DynamicOutputShapeException``), or a
+         ``SkipFrame``: a backend that declined the graph, or,
+         outside a precompile capture (which allows empty graphs), a frame that
+         traced no ops. A compile error ``suppress_errors=True`` swallows also
+         makes Dynamo skip the frame but is not flagged, so that failure stays a
+         coverage gap. A frame with no variants is skipped at install like a
+         trivial one; for a frame with variants, an installed precompile
+         artifact serves them and runs a call they miss eagerly instead of
+         refusing it.
     """
 
     python_code: SerializedCode
@@ -646,6 +666,7 @@ class _DynamoCodeCacheEntry:
     has_compile_id: bool = False
     bypassed: bool = False
     skip_recursive: bool = False
+    eager_fallback: bool = False
 
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
@@ -1369,6 +1390,13 @@ class CompilePackage:
         self._current_entry.bypassed = False
         for backend_id in _backend_ids_from_code(dynamo_code):
             self._add_backend_id(backend_id)
+
+    def record_eager_fallback(self, code: types.CodeType) -> None:
+        """Note that Dynamo gave up on ``code`` and skips it from now on (see
+        ``_DynamoCodeCacheEntry``)."""
+        entry = self._codes.get(code)
+        if entry is not None:
+            entry.eager_fallback = True
 
     def add_inlined_source(self, sources: list[types.CodeType]) -> None:
         if self._current_entry is None:
