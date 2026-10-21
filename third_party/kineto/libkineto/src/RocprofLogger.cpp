@@ -931,10 +931,15 @@ void RocprofLogger::stopLogging() {
     return;
   logging_ = false;
 
-  // Flush buffers
   auto& globalContext = getGlobalContext();
-  rocprofiler_flush_buffer(globalContext.buffer);
-  rocprofiler_stop_context(globalContext.context);
+  const auto stopStatus = rocprofiler_stop_context(globalContext.context);
+  if (stopStatus != ROCPROFILER_STATUS_SUCCESS) {
+    LOG(WARNING) << "rocprofiler_stop_context failed with status " << stopStatus;
+  }
+  const auto flushStatus = rocprofiler_flush_buffer(globalContext.buffer);
+  if (flushStatus != ROCPROFILER_STATUS_SUCCESS) {
+    LOG(WARNING) << "rocprofiler_flush_buffer failed with status " << flushStatus;
+  }
 }
 
 void RocprofLogger::endTracing() {
