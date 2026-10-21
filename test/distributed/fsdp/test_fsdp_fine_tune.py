@@ -15,11 +15,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
@@ -125,10 +121,6 @@ class TestFSDPFineTune(FineTuneTestBase):
                     param.requires_grad = requires_grad
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_backward_reshard_hooks(self, device):
         """
         Tests that the post-backward reshard happens even for flat parameters
@@ -253,10 +245,6 @@ class TestFSDPFineTune(FineTuneTestBase):
         return TestModule()
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_hooks_multi_traversal(self, device):
         """
         Tests that the hooks do reshard / unshard correctly in the case of same
@@ -314,10 +302,6 @@ class TestFSDPFineTune(FineTuneTestBase):
             losses.clear()
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_parity_with_ddp(self, device):
         """
         Tests parity with DDP when mixing flat parameters that require and do
@@ -371,10 +355,6 @@ class TestFSDPFineTune(FineTuneTestBase):
             losses.clear()
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_parity_with_non_frozen_fsdp(self, device):
         """
         For frozen modules with unused input, reshard could happen without unshard
