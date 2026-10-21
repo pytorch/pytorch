@@ -101,14 +101,16 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     skipIfRocmArch,
-    skipIfXpu,
-    TEST_ACCELERATOR,
+    subtest,
     TemporaryFileName,
+    TEST_ACCELERATOR,
     TEST_CUDA,
     TEST_MULTIACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
+    TEST_XPU,
     TestCase,
+    xfailIf,
 )
 
 
@@ -128,17 +130,10 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 device_module = torch.get_device_module(device_type)
-# Backend under test: NCCL on CUDA, the device default (XCCL) elsewhere.
-BACKEND = (
-    NCCL_BACKEND
-    if device_type == "cuda"
-    else dist.get_default_backend_for_device(device_type)
-)
+if device_type != "cuda":
+    NCCL_BACKEND = dist.get_default_backend_for_device(device_type)
 BACKEND_ENV_PREFIX = ""
-# ProcessGroupNCCL reads DUMP_ON_TIMEOUT/DEBUG_INFO_PIPE_FILE only as TORCH_NCCL_*,
-# XCCL only as TORCH_FR_*.
 FR_ENV_PREFIX = ""
-# Not a plain prefix swap: NCCL spells this CUDA_EVENT_CACHE, XCCL XPU_EVENT_CACHE.
 EVENT_CACHE_ENV = ""
 if device_type == "cuda":
     BACKEND_ENV_PREFIX = "TORCH_NCCL"
@@ -151,16 +146,12 @@ elif device_type == "xpu":
 
 
 def _pg_options():
-    # ProcessGroupNCCL.Options and ProcessGroupXCCL.Options both expose
     # is_high_priority_stream and _timeout. Only the NCCL one has .config.
     pg_cls = c10d.ProcessGroupXCCL if device_type == "xpu" else c10d.ProcessGroupNCCL
     return pg_cls.Options()
 
 
-# Flight-recorder profiling names are prefixed with the backend's short name.
 COLL_PREFIX = "xccl" if device_type == "xpu" else "nccl"
-
-
 _PROFILER_ACTIVITY = {
     "cuda": torch.profiler.ProfilerActivity.CUDA,
     "xpu": torch.profiler.ProfilerActivity.XPU,
@@ -168,12 +159,10 @@ _PROFILER_ACTIVITY = {
 
 
 def _is_ncclx():
-    # NCCLX is an NCCL fork; the check is only meaningful when NCCL is in use.
     return device_type == "cuda" and torch.cuda.nccl.version()[-1] == "x"
 
 
 def _comm_lib_version():
-    # NCCL reports a version tuple, XCCL a dotted string.
     if device_type == "xpu":
         return torch._C._distributed_c10d.get_xccl_version()
     return ".".join(str(v) for v in torch.cuda.nccl.version())
@@ -363,7 +352,7 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
         not TEST_ACCELERATOR, "No accelerator available, skipping test"
     )
     def test_default_store_timeout_nccl(self):
-        self._test_default_store_timeout(BACKEND)
+        self._test_default_store_timeout(NCCL_BACKEND)
 
 
 class ProcessGroupNCCLNoGPUTest(TestCase):
@@ -432,7 +421,7 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(1)
     def test_scalable_init(self):
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "1"
-        self._init_process_group(backend=BACKEND, device_id=self.device)
+        self._init_process_group(backend=NCCL_BACKEND, device_id=self.device)
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
@@ -442,7 +431,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -481,7 +470,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        # self.num_gpus = device_module.device_count()
+        # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -498,7 +487,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, BACKEND)
+        return init_multigpu_helper(self.world_size, NCCL_BACKEND)
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -507,10 +496,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         return False
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 1 accelerator"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @skip_if_lt_x_gpu(1)
+    @xfailIf(TEST_XPU)  # XCCL does not raise DistBackendError: #torch-xpu-ops/5385
     def test_nccl_dist_backend_error(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         self._create_process_group_nccl(store, self.opts())
@@ -523,10 +511,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertIsInstance(cm.exception, RuntimeError)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(msg="constructs ProcessGroupNCCL directly")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # constructs ProcessGroupNCCL directly: #torch-xpu-ops/3378
     def test_abort_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
@@ -567,9 +553,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             thread.join()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize("eager_init", [True, False])
     def test_close_pg(self, eager_init: bool):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
@@ -581,7 +565,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             f"{device_type}:{self.rank % device_module.device_count()}"
         )
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -598,9 +582,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
         # TODO: expand this test to non-blocking mode
@@ -611,7 +593,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # initialize pg for the first time
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -628,7 +610,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # re-initialize pg
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=new_store,
@@ -642,9 +624,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t1)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_cuda_event_cache_mthd_race(self):
         # This unit test is to test the case when the collective is launched in
         # a side thread and the thread dies before the cache has been fully recycled.
@@ -683,7 +663,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR,
-        "NCCL/XCCL test requires 2+ accelerators",
+        "Need 2+ accelerators",
     )
     @parametrize(
         "type",
@@ -759,7 +739,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank:d}")
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -787,7 +767,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ[f"{BACKEND_ENV_PREFIX}_NAN_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -803,10 +783,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
+    @xfailIf(TEST_XPU)  # no XPU c10d::gather_into_tensor_: #torch-xpu-ops/5385
     def test_gather_single(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -969,7 +950,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank:d}")
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -996,7 +977,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank:d}")
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -1030,9 +1011,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_destruct_before_terminate_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
@@ -1048,9 +1027,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         del pg
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not raise DistBackendError: #torch-xpu-ops/5385
     def test_abort_in_destroy_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
@@ -1072,8 +1050,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        device_module.device_count() < 2, "NCCL/XCCL test requires 2+ accelerators"
+        device_module.device_count() < 2, "Need 2+ accelerators"
     )
+    @xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
     def test_abort_in_destroy_multi_pgs(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -1096,8 +1075,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        device_module.device_count() < 2, "NCCL/XCCL test requires 2+ accelerators"
+        device_module.device_count() < 2, "Need 2+ accelerators"
     )
+    @xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
     def test_abort_in_destroy_mixed_empty_pgs(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_nccl(store, self.opts())
@@ -1119,7 +1099,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
-        device_module.device_count() < 2, "NCCL/XCCL test requires 2+ accelerators"
+        device_module.device_count() < 2, "Need 2+ accelerators"
     )
     def test_file_store_check(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -1132,7 +1112,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # e.g., self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -1153,13 +1133,14 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @skip_but_pass_in_sandcastle_if(
         not TEST_ACCELERATOR, "No GPUs available, skipping test"
     )
+    @xfailIf(TEST_XPU)  # no default XCCL PG timeout constant: #torch-xpu-ops/5385
     def test_init_process_group_nccl_timeout(self):
         # nccl is handled 'specially' inside init_process_group and its options class is different from the options
         # used by the other PG's.  There are specific edge cases for nccl that need to be tested.
 
         store = c10d.FileStore(self.file_name, self.world_size)
         base_opts = dict(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -1199,10 +1180,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @parametrize("backend", [None, BACKEND])
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @parametrize("backend", [None, NCCL_BACKEND])
     def test_set_nccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
@@ -1230,10 +1209,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @parametrize("backend", [None, BACKEND])
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @parametrize("backend", [None, NCCL_BACKEND])
+    @xfailIf(TEST_XPU)  # XCCL Work does not support getTimeout: #torch-xpu-ops/5385
     def test_extend_nccl_pg_timeout(self, backend):
         device_module.set_device(self.rank)
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1288,9 +1266,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize("eager_init", [True, False])
     def test_new_group(self, eager_init: bool):
         # Test the optimization of new groups that contain all world
@@ -1300,7 +1276,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             f"{device_type}:{self.rank % device_module.device_count()}"
         )
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1313,10 +1289,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @skip_but_pass_in_sandcastle_if(_is_ncclx(), "NCCL test not for NCCLX")
+    @xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
     def test_comm_split_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -1340,9 +1315,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_comm_eager_init_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -1384,9 +1357,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support splitting: #torch-xpu-ops/5385
     def test_comm_split_group(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -1429,9 +1401,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support splitting: #torch-xpu-ops/5385
     def test_comm_split_initialized_parent_with_lazy_default(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
@@ -1460,10 +1431,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(msg="constructs ProcessGroupNCCL directly")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # constructs ProcessGroupNCCL directly: #torch-xpu-ops/5385
     def test_comm_split_world_pg_created_after_another_nccl_pg(self):
         # Regression test: ProcessGroupNCCL::groupRanks() used to derive the
         # identity rank mapping only when local_id_ == 0. local_id_ is a
@@ -1477,7 +1446,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         device = torch.device(f"{device_type}:{self.rank}")
         # (1) burn local_id_ == 0 on an unrelated nccl pg.
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=c10d.PrefixStore("prior", store),
@@ -1485,7 +1454,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
         # (2) the real default pg -> global_ranks_in_group empty.
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=c10d.PrefixStore("world", store),
@@ -1507,9 +1476,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support splitting: #torch-xpu-ops/5385
     def test_comm_split_group_mixed_backend(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -1518,7 +1486,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
         # create nccl processgroup with opts
         c10d.init_process_group(
-            f"cpu:gloo,{device_type}:{BACKEND}",
+            f"cpu:gloo,{device_type}:{NCCL_BACKEND}",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1565,9 +1533,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support splitting: #torch-xpu-ops/5385
     def test_comm_split_group_out_of_order_ranks(self):
         # Out-of-order ranks are preserved: position in the list determines
         # group rank, so group rank 0 is the highest parent rank.
@@ -1590,9 +1557,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support splitting: #torch-xpu-ops/5385
     def test_comm_split_group_backend_filter(self):
         # Hybrid parent (cpu:gloo + cuda:nccl-legacy); request only cuda:nccl-legacy in the
         # child via the new `backend` arg. The child should only have the cuda
@@ -1600,7 +1566,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
         c10d.init_process_group(
-            f"cpu:gloo,{device_type}:{BACKEND}",
+            f"cpu:gloo,{device_type}:{NCCL_BACKEND}",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1611,7 +1577,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         cuda_backend = pg._get_backend(torch.device(device_type))
 
         subg_ranks = [0, 1]
-        ng = c10d.split_group(pg, [subg_ranks], backend=f"{device_type}:{BACKEND}")
+        ng = c10d.split_group(pg, [subg_ranks], backend=f"{device_type}:{NCCL_BACKEND}")
         if self.rank in subg_ranks:
             self.assertIsNotNone(ng)
             ng_cuda = ng._get_backend(torch.device(device_type))
@@ -1621,7 +1587,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
                 ng._get_backend(torch.device("cpu"))
             self.assertEqual(
                 c10d.distributed_c10d._world.pg_backend_config[ng],
-                f"{device_type}:{BACKEND}",
+                f"{device_type}:{NCCL_BACKEND}",
             )
 
             cuda_tensor = torch.full((1,), self.rank).to(device)
@@ -1648,14 +1614,13 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support splitting: #torch-xpu-ops/5385
     def test_comm_split_group_backend_validation(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
         c10d.init_process_group(
-            f"cpu:gloo,{device_type}:{BACKEND}",
+            f"cpu:gloo,{device_type}:{NCCL_BACKEND}",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1679,9 +1644,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
     def test_non_blocking_init(self):
         # Test creating a pg using nonblocking mode but not eagerly
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
@@ -1703,9 +1667,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
     def test_non_blocking_with_eager_init(self):
         # Test creating a pg eagerly with nonblocking mode when
         # we've passed a specific device_id to init_process_group.
@@ -1729,9 +1692,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 1)
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_non_blocking_p2p(self):
         # Test creating a pg using nonblocking mode but not eagerly
         os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
@@ -1749,9 +1710,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertEqual(send_tensor, recv_tensor)
         dist.destroy_process_group()
 
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize("eager_init", [True, False])
     def test_subgroup_p2p(self, eager_init: bool):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1759,7 +1718,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             f"{device_type}:{self.rank % device_module.device_count()}"
         )
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -1776,9 +1735,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # _get_process_group_uid is NCCL-only: #torch-xpu-ops/5385
     def test_get_uid(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
@@ -1790,9 +1748,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertEqual(_get_process_group_uid(pg_2), 1)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_set_process_group_desc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
@@ -1807,6 +1763,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(2)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_basic(self):
         """Test basic shrink_group functionality."""
         self._perform_shrink_test([1], "Basic shrink test")
@@ -1841,6 +1798,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(2)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_backend_properties(self):
         """Test that backend properties are preserved after shrinking."""
 
@@ -1927,6 +1885,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl_shrink()
     @requires_world_size(3)
     @parametrize("shrink_flags", [NCCL_SHRINK_DEFAULT, NCCL_SHRINK_ABORT])
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_multiple_comms(self, shrink_flags):
         """Test shrink_group across a subgroup and the default group."""
         device, default_pg = self._setup_shrink_test("multiple_comms")
@@ -1968,6 +1927,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(2)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_flags(self):
         """Test shrink_group with different shrink flags."""
         # Test ABORT flags
@@ -1976,9 +1936,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="ProcessGroupXCCL.Options has no comm config"
-    )
+    @xfailIf(TEST_XPU)  # XCCL Options has no comm config: #torch-xpu-ops/5385
     def test_shrink_group_nccl_config(self):
         """Verify that passing NCCL config via pg_options influences the shrunk group's backend options."""
         device, pg = self._setup_shrink_test("config")
@@ -2021,6 +1979,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(2)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_performance(self):
         """Test shrink_group performance and regression detection."""
         import time
@@ -2070,6 +2029,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(4)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_multiple_exclusions(self):
         """Test shrink_group with multiple ranks excluded at once."""
         # Scale exclusions with world size
@@ -2079,6 +2039,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(3)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_multiple_iterations(self):
         """Test multiple shrink operations in sequence."""
         log_test_info(
@@ -2191,7 +2152,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name + f"_{test_suffix}", world_size)
         device = torch.device(f"{device_type}:{self.rank}")
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=world_size,
             rank=self.rank,
             store=store,
@@ -2298,6 +2259,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(3)
+    @xfailIf(TEST_XPU)  # XCCL does not support shrinking: #torch-xpu-ops/5385
     def test_shrink_group_vs_abort_reinit_performance(self):
         """Compare performance of shrink_group vs traditional abort+reinit (simplified for reliability)."""
         log_test_info(self.rank, "=== TEST 1: abort+reinit ===")
@@ -2396,9 +2358,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         log_test_info(self.rank, "Performance test completed")
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_deterministic_mode_no_break(self):
         torch.use_deterministic_algorithms(True)
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2408,9 +2368,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.all_reduce(tensor)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_init_with_idx(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device_idx = self.rank
@@ -2426,9 +2384,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_block_current_stream(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
@@ -2445,9 +2401,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl_version(
         (2, 29, 7), "Need NCCL 2.29.7+ for backend.suspend and backend.memory_stats"
     )
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support suspend/resume: #torch-xpu-ops/5385
     def test_suspend(self):
         """Test that suspend can be called on the NCCL backend."""
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2466,9 +2421,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     @requires_nccl_version(
         (2, 29, 7), "Need NCCL 2.29.7+ for backend.memory_stats / ncclCommMemStats"
     )
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support getMemoryStats: #torch-xpu-ops/5385
     def test_get_memory_stats(self):
         """Test that get_memory_stats returns a dict of memory stats."""
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2489,9 +2443,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         (2, 29, 7),
         "Need NCCL 2.29.7+ for backend.resume, backend.suspend and backend.memory_stats",
     )
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL does not support suspend/resume: #torch-xpu-ops/5385
     def test_resume(self):
         """Test the full suspend/resume cycle with collectives."""
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2532,7 +2485,7 @@ class DistributedDataParallelTest(
     def _get_process_group(self):
         store = self._get_store()
         c10d.init_process_group(
-            BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
         )
         return c10d.distributed_c10d._get_default_group()
 
@@ -2768,7 +2721,7 @@ class DistributedDataParallelTest(
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(msg="constructs ProcessGroupNCCL directly")
+    @xfailIf(TEST_XPU)  # constructs ProcessGroupNCCL directly: #torch-xpu-ops/5385
     def test_nccl_propagate_error_reason(self):
         # Need to use TORCH_NCCL_BLOCKING_WAIT and not ASYNC_ERROR_HANDLING,
         # otherwise process will be taken down and we can't check for errors.
@@ -3061,7 +3014,7 @@ class DistributedDataParallelTest(
         """
         device_module.set_device(self.rank)
         dist.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             init_method=f"file://{self.file_name}",
@@ -3428,7 +3381,7 @@ class DistributedDataParallelTest(
 
         store = c10d.FileStore(recovery_filename, self.world_size)
         c10d.init_process_group(
-            BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
         ddp = DistributedDataParallel(
@@ -3450,7 +3403,7 @@ class DistributedDataParallelTest(
     @skip_if_lt_x_gpu(2)
     def test_pass_default_pg(self):
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
@@ -4006,7 +3959,7 @@ class DistributedDataParallelTest(
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -4204,9 +4157,7 @@ class DistributedDataParallelTest(
         )
 
 
-@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5382
-    msg="XCCL does not implement registerOnCompletionHook"
-)
+@xfailIf(TEST_XPU)  # XCCL lacks registerOnCompletionHook: #torch-xpu-ops/5382
 class WorkHookTest(MultiProcessTestCase):
     @property
     def world_size(self):
@@ -4233,7 +4184,7 @@ class WorkHookTest(MultiProcessTestCase):
     def _get_process_group(self):
         store = self._get_store()
         c10d.init_process_group(
-            BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
         )
         return c10d.distributed_c10d._get_default_group()
 
@@ -4430,9 +4381,7 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertEqual(work, seq)
 
 
-@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-    msg="XCCL has no TORCH_XCCL_PROPAGATE_ERROR / HEARTBEAT_TIMEOUT_SEC / ASYNC_ERROR_HANDLING"
-)
+@xfailIf(TEST_XPU)  # XCCL lacks NCCL error-handling env knobs: #torch-xpu-ops/5385
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -4664,7 +4613,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         # initialize pg for the first time
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             timeout=timedelta(seconds=2),
             world_size=self.world_size,
             rank=self.rank,
@@ -4705,7 +4654,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         new_store = c10d.FileStore(new_file_name, self.world_size)
         # re-initialize pg
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=new_store,
@@ -4744,9 +4693,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
 
-@skipIfXpu(
-    msg="requires NCCL library env vars (NCCL_ALGO/NCCL_DEBUG) and debug-log scraping"
-)
+@xfailIf(TEST_XPU)  # needs NCCL_ALGO/NCCL_DEBUG log scraping: #torch-xpu-ops/5385
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -4787,7 +4734,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device(f"{device_type}:{self.rank}")
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -4841,7 +4788,7 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
         with device_module.device(device):
             # Eager init the nccl comm so that we don't implicitly create one during register_mem_pool
             c10d.init_process_group(
-                backend=BACKEND,
+                backend=NCCL_BACKEND,
                 rank=self.rank,
                 world_size=self.world_size,
                 store=store,
@@ -4942,7 +4889,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -4958,7 +4905,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_coalesced_manager_op_integrity(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -4991,7 +4938,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         "custom_group_name",
         [True, False],
     )
-    @skipIfXpu(msg="intra-node comm is NCCL-only")
+    @xfailIf(TEST_XPU)  # intra-node comm is NCCL-only: #torch-xpu-ops/5385
     def test_intra_node_comm_all_reduce(self, custom_group_name):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
         from torch.testing._internal.common_cuda import SM80OrLater
@@ -5017,7 +4964,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         os.environ["TEST_INTRA_NODE_COMM"] = "1"
         device_module.set_device(self.rank)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -5075,14 +5022,12 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 22), "Need NCCL 2.22+ for configuring estimate comm time"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5383
-        msg="XCCL does not implement collective time estimation"
-    )
+    @xfailIf(TEST_XPU)  # XCCL lacks collective time estimation: #torch-xpu-ops/5383
     def test_time_estimate_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device_module.set_device(self.rank)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -5104,7 +5049,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         # Test init_process_group accepts options
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5131,9 +5076,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="ProcessGroupXCCL.Options has no comm config"
-    )
+    @xfailIf(TEST_XPU)  # XCCL Options has no comm config: #torch-xpu-ops/5385
     def test_pass_nccl_options_config(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()
         pg_opts.config.max_ctas = 4
@@ -5187,9 +5130,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 30), "Need NCCL 2.30+ for testing max_p2p_peers in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="ProcessGroupXCCL.Options has no comm config"
-    )
+    @xfailIf(TEST_XPU)  # XCCL Options has no comm config: #torch-xpu-ops/5385
     def test_pass_nccl_options_config_max_p2p_peers(self):
         nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
         if not hasattr(nccl_cfg, "max_p2p_peers"):
@@ -5208,9 +5149,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="ProcessGroupXCCL.Options has no comm config"
-    )
+    @xfailIf(TEST_XPU)  # XCCL Options has no comm config: #torch-xpu-ops/5385
     def test_pass_nccl_options_config_comm_name(self):
         nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
         if not hasattr(nccl_cfg, "comm_name"):
@@ -5237,9 +5176,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="ProcessGroupXCCL.Options has no comm config"
-    )
+    @xfailIf(TEST_XPU)  # XCCL Options has no comm config: #torch-xpu-ops/5385
     def test_comm_name_defaults_to_group_desc_and_name(self):
         # When the user does not set config.comm_name, ProcessGroupNCCL populates
         # it with "<group_desc>:<group_name>" so the NCCL profiler / Inspector can
@@ -5254,7 +5191,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with tempfile.NamedTemporaryFile() as nccl_debug_file:
             os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
             dist.init_process_group(
-                BACKEND, world_size=self.world_size, rank=self.rank, store=store
+                NCCL_BACKEND, world_size=self.world_size, rank=self.rank, store=store
             )
             pg = c10d.new_group([0, 1], group_desc="test_desc")
             t = torch.tensor([self.rank + 1] * 10).to(f"{device_type}:{self.rank}")
@@ -5274,9 +5211,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 31, 2), "Need NCCL 2.31.2+ for testing host_cft_mode in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="ProcessGroupXCCL.Options has no comm config"
-    )
+    @xfailIf(TEST_XPU)  # XCCL Options has no comm config: #torch-xpu-ops/5385
     def test_pass_nccl_options_config_host_cft_mode(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()
         # The binding is gated on the same NCCL version as the decorator above.
@@ -5320,7 +5255,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nccl_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -5360,7 +5295,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nccl_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -5375,7 +5310,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # even with unwaited tensors
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -5413,7 +5348,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # output tensor of non-functional collective
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             rank=self.rank,
             world_size=self.world_size,
             store=store,
@@ -5456,41 +5391,41 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["DETAIL"])
     def test_nccl_warn_not_in_group_debug_detail(self):
-        self._test_warn_not_in_group(backend=BACKEND)
+        self._test_warn_not_in_group(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["INFO"])
     def test_nccl_warn_not_in_group_debug_info(self):
-        self._test_warn_not_in_group(backend=BACKEND)
+        self._test_warn_not_in_group(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     @with_dist_debug_levels(levels=["OFF"])
     def test_nccl_warn_not_in_group_debug_off(self):
-        self._test_warn_not_in_group(backend=BACKEND)
+        self._test_warn_not_in_group(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_nncl_rank_membership(self):
-        self._test_rank_membership(backend=BACKEND)
+        self._test_rank_membership(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_tensor_dtype_mismatch(self):
-        self._test_tensor_dtype_mismatch(backend=BACKEND)
+        self._test_tensor_dtype_mismatch(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_tensor_dtype_complex(self):
-        self._test_tensor_dtype_complex(backend=BACKEND)
+        self._test_tensor_dtype_complex(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_base_k(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5508,7 +5443,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_reduce_scatter_tensor_coalesced(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5524,13 +5459,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("use_python_export", [False, True])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5384
-        msg="XCCL kernels lack collective metadata annotations"
-    )
     def test_profiler_nccl_annotations_on_gpu_kernels(self, use_python_export):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            backend=BACKEND,
+            backend=NCCL_BACKEND,
             store=store,
             rank=self.rank,
             world_size=self.world_size,
@@ -5625,7 +5557,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
     def test_allgather_base(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5645,7 +5577,7 @@ class NcclProcessGroupWithDispatchedCollectivesTests(
             self.skipTest("FP8 reduction support begins with sm90 capable devices")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -5684,22 +5616,22 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync(self):
-        self._test_new_group_local_sync(backend=BACKEND)
+        self._test_new_group_local_sync(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync_sanity_check(self):
-        self._test_new_group_local_sync_sanity_check(backend=BACKEND)
+        self._test_new_group_local_sync_sanity_check(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync_duplicated_pg(self):
-        self._test_new_group_local_sync_duplicate_pg(backend=BACKEND)
+        self._test_new_group_local_sync_duplicate_pg(backend=NCCL_BACKEND)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
     def test_new_group_ordered(self):
-        self._test_new_group_ordered(backend=BACKEND)
+        self._test_new_group_ordered(backend=NCCL_BACKEND)
 
     def _init_two_pg2_subgroups(self, world_size: int = 4):
         if world_size != 4:
@@ -5708,7 +5640,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             )
         store = c10d.FileStore(self.file_name, world_size)
         c10d.init_process_group(
-            backend=BACKEND, store=store, rank=self.rank, world_size=world_size
+            backend=NCCL_BACKEND, store=store, rank=self.rank, world_size=world_size
         )
         # every rank creates the same sub groups
         # including unused sub groups in the current rank
@@ -6093,7 +6025,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -6154,13 +6086,11 @@ class SparseCollective(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(1)
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="c10d::allreduce_ has no SparseXPU dispatch"
-    )
+    @xfailIf(TEST_XPU)  # no SparseXPU c10d::allreduce_: #torch-xpu-ops/5385
     def test_ddp_set_sparse_metadata(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -6227,7 +6157,7 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
 
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -6322,7 +6252,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def _create_process_group_nccl(self):
         store = dist.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
-            BACKEND, world_size=self.world_size, rank=self.rank, store=store
+            NCCL_BACKEND, world_size=self.world_size, rank=self.rank, store=store
         )
         pg = c10d.distributed_c10d._get_default_group()
         return pg
@@ -6343,7 +6273,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, BACKEND)
+        return init_multigpu_helper(self.world_size, NCCL_BACKEND)
 
     def _trace_basename(self):
         # we pass the base to the env, and the dump util will append rank
@@ -6445,14 +6375,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
         # Set name
         pthread_setname_np(tid, name.encode())
 
+    # timing_enabled=True / include_collectives=True on XPU: XCCL flight recorder does not mark works completed: #torch-xpu-ops/5381
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @parametrize(
+        "timing_enabled", [subtest(True, decorators=[xfailIf(TEST_XPU)]), False]
     )
-    @parametrize("timing_enabled", [True, False])
-    @parametrize("include_collectives", [True, False])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
+    @parametrize(
+        "include_collectives", [subtest(True, decorators=[xfailIf(TEST_XPU)]), False]
     )
     def test_short_json(self, timing_enabled, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -6474,14 +6404,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize("timing_enabled", [True, False])
     @parametrize("include_collectives", [True, False])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
-    )
+    @xfailIf(TEST_XPU)  # XCCL FR does not mark works completed: #torch-xpu-ops/5381
     def test_short_pickle(self, timing_enabled, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -6495,7 +6421,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             f = pg.allreduce(a)
         f.wait()
         device_module.synchronize(device=device)
-        torch.cuda.synchronize(device=device)
         pg._wait_for_pending_works()
         t = pickle.loads(
             torch._C._distributed_c10d._dump_nccl_trace(
@@ -6511,12 +6436,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="XCCL does not implement waitForPendingWorks"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL lacks waitForPendingWorks: #torch-xpu-ops/5385
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -6536,16 +6457,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
         for _ in range(4):
             f = pg.allreduce(a)
         f.wait()
-        torch.cuda.synchronize(device=device)
+        device_module.synchronize(device=device)
         pg._wait_for_pending_works()
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_dump_pipe(self):
         def open_file_with_timeout(file_path, mode, timeout=1.0):
             start_time = time.time()
@@ -6581,12 +6500,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.parent.recv()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL FR does not mark works completed: #torch-xpu-ops/5381
     def test_long(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -6624,9 +6539,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     def test_barrier_profiling(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -6650,12 +6563,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL FR does not mark works completed: #torch-xpu-ops/5381
     def test_trace_while_all_works_retired(self):
         os.environ["TORCH_FR_BUFFER_SIZE"] = "10"
         if self.rank == self.MAIN_PROCESS_RANK:
@@ -6678,14 +6587,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["state"], "completed")
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize("timing_enabled", [True, False])
     @parametrize("only_active", [True, False])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
-    )
+    @xfailIf(TEST_XPU)  # XCCL FR does not mark works completed: #torch-xpu-ops/5381
     def test_trace_while_active(self, timing_enabled, only_active):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
@@ -6751,10 +6656,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             device_module.synchronize(device=device)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize("timing_enabled", [True, False])
+    @xfailIf(TEST_XPU)  # XCCL FR does not mark works completed: #torch-xpu-ops/5381
     def test_trace_while_stuck(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
@@ -6813,9 +6717,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             device_module.synchronize(device=device)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize(
         "op_sizes_per_coalesce",
         [
@@ -6824,9 +6726,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         ],
     )
     @parametrize("timing_enabled", [True, False])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
-    )
+    @xfailIf(TEST_XPU)  # XCCL FR does not mark works completed: #torch-xpu-ops/5381
     def test_batched_send_recv(self, op_sizes_per_coalesce, timing_enabled):
         """
         'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
@@ -6919,10 +6819,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue("duration_ms" not in t["entries"][coalesced_op])
             self.assertEqual(t["entries"][coalesced_op]["timeout_ms"], 600000)
 
+    # timing_enabled=True on XPU: XCCL flight recorder does not mark works completed: #torch-xpu-ops/5381
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @torch._dynamo.config.patch({"enable_p2p_compilation": True})
     @parametrize(
         "op_sizes_per_coalesce",
@@ -6931,9 +6830,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             [(2, 3), (5, 5), (1,)],
         ],
     )
-    @parametrize("timing_enabled", [True, False])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
+    @parametrize(
+        "timing_enabled", [subtest(True, decorators=[xfailIf(TEST_XPU)]), False]
     )
     def test_batched_send_recv_compiled(self, op_sizes_per_coalesce, timing_enabled):
         def _pattern(tensors):
@@ -7368,10 +7266,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
         device_module.synchronize(device=device)
         self.assertEqual(out_e, out_c, atol=1e-3, rtol=1e-3)
 
+    # timing_enabled=True on XPU: XCCL flight recorder does not mark works completed: #torch-xpu-ops/5381
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
     @parametrize(
         "op_sizes",
         [
@@ -7379,9 +7276,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             [(2, 3), (5, 5), (1,)],
         ],
     )
-    @parametrize("timing_enabled", [True, False])
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5381
-        msg="XCCL flight recorder does not mark works completed"
+    @parametrize(
+        "timing_enabled", [subtest(True, decorators=[xfailIf(TEST_XPU)]), False]
     )
     def test_individual_send_recv(self, op_sizes, timing_enabled):
         """
@@ -7443,7 +7339,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @parametrize("timing_enabled", [True, False])
     def test_allgather_uneven(self, timing_enabled):
         if timing_enabled and device_type == "xpu":
-            # https://github.com/intel/torch-xpu-ops/issues/5385
+            # #torch-xpu-ops/5385
             self.skipTest("XCCL does not implement waitForPendingWorks")
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -7500,7 +7396,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         For now, flight recording of coalescing_manager collectives is less detailed than cpp coalesced collectives.
         """
         if timing_enabled and device_type == "xpu":
-            # https://github.com/intel/torch-xpu-ops/issues/5385
+            # #torch-xpu-ops/5385
             self.skipTest("XCCL does not implement waitForPendingWorks")
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -7556,12 +7452,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertTrue("duration_ms" not in t["entries"][0])
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="XCCL does not implement waitForPendingWorks"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL lacks waitForPendingWorks: #torch-xpu-ops/5385
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
         """
@@ -7619,12 +7511,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="XCCL does not implement waitForPendingWorks"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL lacks waitForPendingWorks: #torch-xpu-ops/5385
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_partial_overwrite(self, timing_enabled):
         """
@@ -7675,12 +7563,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="XCCL does not implement waitForPendingWorks"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL lacks waitForPendingWorks: #torch-xpu-ops/5385
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_reset_wraparound(self, timing_enabled):
         """
@@ -7735,12 +7619,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         dist.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL/XCCL test requires 2+ accelerators"
-    )
-    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-        msg="XCCL does not implement waitForPendingWorks"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Need 2+ accelerators")
+    @xfailIf(TEST_XPU)  # XCCL lacks waitForPendingWorks: #torch-xpu-ops/5385
     @parametrize("timing_enabled", [True, False])
     def test_fr_record_multiple_resets(self, timing_enabled):
         """
@@ -7875,7 +7755,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             pg._enable_collectives_timing()
 
         device = self.local_device
-        with torch.cuda.device(device):
+        with torch.accelerator.device_index(device.index):
             a = torch.full((3, 4), float(self.rank), device=device)
 
             pg.allreduce(a).wait()
@@ -7883,7 +7763,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 pg.allreduce(a).wait()
 
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
-            torch.cuda.synchronize(device=device)
+            device_module.synchronize(device=device)
 
 
 instantiate_parametrized_tests(ProcessGroupNCCLGroupTest)
@@ -7929,7 +7809,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 
         pg = self._create_process_group_nccl()
         device = self.local_device
-        with torch.cuda.device(device):
+        with torch.accelerator.device_index(device.index):
             a = torch.full((3, 4), float(self.rank), device=device)
 
             pg.allreduce(a).wait()
@@ -7937,7 +7817,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 pg.allreduce(a).wait()
 
             # rank 0 will get stuck, timeout and then signal a timeout to all ranks.
-            torch.cuda.synchronize(device=device)
+            device_module.synchronize(device=device)
 
             if self.rank == 1:
                 # Force rank 1 to idle so that it will eventually timeout as well after
@@ -7946,9 +7826,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 
 
 @skip_but_pass_in_sandcastle
-@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-    msg="XCCL has no TORCH_XCCL_HEARTBEAT_TIMEOUT_SEC"
-)
+@xfailIf(TEST_XPU)  # XCCL has no TORCH_XCCL_HEARTBEAT_TIMEOUT_SEC: #torch-xpu-ops/5385
 class NcclErrorDumpTest(NCCLTraceTestBase):
     def _wait_process(self, rank, timeout):
         try:
@@ -8007,14 +7885,12 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
 
 
 # tests that needs to be run with a larger world size
-@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
-    msg="ProcessGroupXCCL has no comm_split_count"
-)
+@xfailIf(TEST_XPU)  # ProcessGroupXCCL has no comm_split_count: #torch-xpu-ops/5385
 class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
         c10d.init_process_group(
-            BACKEND,
+            NCCL_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
@@ -8050,7 +7926,7 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
     @property
     def rank_to_GPU(self):
         # return rank to GPU map
-        return init_multigpu_helper(self.world_size, BACKEND)
+        return init_multigpu_helper(self.world_size, NCCL_BACKEND)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_if_lt_x_gpu(8)
