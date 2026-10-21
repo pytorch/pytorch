@@ -660,6 +660,8 @@ class CachingAutotuner(KernelInterface):
             size_hints, fn, self.inductor_meta, heuristic_type
         )
         self.configs = [cached_config] if cached_config else configs
+        # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
+        self.fallback: Callable[[], CachingAutotuner] | None = None
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -889,6 +891,11 @@ class CachingAutotuner(KernelInterface):
                 compile_results.append(self._precompile_config(c))
             except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc_msg = f"{type(e).__name__}: {e}"
+        if len(compile_results) == 0 and self.fallback is not None:
+            # The pinned config was tuned on a GPU it fits; this one may be smaller.
+            log.warning("%s: pinned config failed: %s", self.fn.__name__, exc_msg)
+            self.configs, self.fallback = self.fallback().configs, None
+            return self._precompile_worker()
         if len(compile_results) == 0:
             raise NoTritonConfigsError(f"No valid triton configs. {exc_msg}")
         self.compile_results = compile_results
@@ -1265,6 +1272,7 @@ class CachingAutotuner(KernelInterface):
             **self.__dict__,
             "lock": None,
             "_plugins": [],
+            "fallback": None,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -3763,14 +3771,21 @@ def cached_autotune(
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
         # So that fixed_config does not come back here.
         del meta["pinned_config"]
-        return fixed_config(
-            pinned,
-            filename,
-            triton_meta,
-            meta,
-            caching_autotuner_cls=caching_autotuner_cls,
-            debug_autotuner_cls=debug_autotuner_cls,
-        )
+        cls_kwargs = {
+            "caching_autotuner_cls": caching_autotuner_cls,
+            "debug_autotuner_cls": debug_autotuner_cls,
+        }
+        # Copies, since cached_autotune pops entries from both metas and the fallback
+        # needs them whole.
+        pin = fixed_config(pinned, filename, {**triton_meta}, {**meta}, **cls_kwargs)
+        unpinned = (size_hints, configs, triton_meta, heuristic_type, filename, meta)
+
+        def decorator(fn):
+            kernel = pin(fn)
+            kernel.fallback = lambda: cached_autotune(*unpinned, **cls_kwargs)(fn)
+            return kernel
+
+        return decorator
     if size_hints is not None and heuristic_type in (
         HeuristicType.REDUCTION,
         HeuristicType.PERSISTENT_REDUCTION,
