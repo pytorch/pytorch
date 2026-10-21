@@ -20,7 +20,9 @@ endif()
 # it without seeing any SYCL. ComputeOnXpu is exported via the API macro in the
 # header (dllexport on Windows / default visibility on ELF) - no need for
 # WINDOWS_EXPORT_ALL_SYMBOLS or an exe<->dll symbol cycle.
-add_library(xpupti_compute SHARED XpuptiScopeProfilerCompute.cpp)
+add_library(xpupti_compute SHARED
+  XpuptiScopeProfilerCompute.cpp
+  XpuptiPeerCopyCompute.cpp)
 target_compile_options(xpupti_compute PRIVATE -fsycl)
 target_link_options(xpupti_compute PRIVATE -fsycl)
 
