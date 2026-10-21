@@ -6590,15 +6590,13 @@ else:
         ):
             foo(x, w)
 
-        prefix = "Auto-tuning code written to "
-        messages = [record.getMessage() for record in log.records]
-        (path,) = [m.removeprefix(prefix) for m in messages if m.startswith(prefix)]
-        with open(path) as f:
-            tuning_code = f.read()
+        output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
-        FileCheck().check("PrecomputedGrid").check("(31 + _launcher_s0) // 32").check(
-            "(127 + _launcher_s0) // 128"
-        ).run(tuning_code)
+        FileCheck().check("Compile-time auto-tuning block:").check(
+            "PrecomputedGrid"
+        ).check("(31 + _launcher_s0) // 32").check("(127 + _launcher_s0) // 128").run(
+            output
+        )
 
     # Triton 3.2.0 adds the required flags to the Autotuner object for this test
     # PR: https://github.com/triton-lang/triton/pull/5092
