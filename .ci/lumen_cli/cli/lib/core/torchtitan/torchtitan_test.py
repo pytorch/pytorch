@@ -51,6 +51,7 @@ class TorchtitanTestRunner(BaseRunner):
             ],
         )
         pip_install_packages(packages=["helion"])
+        pip_install_packages(packages=["numpy==2.0.2"])
         with working_directory(self.work_directory):
             pip_install_packages(packages=["-e", "."])
             pip_install_packages(packages=["pytest", "pytest-cov"])
