@@ -38,11 +38,11 @@ if TEST_SCIPY:
     import scipy.signal
 
 
-# oneDNN describes a conv buffer to the primitive by format tag, so every
-# operand of one call must be laid out the way the entry point decided. The
-# shapes are degenerate on purpose: with unit spatial extents or a single
-# channel the contiguous and channels-last layouts address the same memory, so
-# only one operand still discriminates between them. Lives at module scope
+# Every operand of one conv call must be described to oneDNN the way it is
+# actually laid out. The shapes are degenerate on purpose: with unit spatial
+# extents or a single channel the contiguous and channels-last layouts address
+# the same memory, so only one operand still discriminates between them, which
+# is where a layout guessed from a memory format goes wrong. Lives at module scope
 # because parametrize_test consumes it while the class body is executed.
 class ConvLayoutCase(NamedTuple):
     op: str

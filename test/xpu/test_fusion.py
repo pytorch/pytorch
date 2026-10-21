@@ -287,22 +287,28 @@ class TestoneDNNFusion(TestCase):
 
     @parametrize_test("inplace", [False, True])
     @parametrize_test("x_channels_last", [False, True])
-    @parametrize_test("other_channels_last", [False, True])
+    @parametrize_test(
+        "other_layout",
+        ["contiguous", "channels_last", "sliced", "channels_last_sliced"],
+    )
     def test_conv_binary_other_layout(
-        self, device, inplace, x_channels_last, other_channels_last
+        self, device, inplace, x_channels_last, other_layout
     ):
-        # `other` is read (and for the in-place op written) under the layout the
-        # conv picked from src/weight, not under its own strides, so a layout
-        # that disagrees has to be normalized instead of used transposed
+        # `other` is read (and for the in-place op written) in its own layout,
+        # which may differ from the one the conv picked from src/weight and may
+        # not even be dense
         conv = nn.Conv2d(3, 6, 3).to(device)
         x = torch.randn(2, 3, 8, 8, device=device)
         if x_channels_last:
             x = x.to(memory_format=torch.channels_last)
         with torch.no_grad():
             ref = conv(x)
-            other = torch.randn_like(ref)
-            if other_channels_last:
+            sliced = other_layout.endswith("sliced")
+            other = torch.randn_like(ref).repeat(1, 1, 1, 2 if sliced else 1)
+            if other_layout.startswith("channels_last"):
                 other = other.to(memory_format=torch.channels_last)
+            if sliced:
+                other = other[..., ::2]
             expected = ref + other
             args = (
                 conv.weight,
@@ -323,6 +329,57 @@ class TestoneDNNFusion(TestCase):
             else:
                 fused = torch.ops.mkldnn._convolution_pointwise.binary(x, other, *args)
         self.assertEqual(expected, fused)
+
+    @parametrize_test("x_channels_last", [False, True])
+    @parametrize_test("expanded", [False, True])
+    def test_conv_binary_broadcast_other(self, device, x_channels_last, expanded):
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        if x_channels_last:
+            x = x.to(memory_format=torch.channels_last)
+        args = (
+            conv.weight,
+            conv.bias,
+            conv.padding,
+            conv.stride,
+            conv.dilation,
+            conv.groups,
+            "add",
+            None,
+            None,
+            [],
+            None,
+        )
+        with torch.no_grad():
+            ref = conv(x)
+            other = torch.randn(1, 6, 1, 1, device=device)
+            if expanded:
+                other = other.expand_as(ref)
+            fused = torch.ops.mkldnn._convolution_pointwise.binary(x, other, *args)
+        self.assertEqual(ref + other, fused)
+
+    def test_conv_binary_inplace_overlapping_other(self, device):
+        conv = nn.Conv2d(3, 6, 3).to(device)
+        x = torch.randn(2, 3, 8, 8, device=device)
+        args = (
+            conv.weight,
+            conv.bias,
+            conv.padding,
+            conv.stride,
+            conv.dilation,
+            conv.groups,
+            "add",
+            None,
+            None,
+            [],
+            None,
+        )
+        other = torch.zeros(1, 6, 1, 1, device=device).expand(2, 6, 6, 6)
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(RuntimeError, "more than one element"),
+        ):
+            torch.ops.mkldnn._convolution_pointwise_.binary(other, x, *args)
 
 
 instantiate_device_type_tests(
