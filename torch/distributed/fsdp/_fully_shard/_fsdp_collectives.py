@@ -602,17 +602,18 @@ def foreach_all_gather_copy_out(
         for fsdp_param in fsdp_params:
             fsdp_param.alloc_all_gather_outputs()
         if persistent_buffers is not None:
-            buffers = persistent_buffers.tensors
+            buffers = list(persistent_buffers.tensors)
         else:
             # Outputs that the default layout created are their own buffers
             buffers = [t for p in fsdp_params for t in p.all_gather_outputs]
     outer_sizes = iter(all_gather_result.all_gather_input_outer_sizes)
+    # Copies, so that a layout cannot change FSDP's lists behind the checks below
     param_metadata = [
         AllGatherParamMetadata(
             input_numels=numels,
             input_dtypes=dtypes,
             outer_sizes=[next(outer_sizes) for _ in numels],
-            outputs=fsdp_param.all_gather_outputs,
+            outputs=list(fsdp_param.all_gather_outputs),
         )
         for fsdp_param, numels, dtypes in zip(
             fsdp_params,
@@ -638,7 +639,9 @@ def foreach_all_gather_copy_out(
             )
         )
     if first_unshard:
-        return _adopt_layout_outputs(fsdp_params, param_metadata, outputs, world_size)
+        return _adopt_layout_outputs(
+            fsdp_params, param_metadata, outputs, all_gather_result, world_size
+        )
     _check_layout_refill(fsdp_params, outputs)
     return persistent_buffers
 
@@ -987,7 +990,10 @@ def _get_all_gather_input_metadatas(
 ) -> tuple[list[list[torch.dtype]], list[list[int]], torch.dtype]:
     param_all_gather_input_dtypes: list[list[torch.dtype]] = []
     param_all_gather_input_numels: list[list[int]] = []
-    all_gather_dtype = next(chain.from_iterable(param_all_gather_inputs)).dtype
+    first_input = next(chain.from_iterable(param_all_gather_inputs), None)
+    if first_input is None:
+        raise ValueError("cannot all-gather a parameter group without any payloads")
+    all_gather_dtype = first_input.dtype
     for all_gather_inputs in param_all_gather_inputs:
         input_dtypes: list[torch.dtype] = []
         input_numels: list[int] = []

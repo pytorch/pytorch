@@ -25,6 +25,7 @@ from ._all_gather_layout import (
     _PersistentBuffers,
     AllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
+    DefaultAllGatherLayout,
 )
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
@@ -398,12 +399,28 @@ class FSDPParamGroup:
         self._init_reduce_scatter_param_order()
         self._register_state_dict_hooks()
 
+    def _check_all_gather_replaceable(self) -> None:
+        # Pending results and unsharded parameters depend on the current backend's
+        # outputs, and outputs that view a custom layout's buffers keep their owner
+        if self._all_gather_result is not None or self.is_unsharded:
+            raise RuntimeError(
+                "cannot replace the all-gather comm or layout while an all-gather "
+                "is pending or parameters are unsharded"
+            )
+        if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
+            raise RuntimeError(
+                "cannot replace the all-gather comm or layout after parameters "
+                "adopted outputs from the installed layout"
+            )
+
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
         if self._all_gather_layout.comm is not None:
-            raise AssertionError(
+            raise RuntimeError(
                 "cannot call set_symm_mem() while the all-gather layout is bound "
                 "to its comm"
             )
+        if not isinstance(self._all_gather_layout, DefaultAllGatherLayout):
+            self._check_all_gather_replaceable()
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -431,10 +448,12 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         if self._all_gather_layout.comm is not None:
-            raise AssertionError(
+            raise RuntimeError(
                 "cannot call set_allocate_memory_from_process_group() while the "
                 "all-gather layout is bound to its comm"
             )
+        if not isinstance(self._all_gather_layout, DefaultAllGatherLayout):
+            self._check_all_gather_replaceable()
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):
@@ -574,9 +593,11 @@ class FSDPParamGroup:
                         self._all_gather_buffers,
                     )
                 except ValueError:
-                    # A rejected first unshard adopted nothing; drop the completed
-                    # all-gather so that another layout can be installed
+                    # Drop the completed all-gather, so that a layout whose first
+                    # unshard was rejected can be replaced, and free the buffers
+                    # that a rejected refill re-allocated
                     self._all_gather_result = None
+                    self._free_all_gather_buffers()
                     raise
 
         for fsdp_param in self.fsdp_params:
@@ -1186,6 +1207,15 @@ class FSDPParamGroup:
     @property
     def is_unsharded(self) -> bool:
         return self._sharded_state == ShardedState.UNSHARDED
+
+    def _set_all_gather_output_fn(self, fn: Callable) -> None:
+        raise AttributeError(
+            "FSDPParamGroup._all_gather_output_fn was removed; install the copy-out "
+            "function with set_all_gather_layout(DefaultAllGatherLayout(fn))"
+        )
+
+    # 2.15's private hook, so that assigning it fails instead of being ignored
+    _all_gather_output_fn = property(fset=_set_all_gather_output_fn)
 
     @contextlib.contextmanager
     def use_training_state(self, training_state: TrainingState):

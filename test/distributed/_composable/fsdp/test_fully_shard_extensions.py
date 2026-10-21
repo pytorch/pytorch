@@ -1120,6 +1120,12 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             self.assertEqual(model(inp), inp @ weight.T)
         fsdp_param = fully_shard.state(model)._fsdp_param_group.fsdp_params[0]
         self.assertEqual(fsdp_param.all_gather_output_layouts, ())
+        # More shard ranks have nothing to all-gather, which raises, not StopIteration
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (self.world_size,)))
+        self._patch_extension(model, fsdp_pre_all_gather, fsdp_post_all_gather)
+        with self.assertRaisesRegex(ValueError, "without any payloads"):
+            model(inp)
 
 
 class TestAllGatherInputValidation(TestCase):
