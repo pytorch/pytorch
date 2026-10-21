@@ -4633,7 +4633,10 @@ class NcclUserBufferRegistrationTest(MultiProcessTestCase):
             nccl_debug_file_content = f.read()
             # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
             # should show successful registration in debug output
-            if torch.cuda.nccl.version() >= (2, 24, 3):
+            nccl_version = torch.cuda.nccl.version()
+            if nccl_version >= (2, 32):
+                self.assertRegex(nccl_debug_file_content, "NVLS UB registered")
+            elif nccl_version >= (2, 24, 3):
                 self.assertRegex(
                     nccl_debug_file_content, "successfully registered NVLS"
                 )

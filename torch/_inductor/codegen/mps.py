@@ -681,6 +681,10 @@ class MetalKernel(SIMDKernel):
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+            # Past the reduction every thread holds the same value, so only one may accumulate it
+            if self.features.is_reduction() and not self.inside_reduction:
+                reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+                line = f"if ({reduction_dim.name} == 0) {line}"
         else:
             raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
