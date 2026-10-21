@@ -3805,9 +3805,10 @@ def cached_autotune(
 
     A kernel whose name is a key of the ``KERNEL_CONFIGS_NAME`` dict in its module's
     globals, which the python wrapper writes under ``triton.autotune_at_compile_time``
-    (see ``_KernelConfigs`` in codegen/wrapper.py) and a person may edit, is built as a
-    FIXED kernel with that config, and falls back to ``configs`` if it does not compile
-    or load.
+    (see ``_KernelConfigs`` in codegen/wrapper.py), is built as a FIXED kernel with that
+    config. It falls back to ``configs`` only if the config does not fit this GPU (see
+    ``_PINNED_CONFIG_ERRORS``); any other error in an entry, such as a misspelled key, is
+    raised.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     compiled = compiled_kernels_for_load.get()
@@ -5398,7 +5399,11 @@ def config_to_dict(config: Config) -> dict[str, Any]:
 
 def config_from_dict(config: dict[str, Any]) -> Config:
     config = {**config}
-    return Config(config, **_pop_config_kwargs(config))
+    extra_options = config.pop("extra_options", None)
+    triton_config = Config(config, **_pop_config_kwargs(config))
+    if extra_options:
+        triton_config.extra_options = extra_options
+    return triton_config
 
 
 def fixed_config(
