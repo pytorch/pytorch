@@ -2457,6 +2457,7 @@ class PythonWrapperCodegen(CodeGen):
         return bool(self.conditional_lines)
 
     def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
+        """The names ``module`` uses, leaving out what write_omitted_from_scan wrote."""
         self.scanning_for_uses = True
         try:
             text = module.getvalue()
