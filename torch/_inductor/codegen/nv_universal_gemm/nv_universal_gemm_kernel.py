@@ -1684,7 +1684,9 @@ class NVUniversalGemmKernel(Kernel):
                     else:
                         cols = f"{cols} // {reduction.group}"
                     # Keep both matrix dimensions so singleton groups transpose.
-                    reduce_ptr = f"{reduce_ptr}.view(*{a_name}.shape[:-2], {rows}, {cols})"
+                    reduce_ptr = (
+                        f"{reduce_ptr}.view(*{a_name}.shape[:-2], {rows}, {cols})"
+                    )
 
                 def feed_output_ptr(output_name: str | None) -> str:
                     if output_name is None:
