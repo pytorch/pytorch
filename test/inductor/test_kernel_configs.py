@@ -562,6 +562,10 @@ class TestKernelConfigs(TestCase):
                 stack.enter_context(does_not_fit(*target))
             ns = _load_from_file(code)
             self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
+            if cached:
+                # The new winner was saved over the pinned one, so this load does not tune.
+                again = _load_from_file(code)
+                self.assertEqual(again["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
         self.assertEqual(failed[:num_stages], [2, 1][-num_stages:])
         tuned.assert_called_once()
         # It is the unpinned kernel now, which tunes as it did before pinning.
@@ -712,6 +716,19 @@ class TestKernelConfigs(TestCase):
             (launcher,) = ns[name].launchers
             self.assertEqual(launcher.config.extra_options, options, name)
             self.assertNotIn("extra_options", launcher.config.kwargs, name)
+
+    @requires_gpu_and_triton
+    def test_a_row_the_module_cannot_read_back_is_left_out(self):
+        def record(kernel, in_block):
+            if in_block:
+                kernel.launchers[0].config.extra_options = {"opt": HeuristicType.FIXED}
+
+        x = torch.randn(64, 128, device=GPU_TYPE)
+        with _spy_launches(record):
+            result, code = _code_for(_softmax, x)
+        ns = _load_from_file(code)
+        self.assertEqual(ns["KERNEL_CONFIGS"], {})
+        self.assertEqual(ns["call"]([x])[0], result)
 
     @requires_gpu_and_triton
     def test_without_compile_time_autotuning_nothing_is_pinned(self):
