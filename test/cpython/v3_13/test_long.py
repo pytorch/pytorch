@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -1143,6 +1143,7 @@ class LongTest(__TestCase):
         self.assertIs(i - i, 0)
         self.assertIs(0 * i, 0)
 
+    @slowTest
     def test_bit_length(self):
         tiny = 1e-10
         for x in range(-65000, 65000):
