@@ -383,6 +383,11 @@ class InductorMeta(typing.TypedDict, total=False):
     grid_type: str
     kernel_name: str
     mutated_arg_names: typing.Any
+    # The config compile-time autotuning chose (KERNEL_CONFIGS in the python wrapper).
+    # Only the module text under triton.autotune_at_compile_time sets it; the source the
+    # worker pool compiles never has it. cached_autotune removes it and builds a FIXED
+    # kernel with this config instead of tuning again.
+    pinned_config: dict[str, typing.Any] | None
     optimize_mem: bool
 
     # Injected at runtime (CachingAutotuner, reduction heuristics, combo kernels)
