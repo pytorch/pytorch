@@ -3710,7 +3710,11 @@ class PythonWrapperCodegen(CodeGen):
                 # A third-party backend's options, which config_from_dict restores.
                 if extra_options := getattr(launched, "extra_options", None):
                     row["extra_options"] = extra_options
-                self.kernel_configs[name] = row
+                # A row the module could not read back, such as one holding an enum, is
+                # left out, so that its kernel tunes on first launch.
+                with contextlib.suppress(ValueError, SyntaxError, TypeError):
+                    if ast.literal_eval(repr(row)) == row:
+                        self.kernel_configs[name] = row
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
