@@ -239,7 +239,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         )
 
         # Avg (only available for NCCL 2.10+)
-        if _nccl_version_at_least((2, 10, 0)):
+        if device_type != "cuda" or _nccl_version_at_least((2, 10, 0)):
             tensors = [
                 torch.tensor([self.rank + 1.0]).to(
                     torch.device(device_type, local_device_id)
