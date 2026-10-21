@@ -21,6 +21,9 @@ class ShardedTensorTestBase(MultiProcessTestCase):
     def world_size(self):
         return TEST_GPU_NUM
 
+    def backend(self, device) -> str:
+        return dist.get_default_backend_for_device(device)
+
     def init_pg(self, backend="nccl"):
         # Ask the distributed framework rather than matching a fixed list, so a
         # backend registered by an out-of-tree device is accepted the same way
@@ -103,15 +106,13 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # Skip test if backend requires accelerator but not enough devices available
-        acc = torch.accelerator.current_accelerator()
-        if backend != dist.Backend.GLOO:
-            if (
-                acc is None
-                or backend != dist.get_default_backend_for_device(acc)
-                or torch.accelerator.device_count() < self.world_size
-            ):
+        device_type = getattr(self, "device_type", None)
+        # Avoid shadowing the outer backend parameter used by legacy callers.
+        backend_name = self.backend(device_type) if device_type is not None else backend
+        if torch.accelerator.is_available() and backend_name != dist.Backend.GLOO:
+            if torch.accelerator.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
-        self.init_comms(init_rpc=init_rpc, backend=backend)
+        self.init_comms(init_rpc=init_rpc, backend=backend_name)
         func(self, *args, **kwargs)
         self.destroy_comms(destroy_rpc=init_rpc)
 
