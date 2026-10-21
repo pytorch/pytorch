@@ -559,6 +559,21 @@ class TestKernelConfigs(TestCase):
                 _load_from_file(code)
         self.assertEqual(len(calls), 1)
 
+    @requires_cuda_and_triton
+    def test_falling_back_keeps_the_launch_being_recorded(self):
+        # run() records a DebugMode launch before a lazy precompile, which is where a
+        # pinned kernel may fall back; the launch must still be finalized afterwards.
+        x = torch.randn(64, 3000, device="cuda")
+        _, code = _code_for(lambda x: x.sum(-1), x)
+        ns = _load_from_file(code)
+        (kernel,) = _kernels(code)
+        autotuner = ns[kernel]
+        debug_call = object()
+        autotuner._debug_call = debug_call
+        autotuner._fall_back_to_tuning(RuntimeError("does not fit"))
+        self.assertIsNone(autotuner.fallback)
+        self.assertIs(autotuner._debug_call, debug_call)
+
     # Nothing launches, so no GPU is needed.
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_pinned_kernel_keeps_the_backends_autotuner_class(self):
