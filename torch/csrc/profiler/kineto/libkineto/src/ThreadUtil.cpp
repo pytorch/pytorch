@@ -214,22 +214,24 @@ std::string processName([[maybe_unused]] int32_t pid) {
 #ifdef __linux__
   std::ifstream cmdfile(fmt::format("/proc/{}/cmdline", pid));
   std::string command;
-  // cmdline is NUL-separated: the first field is argv[0].
+  // cmdline is NUL-separated: the first field is executable name.
   if (std::getline(cmdfile, command, '\0') && !command.empty()) {
     return basename(command.c_str());
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
   std::cerr << "Failed to read process name for pid " << pid << std::endl;
 #elif defined(_WIN32)
-  HANDLE process = OpenProcess(
-      PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+  constexpr BOOL inherit_handle = FALSE; // FALSE means the handle cannot be inherited by child processes
+  const HANDLE process = OpenProcess(
+      PROCESS_QUERY_LIMITED_INFORMATION, inherit_handle, static_cast<DWORD>(pid));
   if (process != nullptr) {
     char path[MAX_PATH];
     DWORD size = MAX_PATH;
-    const BOOL ok = QueryFullProcessImageNameA(process, 0, path, &size);
+    constexpr DWORD use_win32_path_format = 0; // 0 means use the Win32 path format 1 means PROCESS_NAME_NATIVE
+    const BOOL ok = QueryFullProcessImageNameA(process, use_win32_path_format, path, &size);
     CloseHandle(process);
     if (ok && size > 0) {
-      std::string ret(path, size);
+      const std::string ret(path, size);
       const auto sep = ret.find_last_of("\\/"); // '\' or '/'
       return sep == std::string::npos ? ret : ret.substr(sep + 1);
     }
@@ -249,13 +251,13 @@ static std::pair<int32_t, std::string> parentPidAndCommand(
   std::string line;
   std::getline(statfile, line);
   // "<pid> (<comm>) <state> <ppid> ..."; comm may itself contain parentheses.
-  const auto open = line.find('(');
-  const auto close = line.rfind(')');
-  char state = 0;
+  const auto start_bracket_pos = line.find('(');
+  const auto end_bracket_pos = line.rfind(')');
+  const bool in_brackets = start_bracket_pos != std::string::npos && end_bracket_pos != std::string::npos && start_bracket_pos < end_bracket_pos;
   int32_t parent_pid = 0;
-  if (open != std::string::npos && close != std::string::npos && open < close &&
-      std::istringstream(line.substr(close + 1)) >> state >> parent_pid) {
-    return std::make_pair(parent_pid, line.substr(open + 1, close - open - 1));
+  const bool is_parent_pid_present = std::istringstream(line.substr(end_bracket_pos + 1)) >> std::ignore >> parent_pid; // std::ignore is used to skip <state>
+  if (in_brackets && is_parent_pid_present) {
+    return std::make_pair(parent_pid, line.substr(start_bracket_pos + 1, end_bracket_pos - start_bracket_pos - 1));
   }
   // NOLINTNEXTLINE(performance-avoid-endl)
   std::cerr << "Failed to parse /proc/" << pid << "/stat" << std::endl;
