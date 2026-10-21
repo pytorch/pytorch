@@ -115,9 +115,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", False, swizzled)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        self.assertEqual(scales.shape, scales_ref.shape)
         if swizzled:
             scale_bytes = scales.view(torch.uint8).flatten()
-            self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
+            self.assertEqual(scale_bytes, scales_ref.view(torch.uint8).flatten())
             scales = from_blocked(qdata, scales.flatten(), 32)
         else:
             self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
@@ -142,7 +143,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_m", False, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         scale_bytes = scales.view(torch.uint8).flatten()
-        self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
+        self.assertEqual(scale_bytes, scales_ref.view(torch.uint8).flatten())
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     @parametrize(
@@ -161,7 +162,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_m", False, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(
-            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
+            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8).flatten()
         )
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
@@ -188,8 +189,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata_m.view(torch.uint8), qdata_m_ref.view(torch.uint8))
         scale_k_bytes = scales_k.view(torch.uint8).flatten()
         scale_m_bytes = scales_m.view(torch.uint8).flatten()
-        self.assertEqual(scale_k_bytes, scales_k_ref.view(torch.uint8))
-        self.assertEqual(scale_m_bytes, scales_m_ref.view(torch.uint8))
+        self.assertEqual(scale_k_bytes, scales_k_ref.view(torch.uint8).flatten())
+        self.assertEqual(scale_m_bytes, scales_m_ref.view(torch.uint8).flatten())
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
