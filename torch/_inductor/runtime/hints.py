@@ -10,13 +10,14 @@ import torch
 from torch.utils._triton import has_triton_package
 
 
-# The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
-# NOTE: if these fail asserts submit a PR to increase them
 # The python wrapper global mapping a module-level kernel's name to the config it
 # launches with (written by _KernelConfigs in codegen/wrapper.py, read by
 # cached_autotune).
 KERNEL_CONFIGS_NAME = "KERNEL_CONFIGS"
 
+
+# The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
+# NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
     "X": 8192 if torch.version.hip else 4096,
     "Y": 1024,
