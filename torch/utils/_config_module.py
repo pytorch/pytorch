@@ -202,6 +202,48 @@ def _read_env_variable(name: str) -> bool | str | None:
     return value
 
 
+class _ConfigAttr:
+    """Data descriptor for one config variable on a ConfigModule or SubConfigProxy.
+
+    Reads return the user override, or a default needing no further resolution,
+    directly; everything else, including hidden and env-forced entries, goes through
+    __getattr__.
+    """
+
+    def __init__(self, attr: str, entry: "_ConfigEntry") -> None:
+        # The name on the owner, without any SubConfigProxy prefix
+        self.attr = attr
+        self.entry = entry
+        # entry.default if it needs no further resolution, else _UNSET_SENTINEL
+        self.default = (
+            entry.default
+            if entry.env_value_default is _UNSET_SENTINEL
+            and entry.justknob is None
+            and isinstance(entry.default, _IMMUTABLE_CONFIG_TYPES)
+            else _UNSET_SENTINEL
+        )
+
+    def __get__(
+        self, obj: "ConfigModule | SubConfigProxy | None", objtype: type | None = None
+    ) -> Any:
+        if obj is None:
+            return self
+        entry = self.entry
+        # Checked on each read, since both can change after install
+        if not entry.hide and entry.env_value_force is _UNSET_SENTINEL:
+            value = entry.user_override.get()
+            if value is _UNSET_SENTINEL:
+                value = self.default
+            if value is not _UNSET_SENTINEL:
+                return value
+        return obj.__getattr__(self.attr)
+
+    # Never called, since both owners define __setattr__, but defining it makes this
+    # a data descriptor, which Python looks up before instance attributes.
+    def __set__(self, obj: "ConfigModule | SubConfigProxy", value: Any) -> None:
+        obj.__setattr__(self.attr, value)
+
+
 def install_config_module(module: ModuleType) -> None:
     """
     Converts a module-level config into a `ConfigModule()`.
@@ -266,7 +308,11 @@ def install_config_module(module: ModuleType) -> None:
                         f"subconfig class {value} must be defined in module {module.__name__}"
                     )
                 # a subconfig with `class Blah:` syntax
-                proxy = SubConfigProxy(module, f"{name}.")
+                # Each proxy gets its own class, to hold its config descriptors
+                proxy = type(SubConfigProxy.__name__, (SubConfigProxy,), {})(
+                    module, f"{name}."
+                )
+                proxies[name] = proxy
                 visit(value, proxy, f"{name}.")
                 if dest is module:
                     setattr(dest, key, proxy)
@@ -276,6 +322,7 @@ def install_config_module(module: ModuleType) -> None:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
     config: dict[str, _ConfigEntry] = {}
+    proxies: dict[str, SubConfigProxy] = {}
     namespaces: dict[str, dict[str, Any]] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
@@ -283,6 +330,8 @@ def install_config_module(module: ModuleType) -> None:
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
+    cls: type[ConfigModule] = ConfigModuleInstance
+    implications: dict[str, tuple[tuple[str, Any, Any], ...]] = {}
     if any(entry.implies for entry in config.values()):
 
         class ImplicationConfigModuleInstance(_ImplicationConfigModule):
@@ -295,9 +344,23 @@ def install_config_module(module: ModuleType) -> None:
             name for name in sources if config[name].justknob is not None
         }
         module._implication_hash = repr(sorted(implications.items())).encode()  # type: ignore[attr-defined]
-        module.__class__ = ImplicationConfigModuleInstance
-    else:
-        module.__class__ = ConfigModuleInstance
+        cls = ImplicationConfigModuleInstance
+
+    # Install fast-read descriptors. Entries that need __getattr__ on every read get
+    # none, so reads reach it directly and deprecation warnings point at the caller.
+    # Names that would shadow a class attribute get none either.
+    for name, entry in config.items():
+        prefix, _, attr = name.rpartition(".")
+        owner = type(proxies[prefix]) if prefix else cls
+        if not (
+            entry.deprecated
+            or entry.alias is not None
+            or name in implications
+            or hasattr(owner, attr)
+        ):
+            setattr(owner, attr, _ConfigAttr(attr, entry))
+
+    module.__class__ = cls
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
     module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._hash_cache", default=None
@@ -578,9 +641,8 @@ class ConfigModule(ModuleType):
             # Issue deprecation warning on read (once per config)
             self._warn_if_deprecated(name, config)
 
-            alias_val = self._get_alias_val(config)
-            if alias_val is not _UNSET_SENTINEL:
-                return alias_val
+            if config.alias is not None:
+                return self._get_alias_val(config)
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
