@@ -9,6 +9,7 @@ import keyword
 import math
 import os
 import pickle
+import sys
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -210,6 +211,8 @@ class _ConfigAttr:
     __getattr__.
     """
 
+    __slots__ = ("attr", "entry", "default")
+
     def __init__(self, attr: str, entry: "_ConfigEntry") -> None:
         # The name on the owner, without any SubConfigProxy prefix
         self.attr = attr
@@ -351,6 +354,8 @@ def install_config_module(module: ModuleType) -> None:
     # Names that would shadow a class attribute get none either.
     for name, entry in config.items():
         prefix, _, attr = name.rpartition(".")
+        # Share the interned name rather than keep a copy in each descriptor
+        attr = sys.intern(attr)
         owner = type(proxies[prefix]) if prefix else cls
         if not (
             entry.deprecated
@@ -418,8 +423,22 @@ _GetDictCacheKey = tuple[tuple[str, ...], tuple[str, ...], bool]
 _ResolvedConfigChanges = tuple[list[tuple[ModuleType, str, Any]], set["ConfigModule"]]
 
 
-@dataclass
 class _ConfigEntry:
+    __slots__ = (
+        "default",
+        "value_type",
+        "user_override",
+        "justknob",
+        "env_value_force",
+        "env_value_default",
+        "hide",
+        "alias",
+        "implies",
+        "deprecated",
+        "deprecation_message",
+        "_deprecation_warned",
+    )
+
     # The default value specified in the configuration
     default: Any
     # The type of the configuration value
@@ -428,10 +447,10 @@ class _ConfigEntry:
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: ContextVar[object]
     # The justknob to check for this config
-    justknob: str | None = None
+    justknob: str | None
     # environment variables are read at install time
-    env_value_force: Any = _UNSET_SENTINEL
-    env_value_default: Any = _UNSET_SENTINEL
+    env_value_force: Any
+    env_value_default: Any
     # Used to work around bad assumptions in unittest.mock.patch
     # The code to blame is
     # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
@@ -443,13 +462,13 @@ class _ConfigEntry:
     # mock.patch is unpatching itself, but it calls setattr after the delete
     # call so the final state is correct. It's just very unintuitive.
     # upstream bug - python/cpython#126886
-    hide: bool = False
-    alias: str | None = None
-    implies: dict[Any, dict[str, Any]] | None = None
+    hide: bool
+    alias: str | None
+    implies: dict[Any, dict[str, Any]] | None
     # Deprecation support
-    deprecated: bool = False
-    deprecation_message: str | None = None
-    _deprecation_warned: bool = False
+    deprecated: bool
+    deprecation_message: str | None
+    _deprecation_warned: bool
 
     def __init__(self, config: _Config, name: str) -> None:
         self.default = config.default
@@ -463,6 +482,9 @@ class _ConfigEntry:
         self.deprecated = config.deprecated
         self.deprecation_message = config.deprecation_message
         self._deprecation_warned = False
+        self.hide = False
+        self.env_value_default = _UNSET_SENTINEL
+        self.env_value_force = _UNSET_SENTINEL
 
         self.user_override = ContextVar(name, default=_UNSET_SENTINEL)
         if config.env_name_default is not None:
@@ -522,6 +544,7 @@ def _install_implications(
         entry = config[name]
         if isinstance(entry.value_type, str):
             annotations = ModuleType("_config_annotations")
+            # pyrefly: ignore [missing-attribute]
             annotations.__annotations__ = {"value": entry.value_type}
             prefix = name[: name.rfind(".") + 1]
             entry.value_type = get_type_hints(
@@ -625,11 +648,7 @@ class ConfigModule(ModuleType):
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                # Avoid a redundant instance-__dict__ write: hide defaults to False on
-                # the class and is only ever set True by __delattr__ (the mock.patch
-                # workaround), so only clear it when it is actually set.
-                if config.hide:
-                    config.hide = False
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
