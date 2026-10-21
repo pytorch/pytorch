@@ -180,9 +180,9 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
                 torch.compile(flex_attention), q, k, v, block_mask=block_mask
             )
 
-        FileCheck().check("@triton.jit").check(
+        FileCheck().check("type='privateuseone'").check("@triton.jit").check(
             "def triton_tem_fused_flex_attention"
-        ).check("device_str='privateuseone'").run(code)
+        ).run(code)
 
     def _register_custom_backend_with_heuristics(self, device):
         path_to_ext_heuristics = str(
