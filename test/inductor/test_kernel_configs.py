@@ -12,6 +12,11 @@ from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.runtime import triton_heuristics
+from torch._inductor.runtime.autotune_cache import (
+    _comment_stripped_hash,
+    AutotuneCacheBundler,
+)
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_heuristics import (
@@ -212,6 +217,32 @@ class TestKernelConfigs(TestCase):
         self.assertIn("KERNEL_CONFIGS = {", code)
         self.assertIn(HeuristicType.REDUCTION, launched)
         self.assertNotIn(HeuristicType.FIXED, launched)
+
+    @requires_gpu_and_triton
+    @config.patch(fx_graph_cache=False)
+    def test_bundled_autotune_cache_key_ignores_the_winners(self):
+        # AutotuneCacheBundler keys on the wrapper code, which must not change with
+        # which config each kernel's tuning picked.
+        keys = []
+        begin = AutotuneCacheBundler.begin_compile.__func__
+
+        def begin_spy(cls, inductor_meta, *, code=None, code_hash=None):
+            keys.append(_comment_stripped_hash(code))
+            return begin(cls, inductor_meta, code=code, code_hash=code_hash)
+
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        for xblock in (1, 2):
+            to_dict = lambda cfg: {**config_to_dict(cfg), "XBLOCK": xblock}  # noqa: E731
+            with (
+                mock.patch.object(
+                    AutotuneCacheBundler, "begin_compile", classmethod(begin_spy)
+                ),
+                mock.patch.object(triton_heuristics, "config_to_dict", to_dict),
+            ):
+                _, code = _code_for(lambda x: x.sum(-1), x)
+            self.assertIn(f"'XBLOCK': {xblock}", code)
+        self.assertEqual(len(keys), 2)
+        self.assertEqual(keys[0], keys[1])
 
     @requires_gpu_and_triton
     @config.patch(coordinate_descent_tuning=True)
