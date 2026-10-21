@@ -11930,10 +11930,6 @@ _GROUPED_MM_CASES = [
     subtest(((16, 256), (32, 256), [0, 128, 128, 256], False), name="2d_2d_zero_size"),
     subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
     subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
-    # N and the dW output divisible by 256 / 128 / only 64 select ROCm ck_tile's per-size tile configs
-    subtest(((256, 256), (2, 256, 256), [96, 256], True), name="2d_3d_n256"),
-    subtest(((256, 128), (2, 128, 128), [96, 256], True), name="2d_3d_n128"),
-    subtest(((256, 128), (2, 192, 128), [96, 256], True), name="2d_3d_n192"),
     subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
     subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
     subtest(
@@ -11945,6 +11941,22 @@ _GROUPED_MM_CASES = [
     subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
     subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
     subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
+]
+
+# ROCm ck_tile picks the tile config with the lowest load cost, so only shapes with more output tiles than CUs select
+# the large ones. Together with _GROUPED_MM_CASES these select every gfx950 and gfx942 candidate config: 2d_3d cases
+# run forward (b row-major) and dX (b column-major) configs, 2d_2d cases dW configs. Contractions stay small, and the
+# eight-wave configs see 2, 3 and 5 K tiles.
+_GROUPED_MM_CK_TILE_CASES = [
+    subtest(((256, 64), (2, 1024, 64), [128, 256], False), name="ck_tile_2d_3d_n1024"),
+    subtest(((2048, 64), (2, 5120, 64), [1024, 2048], False), name="ck_tile_2d_3d_n5120"),
+    subtest(((768, 64), (2, 8192, 64), [384, 768], False), name="ck_tile_2d_3d_n8192"),
+    subtest(((1536, 64), (2, 2816, 64), [768, 1536], False), name="ck_tile_2d_3d_n2816"),
+    subtest(((1536, 64), (2, 2880, 64), [768, 1536], False), name="ck_tile_2d_3d_n2880"),
+    subtest(((256, 96), (2, 1024, 96), [128, 256], False), name="ck_tile_2d_3d_k96"),
+    subtest(((512, 256), (512, 256), [96, 256], False), name="ck_tile_2d_2d_n512"),
+    subtest(((2048, 256), (4096, 256), [96, 256], False), name="ck_tile_2d_2d_n4096"),
+    subtest(((2048, 256), (2880, 256), [96, 256], False), name="ck_tile_2d_2d_n2880"),
 ]
 
 
@@ -12025,7 +12037,7 @@ class TestGroupedMM(TestCase):
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
-    @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
+    @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES + _GROUPED_MM_CK_TILE_CASES)
     @dtypes(torch.bfloat16, torch.float16)
     def test_grouped_gemm_rocm_backend(self, device, backend, strided, a_row_major, b_row_major, a_shape, b_shape, offsets,
                                        backward, dtype):
