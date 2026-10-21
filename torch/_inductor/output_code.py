@@ -233,7 +233,9 @@ def _skip_cudagraphs_without_capture_runtime(
     cudagraphs: BoxedBool,
     boxed_forward_device_index: BoxedDeviceIndex | None,
 ) -> bool:
-    if is_graph_capture_runtime_ready(compiled_graph.device_types):
+    if is_graph_capture_runtime_ready(
+        compiled_graph.device_types, compiled_graph.device_idxs
+    ):
         return False
 
     BoxedBool.disable(cudagraphs)

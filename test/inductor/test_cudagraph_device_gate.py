@@ -47,6 +47,10 @@ class _RegisteredInterface(DeviceInterface):
     def is_available() -> bool:
         return True
 
+    @staticmethod
+    def is_graph_capture_supported(device=None) -> bool:
+        return False
+
 
 class _CaptureInterface(DeviceInterface):
     @staticmethod
@@ -56,6 +60,21 @@ class _CaptureInterface(DeviceInterface):
     @staticmethod
     def is_graph_capture_supported(device=None) -> bool:
         return True
+
+
+class _IndexedCaptureInterface(DeviceInterface):
+    """Capture is supported only on device index 0. Records the device argument."""
+
+    seen: list[object] = []
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def is_graph_capture_supported(device=None) -> bool:
+        _IndexedCaptureInterface.seen.append(device)
+        return device is not None and getattr(device, "index", None) == 0
 
 
 @contextlib.contextmanager
@@ -175,6 +194,27 @@ class TestGraphCaptureRuntimeReady(TestCase):
         with temporary_device_interface(OOT_DEVICE, _CaptureInterface):
             self.assertTrue(is_graph_capture_runtime_ready({OOT_DEVICE}))
 
+    def test_oot_uses_graph_device_index(self):
+        # Device 0 supports capture and device 1 does not. The check must
+        # receive the graph device, not an omitted argument that falls back
+        # to the process current device. privateuseone is a real device
+        # string, so the argument is a torch.device with that index.
+        device_type = "privateuseone"
+        _IndexedCaptureInterface.seen = []
+        with temporary_device_interface(device_type, _IndexedCaptureInterface):
+            ready_on_one = is_graph_capture_runtime_ready(
+                {device_type}, OrderedSet([1])
+            )
+            ready_on_zero = is_graph_capture_runtime_ready(
+                {device_type}, OrderedSet([0])
+            )
+        self.assertFalse(ready_on_one)
+        self.assertTrue(ready_on_zero)
+        self.assertEqual(len(_IndexedCaptureInterface.seen), 2)
+        first, second = _IndexedCaptureInterface.seen
+        self.assertEqual(first, torch.device(device_type, 1))
+        self.assertEqual(second, torch.device(device_type, 0))
+
     def test_cuda_with_cpu_is_ready(self):
         self.assertTrue(is_graph_capture_runtime_ready({"cuda", "cpu"}))
 
@@ -189,9 +229,9 @@ class TestCudagraphPostCompileRuntimeDispatch(TestCase):
     def test_post_compile_skips_without_capture_bit(self):
         from torch._inductor import compile_fx
 
-        graph = _make_post_compile_graph()
+        graph = _make_post_compile_graph(device_type="privateuseone")
         cudagraphs = BoxedBool(True)
-        with temporary_device_interface(OOT_DEVICE, _RegisteredInterface):
+        with temporary_device_interface("privateuseone", _RegisteredInterface):
             with mock.patch.object(
                 compile_fx,
                 "cudagraphify",
@@ -203,9 +243,11 @@ class TestCudagraphPostCompileRuntimeDispatch(TestCase):
     def test_partition_post_compile_skips_without_capture_bit(self):
         from torch._inductor import compile_fx
 
-        graph = _make_post_compile_graph(with_partition=True)
+        graph = _make_post_compile_graph(
+            device_type="privateuseone", with_partition=True
+        )
         cudagraphs = BoxedBool(True)
-        with temporary_device_interface(OOT_DEVICE, _RegisteredInterface):
+        with temporary_device_interface("privateuseone", _RegisteredInterface):
             with mock.patch.object(
                 compile_fx,
                 "cudagraphify",
@@ -224,13 +266,32 @@ class TestCudagraphPostCompileRuntimeDispatch(TestCase):
             calls.append("oot")
             return model
 
-        graph = _make_post_compile_graph()
+        graph = _make_post_compile_graph(device_type="privateuseone")
         cudagraphs = BoxedBool(True)
-        with temporary_device_interface(OOT_DEVICE, _CaptureInterface):
+        with temporary_device_interface("privateuseone", _CaptureInterface):
             with mock.patch.object(compile_fx, "cudagraphify", oot_cudagraphify):
                 cudagraph_post_compile([], graph, cudagraphs, {}, None)
         self.assertEqual(calls, ["oot"])
         self.assertTrue(cudagraphs.value)
+
+    def test_post_compile_checks_graph_device_index(self):
+        from torch._inductor import compile_fx
+
+        _IndexedCaptureInterface.seen = []
+        graph = _make_post_compile_graph(device_type="privateuseone")
+        graph.device_idxs = OrderedSet([1])
+        cudagraphs = BoxedBool(True)
+        with temporary_device_interface("privateuseone", _IndexedCaptureInterface):
+            with mock.patch.object(
+                compile_fx,
+                "cudagraphify",
+                side_effect=AssertionError("cudagraphify must not run"),
+            ):
+                cudagraph_post_compile([], graph, cudagraphs, {}, None)
+        self.assertFalse(cudagraphs.value)
+        self.assertEqual(
+            _IndexedCaptureInterface.seen, [torch.device("privateuseone", 1)]
+        )
 
 
 class TestCudagraphDeviceGate(TestCase):

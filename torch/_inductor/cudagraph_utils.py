@@ -358,11 +358,16 @@ def get_single_accelerator_device_type(
     return None
 
 
-def is_graph_capture_runtime_ready(device_types: AbstractSet[str]) -> bool:
+def is_graph_capture_runtime_ready(
+    device_types: AbstractSet[str],
+    device_indexes: AbstractSet[int] | None = None,
+) -> bool:
     """Whether post-compile may dispatch to a graph capture runtime.
 
     CUDA is always ready. Other accelerators require
-    ``DeviceInterface.is_graph_capture_supported()`` on the registered backend.
+    ``DeviceInterface.is_graph_capture_supported(device)`` on the registered
+    backend. ``device_indexes`` are the graph's devices, not the process
+    current device. Every index must support capture.
     """
     device_type = get_single_accelerator_device_type(device_types)
     if device_type is None:
@@ -370,9 +375,15 @@ def is_graph_capture_runtime_ready(device_types: AbstractSet[str]) -> bool:
     if device_type == "cuda":
         return True
     try:
-        return get_interface_for_device(device_type).is_graph_capture_supported()
+        interface = get_interface_for_device(device_type)
     except NotImplementedError:
         return False
+    if not device_indexes:
+        return interface.is_graph_capture_supported()
+    for index in device_indexes:
+        if not interface.is_graph_capture_supported(torch.device(device_type, index)):
+            return False
+    return True
 
 
 def _graph_capture_compatible_device_type(device_type: str) -> bool:
