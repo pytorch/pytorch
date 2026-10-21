@@ -542,11 +542,13 @@ def _torchci_report_args(
 
 
 def _torchci_reports_default() -> str | None:
-    # The CI jobs that write reports by default, widening until it's all of CI.
-    # upload-test-artifacts uploads this folder.
-    if IS_CI and os.environ.get("GITHUB_WORKFLOW") in ("trunk", "pull"):
-        return str(REPO_ROOT / "test/torchci-reports")
-    return None
+    # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
+    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
+    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
+    if not in_pytorch_ci or torch.version.xpu:
+        return None
+    return str(REPO_ROOT / "test/torchci-reports")
 
 
 def run_test(
@@ -1027,6 +1029,7 @@ def run_gloo_test(test_module, test_directory, options):
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
             "ProcessGroupGlooFRTest",
+            "DistributedDataParallelTest",
         ),
     )
 
@@ -1041,6 +1044,15 @@ def run_common_test(test_module, test_directory, options):
             "ProcessGroupWithDispatchedCollectivesTests",
             "LocalRankTest",
         ),
+    )
+
+
+def run_nccl_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        ("DistributedDataParallelTest", "CommTest", "NCCLTraceTest", "WorkHookTest"),
     )
 
 
@@ -1545,7 +1557,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_nccl": run_nccl_test,
     "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_common_test,
@@ -1719,7 +1731,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in rolled-out CI jobs: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
