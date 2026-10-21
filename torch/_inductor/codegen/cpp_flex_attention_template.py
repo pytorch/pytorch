@@ -1399,6 +1399,8 @@ class CppFlexAttentionTemplate(CppTemplate):
             else None
         )
         self.other_ptr_data = {}
+        # Use BLAS because oneDNN BRGEMM ukernels are not yet supported on AArch64.
+        self.use_blas_gemm = torch.cpu._is_aarch64()
         # Gate every AMX region on the ISA inductor will compile with.
         self.amx_supported = isinstance(pick_vec_isa(), VecAMX)
 
@@ -1654,7 +1656,6 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
-        use_blas_gemm = torch.cpu._is_aarch64()
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1692,7 +1693,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             mask_buf_idx=self.mask_buf_idx,
             partition_size=self.partition_size,
             amx_supported=self.amx_supported,
-            use_blas_gemm=use_blas_gemm,
+            use_blas_gemm=self.use_blas_gemm,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
@@ -1743,12 +1744,9 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        use_blas_gemm = torch.cpu._is_aarch64()
-        emit_transpose_b_micro_gemm = not use_blas_gemm
-
         micro_gemm_trans: CppMicroGemmFP32Vec | None = None
         code_trans = ""
-        if emit_transpose_b_micro_gemm:
+        if not self.use_blas_gemm:
             micro_gemm_trans = CppMicroGemmFP32Vec(
                 kernel_name + "_kernel_micro_gemm_transpose_b",
                 self.input_dtype,
