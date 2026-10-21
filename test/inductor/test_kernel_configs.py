@@ -4,6 +4,7 @@ import contextlib
 import os
 import re
 import tempfile
+import unittest
 from unittest import mock
 
 import torch
@@ -24,6 +25,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._triton import has_triton_package
 
 
 def _code_for(fn, *args, dynamic=None, **config_kwargs):
@@ -158,7 +160,8 @@ class TestKernelConfigs(TestCase):
 
             return torch.cond(p, outer, lambda t: t.sin() * 2, (x,))
 
-        p, x = torch.tensor(True, device="cuda"), torch.randn(64, 128, device="cuda")
+        p = torch.tensor(True, device="cuda")
+        x = torch.randn(64, 128, device="cuda")
         with _configs_tuned_at_compile_time() as tuned:
             _, code = _code_for(fn, p, x)
         kernels = _kernels(code)
@@ -167,8 +170,8 @@ class TestKernelConfigs(TestCase):
         with _no_runtime_tuning():
             ns = _load_from_file(code)
             for pred in (p, ~p):
-                expected = fn(pred, x)
-                self.assertEqual(ns["call"]([pred, x])[0], expected, atol=1e-4, rtol=1e-4)
+                out = ns["call"]([pred, x])[0]
+                self.assertEqual(out, fn(pred, x), atol=1e-4, rtol=1e-4)
         self.assertEqual(set(ns["KERNEL_CONFIGS"]), kernels)
         for name, cfg in ns["KERNEL_CONFIGS"].items():
             self.assertEqual(cfg, tuned[name], name)
@@ -298,7 +301,8 @@ class TestKernelConfigs(TestCase):
             self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
         tuned.assert_called_once()
 
-    @requires_cuda_and_triton
+    # Nothing launches, so no GPU is needed.
+    @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_pinned_kernel_keeps_the_backends_autotuner_class(self):
         # An out-of-tree backend's heuristics pass their own CachingAutotuner subclass.
         import triton.language as tl
