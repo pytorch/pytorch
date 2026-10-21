@@ -43,6 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     TrainingState,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp.experimental import reduce_scatter_input_fn_with_native_copy
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -488,6 +489,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     [(16, 17), (17, 8)],
                 ],
                 "use_shard_placement_fn": [False],
+                "reduce_scatter_input_fn": [
+                    None,
+                    reduce_scatter_input_fn_with_native_copy,
+                ],
             },
             self._test_train_parity_single_group,
         )
@@ -503,16 +508,28 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 # Sharding on nonzero dim requires even sharding
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
+                # False tests Shard(1)-only weights; True adds Shard(0) biases.
+                "bias": [False, True],
+                "reduce_scatter_input_fn": [
+                    None,
+                    reduce_scatter_input_fn_with_native_copy,
+                ],
             },
             self._test_train_parity_single_group,
         )
 
     def _test_train_parity_single_group(
-        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
+        self,
+        lin_shapes: list[tuple[int, int]],
+        use_shard_placement_fn: bool,
+        bias: bool = True,
+        reduce_scatter_input_fn: Callable | None = None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
-            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+            nn.Linear(*lin_shapes[0], bias=bias),
+            nn.ReLU(),
+            nn.Linear(*lin_shapes[1], bias=bias),
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
@@ -523,17 +540,19 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
         for iter_idx in range(10):
-            losses: list[torch.Tensor] = []
+            outputs: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(*inp).sum())
-                losses[-1].backward()
+                outputs.append(_model(*inp))
+                outputs[-1].sum().backward()
                 _optim.step()
-            self.assertEqual(losses[0], losses[1])
+            self.assertEqual(outputs[0], outputs[1])
+            check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -2794,15 +2813,18 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
     @skip_if_lt_x_gpu(8)
-    def test_shard_placement_fn_tp_ep(self):
+    @parametrize("tp_degree", [1, 2])
+    @parametrize("dp_replicate", [1, 2])
+    def test_shard_placement_fn_tp_ep(self, tp_degree: int, dp_replicate: int):
         # Every new mesh adds NCCL communicators that hold /dev/shm until the
         # processes exit, and the meshes depend only on tp_degree and
-        # dp_replicate, so build them once rather than once per subtest.
+        # dp_replicate, so build them once rather than once per subtest, and
+        # give each configuration its own test (and so its own processes).
         self._parallel_meshes = {}
         self.run_subtests(
             {
-                "tp_degree": [1, 2],
-                "dp_replicate": [1, 2],
+                "tp_degree": [tp_degree],
+                "dp_replicate": [dp_replicate],
                 "reshard_non_layer_modules": [False, True, 2],
             },
             self._test_shard_placement_fn_tp_ep,
@@ -3369,10 +3391,13 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
+        torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            model(torch.ones((2, 8), device=device_type))
+            inp = torch.ones((2, 8), device=device_type)
+            self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
@@ -3618,7 +3643,7 @@ class TestFullyShardCudaGraph(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFullyShardGradientAccumulation)
-
+instantiate_parametrized_tests(TestFullyShardNDTraining)
 
 if __name__ == "__main__":
     run_tests()
