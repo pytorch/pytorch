@@ -2,7 +2,7 @@
 import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any as _Any
 
 import torch._C
 
@@ -274,7 +274,7 @@ class strict_fusion:
     def __enter__(self):
         pass
 
-    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
+    def __exit__(self, type: _Any, value: _Any, tb: _Any) -> None:
         pass
 
 
@@ -308,8 +308,6 @@ def onednn_fusion_enabled():
     """
     return torch._C._jit_llga_enabled()
 
-
-del Any
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
