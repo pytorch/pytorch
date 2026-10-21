@@ -46,7 +46,6 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     expectedFailureCUDA,
     expectedFailureXPU,
-    skipXPU,
     skipCUDAIf,
     skipXPUIf,
     skipCUDAIfNotRocm,
@@ -1318,7 +1317,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(op(input.clone(), *args, beta=2), input * 2)
 
     @onlyOn(["cuda", "xpu"])
-    @skipXPUIf(True, "Missing XPU support for _scaled_addmm")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5775")
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("fake", [False, True])
@@ -3684,7 +3683,6 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
                 out_dtype=output_dtype,
             )
 
-    @skipXPU
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     def test_passed_swizzle_arrays(self, device) -> None:
         # Ensure that incorrectly-sized swizzle arrays are caught
