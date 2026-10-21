@@ -202,34 +202,6 @@ static unsigned acceptOverheadActivities(
   return count;
 }
 
-class TestActivityLogger : public KN::ActivityLogger {
-  void handleDeviceInfo(
-      [[maybe_unused]] const KN::DeviceInfo& info,
-      [[maybe_unused]] int64_t time) override {}
-  void handleResourceInfo(
-      [[maybe_unused]] const KN::ResourceInfo& info,
-      [[maybe_unused]] int64_t time) override {}
-  void handleOverheadInfo(
-      [[maybe_unused]] const KN::ActivityLogger::OverheadInfo& info,
-      [[maybe_unused]] int64_t time) override {}
-  void handleTraceSpan([[maybe_unused]] const KN::TraceSpan& span) override {}
-  void handleActivity(
-      [[maybe_unused]] const KN::ITraceActivity& activity) override {}
-  void handleGenericActivity(
-      [[maybe_unused]] const KN::GenericTraceActivity& activity) override {}
-  void handleTraceStart(
-      [[maybe_unused]] const std::unordered_map<std::string, std::string>&
-          metadata,
-      [[maybe_unused]] const std::string& device_properties) override {}
-  void finalizeMemoryTrace(
-      [[maybe_unused]] const std::string&,
-      [[maybe_unused]] const KN::Config&) override {}
-  void finalizeTrace(
-      [[maybe_unused]] const KN::Config& config,
-      [[maybe_unused]] std::unique_ptr<KN::ActivityBuffers> buffers,
-      [[maybe_unused]] int64_t endTime) override {}
-};
-
 std::pair<
     std::unique_ptr<KN::IActivityProfilerSession>,
     std::unique_ptr<KN::CpuTraceBuffer>>
