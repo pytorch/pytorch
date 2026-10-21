@@ -14,13 +14,6 @@ import unittest
 from torch._dynamo.test_case import CPythonTestCase
 from torch.testing._internal.common_utils import run_tests
 
-try:
-    import _warnings
-    if hasattr(_warnings, "_filters_mutated"):
-        torch._dynamo.config.ignore_logging_functions.add(_warnings._filters_mutated)
-except ImportError:
-    pass
-
 __TestCase = CPythonTestCase
 
 # ======= END Dynamo patch =======

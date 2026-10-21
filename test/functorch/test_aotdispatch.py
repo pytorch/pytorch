@@ -88,6 +88,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     ops,
+    skipCUDAIf,
     skipOps,
     tol,
     toleranceOverride,
@@ -96,6 +97,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
+    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -105,6 +107,7 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     TEST_MKL,
     TestCase,
     xfail_inherited_tests,
@@ -470,7 +473,7 @@ def skipIfDynamoInput(reason):
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            if getattr(self, "_is_dynamo_test", False):
+            if isinstance(self, _AOTAutogradDynamoMixin):
                 self.skipTest(
                     f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
                 )
@@ -482,9 +485,7 @@ def skipIfDynamoInput(reason):
     return decorator
 
 
-class TestAOTAutograd(AOTTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class _TestAOTAutogradBase(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
@@ -630,7 +631,7 @@ class TestAOTAutograd(AOTTestCase):
             check_results(
                 ref_results, test_results, graph_inps, test_graph_inps, inp, test_inp
             )
-            if getattr(self, "_is_cache_test", False):
+            if isinstance(self, _AOTAutogradCacheMixin):
                 # When testing with cache, run compiled_f a second time
                 cached_inp, cached_graph_inps = make_inputs(inp_)
                 cached_results = outs_and_grads(
@@ -646,6 +647,10 @@ class TestAOTAutograd(AOTTestCase):
                 )
 
         return fw_graph_cell[0]
+
+
+class TestAOTAutograd(_TestAOTAutogradBase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_non_tensor_and_none_inputs(self):
         # int, None, Tensor
@@ -791,59 +796,6 @@ def forward(self, primals_1):
             torch.zeros(3, 9, requires_grad=False),
         ]
         self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
-
-    def _compile_autocast(self, device, *, forward_autocast):
-        device_type = torch.device(device).type
-        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
-            m.define("foo(Tensor x) -> Tensor")
-            m.impl("foo", torch.clone, "CompositeExplicitAutograd")
-
-            def autocast(x):
-                return x + 1
-
-            m.impl("foo", autocast, "AutocastCPU")
-            m.impl("foo", autocast, "AutocastCUDA")
-            m.impl("foo", autocast, "AutocastPrivateUse1")
-
-            foo = torch.ops.mylib.foo.default
-
-            class Foo(torch.autograd.Function):
-                @staticmethod
-                def forward(ctx, x):
-                    ctx.save_for_backward(x)
-                    return foo(x)
-
-                @staticmethod
-                def backward(ctx, grad):
-                    (x,) = ctx.saved_tensors
-                    return grad * foo(x)
-
-            def fn(x):
-                with torch.amp.autocast(device_type, enabled=False):
-                    return Foo.apply(x)
-
-            x = torch.tensor(0.0, device=device, requires_grad=True)
-            if forward_autocast:
-                with (
-                    torch.amp.autocast(device_type),
-                    torch._dynamo.config.patch(recompile_limit=999),
-                ):
-                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
-            else:
-                with torch._dynamo.config.patch(recompile_limit=999):
-                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
-            (grad,) = torch.autograd.grad(out, x)
-            return out, grad
-
-    def _test_backward_pass_autocast(
-        self, device, *, backward_autocast, forward_autocast, expected_grad
-    ):
-        with torch._functorch.config.patch(backward_pass_autocast=backward_autocast):
-            out, grad = self._compile_autocast(
-                device, forward_autocast=forward_autocast
-            )
-        self.assertEqual(out, torch.zeros_like(out))
-        self.assertEqual(grad, torch.full_like(grad, expected_grad))
 
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
@@ -1389,6 +1341,30 @@ def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     return (mul, mul)""",
         )
+
+    def test_input_mutation_is_output_after_mutated_inputs(self):
+        # b's mutation is applied after the graph and a's stays in it; the
+        # graph returns the updated b before a, and b must not get a's value.
+        def f(a, b):
+            b.mul_(2)
+            a.add_(1)
+            return a
+
+        def f_metadata(a, b):
+            b.t_()
+            a.add_(1)
+            return a
+
+        for fn, make_inputs in [
+            # b requires grad: training graph
+            (f, lambda: [torch.zeros(3), torch.ones(3, requires_grad=True).add(1)]),
+            # inference graph
+            (f_metadata, lambda: [torch.zeros(3), torch.ones(2, 3)]),
+        ]:
+            compiled_fn = aot_function(fn, nop, keep_inference_input_mutations=True)
+            ref_inp, test_inp = make_inputs(), make_inputs()
+            self.assertEqual(fn(*ref_inp), compiled_fn(*test_inp))
+            self.assertEqual(ref_inp, test_inp)
 
     def test_input_mutation_multiple(self):
         def f(a, b, c):
@@ -4852,6 +4828,7 @@ def forward(self, tangents_1):
         self.assertEqual(remainder, 0)
         self.assertEqual(pack_body_runs, 3)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_mark_activations_dynamic_with_nested(self):
         # The flattened tensors of the nested tensor aren't
         # marked as activations, but they add some offset
@@ -4966,7 +4943,302 @@ def forward(self, tangents_1):
         out = f(inp)
         self.assertEqual(out.stride(), inp.stride())
 
-    def _make_model_and_input(self, hidden=1024, vocab=4096, seq_len=128):
+
+class TestAOTAutogradDevice(_TestAOTAutogradBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _compile_autocast(self, device, *, forward_autocast):
+        device_type = torch.device(device).type
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            m.define("foo(Tensor x) -> Tensor")
+            m.impl("foo", torch.clone, "CompositeExplicitAutograd")
+
+            def autocast(x):
+                return x + 1
+
+            m.impl("foo", autocast, "AutocastCPU")
+            m.impl("foo", autocast, "AutocastCUDA")
+            m.impl("foo", autocast, "AutocastXPU")
+            m.impl("foo", autocast, "AutocastPrivateUse1")
+
+            foo = torch.ops.mylib.foo.default
+
+            class Foo(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return foo(x)
+
+                @staticmethod
+                def backward(ctx, grad):
+                    (x,) = ctx.saved_tensors
+                    return grad * foo(x)
+
+            def fn(x):
+                with torch.amp.autocast(device_type, enabled=False):
+                    return Foo.apply(x)
+
+            x = torch.tensor(0.0, device=device, requires_grad=True)
+            if forward_autocast:
+                with (
+                    torch.amp.autocast(device_type),
+                    torch._dynamo.config.patch(recompile_limit=999),
+                ):
+                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            else:
+                with torch._dynamo.config.patch(recompile_limit=999):
+                    out = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+            (grad,) = torch.autograd.grad(out, x)
+            return out, grad
+
+
+    @onlyAccelerator
+    def test_mem_leak_from_save_for_bw(self, device):
+        # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
+        # Note [Detaching saved tensors in AOTAutograd]
+        # This program creates a ref-cycle. Long term, we should fix this ref cycle
+        # (since it can arise, naturally albeit rarely, from uses of autograd.Function).
+        # But AOTAutograd makes it more likely to show up from tracing user programs,
+        # so we deal with it by manually detaching the tensors that we save for backward.
+        # This is completely wrong and would give wrong results if we were to do double backward.
+        # Fortunately today, double backward is explicitly banned in AOTAutograd.
+        def f(a, b):
+            add = a + a
+            split = torch.functional.split(add, [4, 4], dim=1)
+            getitem_2 = split[1]
+            unsqueeze = getitem_2.unsqueeze(-1)
+            mul = unsqueeze * b
+            return (getitem_2, mul)
+
+        f_compiled = aot_function(f, nop)
+        inps = [
+            torch.ones(8, 8, device=device, requires_grad=True),
+            torch.ones(1, 4, 1, device=device, requires_grad=True),
+        ]
+        mem_before = torch.accelerator.memory_allocated()
+        f_compiled(*inps)
+        mem_after = torch.accelerator.memory_allocated()
+        self.assertTrue(mem_after == mem_before)
+
+    @onlyAccelerator
+    def test_save_input_view_for_bw_does_not_leak_memory(self, device):
+        def f(x):
+            return (x * x).sum()
+
+        f_compiled = aot_function(f, nop)
+
+        def run_once(check_saved_view):
+            base = torch.randn(1024, 1024, device=device, requires_grad=True)
+            non_leaf_base = base * 2
+            input_view = non_leaf_base[:512]
+            input_view_ref = weakref.ref(input_view)
+            non_leaf_base_ref = weakref.ref(non_leaf_base)
+            saved_view_refs = []
+            saved_base_refs = []
+
+            def pack_hook(t):
+                if t._is_view():
+                    saved_view_refs.append(weakref.ref(t))
+                    saved_base_refs.append(weakref.ref(t._base))
+                return t
+
+            if check_saved_view:
+                with torch.autograd.graph.saved_tensors_hooks(pack_hook, lambda t: t):
+                    out = f_compiled(input_view)
+            else:
+                out = f_compiled(input_view)
+
+            return (
+                out,
+                input_view,
+                non_leaf_base,
+                base,
+                input_view_ref,
+                non_leaf_base_ref,
+                saved_view_refs,
+                saved_base_refs,
+            )
+
+        warmup = run_once(check_saved_view=False)
+        del warmup
+        gc.collect()
+        torch.accelerator.synchronize()
+        mem_before = torch.accelerator.memory_allocated()
+
+        (
+            out,
+            input_view,
+            non_leaf_base,
+            base,
+            input_view_ref,
+            non_leaf_base_ref,
+            saved_view_refs,
+            saved_base_refs,
+        ) = run_once(check_saved_view=True)
+        out_ref = weakref.ref(out)
+        self.assertGreater(torch.accelerator.memory_allocated(), mem_before)
+
+        self.assertEqual(len(saved_view_refs), 1)
+        saved_view = saved_view_refs[0]()
+        saved_base = saved_base_refs[0]()
+        self.assertIs(saved_view, input_view)
+        self.assertIs(saved_base, non_leaf_base)
+        self.assertIsNot(saved_base, out)
+        self.assertIsNot(saved_base.grad_fn, out.grad_fn)
+
+        saved_view = saved_base = None
+        del input_view, non_leaf_base, base
+        gc.collect()
+        self.assertIsNotNone(out_ref())
+        self.assertIsNotNone(input_view_ref())
+        self.assertIsNotNone(non_leaf_base_ref())
+
+        del out
+        gc.collect()
+        torch.accelerator.synchronize()
+        mem_after = torch.accelerator.memory_allocated()
+        self.assertEqual(mem_after, mem_before)
+        self.assertIsNone(out_ref())
+        self.assertIsNone(input_view_ref())
+        self.assertIsNone(non_leaf_base_ref())
+
+    @onlyAccelerator
+    def test_synthetic_base_base_attribute_is_none(self, device):
+        def f(a, b):
+            a.add_(1)
+            return a + b
+
+        def inp_callable():
+            base = torch.ones(4, 4, device=device)
+            # detach() so that none of the inputs have a ._base attribute.
+            a = base[0].detach()
+            b = base[1].detach()
+            base2 = torch.ones(2, 2, requires_grad=True)  # noqa: F841
+            return [base], [a, b]
+
+        self.verify_aot_autograd(f, inp_callable, test_mutation=True)
+
+    @onlyAccelerator
+    def test_autocast_disable_guard(self, device):
+        with torch._C._DisableAutocast():
+            x = torch.rand([4, 4]).to(device=device)
+            y = x @ x
+            self.assertEqual(y.dtype, torch.float32)
+
+    @onlyAccelerator
+    def test_nonidempotent_amp(self, device):
+        def f(self_s_emb, add_3):
+            einsum_2 = torch.functional.einsum("ah,th->t", self_s_emb, add_3)
+            log_softmax_2 = einsum_2.log_softmax(-1)
+            return (log_softmax_2,)
+
+        device_type = torch.device(device).type
+        args = [
+            torch.rand((1, 256), dtype=torch.float32, device=device),
+            torch.rand((30, 256), dtype=torch.float16, device=device),
+        ]
+        with torch.amp.autocast(device_type, enabled=True):
+            self.verify_aot_autograd(f, args)
+
+        args = [e.requires_grad_(True) for e in args]
+        with torch.amp.autocast(device_type, enabled=True):
+            self.verify_aot_autograd(f, args)
+
+    @onlyAccelerator
+    @skipCUDAIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
+    def test_batch_norm_amp(self, device):
+        input_dtype = torch.float16
+        param_dtype = torch.float32
+        weight, bias = (
+            torch.ones(64, device=device, dtype=param_dtype, requires_grad=True)
+            for _ in range(2)
+        )
+        running_mean, running_var = (
+            torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)
+        )
+
+        device_type = torch.device(device).type
+
+        def bn(x):
+            fn = (
+                torch.ops.aten.native_batch_norm
+                if device_type == "xpu"
+                else torch.ops.aten.cudnn_batch_norm
+                if torch.version.hip is None
+                else torch.ops.aten.miopen_batch_norm
+            )
+            return fn(
+                x,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                False,
+                0.1,
+                1e-05,
+            )
+
+        inp = torch.ones(
+            torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device
+        )
+
+        ref = bn(inp)
+        batch_norm_decomp = torch._decomp.get_decompositions(
+            {
+                torch.ops.aten.native_batch_norm
+                if device_type == "xpu"
+                else torch.ops.aten.cudnn_batch_norm
+            }
+        )
+        aot_fn = make_fx(bn, decomposition_table=batch_norm_decomp)(inp)
+        res = aot_fn(inp)
+        for a, b in zip(ref, res):
+            if not torch.allclose(a, b):
+                raise AssertionError(f"Tensors not allclose: {a} vs {b}")
+
+    @onlyAccelerator
+    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
+    @torch._functorch.config.patch(recompute_views=True)
+    def test_saved_tensors_hooks_mutations_raise(self, device):
+        ctx = torch.autograd.graph.saved_tensors_hooks
+
+        class SAF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gx):
+                (saved_x,) = ctx.saved_tensors
+                return gx + saved_x
+
+        def mutate(x):
+            return x.mul_(2)
+
+        def fn(x):
+            x = 2 * x
+            x = SAF.apply(x)
+            return x
+
+        def inp_fn():
+            x = torch.ones(2, 3, device=device, requires_grad=True)
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(x, 1)
+            return x
+
+        with self.assertRaisesRegex(
+            AssertionError, "Saved tensors hooks with inputs mutations are not allowed"
+        ):
+            try:
+                with ctx(*saved_tensors_hooks_to_gm(mutate, mutate, None, None)):
+                    x = inp_fn()
+                    y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+                    y.sum().backward()
+            except torch._dynamo.exc.BackendCompilerFailed as e:
+                raise e.inner_exception from e
+
+    def _make_model_and_input(self, device, hidden=1024, vocab=4096, seq_len=128):
         """Build a small model that produces non-scalar output (like an LM head)."""
         model = nn.Sequential(
             nn.Linear(hidden, hidden, bias=False),
@@ -4974,9 +5246,9 @@ def forward(self, tangents_1):
             nn.Linear(hidden, hidden, bias=False),
             nn.ReLU(),
             nn.Linear(hidden, vocab, bias=False),
-        ).cuda()
-        x = torch.randn(seq_len, hidden, device="cuda", requires_grad=True)
-        labels = torch.randint(0, vocab, (seq_len,), device="cuda")
+        ).to(device)
+        x = torch.randn(seq_len, hidden, device=device, requires_grad=True)
+        labels = torch.randint(0, vocab, (seq_len,), device=device)
         return model, x, labels
 
     def _make_refcount_probe(self):
@@ -5017,6 +5289,83 @@ def forward(self, tangents_1):
             "Framework holds extra refs to tangent: weakref still alive after "
             "removing all user-visible references",
         )
+
+    @onlyAccelerator
+    def test_tangent_freed_compiled_model_and_loss(self, device):
+        """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
+
+        Mirrors torchtitan's simple_fsdp training loop:
+          pred = compiled_model(input)   # torch.compile(model)
+          loss = compiled_loss(pred, labels)  # torch.compile(loss_fn)
+          loss.backward()
+
+        The tangent for model backward is created internally by loss backward.
+        No user variable holds it — only the C++ pyInputs tuple on the stack.
+        The boxed calling convention alone frees it."""
+        model, x, labels = self._make_model_and_input(device)
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @onlyAccelerator
+    def test_tangent_freed_compiled_model_eager_loss(self, device):
+        """Scenario: compiled model + eager loss (common training pattern).
+
+        Similar to torchtitan but loss is not compiled. The tangent is
+        created by eager cross_entropy backward. Boxed convention frees it."""
+        model, x, labels = self._make_model_and_input(device)
+        compiled_model = torch.compile(model, backend="inductor")
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = torch.nn.functional.cross_entropy(pred.float(), labels)
+        del pred
+        loss.backward()
+
+        self._assert_no_extra_refs(refcount_box)
+
+    @onlyAccelerator
+    def test_tangent_user_provided_via_pop(self, device):
+        """Scenario: user creates tangent but releases it before backward runs.
+
+        The user wraps the tangent in a list and calls out.backward(l.pop()).
+        After pop(), no Python variable holds the tangent — same as torchtitan.
+        The boxed calling convention should free it."""
+        model, x, _labels = self._make_model_and_input(device)
+        compiled_model = torch.compile(model, backend="inductor")
+
+        def loss_fn(pred, labels):
+            return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+        compiled_loss = torch.compile(loss_fn, backend="inductor")
+        _, _, labels = self._make_model_and_input(device)
+
+        Probe, refcount_box = self._make_refcount_probe()
+        pred = compiled_model(x)
+        pred = Probe.apply(pred)
+        loss = compiled_loss(pred, labels)
+        del pred
+
+        # Wrap loss in a list and use pop() — no user variable holds loss
+        # after this. The tangent created by loss backward has no user ref.
+        loss_list = [loss]
+        del loss
+        loss_list.pop().backward()
+
+        self._assert_no_extra_refs(refcount_box)
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -5998,6 +6347,109 @@ class <lambda>(torch.nn.Module):
         for g_ref, g_test in zip(grads_ref, grads_test):
             self.assertEqual(g_ref, g_test)
 
+    def test_aot_export_simplified_preserves_export_default_cia_ops(self):
+        def f(x):
+            return (
+                F.interpolate(x, size=(8, 8), mode="bilinear", align_corners=False),
+            )
+
+        x = torch.randn(1, 3, 4, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x],
+            trace_joint=False,
+            decompositions=torch.export.default_decompositions(),
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.upsample_bilinear2d.vec])
+
+    def test_aot_export_simplified_empty_decomp_table_preserves_cia_ops(self):
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=False,
+            decompositions={},
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.matmul.default])
+
+    def test_aot_export_simplified_none_decomp_table_keeps_raw_semantics(self):
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=False,
+            decompositions=None,
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.mm.default])
+
+    def test_aot_export_simplified_joint_keeps_gradients(self):
+        # Preserved CIA ops have no autograd kernel, so joint tracing must
+        # keep decomposing them instead of dropping the gradients.
+        def f(x, y):
+            return (torch.matmul(x, y).sum(),)
+
+        x = torch.randn(2, 3, requires_grad=True)
+        y = torch.randn(3, 4, requires_grad=True)
+
+        gm = aot_export_joint_simple(
+            f,
+            [x, y],
+            trace_joint=True,
+            decompositions={},
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertNotIn(torch.ops.aten.matmul.default, targets)
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        self.assertTrue(all(out is not None for out in output_node.args[0]))
+        self.assertEqual(len(output_node.args[0]), 3)
+
+    def test_aot_export_simplified_keeps_existing_fake_rules(self):
+        from torch._subclasses.fake_impls import _is_op_registered_to_fake_rule
+
+        def f(x, y):
+            return (torch.matmul(x, y),)
+
+        ops = [torch.ops.aten.item.default, torch.ops.aten.nonzero_numpy.default]
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
+        aot_export_joint_simple(
+            f,
+            [torch.randn(2, 3), torch.randn(3, 4)],
+            trace_joint=False,
+            decompositions={},
+        )
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
+
+    def test_aot_export_module_keeps_raw_decomposition_semantics(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return (torch.matmul(x, y),)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 4)
+
+        gm, _ = aot_export_module(
+            M(),
+            [x, y],
+            trace_joint=False,
+            decompositions={},
+        )
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertEqual(targets, [torch.ops.aten.mm.default])
+
     def test_aot_export_metadata_mutation_banned(self):
         def fn(p, x):
             x.t_()
@@ -6838,6 +7290,7 @@ def forward(self, primals_1, tangents_1):
         aot_fn(x)
         self.assertTrue(inference_graph_cell[0] is not None)
 
+
     def test_quantize_activation_duplicate_nodes(self):
         """Test both quantize_activation_fw and quantize_activation_bw handle duplicate nodes correctly"""
         import torch.fx as fx
@@ -7072,6 +7525,7 @@ def forward(self, primals_1, tangents_1):
         node = graph.placeholder("dev")
         node.meta["val"] = torch.device("cuda:0")
         self.assertEqual(_size_of(node), 0)
+
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_unbounded_error_message(self):
@@ -7804,6 +8258,7 @@ def forward(self, primals_1, tangents_1):
             return_new_outs=return_new_outs
         ).post_compile(compiled_fn, mock_aot_config, runtime_metadata=mock_meta)
 
+
     def test_functionalized_rng_no_codegen(self):
         with capture_codegen_source("functionalized_rng_wrapper") as captured:
 
@@ -7833,6 +8288,7 @@ def forward(self, primals_1, tangents_1):
             sentinel, SimpleNamespace(), runtime_metadata=mock_meta
         )
         self.assertIs(result, sentinel)
+
 
     # --- Backward prologue codegen tests ---
 
@@ -8105,6 +8561,7 @@ def forward(self, primals_1, tangents_1):
         ):
             torch.autograd.grad(loss, x, create_graph=True)
 
+
     # --- CompiledFunction.forward codegen tests ---
 
     def test_compiled_forward_codegen_emitted(self):
@@ -8191,6 +8648,7 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertNotIn("_rng_add_(ctx, args)", source)
 
+
     def test_compiled_forward_correctness(self):
         @torch.compile(backend="aot_eager")
         def f(x, y):
@@ -8243,6 +8701,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertNotIn("_rng_add_(_ctx_", source)
+
 
     def test_compiled_backward_elides_vc_check(self):
         with capture_codegen_source("compiled_function_backward") as captured:
@@ -8324,6 +8783,7 @@ def forward(self, primals_1, tangents_1):
         a, b, c = f(x)
         (a + b + c).sum().backward()
         self.assertEqual(x.grad, 2 + 2 * x + 1)
+
 
     def test_compiled_backward_dynamic_shapes(self):
         @torch.compile(backend="aot_eager", dynamic=True)
@@ -8552,6 +9012,7 @@ def forward(self, primals_1, tangents_1):
             h1.destroy()
             h2.destroy()
 
+
     def test_backward_epilogue_create_graph(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -8561,6 +9022,7 @@ def forward(self, primals_1, tangents_1):
         out = f(x)
         (grad_x,) = torch.autograd.grad(out.sum(), x, create_graph=True)
         self.assertEqual(grad_x, 2 * x)
+
 
     def test_backward_epilogue_subclass_and_tokens_codegen(self):
         from torch._higher_order_ops.effects import _register_effectful_op
@@ -9531,6 +9993,7 @@ def forward(self, primals_1, tangents_1):
         self.assertEqual(metadata.output_info[1].output_type, OutputType.non_alias)
         self.assertEqual(metadata.num_intermediate_bases, 0)
 
+
     def test_size_of_void_returning_nodes(self):
         # Void-returning ops have no `val` metadata. _size_of must return 0
         # for them instead of raising RuntimeError.
@@ -9546,6 +10009,38 @@ def forward(self, primals_1, tangents_1):
         ):
             node = g.call_function(target, args=())
             self.assertEqual(_size_of(node), 0)
+
+    def test_estimate_runtime_device_argument(self):
+        import torch._functorch.config as functorch_config
+        from torch._functorch.partitioners import estimate_runtime
+
+        graph = torch.fx.Graph()
+        device = graph.placeholder("device")
+        device.meta["val"] = torch.device("cpu")
+        node = graph.call_function(
+            torch.ops.aten.ones.default, args=([2, 3],), kwargs={"device": device}
+        )
+        with functorch_config.patch(activation_memory_budget_runtime_estimator="flops"):
+            self.assertEqual(estimate_runtime(node), 1)
+
+        outputs = []
+
+        def benchmark(fn):
+            outputs.append(fn())
+            return 1.0
+
+        with (
+            functorch_config.patch(
+                activation_memory_budget_runtime_estimator="profile"
+            ),
+            patch(
+                "torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu",
+                side_effect=benchmark,
+            ) as timer,
+        ):
+            self.assertEqual(estimate_runtime(node), 1.0)
+        timer.assert_called_once()
+        self.assertEqual(outputs, [torch.ones(2, 3, device="cpu")])
 
     def test_size_of_fake_script_object(self):
         import torch._functorch.config as functorch_config
@@ -9886,8 +10381,6 @@ def forward(self, primals_1, tangents_1):
 
 
 class TestAOTDispatch(AOTTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
     # - subclass / mode introduced in the middle of the compiled fn
     # - various input mutation / intermediate base tests
@@ -9895,6 +10388,7 @@ class TestAOTDispatch(AOTTestCase):
     # - metadata mutation? (TBD)
     # - guard tests (fw guards *and* bw guards)
     # - subclass test involving _indices_of_inps_to_detach
+    hw_classification = HardwareClassification.GENERIC
 
     def test_aminmax_out_dtype_mismatch_errors(self):
         def f(inp, out_min, out_max):
@@ -10523,9 +11017,14 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedInline(
             shape_env.format_guards(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+ - Eq(s49, 20)
+ - Eq(30, s70)""",
+                """\
  - Eq(s49, 20)
  - Eq(s70, 30)""",
+            ),
         )
 
         if not torch.allclose(ref[0], res[0]):
@@ -10898,6 +11397,7 @@ class TestAOTModuleSimplified(AOTTestCase):
             self.assertEqual(ctx.d[torch.channels_last], 4)
             self.assertEqual(ctx.d[torch.contiguous_format], 0)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_grads_no_force_contiguous_nested_tensor_tangent(self):
         # NestedTensor setattr could fails with AttributeError for attr "_min_seqlen_tensor"
         # Adding test to verify that it is handled.
@@ -11012,6 +11512,7 @@ Expected a .* tangent but got a plain Tensor.""",
         eager = fn(x)
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
+
 
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):
@@ -11242,6 +11743,7 @@ Expected a .* tangent but got a plain Tensor.""",
 
             self.assertEqual(ref_x.grad, x.grad)
 
+
     def _test_pack_hooks(
         self,
         fn,
@@ -11305,11 +11807,12 @@ Expected a .* tangent but got a plain Tensor.""",
             x_grad = pytree.tree_map_only(torch.Tensor, lambda t: t.grad, x)
             self.assertEqual(ref_x_grad, x_grad, atol=1e-2, rtol=1e-2)
 
-            # Disable testing of Subclasses for now
-            # self._test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
-            # self._test_pack_hooks(
-            #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
-            # )
+                # Disable testing of Subclasses for now
+                # self._test_pack_hooks(test_fn, inp_fn, [(pack_wrapper_sc, unpack_wrapper_sc)])
+                # self._test_pack_hooks(
+                #     test_fn, inp_fn, [(pack_wrapper_two_tensor, unpack_wrapper_two_tensor)]
+                # )
+
 
     @torch._functorch.config.patch(donated_buffer=True)
     @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
@@ -11404,6 +11907,14 @@ aot_autograd_failures = {
         # This delta is coming entirely from the clone() on tangents
         # in AOTDispatcher to make them contiguous
         decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
+    ),
+    decorate(
+        "linalg.pinv",
+        "hermitian",
+        # Small gradient entries come from cancellation against much larger ones
+        # (max |grad| ~3e4 for cond ~7e2), so eager vs compiled rounding
+        # differences are absolute rather than relative to each entry
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-05)}),
     ),
     decorate(
         "cholesky_inverse",
@@ -11681,25 +12192,23 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         )
 
 
-instantiate_parametrized_tests(TestAOTAutograd)
-instantiate_parametrized_tests(TestPartitioning)
-instantiate_parametrized_tests(TestAOTModuleSimplified)
-instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
-
-
-@xfail_inherited_tests(
-    [
-        "test_set__and_data_mutation_bad",
-    ]
-)
-class TestAOTAutogradWithDynamo(TestAOTAutograd):
+def inherit_device_tests(cls):
     """
-    These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
-    """
+    Copy inherited device-generic tests into the decorated class' own __dict__.
 
-    hw_classification = HardwareClassification.GENERIC
-    _is_dynamo_test = True
+    instantiate_device_type_tests() only looks at generic_test_class.__dict__, so a
+    subclass that adds no tests of its own would otherwise be instantiated empty.
+    """
+    for name in dir(cls):
+        if name.startswith("test") and name not in cls.__dict__:
+            setattr(cls, name, getattr(cls, name))
+    return cls
+
+
+class _AOTAutogradDynamoMixin:
+    """
+    Runs dynamo first to get a graph module, then runs aot_autograd on it.
+    """
 
     def assertExpectedInline(self, *args, **kwargs):
         # These will have different outputs because dynamo returns a different graph module
@@ -11746,6 +12255,19 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             return result
 
         return torch_compile_wrapper
+
+
+@xfail_inherited_tests(
+    [
+        "test_set__and_data_mutation_bad",
+    ]
+)
+class TestAOTAutogradWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutograd):
+    """
+    These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_inputs_overlapping_unsqueeze_with_mutation(self):
         def f(x, y):
@@ -11919,6 +12441,15 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             self.assertEqual(ref, inplace)
 
 
+@inherit_device_tests
+class TestAOTAutogradDeviceWithDynamo(_AOTAutogradDynamoMixin, TestAOTAutogradDevice):
+    """
+    These are the same as TestAOTAutogradDevice tests, but we run dynamo first to get a graph module.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+
 class MockFXGraphCache:
     """
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
@@ -11968,14 +12499,10 @@ FAILING_CACHE_TESTS = (
 )
 
 
-@xfail_inherited_tests(FAILING_CACHE_TESTS)
-class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
+class _AOTAutogradCacheMixin(_AOTAutogradDynamoMixin):
     """
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
     """
-
-    hw_classification = HardwareClassification.GENERIC
-    _is_cache_test = True
 
     def make_compiler(self, fw_graph_cell):
         mock_inductor_cache = self.inductor_cache
@@ -11997,8 +12524,7 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         keep_input_mutations: bool,
         dynamic: bool,
     ):
-        return TestAOTAutogradWithDynamo.run_autograd(
-            self,
+        return super().run_autograd(
             f,
             fw_graph_cell,
             decompositions,
@@ -12035,8 +12561,7 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         # cache root shared by every process of this user, so under a parallel
         # runner it deletes entries other workers are mid-read/mid-write on.
         with fresh_cache(), mock_fx_graph_cache:
-            return TestAOTAutogradWithDynamo.verify_aot_autograd(
-                self,
+            return super().verify_aot_autograd(
                 f,
                 inp_,
                 test_mutation=test_mutation,
@@ -12046,6 +12571,15 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
                 make_inputs_subclasses=make_inputs_subclasses,
             )
 
+
+@xfail_inherited_tests(FAILING_CACHE_TESTS)
+class TestAOTAutogradWithCache(_AOTAutogradCacheMixin, TestAOTAutogradWithDynamo):
+    """
+    In memory version of FXGraphCache so we can isolate testing for FXGraphCache
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
     def test_input_mutation_false_aliasing(self):
         # This test is disabled because it fails in strict cache mode
         # But also can't be xfailed because it causes undefined behavior for
@@ -12053,547 +12587,29 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         self.skipTest("Skipping because it fails in strict cache mode")
 
 
-class _AOTAutogradHardwareTestBase(AOTTestCase):
-    run_autograd = TestAOTAutograd.run_autograd
-    verify_aot_autograd = TestAOTAutograd.verify_aot_autograd
-    _compile_autocast = TestAOTAutograd._compile_autocast
-    _test_backward_pass_autocast = TestAOTAutograd._test_backward_pass_autocast
-    _make_model_and_input = TestAOTAutograd._make_model_and_input
-    _make_refcount_probe = TestAOTAutograd._make_refcount_probe
-    _assert_no_extra_refs = TestAOTAutograd._assert_no_extra_refs
-
-
-class _AOTAutogradDynamoHardwareMixin:
-    _is_dynamo_test = True
-
-    assertExpectedInline = TestAOTAutogradWithDynamo.assertExpectedInline
-    make_compiler = TestAOTAutogradWithDynamo.make_compiler
-    run_autograd = TestAOTAutogradWithDynamo.run_autograd
-
-
-class _AOTAutogradCacheHardwareMixin:
-    _is_cache_test = True
-
-    make_compiler = TestAOTAutogradWithCache.make_compiler
-    run_autograd = TestAOTAutogradWithCache.run_autograd
-    verify_aot_autograd = TestAOTAutogradWithCache.verify_aot_autograd
-
-
-class TestAOTAutogradCUDA(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.CUDA
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_mem_leak_from_save_for_bw(self):
-        # See a full diagnosis at this issue: https://github.com/pytorch/pytorch/issues/94990
-        # Note [Detaching saved tensors in AOTAutograd]
-        # This program creates a ref-cycle. Long term, we should fix this ref cycle
-        # (since it can arise, naturally albeit rarely, from uses of autograd.Function).
-        # But AOTAutograd makes it more likely to show up from tracing user programs,
-        # so we deal with it by manually detaching the tensors that we save for backward.
-        # This is completely wrong and would give wrong results if we were to do double backward.
-        # Fortunately today, double backward is explicitly banned in AOTAutograd.
-        def f(a, b):
-            add = a + a
-            split = torch.functional.split(add, [4, 4], dim=1)
-            getitem_2 = split[1]
-            unsqueeze = getitem_2.unsqueeze(-1)
-            mul = unsqueeze * b
-            return (getitem_2, mul)
-
-        f_compiled = aot_function(f, nop)
-        inps = [
-            torch.ones(8, 8, device="cuda", requires_grad=True),
-            torch.ones(1, 4, 1, device="cuda", requires_grad=True),
-        ]
-        mem_before = torch.cuda.memory_allocated()
-        f_compiled(*inps)
-        mem_after = torch.cuda.memory_allocated()
-        self.assertTrue(mem_after == mem_before)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_save_input_view_for_bw_does_not_leak_memory(self):
-        def f(x):
-            return (x * x).sum()
-
-        f_compiled = aot_function(f, nop)
-
-        def run_once(check_saved_view):
-            base = torch.randn(1024, 1024, device="cuda", requires_grad=True)
-            non_leaf_base = base * 2
-            input_view = non_leaf_base[:512]
-            input_view_ref = weakref.ref(input_view)
-            non_leaf_base_ref = weakref.ref(non_leaf_base)
-            saved_view_refs = []
-            saved_base_refs = []
-
-            def pack_hook(t):
-                if t._is_view():
-                    saved_view_refs.append(weakref.ref(t))
-                    saved_base_refs.append(weakref.ref(t._base))
-                return t
-
-            if check_saved_view:
-                with torch.autograd.graph.saved_tensors_hooks(pack_hook, lambda t: t):
-                    out = f_compiled(input_view)
-            else:
-                out = f_compiled(input_view)
-
-            return (
-                out,
-                input_view,
-                non_leaf_base,
-                base,
-                input_view_ref,
-                non_leaf_base_ref,
-                saved_view_refs,
-                saved_base_refs,
-            )
-
-        warmup = run_once(check_saved_view=False)
-        del warmup
-        gc.collect()
-        torch.cuda.synchronize()
-        mem_before = torch.cuda.memory_allocated()
-
-        (
-            out,
-            input_view,
-            non_leaf_base,
-            base,
-            input_view_ref,
-            non_leaf_base_ref,
-            saved_view_refs,
-            saved_base_refs,
-        ) = run_once(check_saved_view=True)
-        out_ref = weakref.ref(out)
-        self.assertGreater(torch.cuda.memory_allocated(), mem_before)
-
-        self.assertEqual(len(saved_view_refs), 1)
-        saved_view = saved_view_refs[0]()
-        saved_base = saved_base_refs[0]()
-        self.assertIs(saved_view, input_view)
-        self.assertIs(saved_base, non_leaf_base)
-        self.assertIsNot(saved_base, out)
-        self.assertIsNot(saved_base.grad_fn, out.grad_fn)
-
-        saved_view = saved_base = None
-        del input_view, non_leaf_base, base
-        gc.collect()
-        self.assertIsNotNone(out_ref())
-        self.assertIsNotNone(input_view_ref())
-        self.assertIsNotNone(non_leaf_base_ref())
-
-        del out
-        gc.collect()
-        torch.cuda.synchronize()
-        mem_after = torch.cuda.memory_allocated()
-        self.assertEqual(mem_after, mem_before)
-        self.assertIsNone(out_ref())
-        self.assertIsNone(input_view_ref())
-        self.assertIsNone(non_leaf_base_ref())
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_synthetic_base_base_attribute_is_none(self):
-        def f(a, b):
-            a.add_(1)
-            return a + b
-
-        def inp_callable():
-            base = torch.ones(4, 4, device="cuda")
-            # detach() so that none of the inputs have a ._base attribute.
-            a = base[0].detach()
-            b = base[1].detach()
-            base2 = torch.ones(2, 2, requires_grad=True)  # noqa: F841
-            return [base], [a, b]
-
-        self.verify_aot_autograd(f, inp_callable, test_mutation=True)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_autocast_disable_guard(self):
-        with torch._C._DisableAutocast():
-            x = torch.rand([4, 4]).cuda()
-            y = x @ x
-            self.assertEqual(y.dtype, torch.float32)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_nonidempotent_amp(self):
-        def f(self_s_emb, add_3):
-            einsum_2 = torch.functional.einsum("ah,th->t", self_s_emb, add_3)
-            log_softmax_2 = einsum_2.log_softmax(-1)
-            return (log_softmax_2,)
-
-        args = [
-            torch.rand((1, 256), dtype=torch.float32, device="cuda"),
-            torch.rand((30, 256), dtype=torch.float16, device="cuda"),
-        ]
-        with torch.cuda.amp.autocast(enabled=True):
-            self.verify_aot_autograd(f, args)
-
-        args = [e.requires_grad_(True) for e in args]
-        with torch.cuda.amp.autocast(enabled=True):
-            self.verify_aot_autograd(f, args)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skipIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
-    def test_batch_norm_amp(self):
-        device = "cuda"
-        input_dtype = torch.float16
-        param_dtype = torch.float32
-        weight, bias = (
-            torch.ones(64, device=device, dtype=param_dtype, requires_grad=True)
-            for _ in range(2)
-        )
-        running_mean, running_var = (
-            torch.ones(64, device=device, dtype=param_dtype) for _ in range(2)
-        )
-
-        def bn(x):
-            fn = (
-                torch.ops.aten.cudnn_batch_norm
-                if torch.version.hip is None
-                else torch.ops.aten.miopen_batch_norm
-            )
-            return fn(
-                x,
-                weight,
-                bias,
-                running_mean,
-                running_var,
-                False,
-                0.1,
-                1e-05,
-            )
-
-        inp = torch.ones(
-            torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device
-        )
-
-        ref = bn(inp)
-        cudnn_batch_norm_decomp = torch._decomp.get_decompositions(
-            {torch.ops.aten.cudnn_batch_norm}
-        )
-        aot_fn = make_fx(bn, decomposition_table=cudnn_batch_norm_decomp)(inp)
-        res = aot_fn(inp)
-        for a, b in zip(ref, res):
-            if not torch.allclose(a, b):
-                raise AssertionError(f"Tensors not allclose: {a} vs {b}")
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @torch._functorch.config.patch(saved_tensors_hooks_filtering_mode="no_static")
-    @torch._functorch.config.patch(recompute_views=True)
-    def test_saved_tensors_hooks_mutations_raise(self):
-        ctx = torch.autograd.graph.saved_tensors_hooks
-        device = "cuda"
-
-        class SAF(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                ctx.save_for_backward(x)
-                return x
-
-            @staticmethod
-            def backward(ctx, gx):
-                (saved_x,) = ctx.saved_tensors
-                return gx + saved_x
-
-        def mutate(x):
-            return x.mul_(2)
-
-        def fn(x):
-            x = 2 * x
-            x = SAF.apply(x)
-            return x
-
-        def inp_fn():
-            x = torch.ones(2, 3, device=device, requires_grad=True)
-            torch._dynamo.mark_dynamic(x, 0)
-            torch._dynamo.mark_dynamic(x, 1)
-            return x
-
-        with self.assertRaisesRegex(
-            AssertionError, "Saved tensors hooks with inputs mutations are not allowed"
-        ):
-            try:
-                with ctx(*saved_tensors_hooks_to_gm(mutate, mutate, None, None)):
-                    x = inp_fn()
-                    y = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
-                    y.sum().backward()
-            except torch._dynamo.exc.BackendCompilerFailed as e:
-                raise e.inner_exception from e
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_tangent_freed_compiled_model_and_loss(self):
-        """Scenario: compiled model + compiled loss (torchtitan simple_fsdp pattern).
-
-        Mirrors torchtitan's simple_fsdp training loop:
-          pred = compiled_model(input)   # torch.compile(model)
-          loss = compiled_loss(pred, labels)  # torch.compile(loss_fn)
-          loss.backward()
-
-        The tangent for model backward is created internally by loss backward.
-        No user variable holds it — only the C++ pyInputs tuple on the stack.
-        The boxed calling convention alone frees it."""
-        model, x, labels = self._make_model_and_input()
-        compiled_model = torch.compile(model, backend="inductor")
-
-        def loss_fn(pred, labels):
-            return torch.nn.functional.cross_entropy(pred.float(), labels)
-
-        compiled_loss = torch.compile(loss_fn, backend="inductor")
-
-        Probe, refcount_box = self._make_refcount_probe()
-        pred = compiled_model(x)
-        pred = Probe.apply(pred)
-        loss = compiled_loss(pred, labels)
-        del pred
-        loss.backward()
-
-        self._assert_no_extra_refs(refcount_box)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_tangent_freed_compiled_model_eager_loss(self):
-        """Scenario: compiled model + eager loss (common training pattern).
-
-        Similar to torchtitan but loss is not compiled. The tangent is
-        created by eager cross_entropy backward. Boxed convention frees it."""
-        model, x, labels = self._make_model_and_input()
-        compiled_model = torch.compile(model, backend="inductor")
-
-        Probe, refcount_box = self._make_refcount_probe()
-        pred = compiled_model(x)
-        pred = Probe.apply(pred)
-        loss = torch.nn.functional.cross_entropy(pred.float(), labels)
-        del pred
-        loss.backward()
-
-        self._assert_no_extra_refs(refcount_box)
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_tangent_user_provided_via_pop(self):
-        """Scenario: user creates tangent but releases it before backward runs.
-
-        The user wraps the tangent in a list and calls out.backward(l.pop()).
-        After pop(), no Python variable holds the tangent — same as torchtitan.
-        The boxed calling convention should free it."""
-        model, x, _labels = self._make_model_and_input()
-        compiled_model = torch.compile(model, backend="inductor")
-
-        def loss_fn(pred, labels):
-            return torch.nn.functional.cross_entropy(pred.float(), labels)
-
-        compiled_loss = torch.compile(loss_fn, backend="inductor")
-        _, _, labels = self._make_model_and_input()
-
-        Probe, refcount_box = self._make_refcount_probe()
-        pred = compiled_model(x)
-        pred = Probe.apply(pred)
-        loss = compiled_loss(pred, labels)
-        del pred
-
-        # Wrap loss in a list and use pop() — no user variable holds loss
-        # after this. The tangent created by loss backward has no user ref.
-        loss_list = [loss]
-        del loss
-        loss_list.pop().backward()
-
-        self._assert_no_extra_refs(refcount_box)
-
-
-class TestAOTAutogradWithDynamoCUDA(
-    _AOTAutogradDynamoHardwareMixin, TestAOTAutogradCUDA
+@inherit_device_tests
+class TestAOTAutogradDeviceWithCache(
+    _AOTAutogradCacheMixin, TestAOTAutogradDeviceWithDynamo
 ):
-    hw_classification = HardwareClassification.CUDA
+    """
+    In memory version of FXGraphCache so we can isolate testing for FXGraphCache
+    """
 
-
-class TestAOTAutogradWithCacheCUDA(
-    _AOTAutogradCacheHardwareMixin, TestAOTAutogradWithDynamoCUDA
-):
-    hw_classification = HardwareClassification.CUDA
-
-
-class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
-    hw_classification = HardwareClassification.CPU
-
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithDynamoAutocast(
-    _AOTAutogradDynamoHardwareMixin, TestAOTAutogradAutocast
-):
-    hw_classification = HardwareClassification.CPU
-
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithCacheAutocast(
-    _AOTAutogradCacheHardwareMixin, TestAOTAutogradWithDynamoAutocast
-):
-    hw_classification = HardwareClassification.CPU
-
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @onlyAccelerator
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
 
-    @onlyAccelerator
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
+class _AOTAutogradHardwareTestBase(_TestAOTAutogradBase):
+    _compile_autocast = TestAOTAutogradDevice._compile_autocast
 
-    @onlyAccelerator
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithDynamoAccelerator(
-    _AOTAutogradDynamoHardwareMixin, TestAOTAutogradAccelerator
-):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
-
-
-class TestAOTAutogradWithCacheAccelerator(
-    _AOTAutogradCacheHardwareMixin, TestAOTAutogradWithDynamoAccelerator
-):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_on(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="same_as_forward",
-            forward_autocast=True,
-            expected_grad=1,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_off(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast="off",
-            forward_autocast=True,
-            expected_grad=0,
-        )
-
-    @onlyAccelerator
-    def test_backward_pass_autocast_custom(self, device):
-        self._test_backward_pass_autocast(
-            device,
-            backward_autocast=[{"device_type": torch.device(device).type}],
-            forward_autocast=False,
-            expected_grad=1,
-        )
+    def _test_backward_pass_autocast(
+        self, device, *, backward_autocast, forward_autocast, expected_grad
+    ):
+        with torch._functorch.config.patch(backward_pass_autocast=backward_autocast):
+            out, grad = self._compile_autocast(
+                device, forward_autocast=forward_autocast
+            )
+        self.assertEqual(out, torch.zeros_like(out))
+        self.assertEqual(grad, torch.full_like(grad, expected_grad))
 
 
 class _PartitioningHardwareTestBase(AOTTestCase):
@@ -13072,6 +13088,51 @@ class TestPartitioningCUDA(_PartitioningHardwareTestBase):
         out.sum().backward()
 
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_min_cut_partitions_must_save_device_valued_node(self):
+        """A device-valued node tagged MUST_SAVE by selective AC must still be placeable.
+
+        compile_on_one_rank emits one current_device() node per graph, at the first
+        device= operand. When that operand is inside a checkpointed region whose
+        policy says MUST_SAVE, the node inherits the tag, and the same node later
+        feeds the parameter cast that min-cut recomputes in the backward (see
+        test_min_cut_partitions_device_valued_node). A MUST_SAVE node is banned from
+        recompute, and a device cannot be saved, so no finite cut existed.
+        """
+        from functorch.compile import min_cut_rematerialization_partition
+        from torch._dynamo.backends.common import aot_autograd
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def must_save(ctx, op, *args, **kwargs):
+            return CheckpointPolicy.MUST_SAVE
+
+        context_fn = partial(create_selective_checkpoint_contexts, must_save)
+        w = torch.randn(64, 64, device="cuda", requires_grad=True)
+
+        def inner(x):
+            return x.sin() + torch.zeros(x.shape, device="cuda", dtype=x.dtype)
+
+        def f(x):
+            y = checkpoint(inner, x, use_reentrant=False, context_fn=context_fn)
+            return (y @ w.to(device="cuda", dtype=torch.bfloat16)).relu().sum()
+
+        backend = aot_autograd(
+            fw_compiler=lambda gm, _: gm.forward,
+            bw_compiler=lambda gm, _: gm.forward,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        torch._dynamo.reset()
+        x = torch.randn(64, 64, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            torch.compile(f, backend=backend, fullgraph=True)(x).backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(w.grad)
+
+
 class _AOTModuleSimplifiedHardwareTestBase(AOTTestCase):
     _test_noncontig_nonmemformat_tangents = (
         TestAOTModuleSimplified._test_noncontig_nonmemformat_tangents
@@ -13504,7 +13565,189 @@ class TestAOTModuleSimplifiedCUDA(_AOTModuleSimplifiedHardwareTestBase):
         )
 
 
-instantiate_parametrized_tests(TestAOTModuleSimplifiedCUDA)
+class TestAOTAutogradAutocast(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.CPU
+
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradWithDynamoAutocast(
+    _AOTAutogradDynamoMixin, TestAOTAutogradAutocast
+):
+    hw_classification = HardwareClassification.CPU
+
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradWithCacheAutocast(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAutocast
+):
+    hw_classification = HardwareClassification.CPU
+
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradAccelerator(_AOTAutogradHardwareTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradWithDynamoAccelerator(
+    _AOTAutogradDynamoMixin, TestAOTAutogradAccelerator
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
+
+
+class TestAOTAutogradWithCacheAccelerator(
+    _AOTAutogradCacheMixin, TestAOTAutogradWithDynamoAccelerator
+):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_on(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="same_as_forward",
+            forward_autocast=True,
+            expected_grad=1,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_off(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast="off",
+            forward_autocast=True,
+            expected_grad=0,
+        )
+
+    @onlyAccelerator
+    def test_backward_pass_autocast_custom(self, device):
+        self._test_backward_pass_autocast(
+            device,
+            backward_autocast=[{"device_type": torch.device(device).type}],
+            forward_autocast=False,
+            expected_grad=1,
+        )
 
 
 class TestAOTModuleSimplifiedNoncontiguousTangents(
@@ -13539,38 +13782,77 @@ class TestAOTModuleSimplifiedAccelerator(_AOTModuleSimplifiedHardwareTestBase):
         )
 
 
+instantiate_parametrized_tests(TestAOTAutograd)
+instantiate_parametrized_tests(TestPartitioning)
+instantiate_device_type_tests(
+    TestAOTAutogradDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAOTAutogradDeviceWithDynamo,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestAOTAutogradDeviceWithCache,
+    globals(),
+    only_for=("cpu", "cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_parametrized_tests(TestAOTModuleSimplified)
+instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for="cpu")
+instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for="cpu")
+
+
 instantiate_device_type_tests(
     TestAOTAutogradAutocast,
     globals(),
     only_for=("cpu",),
 )
+
+
 instantiate_device_type_tests(
     TestAOTAutogradWithDynamoAutocast,
     globals(),
     only_for=("cpu",),
 )
+
+
 instantiate_device_type_tests(
     TestAOTAutogradWithCacheAutocast,
     globals(),
     only_for=("cpu",),
 )
+
+
 instantiate_device_type_tests(
     TestAOTModuleSimplifiedNoncontiguousTangents,
     globals(),
     only_for=("cpu",),
 )
+
+
 instantiate_device_type_tests(
     TestAOTAutogradAccelerator,
     globals(),
+    allow_xpu=True,
 )
+
+
 instantiate_device_type_tests(
     TestAOTAutogradWithDynamoAccelerator,
     globals(),
+    allow_xpu=True,
 )
+
+
 instantiate_device_type_tests(
     TestAOTAutogradWithCacheAccelerator,
     globals(),
+    allow_xpu=True,
 )
+
+
 instantiate_device_type_tests(
     TestAOTModuleSimplifiedAccelerator,
     globals(),

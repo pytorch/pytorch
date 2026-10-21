@@ -88,7 +88,7 @@ SIGNAL_HANDLER(
 // loader process here to avoid this by _exit(EXIT_SUCCESS). Note that if we
 // exit with nonzero code, the loader SIGCHLD handler may report RuntimeError
 // again, and then it defeats the whole purpose.
-static void handler_SIGTERM(int sig, siginfo_t* info, void* ctx) {
+static void handler_SIGTERM(int /*sig*/, siginfo_t* info, void* /*ctx*/) {
   if (info->si_pid == getppid()) {
     _exit(EXIT_SUCCESS);
   }
@@ -106,8 +106,8 @@ static void handler_SIGTERM(int sig, siginfo_t* info, void* ctx) {
 __attribute__((weak)) void setDataLoaderSignalHandlers() {}
 
 static PyObject* THPModule_setWorkerSignalHandlers(
-    PyObject* module,
-    PyObject* arg) {
+    PyObject* /*module*/,
+    PyObject* /*arg*/) {
   HANDLE_TH_ERRORS
   setSignalHandler(SIGBUS, &handler_SIGBUS, nullptr);
   setSignalHandler(SIGSEGV, &handler_SIGSEGV, nullptr);
@@ -121,8 +121,8 @@ static PyObject* THPModule_setWorkerSignalHandlers(
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
 static PyObject* THPModule_errorIfAnyWorkerFails(
-    PyObject* module,
-    PyObject* noargs) {
+    PyObject* /*module*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
 
   // Only check the pids we care about
@@ -176,7 +176,7 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
 
 // We don't want to exit on any SIGCHLD from any child. child_pids is a tuple
 // of pids we are interested in.
-static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* args) {
+static PyObject* THPModule_setWorkerPIDs(PyObject* /*module*/, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK_TYPE(
       PyTuple_GET_SIZE(args) == 2,
@@ -205,7 +205,7 @@ static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* args) {
 }
 
 static PyObject* THPModule_removeWorkerPIDs(
-    PyObject* module,
+    PyObject* /*module*/,
     PyObject* loader_id) {
   HANDLE_TH_ERRORS
 

@@ -239,6 +239,7 @@ ProcessGroupNCCL::RedOpRAII ProcessGroupNCCL::getNcclReduceOp(
 }
 
 void ProcessGroupNCCL::checkWorkQueue() {
+  drainRetiredGraphWork();
   WorkNCCL::WorkStatus status = workq_.garbageCollect();
 
   // Abort hooks run where a failure is DETECTED, not only where the process is
@@ -265,8 +266,7 @@ void ProcessGroupNCCL::checkWorkQueue() {
   }
 }
 
-// The timeout thread cannot make NCCL calls.  The only CUDA call it can make
-// it cudaEventQuery.
+// Retire completed work and graph states and check for timeouts.
 void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread starting for rank: " << rank_;
 
@@ -353,7 +353,12 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
   TC_LOG(INFO, this) << "Timeout thread exiting for rank: " << rank_;
 }
 
-void ProcessGroupNCCL::checkInitialized() const {
+void ProcessGroupNCCL::checkInitialized() {
+  if (options_c10d_->lazy_init &&
+      init_state_ == InitializationState::UNINITIALIZED &&
+      getBoundDeviceId().has_value()) {
+    ensureInitialized(*getBoundDeviceId());
+  }
   TORCH_CHECK(
       init_state_ == InitializationState::INITIALIZED,
       options_c10d_->enable_reconfigure
@@ -464,6 +469,10 @@ void ProcessGroupNCCL::addEphemeralTimeout(
 void ProcessGroupNCCL::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
+  if (coalescing_batch_) {
+    coalescing_works_.push_back(work);
+  }
+
   // In graph capture mode, keep the completion state and events alive until
   // the graph gets destroyed, organized per graph.
   if (getGraphCaptureMode()) {
@@ -498,13 +507,26 @@ void ProcessGroupNCCL::graphCleanupCallback(void* userData) {
       cleanup_data != nullptr && cleanup_data->comm != nullptr,
       "Invalid cleanup data");
 
-  // Clear the work references for this graph
+  // CUDA user-object callbacks cannot call CUDA APIs, including event destroy.
   std::lock_guard<std::mutex> lock(
       cleanup_data->comm->graph_capture_work_mutex_);
-  cleanup_data->comm->graph_capture_work_refs_.erase(cleanup_data->graph_id);
+  auto& comm = *cleanup_data->comm;
+  auto it = comm.graph_capture_work_refs_.find(cleanup_data->graph_id);
+  if (it != comm.graph_capture_work_refs_.end()) {
+    comm.retired_graph_work_refs_.emplace_back(std::move(it->second));
+    comm.graph_capture_work_refs_.erase(it);
+  }
 
   // Clean up the cleanup data itself
   delete cleanup_data;
+}
+
+void ProcessGroupNCCL::drainRetiredGraphWork() {
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>> retired;
+  {
+    std::lock_guard<std::mutex> lock(graph_capture_work_mutex_);
+    retired.swap(retired_graph_work_refs_);
+  }
 }
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
@@ -567,14 +589,16 @@ void ProcessGroupNCCL::registerAddressLocked(void* addr, size_t len) {
       nccl_comm_,
       nccl_api_->commRegister(nccl_comm_, addr, len, &handle),
       "Failed to register memory with NCCL");
-  // Symmetric-window (NCCL_WIN_COLL_SYMMETRIC) registration is collective and
-  // cannot run from the allocator hook, which fires on arbitrary threads. It
-  // happens lazily in ensureSegmentWindow(), keyed by the base recorded here.
+  // The collective NCCL_WIN_COLL_SYMMETRIC upgrade, if any, happens in
+  // ensureSymmetricWindow(), keyed by the base recorded here.
   memoryRegistrationHandles_.emplace(
       addr, RegistrationHandle{handle, nullptr, len});
 }
 
-void ProcessGroupNCCL::register_address(void* addr, size_t len) {
+void ProcessGroupNCCL::register_address(
+    void* addr,
+    size_t len,
+    const std::optional<c10::MempoolId_t>& pool) {
   if (nccl_comm_ == nullptr) {
     return;
   }
@@ -583,6 +607,33 @@ void ProcessGroupNCCL::register_address(void* addr, size_t len) {
       !memoryRegistrationHandles_.count(addr),
       "Memory already registered with NCCL");
   registerAddressLocked(addr, len);
+  if (!pool) {
+    return;
+  }
+  // The hook passes every segment's owning pool (default pool, graph pools,
+  // pools registered on other PGs); unregistered pools keep plain registration.
+  auto it = registeredMemPools_.find(*pool);
+  if (it == registeredMemPools_.end()) {
+    return;
+  }
+  const auto& [id, symm] = *it;
+  if (!symm) {
+    return;
+  }
+  auto rc = ensureSymmetricWindow(memoryRegistrationHandles_.find(addr));
+  TORCH_CHECK(
+      rc != ncclInvalidUsage,
+      "Cannot register segment ",
+      addr,
+      " of a symm=True MemPool as an NCCL symmetric window: this communicator "
+      "does not support symmetric memory (no symmetric-capable transport, or "
+      "NCCL_WIN_ENABLE=0)");
+  TORCH_CHECK(
+      rc == ncclSuccess,
+      "Failed to register segment ",
+      addr,
+      " as an NCCL symmetric window: ",
+      nccl_api_->getErrorString(rc));
 }
 
 void ProcessGroupNCCL::deregister_address(
@@ -662,6 +713,11 @@ ncclResult_t ProcessGroupNCCL::ensureSegmentWindow(const void* ptr) {
   if (it == memoryRegistrationHandles_.end()) {
     return ncclInvalidArgument;
   }
+  return ensureSymmetricWindow(it);
+}
+
+ncclResult_t ProcessGroupNCCL::ensureSymmetricWindow(
+    RegistrationMap::iterator it) {
 #if defined(USE_ROCM)
   // RCCL can create host-RMA windows for ordinary HIP allocations. Enforce the
   // NCCL2 allocator contract for every path that creates a window. Return
@@ -764,7 +820,13 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
 #endif
   {
     std::lock_guard<std::mutex> lock(memory_registration_mutex_);
-    registeredMemPools_.insert(pool->id());
+    auto [it, inserted] = registeredMemPools_.try_emplace(pool->id(), symm);
+    TORCH_CHECK(
+        inserted || it->second == symm,
+        "MemPool is already registered with symm=",
+        it->second ? "True" : "False",
+        "; call deregister_mem_pool before registering it with symm=",
+        symm ? "True" : "False");
   }
   bool symmUnsupported = false;
   for (const auto& segment : segments) {
@@ -782,9 +844,8 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
     if (!symm) {
       continue;
     }
-    // Only segments that exist now can be upgraded: the window call is
-    // collective, so a segment another thread allocates concurrently must be
-    // left to the next registerMemPool.
+    // Segments allocated after this point are upgraded by register_address
+    // from the allocator hook.
     auto rc = ensureSegmentWindow(addr);
     if (rc == ncclInvalidUsage) {
       // No symmetric-memory-capable transport (or NCCL predates
