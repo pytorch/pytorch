@@ -2611,7 +2611,7 @@ from torch.serialization import load, save
 
 # Shared memory manager needs to know the exact location of manager executable
 def _manager_path() -> bytes:
-    if platform.system() == "Windows":
+    if sys.platform == "emscripten" or platform.system() == "Windows":
         return b""
     path = get_file_path("torch", "bin", "torch_shm_manager")
     prepare_multiprocessing_environment(get_file_path("torch"))
