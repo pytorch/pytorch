@@ -12,7 +12,7 @@ epilogue and physical reduction callbacks.
 import dataclasses
 import hashlib
 import operator
-from typing import Any
+from typing import Any, cast
 
 from sympy import Max, Min
 
@@ -27,8 +27,10 @@ from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
 from torch._inductor.kernel.flex_gemm.constraints import (
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
+    FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR,
     LOCAL_REDUCE_FRAGMENT_WIDTH,
@@ -64,7 +66,12 @@ from torch._inductor.kernel.gemm_epilogue_codegen import (
     GemmEpilogueCuteDSLOpOverrides,
     lower_gemm_epilogue_fx_node,
 )
-from torch._inductor.kernel.gemm_epilogue_layout import build_output_contraction_plan
+from torch._inductor.kernel.gemm_epilogue_layout import (
+    build_output_contraction_plan,
+    match_output_expansion,
+    OutputContractionPlan,
+    OutputExpansionPlan,
+)
 from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
@@ -222,6 +229,62 @@ def validate_output_layout_transforms(
         raise NotImplementedError("output layout transforms must be returned directly")
 
 
+def validate_output_transform_composition(
+    outputs: GemmOutputPlan,
+    gemm: torch.fx.Node,
+    graph: GemmEpilogueGraph,
+    plan: OutputContractionPlan | OutputExpansionPlan | None,
+) -> None:
+    """Check the main output's shape and which other outputs may ride along."""
+    gemm_shape = tensor_meta_shape(gemm)
+    match plan:
+        case None:
+            output_shape = tensor_meta_shape(outputs.output)
+            if (
+                gemm_shape is not None
+                and output_shape is not None
+                and not statically_known_shape_equal(output_shape, gemm_shape)
+            ):
+                raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
+        case OutputContractionPlan(transform=contraction):
+            # Chunked B interleaves accumulator columns. Save the unchanged
+            # accumulator by selecting each lane into its logical output half.
+            if (
+                outputs.aux_outputs
+                and contraction.chunked
+                and (contraction.group != 2 or outputs.aux_outputs != (gemm,))
+            ):
+                raise NotImplementedError(
+                    FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR
+                )
+            if (
+                contraction.chunked
+                and outputs.local_reduce is not None
+                and outputs.local_reduce.match.physical_span == 1
+            ):
+                raise NotImplementedError(
+                    "chunked grouped main outputs do not compose with grouped reductions"
+                )
+        case OutputExpansionPlan(pack=pack):
+            # Auxiliaries (and grouped reductions) store through ordinary
+            # GEMM-shaped tiles, so they must be computed before the lanes are packed.
+            local_reduce = outputs.local_reduce
+            if (
+                local_reduce is not None
+                and (
+                    local_reduce.feeds_main
+                    or graph.depends_on(local_reduce.match.value_node, pack)
+                )
+            ) or any(
+                graph.depends_on(aux, pack)
+                or not statically_known_shape_equal(
+                    tensor_meta_shape(aux) or (), gemm_shape or ()
+                )
+                for aux in outputs.aux_outputs
+            ):
+                raise NotImplementedError(FLEX_GEMM_OUTPUT_EXPANSION_COMPOSITION_ERROR)
+
+
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueAnalysis:
     """Bundle the immutable analysis consumed by FlexGEMM lowering and emission.
@@ -229,6 +292,7 @@ class FlexGemmEpilogueAnalysis:
     Attributes:
         outputs: Classification of main, auxiliary, and local-reduction outputs.
         local_reduce: Grouped layouts and local-reduction matches from the FX graph.
+        output_expansion: Lane nodes of an expanded ``[..., 2N]`` main output.
     """
 
     gemm: torch.fx.Node
@@ -240,52 +304,29 @@ class FlexGemmEpilogueAnalysis:
     output_contraction_layouts: dict[torch.fx.Node, FlexGemmLocalReduceGeometry] = (
         dataclasses.field(default_factory=dict)
     )
+    output_expansion: OutputExpansionPlan | None = None
 
     @classmethod
     def from_graph_module(
         cls, graph_module: torch.fx.GraphModule, gemm: torch.fx.Node
     ) -> "FlexGemmEpilogueAnalysis":
-        """Analyze reductions and an optional grouped main-output transform."""
+        """Analyze reductions and an optional main-output lane transform."""
         local_reduce = GemmLocalReduceAnalysis.from_graph_module(graph_module, gemm)
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
         validate_output_layout_transforms(local_reduce.graph, outputs)
         reject_unplanned_reductions(local_reduce, outputs)
         contraction_plan = build_output_contraction_plan(outputs, gemm, local_reduce)
-        if contraction_plan is None:
-            gemm_meta = gemm.meta.get("val")
-            output_meta = outputs.output.meta.get("val")
-            if (
-                isinstance(gemm_meta, torch.Tensor)
-                and isinstance(output_meta, torch.Tensor)
-                and not statically_known_shape_equal(output_meta.shape, gemm_meta.shape)
-            ):
-                raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
-            local_reduce.commit_output_guards(outputs)
-            return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs and (
-            outputs.aux_outputs != (gemm,)
-            or outputs.local_reduce is not None
-            or contraction_plan.transform.group != 2
-            or contraction_plan.transform.chunked
-        ):
-            raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
-        if (
-            contraction_plan.transform.chunked
-            and outputs.local_reduce is not None
-            and outputs.local_reduce.match.physical_span == 1
-        ):
-            raise NotImplementedError(
-                "chunked grouped main outputs do not compose with grouped reductions"
-            )
-        contraction_plan.commit_guards()
-        local_reduce.commit_output_guards(outputs)
-        return cls(
-            gemm,
-            dataclasses.replace(outputs, output_contraction=contraction_plan.transform),
-            local_reduce,
-            contraction_plan.select_indices,
-            contraction_plan.layouts,
+        plan = contraction_plan or match_output_expansion(outputs, gemm)
+        outputs = dataclasses.replace(
+            outputs, output_transform=None if plan is None else plan.transform
         )
+        validate_output_transform_composition(outputs, gemm, local_reduce.graph, plan)
+        if not isinstance(plan, OutputContractionPlan):
+            local_reduce.commit_output_guards(outputs)
+            return cls(gemm, outputs, local_reduce, output_expansion=plan)
+        plan.commit_guards()
+        local_reduce.commit_output_guards(outputs)
+        return cls(gemm, outputs, local_reduce, plan.select_indices, plan.layouts)
 
     @property
     def required_geometries(self) -> tuple[FlexGemmLocalReduceGeometry, ...]:
@@ -295,9 +336,9 @@ class FlexGemmEpilogueAnalysis:
         )
         if self.outputs.local_reduce is not None:
             geometries.add(self.outputs.local_reduce.match.geometry)
-        if self.outputs.output_contraction is not None:
+        if isinstance(self.outputs.output_transform, FlexGemmOutputContraction):
             geometries.add(
-                FlexGemmLocalReduceGeometry(self.outputs.output_contraction.group, 1)
+                FlexGemmLocalReduceGeometry(self.outputs.output_transform.group, 1)
             )
         return tuple(geometries)
 
@@ -422,6 +463,18 @@ class FlexGemmCuteDSLOpOverrides(GemmEpilogueCuteDSLOpOverrides):
                 op_name, index_expr_fn = "max", Max
             case _:
                 raise AssertionError(f"unexpected minmax op: {op}")
+
+        # cutlass.min/max need two TensorSSA operands; broadcast a Python scalar
+        # (including _cute_arg's float("inf")/float("nan") spellings).
+        def scalar(x: Any) -> bool:
+            return isinstance(x, (int, float)) or (
+                isinstance(x, str) and x.startswith("float(")
+            )
+
+        if scalar(a) and CuteDSLOpOverrides._is_tensor_like(b):
+            a = f"cute.full_like({b}, {a})"
+        elif scalar(b) and CuteDSLOpOverrides._is_tensor_like(a):
+            b = f"cute.full_like({a}, {b})"
         return CuteDSLOpOverrides._apply_binary_op(
             a,
             b,
@@ -715,6 +768,14 @@ class FlexGemmEpilogueEmitter:
         self.local_reduce_prepass_result: Any | None = None
         self.epilogue_arg_placeholders = epilogue_arg_placeholders
         self.epilogue_arg_kinds = epilogue_arg_kinds
+        self.output_expansion = analysis.output_expansion
+        self.interleaved_operands = frozenset(
+            node
+            for node, kind in zip(
+                epilogue_arg_placeholders, epilogue_arg_kinds, strict=True
+            )
+            if kind == "interleaved"
+        )
         self.operand_names = tuple(
             f"operand{index}" for index in range(len(epilogue_arg_placeholders))
         )
@@ -1031,6 +1092,31 @@ class FlexGemmEpilogueEmitter:
             shape=getattr(shape_reference, "shape", None),
         )
 
+    def interleaved_lane_source(
+        self, node: torch.fx.Node
+    ) -> tuple[torch.fx.Node, tuple[int, ...]] | None:
+        """Return (capture, lanes) for a last-dim select/unbind of ``h.view(..., N, 2)``."""
+        select = node.target is torch.ops.aten.select.int
+        if not select and node.target is not torch.ops.aten.unbind.int:
+            return None
+        view = node.args[0]
+        if not isinstance(view, torch.fx.Node):
+            return None
+        view_args = view_or_reshape_args(view)
+        if view_args is None or view_args[0] not in self.interleaved_operands:
+            return None
+        gemm_shape = tensor_meta_shape(self.gemm)
+        view_shape = tensor_meta_shape(view)
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim", 0)
+        if (
+            gemm_shape is None
+            or view_shape is None
+            or not statically_known_shape_equal(view_shape, (*gemm_shape, 2))
+            or dim not in (-1, len(gemm_shape))
+        ):
+            return None
+        return view_args[0], (cast(int, node.args[2]) % 2,) if select else (0, 1)
+
     def broadcast_fragment_partial(
         self, reduced: Any, layout: GroupedTensorSSALayout, source: Any
     ) -> CuteDSLCSEVariable:
@@ -1076,41 +1162,57 @@ class FlexGemmEpilogueEmitter:
             )
         return self.broadcast_fragment_partial(reduced, layout, source)
 
-    def scalar_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
-        """Re-broadcast uniform scalar captures to the current logical fragment."""
-        if self.outputs.output_contraction is None:
+    def capture_broadcast_env(self, node: torch.fx.Node) -> dict[torch.fx.Node, Any]:
+        """Re-broadcast uniform captures to the current logical fragment.
+
+        Scalar captures are re-filled to the reference fragment. Row and column
+        captures are lane-uniform (lowering widens rows to the physical N), so
+        inside a lane domain their lane 0 holds the logical value. Against
+        physical GEMM values they stay physical.
+        """
+        if not isinstance(self.outputs.output_transform, FlexGemmOutputContraction):
             return self.env
         graph = self.analysis.local_reduce.graph
         inputs = tuple(iter_fx_node_inputs((node.args, node.kwargs)))
-        reference = next(
+        reference_arg = next(
             (
-                self.env[arg]
+                arg
                 for arg in inputs
                 if graph.depends_on(arg, self.gemm)
                 and isinstance(self.env.get(arg), CuteDSLCSEVariable)
             ),
             None,
         )
-        if reference is None:
+        if reference_arg is None:
             return self.env
+        reference = self.env[reference_arg]
+        domain = self.analysis.local_reduce.lane_domains.get(reference_arg)
         env = self.env
         for arg in inputs:
             shape = tensor_meta_shape(arg)
             value = self.env.get(arg)
             if (
-                shape is not None
-                and statically_known_shape_equal(shape, (1,) * len(shape))
-                and not graph.depends_on(arg, self.gemm)
-                and isinstance(value, CuteDSLCSEVariable)
+                shape is None
+                or graph.depends_on(arg, self.gemm)
+                or not isinstance(value, CuteDSLCSEVariable)
             ):
-                if env is self.env:
-                    env = dict(env)
+                continue
+            if statically_known_shape_equal(shape, (1,) * len(shape)):
                 # The donor can be Boolean; preserve the captured value's dtype.
-                env[arg] = self.generate_like(
-                    f"cute.full_like({reference}, {value}[0], {value}.element_type)",
-                    value,
-                    shape_reference=reference,
+                expression = (
+                    f"cute.full_like({reference}, {value}[0], {value}.element_type)"
                 )
+            elif domain is None:
+                continue
+            else:
+                layout = GroupedTensorSSALayout(domain.physical_span, 1)
+                expression = (
+                    f"{value}.reshape({layout.tensorssa_shape(value)})"
+                    "[((0, 0, None), None, None)]"
+                )
+            if env is self.env:
+                env = dict(env)
+            env[arg] = self.generate_like(expression, value, shape_reference=reference)
         return env
 
     def lower_graph(self) -> None:
@@ -1149,6 +1251,58 @@ class FlexGemmEpilogueEmitter:
                     raise NotImplementedError(
                         f"unsupported FlexGEMM EpiMod node: {node.format_node()}"
                     )
+                if (
+                    node.target is torch.ops.aten.full.default
+                    and isinstance(node.args[1], (bool, int, float))
+                    and node not in (self.outputs.output, *self.outputs.aux_outputs)
+                    and statically_known_shape_equal(
+                        node.meta["val"].shape, self.gemm.meta["val"].shape
+                    )
+                ):
+                    # A uniform tile constant (e.g. ``1 - sigmoid(x)`` from a vjp)
+                    # rounded to the tensor dtype as eager does. Typed, since a
+                    # Python scalar would take ``where``'s Boolean condition dtype.
+                    meta = node.meta["val"]
+                    dtype = (
+                        meta.dtype
+                        if not meta.dtype.is_floating_point
+                        else torch.float32
+                    )
+                    constant = torch.tensor(node.args[1], dtype=meta.dtype).item()
+                    value = flex_gemm_epilogue_arg(constant, self.env)
+                    cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE[dtype]
+                    self.env[node] = self.kernel.cse.generate(
+                        self.kernel.body,
+                        f"cute.full_like({self.env[self.gemm]}, {value}, {cute_dtype})",
+                        dtype=dtype,
+                        shape=(1,),
+                    )
+                    continue
+                if (lanes := self.interleaved_lane_source(node)) is not None:
+                    source, picks = lanes
+                    frag = self.env[source]
+                    values = tuple(
+                        self.generate_like(
+                            f"flex_gemm_interleaved_lane({frag}, {lane}, acc)", frag
+                        )
+                        for lane in picks
+                    )
+                    is_select = node.target is torch.ops.aten.select.int
+                    self.env[node] = values[0] if is_select else values
+                    continue
+                if (expansion := self.output_expansion) is not None:
+                    if node is expansion.pack:
+                        a, b = (
+                            flex_gemm_epilogue_arg(lane, self.env)
+                            for lane in expansion.lanes
+                        )
+                        self.env[node] = self.generate_like(
+                            f"flex_gemm_interleave_lanes({a}, {b})", a
+                        )
+                        continue
+                    if node in expansion.alias_nodes:
+                        self.env[node] = flex_gemm_epilogue_arg(node.args[0], self.env)
+                        continue
                 if node in self.grouped_layouts:
                     self.lower_grouped_layout(node, self.grouped_layouts[node])
                     continue
@@ -1204,7 +1358,7 @@ class FlexGemmEpilogueEmitter:
                     continue
                 self.env[node] = lower_gemm_epilogue_fx_node(
                     self.kernel,
-                    self.scalar_broadcast_env(node),
+                    self.capture_broadcast_env(node),
                     node,
                     context="FlexGEMM",
                 )
@@ -1223,11 +1377,39 @@ class FlexGemmEpilogueEmitter:
             flex_gemm_epilogue_arg(output, self.env)
             for output in self.outputs.aux_outputs
         )
-        main_name = "main" if self.outputs.output_contraction is not None else "D"
-        result_items = [
-            (main_name, main_result),
-            *zip(aux_names, aux_results, strict=True),
-        ]
+        main_name = "main" if self.outputs.output_transform is not None else "D"
+        result_items: list[tuple[str, CuteDSLCSEVariable | str]]
+        if (
+            self.output_expansion is not None
+            and self.output_expansion.transform.chunked
+        ):
+            # Split after scalar/dtype suffixes, not at the original cat operands.
+            result_items = [
+                (
+                    f"main{lane}",
+                    f"flex_gemm_interleaved_lane({gemm_epilogue_source_expr(main_result)}, {lane}, acc)",
+                )
+                for lane in range(2)
+            ]
+        else:
+            result_items = [(main_name, main_result)]
+        transform = self.outputs.output_transform
+        if (
+            isinstance(transform, FlexGemmOutputContraction)
+            and transform.chunked
+            and aux_results
+        ):
+            source = aux_results[0]
+            layout = GroupedTensorSSALayout(2, 1)
+            grouped = self.generate_like(
+                f"{source}.reshape({layout.tensorssa_shape(source)})", source
+            )
+            result_items.extend(
+                (f"output0_lane{lane}", f"{grouped}[((0, {lane}, None), None, None)]")
+                for lane in range(2)
+            )
+        else:
+            result_items.extend(zip(aux_names, aux_results, strict=True))
         if (
             self.local_reduce is not None
             and sink is not None
@@ -1329,6 +1511,10 @@ class FlexGemmEpilogueEmitter:
             "from cutlass._mlir.dialects import math as mlir_math\n"
             "from torch._inductor.codegen.cutedsl._inline_asm import (\n"
             "    inline_asm_elementwise_intrinsic,\n"
+            ")\n"
+            "from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (\n"
+            "    interleave_lanes as flex_gemm_interleave_lanes,\n"
+            "    interleaved_lane as flex_gemm_interleaved_lane,\n"
             ")\n\n"
         )
         return FlexGemmEpiModSource(

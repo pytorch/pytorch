@@ -13,9 +13,12 @@ import tempfile
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_function_trace_timing(self):
         """Test that inline function timing data is captured during compilation."""
 
