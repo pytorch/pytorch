@@ -11,7 +11,6 @@ from torch._inductor import config, metrics
 from torch._inductor.fx_passes.reduced_atomic_contention import _compute_num_partitions
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
