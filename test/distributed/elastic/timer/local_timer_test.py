@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 import multiprocessing as mp
 import signal
+import sys
 import time
 import unittest
 import unittest.mock as mock
@@ -77,6 +78,32 @@ if not INVALID_PLATFORMS:
 
             timer_client.acquire.assert_called_once_with("test", mock.ANY)
             timer_client.release.assert_called_once_with("test")
+
+        def test_default_scope(self):
+            # The default scope is the file and line of the with statement
+            timer_client = mock.MagicMock()
+            line = sys._getframe().f_lineno + 1
+            with timer.expires(after=1, client=timer_client):
+                pass
+
+            scope = f"{__file__}#{line}"
+            timer_client.acquire.assert_called_once_with(scope, mock.ANY)
+            timer_client.release.assert_called_once_with(scope)
+
+        def test_default_scope_decorator(self):
+            # As a decorator, the default scope is the decorated function's caller
+            timer_client = mock.MagicMock()
+
+            @timer.expires(after=1, client=timer_client)
+            def fn():
+                pass
+
+            line = sys._getframe().f_lineno + 1
+            fn()
+
+            scope = f"{__file__}#{line}"
+            timer_client.acquire.assert_called_once_with(scope, mock.ANY)
+            timer_client.release.assert_called_once_with(scope)
 
         def test_happy_path(self):
             timer.configure(timer.LocalTimerClient(self.mp_queue))
