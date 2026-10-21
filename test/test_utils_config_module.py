@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._config_module import (
     _ConfigEntry,
+    _ImplicationConfigModule,
     _UNSET_SENTINEL,
     Config,
     install_config_module,
@@ -1091,7 +1092,8 @@ class TestConfigImplications(TestCase):
         self.assertTrue(cfg.save_config_portable(readonly_values=True)["a"])
         self.assertIs(cfg._config["a"].user_override.get(), _UNSET_SENTINEL)
 
-    def test_external_alias_snapshots_precede_reads_and_imports(self):
+    @parametrize("implications", (False, True))
+    def test_external_alias_snapshots_precede_reads_and_imports(self, implications):
         cfg = self._make_config(
             "mode = Config(default=False, implies={True: {'flag': True}})\nflag = False"
         )
@@ -1115,7 +1117,14 @@ class TestConfigImplications(TestCase):
             f"external = Config(alias='{ordinary.__name__}.value')\n"
             f"mode = Config(alias='{lazy_name}.mode')\nitems = []\n"
             f"mirror = Config(alias='{ordinary.__name__}.mirror')"
+            + (
+                "\ntrigger = Config(default=False, implies={True: {'implied': True}})"
+                "\nimplied = False"
+                if implications
+                else ""
+            )
         )
+        self.assertEqual(isinstance(wrapper, _ImplicationConfigModule), implications)
         with wrapper.patch(external=2, mode=True, items=[1], mirror=True):
             self.assertEqual(ordinary.value, 2)
             self.assertTrue(ordinary.mirror)
