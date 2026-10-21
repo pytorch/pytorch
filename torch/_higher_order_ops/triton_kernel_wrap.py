@@ -430,8 +430,6 @@ def get_restore_value_args(kernel: "TritonAutotunerType") -> list[str]:
     if hasattr(kernel, "restore_idx"):
         # pyrefly: ignore [missing-attribute]
         return [kernel.fn.arg_names[i] for i in kernel.restore_idx]
-    if not hasattr(kernel, "restore_value"):
-        raise AssertionError('Expected hasattr(kernel, "restore_value")')
     return list(kernel.restore_value)
 
 
