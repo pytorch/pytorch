@@ -3908,7 +3908,7 @@ class TestTorchDeviceType(TestCase):
     # FIXME: port to test_scatter_gather_ops.py
     def scatter_allow_reduce(self, device, dtype, reduceop):
         device_type = torch.device(device).type
-        return device_type != 'cuda' or (reduceop == 'multiply' and dtype.is_floating_point)
+        return device_type not in ('cuda', 'xpu') or (reduceop == 'multiply' and dtype.is_floating_point)
 
     # https://github.com/intel/torch-xpu-ops/issues/5376
     @decorateIf(unittest.expectedFailure,
