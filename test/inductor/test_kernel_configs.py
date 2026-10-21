@@ -81,12 +81,10 @@ def _no_runtime_tuning():
 
 
 @contextlib.contextmanager
-def _configs_tuned_at_compile_time():
-    """Each kernel's config right after its launch in the compile-time autotune block,
-    from the kernel object that launched. The wrapper reads the same objects once the
-    block is done, so this checks it pins each kernel's own finished config; it does
-    not check that tuning chose well."""
-    tuned, in_block = {}, [False]
+def _spy_launches(record):
+    """Calls record(kernel, in_block) after each kernel launch, in_block telling whether
+    the launch was in the compile-time autotune block."""
+    in_block = [False]
     block = PythonWrapperCodegen.generate_and_run_autotune_block
     run = CachingAutotuner.run
 
@@ -99,9 +97,7 @@ def _configs_tuned_at_compile_time():
 
     def run_spy(self, *args, **kwargs):
         out = run(self, *args, **kwargs)
-        name = self.inductor_meta.get("kernel_name")
-        if in_block[0] and name is not None and len(self.launchers) == 1:
-            tuned[name] = config_to_dict(self.launchers[0].config)
+        record(self, in_block[0])
         return out
 
     with (
@@ -110,6 +106,23 @@ def _configs_tuned_at_compile_time():
         ),
         mock.patch.object(CachingAutotuner, "run", run_spy),
     ):
+        yield
+
+
+@contextlib.contextmanager
+def _configs_tuned_at_compile_time():
+    """Each kernel's config right after its launch in the compile-time autotune block,
+    from the kernel object that launched. The wrapper reads the same objects once the
+    block is done, so this checks it pins each kernel's own finished config; it does
+    not check that tuning chose well."""
+    tuned = {}
+
+    def record(kernel, in_block):
+        name = kernel.inductor_meta.get("kernel_name")
+        if in_block and name is not None and len(kernel.launchers) == 1:
+            tuned[name] = config_to_dict(kernel.launchers[0].config)
+
+    with _spy_launches(record):
         yield tuned
 
 
@@ -225,28 +238,14 @@ class TestKernelConfigs(TestCase):
         if cache_hit:
             _code_for(fn, x)
         counters.clear()
-        launched, in_block = [], [False]
-        block = PythonWrapperCodegen.generate_and_run_autotune_block
-        run = CachingAutotuner.run
+        launched = []
 
-        def block_spy(self, *args, **kwargs):
-            in_block[0] = True
-            try:
-                return block(self, *args, **kwargs)
-            finally:
-                in_block[0] = False
-
-        def run_spy(self, *args, **kwargs):
+        def record(kernel, in_block):
             # Only the module's own launches, not the autotune block's.
-            if not in_block[0]:
-                launched.append(self.heuristic_type)
-            return run(self, *args, **kwargs)
+            if not in_block:
+                launched.append(kernel.heuristic_type)
 
-        name = "generate_and_run_autotune_block"
-        with (
-            mock.patch.object(PythonWrapperCodegen, name, block_spy),
-            mock.patch.object(CachingAutotuner, "run", run_spy),
-        ):
+        with _spy_launches(record):
             _, code = _code_for(fn, x)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], int(cache_hit))
         self.assertIn("KERNEL_CONFIGS = {", code)
@@ -502,23 +501,29 @@ class TestKernelConfigs(TestCase):
         no_stages = lambda c: {k: v for k, v in c.items() if k != "num_stages"}  # noqa: E731
         failed = []
 
-        def does_not_fit(cls, name, config_of):
+        def does_not_fit(cls, name, config_of, error):
             orig = getattr(cls, name)
 
             def fail(self, *args):
                 c = config_of(self, *args)
                 if no_stages(config_to_dict(c)) == no_stages(pinned):
                     failed.append(c.num_stages)
-                    raise OutOfResources(1 << 20, 1 << 16, "shared memory")
+                    raise error
                 return orig(self, *args)
 
             return mock.patch.object(cls, name, fail)
 
+        smem = OutOfResources(1 << 20, 1 << 16, "shared memory")
         if failure == "compile":
-            targets = [(CachingAutotuner, "_precompile_config", lambda s, c: c)]
+            targets = [(CachingAutotuner, "_precompile_config", lambda s, c: c, smem)]
         else:
-            results = (TritonCompileResult, StaticTritonCompileResult)
-            targets = [(r, "make_launcher", lambda s: s.config) for r in results]
+            # The static launcher reports shared memory overflow as a CUDA OOM.
+            oom = torch.cuda.OutOfMemoryError("out of shared memory")
+            config_of = lambda s: s.config  # noqa: E731
+            targets = [
+                (TritonCompileResult, "make_launcher", config_of, smem),
+                (StaticTritonCompileResult, "make_launcher", config_of, oom),
+            ]
         tune = CachingAutotuner.autotune_to_one_config
         spy = mock.patch.object(
             CachingAutotuner, "autotune_to_one_config", autospec=True, side_effect=tune
