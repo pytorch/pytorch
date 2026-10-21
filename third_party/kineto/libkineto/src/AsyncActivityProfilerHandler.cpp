@@ -321,7 +321,7 @@ time_point<system_clock> AsyncActivityProfilerHandler::performRunLoopStep(
   VLOG_IF(1, currentIter >= 0)
       << "Run loop on application step(), iteration = " << currentIter;
 
-  switch (currentRunloopState_) {
+  switch (currentRunloopState_.load()) {
     case RunloopState::CollectMemorySnapshot:
       LOG(WARNING)
           << "Entered CollectMemorySnapshot in Kineto Loop Step, skipping loop";

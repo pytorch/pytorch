@@ -135,6 +135,21 @@ Sub-agents overlap on purpose. Expect the same defect back from two or three of 
 
 Any directory may contain a `REVIEW.md` with review rules for code under it. It applies to every changed file under that directory at any depth; for renames and deletions, check both the old and new paths.
 
+## Maintainer Comments
+
+When reviewing a PR, check that every comment from a maintainer has been addressed. A maintainer is a user with triage access or above on the repository; bots and other users do not count. A comment is addressed when the code at HEAD fixes the specific problem it raises, or when the author replied explaining why no change is needed and no maintainer pushed back afterwards. Approvals, praise, and questions already answered in the thread need nothing. Report each unaddressed maintainer comment as a finding that names the maintainer and states what they asked.
+
+In Local CLI Mode, fetch the conversation and check each commenter's access:
+
+```bash
+gh api --paginate repos/pytorch/pytorch/issues/<PR_NUMBER>/comments
+gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/reviews
+gh api --paginate repos/pytorch/pytorch/pulls/<PR_NUMBER>/comments
+gh api repos/pytorch/pytorch/collaborators/<LOGIN>/permission --jq .user.permissions
+```
+
+Any of `triage`, `push`, `maintain` or `admin` being true in the last call means a maintainer. Skip this check if you have no network or `gh` access. Skip this check in GitHub Actions Mode: the comments in the prompt do not say who has triage access.
+
 ## Review Workflow
 
 ### Step 1: Understand Context
@@ -145,6 +160,7 @@ Before reviewing, build understanding of what the PR touches and why:
 3. Note the scope of changes (files affected, lines changed)
 4. Spawn sub-agents to read the unchanged code surrounding each significantly changed file to understand existing patterns and infrastructure
 5. List the `REVIEW.md` files that apply to each changed file (see "Directory Review Guides" above); leave reading them to sub-agents unless you review or fact-check a file yourself
+6. For a PR, list the maintainer comments and whether each is addressed (see "Maintainer Comments" above)
 
 ### Step 2: Deep Review
 
@@ -223,7 +239,7 @@ What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the over
 ### Recommendation
 **Approve** / **Request Changes** / **Needs Discussion**
 
-Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**.
+Missing tests (new functionality without tests, bug fixes without regression tests) always means **Request Changes**. So does an unaddressed maintainer comment.
 
 [Brief justification — focus on what blocks approval, if anything]
 ```

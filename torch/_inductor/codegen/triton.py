@@ -779,6 +779,12 @@ class BlockDescriptorOptions:
 
 @dataclasses.dataclass
 class TensorDescriptorOptions(BlockDescriptorOptions):
+    def format_offsets(self) -> str:
+        offsets = [V.kernel.index_to_str(offset) for offset in self.offsets]
+        if V.kernel.index_dtype != "tl.int32":
+            offsets = [f"({offset}).to(tl.int32)" for offset in offsets]
+        return f"[{', '.join(offsets)}]"
+
     def format(self, name: str, roffset=True) -> str:
         """
         Codegen a call to tl.make_tensor_descriptor()
@@ -2423,12 +2429,18 @@ class TritonOverrides(OpOverrides):
         b_zero = ops.eq(b, zero)
         b = ops.where(b_zero, one, b)
         b_neg = ops.lt(b, zero)
+        # 0 - a overflows when a is the minimum value. When both are negative,
+        # divide a - b instead, which can't overflow, and add 1:
+        # floor(a / b) == floor((a - b) / b) + 1.
+        shift = ops.logical_and(b_neg, ops.lt(a, zero))
+        a = ops.where(shift, ops.sub(a, b), a)
         a = ops.where(b_neg, ops.sub(zero, a), a)
         b = ops.where(b_neg, ops.sub(zero, b), b)
         a_neg = ops.lt(a, zero)
         a = ops.where(a_neg, ops.bitwise_not(a), a)
         quot = ops.truncdiv(a, b)
         quot = ops.where(a_neg, ops.bitwise_not(quot), quot)
+        quot = ops.where(shift, ops.add(quot, one), quot)
         return ops.where(b_zero, zero, quot)
 
     @staticmethod
@@ -3103,6 +3115,56 @@ class TMACompatibilityChecker:
             self.failed_debug_prefix,
         )
         return False
+
+    def can_use_32bit_indexing(self) -> bool:
+        """Whether this access can use int32 tensor-descriptor coordinates.
+
+        Triton tensor-descriptor offsets are int32 even when another access in
+        the same kernel requires int64 pointer arithmetic.  A freshly allocated
+        small output can therefore still use a TMA store in such a kernel.  Be
+        conservative for loads: a small view can alias a much larger allocation,
+        and proving its descriptor-local coordinate range needs more information
+        than the buffer layout currently exposes here.
+        """
+        if self.kernel.index_dtype == "tl.int32":
+            return True
+        # Forced template TMA accesses index per dim, bounded by the template's
+        # sizes, which use_triton_tma_template already range-checks.
+        if self.force:
+            return True
+        if (
+            not self.for_store
+            or self.buffer_name is None
+            or V.graph.get_current_device_or_throw().type != "cuda"
+        ):
+            return False
+
+        buffer = V.graph.try_get_buffer(self.buffer_name)
+        output_node = getattr(self.kernel, "output_node", None)
+        if (
+            buffer is None
+            and output_node is not None
+            and output_node.get_name() == self.buffer_name
+        ):
+            buffer = output_node
+        while isinstance(buffer, ir.MutableBox):
+            buffer = buffer.data
+        if not isinstance(buffer, ir.Buffer) or not buffer.has_tensor_output():
+            return False
+
+        sizevars = V.graph.sizevars
+        layout = buffer.get_layout()
+        storage_size = V.graph.get_allocation_storage_size(buffer)
+        return (
+            sizevars.statically_known_geq(layout.offset, 0)
+            and all(
+                sizevars.statically_known_geq(stride, 0) for stride in layout.stride
+            )
+            and _descriptor_shape_fits_in_int32(V.graph.get_allocation_size(buffer))
+            and sizevars.statically_known_leq(
+                storage_size, torch.iinfo(torch.int32).max
+            )
+        )
 
     def are_block_parameters_compatible(
         self,
@@ -4167,21 +4229,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 have_dense = False
             dense_mask_vars.add(tree.mask_name())
 
+        can_use_block_ptr = (
+            block_ptr
+            and self.allow_block_ptr
+            and use_block_ptr_enabled()
+            # workaround https://github.com/triton-lang/triton/issues/2821
+            and self.index_dtype == "tl.int32"
+        )
+        can_use_tma = (
+            tma_compatibility_checker is not None
+            and tma_compatibility_checker.can_use_tma()
+            and tma_compatibility_checker.can_use_32bit_indexing()
+        )
         if (
-            (
-                (block_ptr and self.allow_block_ptr and use_block_ptr_enabled())
-                or (
-                    tma_compatibility_checker
-                    and tma_compatibility_checker.can_use_tma()
-                )
-            )
+            (can_use_block_ptr or can_use_tma)
             and not override_mask
             and not self._load_mask
             and len(mask_vars - dense_mask_vars) == 0
             and not self.is_indirect_indexing(index)
             and have_loop_vars
-            # workaround https://github.com/triton-lang/triton/issues/2821
-            and self.index_dtype == "tl.int32"
         ):
 
             def match_affine_block(
@@ -4805,11 +4871,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_descriptor_load_line(self, block_descriptor, indexing):
         """Generate the descriptor load line. Override for backend customization."""
-        return f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
+        return f"{block_descriptor}.load({indexing.format_offsets()})"
 
     def codegen_descriptor_store_line(self, block_ptr, indexing, value):
         """Generate the descriptor store line. Override for backend customization."""
-        return f"{block_ptr}.store({V.kernel.index_to_str(indexing.offsets)}, {value})"
+        return f"{block_ptr}.store({indexing.format_offsets()}, {value})"
 
     def check_bounds(
         self,
@@ -5096,6 +5162,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
+        # gdc_wait only covers the direct predecessor, so a kernel that exits
+        # without waiting lets its dependents start before older kernels finish.
+        if not has_wait and self._enable_pdl_codegen():
+            code.writeline(self.GDC_WAIT)
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
@@ -5799,7 +5869,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else value
             )
 
-        do_upcast = pytree.tree_any(low_precision_fp_var, value)
+        # The value's tracked dtype can differ from src_dtype (e.g. it is already
+        # fp32 under codegen_upcast_to_fp32), so promote on src_dtype as well to
+        # keep the accumulator and the final cast consistent with the source.
+        do_upcast = low_precision_fp(src_dtype) or pytree.tree_any(
+            low_precision_fp_var, value
+        )
         original_dtype = dtype
         original_src_dtype = src_dtype
         if do_upcast:
@@ -6572,11 +6647,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not all(isinstance(x, TritonCSEVariable) for x in result_tuple):
             raise AssertionError("all result_tuple entries must be TritonCSEVariable")
 
-        # If BF16/F16 upcasting was done, ensure the output is downcast to the
-        # expected dtype.
+        # If BF16/F16 upcasting was done, ensure value outputs are downcast to
+        # the expected dtype. Index-only arg reductions must remain integers.
         if do_upcast:
             for i, result in enumerate(result_tuple):
-                if reduction_type in arg_with_value_reduction_types and i > 0:
+                if reduction_type in arg_index_reduction_types or (
+                    reduction_type in arg_with_value_reduction_types and i > 0
+                ):
                     continue
                 target_dtype = (
                     original_src_dtype
@@ -6584,10 +6661,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     in (arg_value_reduction_types + arg_with_value_reduction_types)
                     else original_dtype
                 )
-                if result.dtype != target_dtype:
+                compute_dtype = upcast_compute_type(target_dtype)
+                if result.dtype != compute_dtype:
                     self.post_loop_combine.writeline(
-                        f"{result} = {result}.to({triton_compute_type(target_dtype)})"
+                        f"{result} = {result}.to({triton_type(compute_dtype)})"
                     )
+                    result.dtype = compute_dtype
 
         return result_var
 
@@ -7684,6 +7763,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return "pointwise"
 
     @classmethod
+    def gen_driver_setup(cls, device_type: str) -> str:
+        """
+        Code that selects the Triton driver when the kernel module is imported, or ""
+        to leave the active driver alone. Backends that trace on one device but run
+        kernels on another override this.
+        """
+        if device_type == "cpu":
+            return "triton_helpers.set_driver_to_cpu()"
+        return "triton_helpers.set_driver_to_gpu()"
+
+    @classmethod
     @lru_cache(None)
     def gen_common_triton_imports(cls) -> str:
         imports = IndentedBuffer()
@@ -7754,6 +7844,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
         }
+
+        if config.incremental_autotune:
+            inductor_meta["incremental_autotune_max_dispatches"] = (
+                config.incremental_autotune_max_dispatches
+            )
 
         if config.write_are_deterministic_algorithms_enabled:
             inductor_meta["are_deterministic_algorithms_enabled"] = (
@@ -7990,10 +8085,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if name is None:
             code.splice(self.gen_common_triton_imports())
             device_type = V.graph.get_current_device_or_throw().type
-            if device_type == "cpu":
-                code.splice("triton_helpers.set_driver_to_cpu()")
-            else:
-                code.splice("triton_helpers.set_driver_to_gpu()")
+            if driver_setup := self.gen_driver_setup(device_type):
+                code.splice(driver_setup)
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
@@ -8883,6 +8976,7 @@ class TritonScheduling(SIMDScheduling):
         [
             BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
+            BackendFeature.INDIRECT_INDEXING,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,
             BackendFeature.SCAN,
@@ -8967,24 +9061,21 @@ class TritonScheduling(SIMDScheduling):
         ):
             return  # External handler handled it
 
-        compile_wrapper = IndentedBuffer()
+        current_device = V.graph.get_current_device_or_throw()
 
-        # The wrapper literal below is the dedented, stripped source; the eager
-        # submission must be the same bytes so CompiledTritonKernels (keyed on the
-        # exact string) hits at wrapper time instead of compiling the kernel twice
-        # and overwriting the same cache file.
+        # The default wrapper's async_compile.triton literal is this dedented, stripped
+        # source; the eager submission must be the same bytes so CompiledTritonKernels
+        # (keyed on the exact string) hits at wrapper time instead of compiling the
+        # kernel twice and overwriting the same cache file.
         src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
-        if async_compile.use_process_pool():
+        if (
+            not wrapper.defines_triton_kernels_as_code()
+            and async_compile.use_process_pool()
+        ):
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
             # so that the second time we call async_compile.triton, we do no work.
             async_compile.triton(subs_name, src_code)
-
-        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
-
-        compile_wrapper.splice(src_code, strip=True)
-        current_device = V.graph.get_current_device_or_throw()
-        compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
         # compile-on-one-rank: the artifact may be built on one machine and run on
         # another, so the wrapper must not embed an absolute cache path (it carries the
@@ -8998,7 +9089,13 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         metadata_comment += "\n" + origins + "\n" + detailed_origins
-        wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
+        wrapper.emit_triton_kernel_definition(
+            kernel_name,
+            subs_name,
+            src_code,
+            current_device.type,
+            metadata=metadata_comment,
+        )
 
     def define_kernel(self, src_code, node_schedule, kernel):
         wrapper = V.graph.wrapper_code
