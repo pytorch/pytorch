@@ -229,6 +229,16 @@ class TestWrapperPreamble(TestCase):
         self.assertNotIn("AsyncCompile", code)
         self.assertEqual(_run_from_file(code, [a, b])[0], result)
 
+    def test_kernels_only_a_subgraph_compiles_keep_async_compile_wait(self):
+        # The root compiles nothing; only the branches' C++ kernels name async_compile.
+        def fn(p, x):
+            return torch.cond(p, lambda t: t.cos(), lambda t: t.sin(), (x,))
+
+        p, x = torch.tensor(True), torch.randn(8)
+        result, code = _code_for(fn, p, x)
+        self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
+        self.assertEqual(_run_from_file(code, [p, x])[0], result)
+
     @requires_cuda_and_triton
     def test_module_level_kernels_keep_async_compile_wait(self):
         # Nothing but the wait names async_compile, and the wait is what compiles the
