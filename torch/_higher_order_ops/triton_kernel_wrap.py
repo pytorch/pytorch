@@ -2537,7 +2537,7 @@ class TritonHOPifier:
             prune_configs_by = {
                 "perf_model": variable.kernel.perf_model,
                 "early_config_prune": variable.kernel.early_config_prune,
-                "configs_top_k": variable.kernel.configs_top_k,
+                "top_k": variable.kernel.configs_top_k,
             }
             new_kernel = autotune(
                 configs=new_configs,
@@ -2583,7 +2583,7 @@ class TritonHOPifier:
                 prune_configs_by = {
                     "perf_model": variable.kernel.perf_model,
                     "early_config_prune": variable.kernel.early_config_prune,
-                    "configs_top_k": variable.kernel.configs_top_k,
+                    "top_k": variable.kernel.configs_top_k,
                 }
 
                 new_kernel = autotune(
@@ -2641,7 +2641,7 @@ class TritonHOPifier:
                     prune_configs_by = {
                         "perf_model": variable.kernel.perf_model,
                         "early_config_prune": variable.kernel.early_config_prune,
-                        "configs_top_k": variable.kernel.configs_top_k,
+                        "top_k": variable.kernel.configs_top_k,
                     }
 
                     new_kernel = autotune(
