@@ -259,7 +259,8 @@ inline ZeModulePtr _createModule(
   ze_module_handle_t rawModule = nullptr;
   ze_result_t error_no = ze().zeModuleCreate(
       context, device, &moduleDescription, &rawModule, &buildLog);
-  // The spec leaves *phModule undefined on failure, so adopt it only on success.
+  // The spec leaves *phModule undefined on failure, so adopt it only on
+  // success.
   ZeModulePtr module(error_no == ZE_RESULT_SUCCESS ? rawModule : nullptr);
 
   if (error_no != ZE_RESULT_SUCCESS) {
@@ -335,13 +336,6 @@ inline LoadedKernel _createKernel(
       requiredSimd != 0 ? requiredSimd : props.maxSubgroupSize;
   *nSpillsPtr = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
                                : props.spillMemSize;
-  auto& syclContext = c10::xpu::get_device_context();
-  auto mod = sycl::make_kernel_bundle<
-      sycl::backend::ext_oneapi_level_zero,
-      sycl::bundle_state::executable>(
-      {module.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
-      syclContext);
-  module.release();
   auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
       {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
