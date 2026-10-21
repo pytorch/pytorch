@@ -8,6 +8,10 @@
 #include <libkineto.h>
 #endif
 
+#if defined(USE_KINETO) && defined(HAS_XPUPTI)
+#include <XpuptiMetricQuery.h>
+#endif
+
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
@@ -515,6 +519,13 @@ void logInvariantViolation(
   }
 #endif // USE_KINETO
 }
+
+#if defined(USE_KINETO) && defined(HAS_XPUPTI)
+std::vector<std::pair<std::string, std::vector<std::string>>>
+xpuAvailableMetrics(const std::array<uint8_t, 16>& deviceUuid) {
+  return libkineto::xpuptiAvailableMetrics(deviceUuid);
+}
+#endif
 
 } // namespace profiler::impl::kineto
 

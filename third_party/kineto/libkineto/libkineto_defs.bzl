@@ -133,6 +133,7 @@ XPUPTI_SRCS = [
     "src/plugin/xpupti/XpuptiActivityHandlers.cpp",
     "src/plugin/xpupti/XpuptiActivityProfiler.cpp",
     "src/plugin/xpupti/XpuptiActivityProfilerSession.cpp",
+    "src/plugin/xpupti/XpuptiMetricQuery.cpp",
     "src/plugin/xpupti/XpuptiProfilerMacros.cpp",
     "src/plugin/xpupti/XpuptiScopeProfilerApi.cpp",
     "src/plugin/xpupti/XpuptiScopeProfilerConfig.cpp",
