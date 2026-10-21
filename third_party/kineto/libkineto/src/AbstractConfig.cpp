@@ -97,6 +97,7 @@ int64_t AbstractConfig::toIntRange(const string& val, int64_t min, int64_t max)
     const {
   char* invalid = nullptr;
   int64_t res = strtoll(val.c_str(), &invalid, 10);
+  // NOLINTNEXTLINE(facebook-hte-NullableDereference)
   if (val.empty() || *invalid) {
     KINETO_THROW(
         std::invalid_argument, fmt::format("Invalid integer: {}", val));
