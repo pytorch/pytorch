@@ -761,8 +761,7 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _cuda_matmul_precision =
-        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    _cuda_matmul_precision = ctx.float32PrecisionCudaMatmul();
     _uses_legacy_allow_tf32 = false;
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
@@ -771,8 +770,7 @@ struct GlobalStateGuard {
   }
 
   bool cudaMatmulPrecisionMatches(const at::Context& ctx) const {
-    const auto precision =
-        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL);
+    const auto precision = ctx.float32PrecisionCudaMatmul();
     return _uses_legacy_allow_tf32
         ? precision != at::Float32Precision::BF16X9 &&
             (_cuda_matmul_precision == at::Float32Precision::TF32) ==
