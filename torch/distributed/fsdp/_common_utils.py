@@ -221,6 +221,11 @@ class _FSDPDeviceHandle:
     semantics to be integrated with FSDP.
     """
 
+    # Return these backend modules directly to avoid proxy overhead.
+    # Other backends are accessed through the device-handle proxy.
+    # register/unregister are intended for import-time, single-threaded setup.
+    _FAST_PATH_BACKENDS: set[str] = {"cuda", "mtia"}
+
     def __init__(self, device: torch.device, backend: Any = None):
         if backend is None:
             try:
@@ -232,19 +237,46 @@ class _FSDPDeviceHandle:
                 ) from exc
         else:
             self.__backend = backend
+            self.__device = device
+
+    @classmethod
+    def register_fast_path_backend(cls, device_type: str) -> None:
+        """
+        Register a device type whose backend module is returned directly.
+        The backend must already be registered as ``torch.<device_type>``.
+        """
+        if not hasattr(torch, device_type):
+            raise AttributeError(
+                f"Device type '{device_type}' does not have a corresponding backend "
+                f"registered as 'torch.{device_type}'."
+            )
+        cls._FAST_PATH_BACKENDS = cls._FAST_PATH_BACKENDS | {device_type}
+
+    @classmethod
+    def unregister_fast_path_backend(cls, device_type: str) -> None:
+        """
+        Remove a device type from the direct-return registry.
+
+        Subsequent ``from_device`` calls use the device-handle proxy for
+        this device type. Existing handles are unaffected. Removing an
+        unregistered device type is a no-op.
+        """
+        cls._FAST_PATH_BACKENDS = cls._FAST_PATH_BACKENDS - {device_type}
 
     @classmethod
     def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
-        Return a device handle corresponding to the device, and through this handle,
-        operations with the same semantics as CUDA can be performed on the device.
-        Just return torch.cuda if the device is cuda to make attribute-access faster.
-        Custom backend must first register a module with the same name with {device.type} on torch.
+        Return a device handle corresponding to the device.
+
+        Registered fast-path backends return ``torch.<device_type>``
+        directly to avoid proxy overhead. Other backends use a proxy
+        that forwards attribute access to the corresponding module.
+
+        Custom backends must first register their module as
+        ``torch.<device_type>``.
         """
-        if device.type == "cuda":
-            return cast(_FSDPDeviceHandle, torch.cuda)
-        elif device.type == "mtia":
-            return cast(_FSDPDeviceHandle, torch.mtia)
+        if device.type in cls._FAST_PATH_BACKENDS:
+            return cast(_FSDPDeviceHandle, getattr(torch, device.type))
         return cls(device)
 
     def __getattr__(self, name: str, /) -> Any:

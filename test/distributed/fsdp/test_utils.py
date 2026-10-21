@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp._common_utils import (
+    _FSDPDeviceHandle,
     _get_param_to_fqns,
     _override_module_mixed_precision,
 )
@@ -18,6 +19,7 @@ from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
@@ -231,6 +233,83 @@ class TestUtils(TestCase):
         self.assertNotIn("custom_key", model2.lin._wrap_overrides)
         self.assertIsNot(model1.lin._wrap_overrides, model2.lin._wrap_overrides)
 
+
+class TestFSDPDeviceHandle(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._orig_fast_path_backends = _FSDPDeviceHandle._FAST_PATH_BACKENDS.copy()
+        self.addCleanup(
+            setattr,
+            _FSDPDeviceHandle,
+            "_FAST_PATH_BACKENDS",
+            self._orig_fast_path_backends,
+        )
+
+    @parametrize("device_type", ["cuda", "mtia"])
+    def test_default_fast_path_backends(self, device_type):
+        handle = _FSDPDeviceHandle.from_device(torch.device(device_type))
+        self.assertIs(handle, getattr(torch, device_type))
+
+    def test_non_fast_path_backend_returns_proxy(self):
+        handle = _FSDPDeviceHandle.from_device(torch.device("cpu"))
+        self.assertIsInstance(handle, _FSDPDeviceHandle)
+        self.assertIsNot(handle, torch.cpu)
+        self.assertIs(handle.synchronize, torch.cpu.synchronize)
+
+    def test_proxy_missing_attribute_error(self):
+        handle = _FSDPDeviceHandle.from_device(torch.device("cpu"))
+        with self.assertRaisesRegex(
+            AttributeError, "Custom backend 'cpu' not implement 'torch.cpu"
+        ):
+            handle.no_such_attr
+
+    def test_missing_backend_module_error(self):
+        with self.assertRaisesRegex(AttributeError, "registered as 'torch.meta'"):
+            _FSDPDeviceHandle(torch.device("meta"))
+
+    def test_explicit_backend_construction(self):
+        handle = _FSDPDeviceHandle(torch.device("cpu"), backend=torch.cpu)
+        self.assertIs(handle.synchronize, torch.cpu.synchronize)
+        with self.assertRaisesRegex(
+            AttributeError, "Custom backend 'cpu' not implement"
+        ):
+            handle.no_such_attr
+
+    def test_register_and_unregister_fast_path_backend(self):
+        device = torch.device("cpu")
+        _FSDPDeviceHandle.register_fast_path_backend("cpu")
+        self.assertIs(_FSDPDeviceHandle.from_device(device), torch.cpu)
+        _FSDPDeviceHandle.unregister_fast_path_backend("cpu")
+        self.assertIsInstance(_FSDPDeviceHandle.from_device(device), _FSDPDeviceHandle)
+
+    def test_register_missing_backend_module_raises(self):
+        with self.assertRaisesRegex(AttributeError, "registered as 'torch.meta'"):
+            _FSDPDeviceHandle.register_fast_path_backend("meta")
+        self.assertEqual(
+            _FSDPDeviceHandle._FAST_PATH_BACKENDS, self._orig_fast_path_backends
+        )
+
+    def test_unregister_unregistered_backend_is_noop(self):
+        _FSDPDeviceHandle.unregister_fast_path_backend("meta")
+        self.assertEqual(
+            _FSDPDeviceHandle._FAST_PATH_BACKENDS, self._orig_fast_path_backends
+        )
+        self.assertIs(_FSDPDeviceHandle.from_device(torch.device("cuda")), torch.cuda)
+
+    def test_subclass_registry_isolation(self):
+        class SubHandle(_FSDPDeviceHandle):
+            pass
+
+        _FSDPDeviceHandle.register_fast_path_backend("cpu")
+        self.assertIs(SubHandle.from_device(torch.device("cpu")), torch.cpu)
+        SubHandle.unregister_fast_path_backend("cpu")
+        self.assertIsInstance(
+            SubHandle.from_device(torch.device("cpu")), _FSDPDeviceHandle
+        )
+        self.assertIs(_FSDPDeviceHandle.from_device(torch.device("cpu")), torch.cpu)
+
+
+instantiate_parametrized_tests(TestFSDPDeviceHandle)
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
