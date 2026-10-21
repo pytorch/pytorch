@@ -4,8 +4,10 @@ import gc
 import random
 import sys
 import time
+import types
 from collections import OrderedDict
 from dataclasses import dataclass
+from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -19,6 +21,7 @@ from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -50,6 +53,8 @@ else:
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "device_list",
         [
@@ -296,17 +301,20 @@ class TestFSDPDeviceHandle(TestCase):
         )
         self.assertIs(_FSDPDeviceHandle.from_device(torch.device("cuda")), torch.cuda)
 
-    def test_subclass_registry_isolation(self):
+    def test_subclass_shares_registry(self):
         class SubHandle(_FSDPDeviceHandle):
             pass
 
-        _FSDPDeviceHandle.register_fast_path_backend("cpu")
+        SubHandle.register_fast_path_backend("cpu")
         self.assertIs(SubHandle.from_device(torch.device("cpu")), torch.cpu)
-        SubHandle.unregister_fast_path_backend("cpu")
-        self.assertIsInstance(
-            SubHandle.from_device(torch.device("cpu")), _FSDPDeviceHandle
-        )
         self.assertIs(_FSDPDeviceHandle.from_device(torch.device("cpu")), torch.cpu)
+
+    def test_register_incomplete_backend_raises(self):
+        backend = types.SimpleNamespace(current_stream=lambda: None)
+        with mock.patch.object(torch, "incomplete_dev", backend, create=True):
+            with self.assertRaisesRegex(AttributeError, "missing attributes required"):
+                _FSDPDeviceHandle.register_fast_path_backend("incomplete_dev")
+        self.assertNotIn("incomplete_dev", _FSDPDeviceHandle._FAST_PATH_BACKENDS)
 
 
 instantiate_parametrized_tests(TestFSDPDeviceHandle)
