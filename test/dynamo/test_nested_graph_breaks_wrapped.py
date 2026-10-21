@@ -126,12 +126,17 @@ xfails = [
     NestedGraphBreaksMiscTests.test_replay_side_effects_model_attr_nested_graph_breaks,
     # caching_precompile initializes the package before debug_force_nested_calls
     # replaces the top frame, so the package is keyed to a different code object
+    NestedGraphBreaksMiscTests.test_cache_entry_survives_reset_getter_debug_isolate_recompiles_False_nested_graph_breaks,
+    NestedGraphBreaksMiscTests.test_cache_entry_survives_reset_getter_debug_isolate_recompiles_True_nested_graph_breaks,
+    NestedGraphBreaksMiscTests.test_cache_entry_survives_reset_getter_region_isolate_recompiles_False_nested_graph_breaks,
+    NestedGraphBreaksMiscTests.test_cache_entry_survives_reset_getter_region_isolate_recompiles_True_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_dynamo_cache_move_to_front_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_dynamo_reset_clears_cache_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_fail_on_recompile_error_message_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_get_cache_entry_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_precompile_entries_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_precompile_entry_hit_nested_graph_breaks,
+    NestedGraphBreaksMiscTests.test_precompile_entry_survives_reset_nested_graph_breaks,
     NestedGraphBreaksMiscTests.test_precompile_fail_on_recompile_nested_graph_breaks,
     NestedGraphBreaksDecoratorTests.test_compile_staticmethod_caching_precompile_nested_graph_breaks,
     NestedGraphBreaksDecoratorTests.test_compile_class_caching_precompile_nested_graph_breaks,

@@ -2,10 +2,19 @@
 ---
 InheritParentConfig: true
 Checks: '
+-clang-diagnostic-deprecated-copy-with-dtor,
+-clang-diagnostic-shorten-64-to-32,
+-clang-diagnostic-switch-enum,
 -cppcoreguidelines-avoid-c-arrays,
 -modernize-avoid-c-arrays,
 -cppcoreguidelines-avoid-const-or-ref-data-members,
+-cppcoreguidelines-special-member-functions,
 -cppcoreguidelines-use-default-member-init,
+-facebook-hte-BadCall-sleep_for,
+-facebook-hte-CArray,
+-facebook-hte-NullableReturn,
+-google-build-using-namespace,
+-misc-unused-alias-decls,
 -modernize-use-default-member-init,
 -clang-analyzer-core.BitwiseShift,
 -clang-analyzer-security.ArrayBound,
