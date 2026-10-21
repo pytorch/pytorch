@@ -848,7 +848,12 @@ class CachingAutotuner(KernelInterface):
         static_triton_bundle_key: str | None = None,
     ):
         if warm_cache_only:
-            self._precompile_worker()
+            try:
+                self._precompile_worker()
+            except NoTritonConfigsError:
+                # The precompile() that follows fails again and falls back.
+                if self.fallback is None:
+                    raise
             return
         with self.lock:
             # Helper function for reloading a kernel generated in a worker
@@ -871,18 +876,19 @@ class CachingAutotuner(KernelInterface):
                 if key is not None and self.is_statically_launchable():
                     TritonBundler.put_static_autotuner(key, self)
                 self._make_launchers()
-            except (RuntimeError, OutOfResources) as e:
+            except (NoTritonConfigsError, OutOfResources) as e:
                 if self.fallback is None:
                     raise
                 # The pinned config fit the GPU it was tuned on; this one may be smaller,
                 # which Triton reports when it loads the binary.
                 log.warning("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
-                fallback, self.fallback = self.fallback(), None
-                self.configs = fallback.configs
-                self.save_cache_hook = fallback.save_cache_hook
-                self.compile_results, self.launchers = [], []
-                self._precompile_worker()
-                self._make_launchers()
+                self.release_benchmark_artifacts()
+                fallback = self.fallback()
+                fallback.set_compile_info(self.compile_id, self.is_backward)
+                fallback.precompile(reload_kernel=reload_kernel)
+                # Become the unpinned kernel, which the module-level name binds to self.
+                self.__dict__ = {**vars(fallback), "lock": self.lock}
+                return
             self._dynamic_scale_rblock()
 
     def _precompile_worker(self):
@@ -1166,7 +1172,7 @@ class CachingAutotuner(KernelInterface):
                         log.debug("Retrying with num_stages=1 after: %s", exc)
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
-                    raise RuntimeError(
+                    raise NoTritonConfigsError(
                         f"No valid triton configs. {type(exc).__name__}: {exc}"
                     )
             self.launchers = launchers
@@ -3765,6 +3771,11 @@ def cached_autotune(
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.
+
+    A kernel whose name is a key of the ``KERNEL_CONFIGS`` dict in its module's globals
+    (written by the python wrapper under ``triton.autotune_at_compile_time``, see
+    ``_KernelConfigs`` in codegen/wrapper.py) is built as a FIXED kernel with that
+    config, and falls back to ``configs`` if it does not compile or load.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     compiled = compiled_kernels_for_load.get()
@@ -3784,7 +3795,8 @@ def cached_autotune(
     def decorator(fn):
         # The config compile-time autotuning chose, which the kernel launches with instead
         # of tuning again: KERNEL_CONFIGS in the python wrapper module that defines it.
-        pinned = fn.fn.__globals__.get("KERNEL_CONFIGS", {}).get(name)
+        table = fn.fn.__globals__.get("KERNEL_CONFIGS")
+        pinned = table.get(name) if isinstance(table, dict) else None
         if pinned is None:
             return _cached_autotune(*args, **cls_kwargs)(fn)
         cfg = {**pinned}
