@@ -1,4 +1,36 @@
 import inspect
+import types
+import weakref
+from collections.abc import Callable, Mapping
+from typing import Any
+
+
+_Parameters = Mapping[str, inspect.Parameter]
+# Weakly keyed, so callers can pass short-lived functions such as closures
+_function_parameters: weakref.WeakKeyDictionary[types.FunctionType, _Parameters] = (
+    weakref.WeakKeyDictionary()
+)
+_method_parameters: weakref.WeakKeyDictionary[types.FunctionType, _Parameters] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _cached_parameters(fn: Callable[..., Any]) -> _Parameters:
+    """
+    Returns inspect.signature(fn).parameters, cached for Python functions and
+    methods. A bound method's signature depends only on its underlying function,
+    so methods are cached by that function, separately from the function itself,
+    whose signature also includes self.
+    """
+    is_method = isinstance(fn, types.MethodType)
+    func = fn.__func__ if is_method else fn
+    if not isinstance(func, types.FunctionType):
+        return inspect.signature(fn).parameters
+    cache = _method_parameters if is_method else _function_parameters
+    params = cache.get(func)
+    if params is None:
+        params = cache[func] = inspect.signature(fn).parameters
+    return params
 
 
 def _signature_metadata(
