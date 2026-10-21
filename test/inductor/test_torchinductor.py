@@ -20474,10 +20474,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (x,))
 
         code = run_and_get_triton_code(torch.compile(fn), x)
-        # the store-only index_put kernel must wait for mul before storing
+        # the store-only index_fill kernel must wait for mul before storing
         (
             FileCheck()
-            .check("def triton_poi_fused_arange_index_put")
+            .check("def triton_poi_fused_arange_index_fill")
             .check_not("store")
             .check("gdc_wait")
             .check("store")

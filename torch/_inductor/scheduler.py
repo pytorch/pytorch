@@ -5977,7 +5977,7 @@ class Scheduler:
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
         # mutation_real_name = {"buf1" : "buf0"}
-        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        # in codegen we only use buf0, never buf1
         self.mutation_real_name: dict[str, str] = {}
 
         # We handle mutation by renaming modified versions of the same
@@ -5987,7 +5987,7 @@ class Scheduler:
         # Example:
         # If you mutate buf0 inside of buf1's kernel, then:
         # mutation_renames = {"buf0" : "buf1"}
-        # in codegen we only use buf0, never buf1
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
         self.mutation_renames: dict[str, str] = {}
 
         self.seen_template_fusions: OrderedSet[
