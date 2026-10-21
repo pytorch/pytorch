@@ -48,10 +48,10 @@
 namespace KINETO_NAMESPACE {
 namespace {
 
-constexpr size_t kHardwareBufferSizeBytes = 64 * 1024 * 1024;
+constexpr size_t kHardwareBufferSizeBytes = size_t{64} * 1024 * 1024;
 // Counter-data images are fully allocated in host memory. Bound their size
 // independently of CUPTI's uint32_t sample-count limit.
-constexpr size_t kMaxCounterDataImageSizeBytes = 256 * 1024 * 1024;
+constexpr size_t kMaxCounterDataImageSizeBytes = size_t{256} * 1024 * 1024;
 
 // GA100 only supports variable-frequency SYSCLK sampling. One option is to
 // measure hardware clock frequency and estimate the number of cycles needed to
@@ -115,7 +115,7 @@ uint32_t maxSamplesForDecode(
 } // namespace
 
 CuptiPMSamplingApi::~CuptiPMSamplingApi() {
-  disable();
+  CuptiPMSamplingApi::disable();
   if (samplingObject_ != nullptr || hostObject_ != nullptr ||
       profilerInitialized_) {
     LOG(WARNING) << "CUPTI PM sampling cleanup failed during destruction; "
@@ -182,8 +182,8 @@ void CuptiPMSamplingApi::configureCupti() {
         std::string{"cudaGetDeviceProperties failed: "} +
             cudaGetErrorString(cudaStatus));
   }
-  CUpti_PmSampling_TriggerMode triggerMode;
-  uint64_t samplingInterval;
+  CUpti_PmSampling_TriggerMode triggerMode{};
+  uint64_t samplingInterval = 0;
   std::chrono::nanoseconds capacityInterval =
       config_.samplingInterval.value_or(std::chrono::milliseconds{1});
   // GPU_TIME_INTERVAL is unavailable on GA100. The wall-time duration of this
@@ -408,7 +408,7 @@ bool CuptiPMSamplingApi::decode(std::vector<CuptiPMSample>& samples) {
   }
 
   const auto reason = decode.decodeStopReason;
-  bool isBufferDrained;
+  bool isBufferDrained = false;
   switch (reason) {
     case CUPTI_PM_SAMPLING_DECODE_STOP_REASON_OTHER:
     case CUPTI_PM_SAMPLING_DECODE_STOP_REASON_COUNTER_DATA_FULL:

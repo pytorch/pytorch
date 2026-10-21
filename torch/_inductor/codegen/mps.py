@@ -13,6 +13,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
@@ -212,6 +213,8 @@ class MetalOverrides(OpOverrides):
                 "float64 cast requested, probably from tensorify_python_scalars"
             )
             return f"static_cast<float>({x})"
+        if use_compute_types and dtype in (torch.float16, torch.bfloat16):
+            return f"static_cast<float>(static_cast<{DTYPE_TO_METAL[dtype]}>({x}))"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
@@ -276,7 +279,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
+        typecast_b = f"static_cast<decltype({b}+{c})>({b})"
+        typecast_c = f"static_cast<decltype({b}+{c})>({c})"
+        return f"{a} ? {typecast_b} : {typecast_c}"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
@@ -559,6 +564,7 @@ class MetalOverrides(OpOverrides):
 
         # Unary special ops with forward in method name
         for name in [
+            "airy_ai",
             "bessel_j0",
             "bessel_j1",
             "bessel_y0",
@@ -675,6 +681,10 @@ class MetalKernel(SIMDKernel):
             atomic_type = f"c10::metal::AtomicType<{dtype_str}>"
             cast_var = f"reinterpret_cast<device {atomic_type}::type *>({var})"
             line = f"{atomic_type}::atomic_add({cast_var}, {self.index_to_str(index)}, {cast_val});"
+            # Past the reduction every thread holds the same value, so only one may accumulate it
+            if self.features.is_reduction() and not self.inside_reduction:
+                reduction_dim = next(t for t in self.range_trees if t.is_reduction)
+                line = f"if ({reduction_dim.name} == 0) {line}"
         else:
             raise RuntimeError(f"Unimplemented store mode {mode}")
         if self.inside_reduction:
@@ -1081,7 +1091,7 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(__file__).parent.parent.parent / "include"],
+                    [Path(get_file_path("torch")) / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
