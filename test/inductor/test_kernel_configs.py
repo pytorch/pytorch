@@ -633,6 +633,27 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(cfg.kwargs, {"XBLOCK": 128})
 
     @requires_cuda_and_triton
+    def test_pinned_kernel_keeps_the_backends_extra_options(self):
+        # An out-of-tree backend can tune options into Config.extra_options.
+        options = {"backend_option": 2}
+
+        def record(kernel, in_block):
+            if in_block:
+                kernel.launchers[0].config.extra_options = options
+
+        x = torch.randn(64, 128, device="cuda")
+        with _spy_launches(record):
+            result, code = _code_for(_softmax, x)
+        ns = _load_from_file(code)
+        self.assertEqual(ns["call"]([x])[0], result)
+        self.assertTrue(ns["KERNEL_CONFIGS"])
+        for name, cfg in ns["KERNEL_CONFIGS"].items():
+            self.assertEqual(cfg["extra_options"], options, name)
+            (launcher,) = ns[name].launchers
+            self.assertEqual(launcher.config.extra_options, options, name)
+            self.assertNotIn("extra_options", launcher.config.kwargs, name)
+
+    @requires_cuda_and_triton
     def test_without_compile_time_autotuning_nothing_is_pinned(self):
         x = torch.randn(64, 128, device="cuda")
         cfg = {"triton.autotune_at_compile_time": None}
