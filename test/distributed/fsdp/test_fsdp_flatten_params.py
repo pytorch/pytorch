@@ -11,11 +11,7 @@ from torch.distributed.fsdp._flat_param import (
     FlatParamShardMetadata,
     HandleShardingStrategy,
 )
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import DISTRIBUTED_BACKEND, FSDPTestContinuous
 from torch.testing._internal.common_utils import (
@@ -128,10 +124,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         return module
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_partial_flattening(self, device):
         """Tests flattening some submodules but not others."""
         self.run_subtests(
@@ -189,10 +181,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         )
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_flatten_nothing(self, device):
         """
         Tests that constructing a ``FlatParamHandle`` with no parameters
@@ -218,10 +206,6 @@ class TestFlattenParams(FlattenParamsTestBase):
             )
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_empty_module(self, device):
         """
         Tests flattening an empty module (i.e. one without any parameters).
@@ -250,10 +234,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         return EmptyModule()
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_numel_without_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are no shared
@@ -271,10 +251,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         self._test_numel(module)
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_numel_with_shared_params(self, device):
         """
         Tests that numel is preserved after flattening when there are shared
@@ -302,10 +278,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_output_without_shared_params(self, device):
         """
         Tests a forward pass after flattening when there are no shared
@@ -323,10 +295,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         self._test_output(module)
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_output_with_shared_params(self, device):
         """
         Tests a forward pass after flattening when there are shared parameters
@@ -357,10 +325,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         return module(*input)
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_pnorm_after_step_with_shared_params(self, device):
         """
         Tests for parameter Frobenius norm parity after an optimizer step when
@@ -392,10 +356,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         return torch.norm(torch.stack([p.detach().norm() for p in module.parameters()]))
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_flat_param_shard_metadata_unaligned(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
@@ -548,10 +508,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         )
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_flat_param_shard_metadata_aligned_full_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
@@ -606,10 +562,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         )
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_flat_param_shard_metadata_aligned_mixed_precision(self, device):
         """
         Tests that ``FlatParameter`` shard metadata are computed as expected
@@ -692,10 +644,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         )
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_flat_param_shard_metadata_with_memory_format(self, device, memory_format):
         """
@@ -746,10 +694,6 @@ class TestFlattenParams(FlattenParamsTestBase):
         )
 
     @requires_world_size(1)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     def test_writeback_orig_params_no_shard(self, device):
         class EmbeddingModel(nn.Module):
             def __init__(self) -> None:
