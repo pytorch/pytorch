@@ -39,6 +39,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.utils._debug_mode import DebugMode
+from torch.utils._debug_mode._calls import _TritonKernelCall
 from torch.utils._triton import has_triton_package
 
 
@@ -564,15 +566,34 @@ class TestKernelConfigs(TestCase):
         # run() records a DebugMode launch before a lazy precompile, which is where a
         # pinned kernel may fall back; the launch must still be finalized afterwards.
         x = torch.randn(64, 3000, device="cuda")
-        _, code = _code_for(lambda x: x.sum(-1), x)
+        cfg = {"autotune_local_cache": False, "max_autotune": True}
+        result, code = _code_for(lambda x: x.sum(-1), x, **cfg)
         ns = _load_from_file(code)
         (kernel,) = _kernels(code)
         autotuner = ns[kernel]
-        debug_call = object()
-        autotuner._debug_call = debug_call
-        autotuner._fall_back_to_tuning(RuntimeError("does not fit"))
+        (launcher,) = autotuner.launchers
+        pinned = config_to_dict(launcher.config)
+        autotuner.launchers = []
+        smem = OutOfResources(1 << 20, 1 << 16, "shared memory")
+
+        def does_not_fit(orig):
+            def make_launcher(self):
+                if config_to_dict(self.config) == pinned:
+                    raise smem
+                return orig(self)
+
+            return make_launcher
+
+        with contextlib.ExitStack() as stack:
+            for cls in (TritonCompileResult, StaticTritonCompileResult):
+                fail = does_not_fit(cls.make_launcher)
+                stack.enter_context(mock.patch.object(cls, "make_launcher", fail))
+            with DebugMode() as debug_mode:
+                self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
         self.assertIsNone(autotuner.fallback)
-        self.assertIs(autotuner._debug_call, debug_call)
+        (call,) = [c for c in debug_mode.operators if isinstance(c, _TritonKernelCall)]
+        # finalize() drops the launch's tensors.
+        self.assertFalse(hasattr(call, "kwargs"))
 
     # Nothing launches, so no GPU is needed.
     @unittest.skipIf(not has_triton_package(), "requires triton")
