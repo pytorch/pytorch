@@ -1750,7 +1750,7 @@ if(USE_KINETO)
   endif()
 
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
-  set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
+  set(KINETO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/torch/csrc/profiler/kineto/libkineto" CACHE STRING "")
   set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
 
   # Kineto's unit tests need gtest, which only exists when BUILD_TEST is on.

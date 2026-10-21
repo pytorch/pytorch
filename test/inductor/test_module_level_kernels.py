@@ -204,17 +204,45 @@ import triton.language.math
 """
         self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
 
+    def test_a_template_repeating_the_header_keeps_it(self):
+        # triton_mm_grouped defines @triton.jit helpers above def_kernel, which emits
+        # the header again; renaming the repeat broke the helpers' decorators.
+        src = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def helper(x):
+    return tl.abs(x)
+
+import triton
+import triton.language as tl
+from triton.language import exp as op
+
+@triton.jit
+def k(a):
+    return helper(op(a))
+"""
+        expected = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def helper_k_0(x):
+    return tl.abs(x)
+
+import triton
+import triton.language as tl
+from triton.language import exp as op_k_0
+
+@triton.jit
+def k_0(a):
+    return helper_k_0(op_k_0(a))
+"""
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
+
 
 class TestModuleLevelKernels(TestCase):
-    def setUp(self):
-        super().setUp()
-        # Module-level kernels are not the default yet.
-        patcher = mock.patch.object(
-            PythonWrapperCodegen, "defines_triton_kernels_as_code", lambda self: True
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     @requires_cuda_and_triton
     @parametrize("fn", [_softmax, _cond_softmax])
     def test_kernels_are_defined_at_module_level(self, fn):
@@ -759,14 +787,6 @@ class TestModuleLevelKernels(TestCase):
         self.assertEqual(load_from_python(code)([x])[0], result)
         shifted = "\n" * code.count("\n") + code
         self.assertEqual(load_from_python(shifted)([x])[0], result)
-
-
-class TestDefaultWrapper(TestCase):
-    @requires_cuda_and_triton
-    def test_default_wrapper_still_uses_async_compile(self):
-        x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(_softmax, x)
-        self.assertIn("async_compile.triton(", code)
 
 
 instantiate_parametrized_tests(TestModuleLevelKernels)
