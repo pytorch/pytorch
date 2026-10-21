@@ -194,6 +194,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           "Expected crow_indices, col_indices and values of a batched CSR "
           "tensor to be batched, got dimensionalities ",
           crow_indices.dim(), ", ", col_indices.dim(), " and ", values.dim());
+      // cuSPARSE uses a single batch stride for column indices and values.
       TORCH_CHECK(
           col_indices.stride(-2) == values_->stride(-2),
           "Expected col_indices and values of a batched CSR tensor to have "
@@ -205,6 +206,8 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           crow_indices.stride(-2),
           values_->stride(-2)));
     } else {
+      // cuSPARSE allows broadcasting of indices and values across batches for
+      // batched matmul
       TORCH_CUDASPARSE_CHECK(
           cusparseCsrSetStridedBatch(raw_descriptor, batch_count, 0, 0));
     }
