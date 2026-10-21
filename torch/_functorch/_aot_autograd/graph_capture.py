@@ -401,7 +401,15 @@ def aot_dispatch_base_graph(
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
+        if not all(idx >= num_tokens for idx in fw_metadata.static_input_indices):
+            raise AssertionError(
+                f"Static inputs {fw_metadata.static_input_indices} overlap {num_tokens} tokens"
+            )
         unlift_tokens(fw_module, fw_metadata, aot_config)
+        # Undo the offset handle_effect_tokens_fn applied for the token inputs.
+        fw_metadata.static_input_indices = [
+            idx - num_tokens for idx in fw_metadata.static_input_indices
+        ]
         saved_updated_flat_args_subclasses_desugared = (
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )

@@ -11,6 +11,7 @@ from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -44,6 +45,8 @@ class TestEinops(TestCase):
     versions of einops. Our goal is to prevent regressions in einops from changes
     in PyTorch.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @parametrize("version", [einops_version_sanitized])
     def test_functions(self, version):
