@@ -3404,6 +3404,10 @@ def is_callable_disallowed(obj: object) -> bool:
 
 def is_forbidden(obj: object) -> bool:
     _maybe_init_lazy_module(obj)
+    # A fast path for plain functions, whose type has no such attribute, since
+    # getattr_static is slow and this runs for every traced call
+    if type(obj) is types.FunctionType:
+        return obj.__dict__.get("_dynamo_forbidden", False)
     return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
