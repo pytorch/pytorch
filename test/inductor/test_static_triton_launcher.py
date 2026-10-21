@@ -2,6 +2,7 @@
 import gc
 import os
 import random
+import sys
 import tempfile
 import unittest
 import weakref
@@ -693,6 +694,54 @@ class TestStaticTritonLauncher(TestCase):
                 f"{launcher.arg_tys}i",
                 (arg0, 0),
                 stream,
+            )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_close_releases_kernel_capsule(self):
+        # _load_kernel must hand over its only capsule reference. An extra one
+        # keeps the capsule alive for the process lifetime, so its destructor
+        # never runs and neither close() nor the autotuner's launcher release
+        # frees the kernel and its Level Zero module.
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        function = launcher.function
+
+        # An object held by exactly one name, so the comparison does not depend
+        # on whether getrefcount counts its own argument reference.
+        throwaway = object()
+        baseline = sys.getrefcount(throwaway)
+        self.assertEqual(
+            sys.getrefcount(function),
+            baseline + 1,
+            "the launcher attribute must be the only reference besides ours",
+        )
+        launcher.close()
+        self.assertEqual(
+            sys.getrefcount(function), baseline, "close() did not drop the capsule"
+        )
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_load_kernel_unknown_name_raises(self):
+        # zeKernelCreate failing is the one load error path reachable from
+        # python, and it unwinds while the Level Zero module is live.
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        from torch._C import _StaticXpuLauncher
+
+        with self.assertRaisesRegex(RuntimeError, "L0 runtime error"):
+            _StaticXpuLauncher._load_kernel(
+                cubin_file, "no_such_kernel", 0, device_interface.current_device()
             )
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
