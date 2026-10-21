@@ -1187,15 +1187,17 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     // MPS TODO:
     // Strided API doesn't play nice with complex data types (at least not in case of matmul).
     // MPSGraph's matrixMultiplication produces incorrect results with stride-0 NDArray
-    // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
-    // by disabling the strided API so they go through the gather/clone path first.
+    // inputs (only every 16th row is computed) on macOS < 26.4, and again on macOS 27.0.0;
+    // 26.4+ and 27.0.1+ are fine. On affected versions, contiguify such tensors by disabling
+    // the strided API so they go through the gather/clone path first.
     // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool is_macOS_26_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_4);
+    static const bool has_stride_zero_mm_bug = !is_macos_at_least(MacOSVersion::MACOS_26_4) ||
+        (is_macos_at_least(MacOSVersion::MACOS_27_0) && !is_macos_at_least(MacOSVersion::MACOS_27_0_1));
     auto hasZeroStride = [](const Tensor& t) {
       return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
     };
-    auto useStridedSelf = !isComplexType(self.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(self));
-    auto useStridedOther = !isComplexType(other.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(other));
+    auto useStridedSelf = !isComplexType(self.scalar_type()) && (!has_stride_zero_mm_bug || !hasZeroStride(self));
+    auto useStridedOther = !isComplexType(other.scalar_type()) && (!has_stride_zero_mm_bug || !hasZeroStride(other));
     auto selfPlaceholder = self.numel() != 0
         ? Placeholder(cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, useStridedSelf)
         : Placeholder();
@@ -2503,15 +2505,26 @@ static void encode_eig_kernel(MPSStream* stream,
   getMPSProfiler().endProfileKernel(pso, stream);
 }
 
-// Calculates the eigenvalues and eigenvectors of the input, based on QR
-// iteration methods described in
-// <https://people.inf.ethz.ch/arbenz/ewp/Lnotes/chapter4.pdf>. Eigenvalues are
-// calculated using the following steps:
+// Note [linalg.eig for MPS]
+//
+// Calculates the eigenvalues and eigenvectors of the input, based on numerical
+// linear algebra methods described in:
+//
+// [Arbenz] "Lecture Notes on Solving Large Scale Eigenvalue Problems", Chapter 4,
+//   by Prof. Dr. Peter Arbenz:
+//   <https://people.inf.ethz.ch/arbenz/ewp/Lnotes/chapter4.pdf>.
+//
+// [Adlerborn et al.] "Towards Highly Parallel and Compute-Bound Computation of
+//   Eigenvectors of Matrices in Schur Form" by Adlerborn et al:
+//   <https://webapps.cs.umu.se/uminf/reports/2017/010/part1.pdf>
+//
+// Eigenvalues are calculated using the following steps:
 //
 //   1. "Balance" the input by transforming it with `B = D^-1 A D`, where D is a
 //      diagonal matrix. The elements of D are chosen to make the norms of each
 //      row of B and its corresponding column similar, which improves the
-//      accuracy of the final output.
+//      accuracy of the final output. This is equivalent to LAPACK xGEBAL's
+//      scaling operation.
 //
 //   2. Reduce B to Hessenberg form, `H = P^* B P`, which is almost an upper
 //      triangular matrix, except that the elements directly below the diagonal
@@ -2620,10 +2633,7 @@ static void encode_eig_kernel(MPSStream* stream,
 //      eigenvectors of B, we first find the eigenvectors of T (the upper
 //      triangular matrix output of QR iteration) and put them into the columns
 //      of a matrix X. Calculating the eigenvectors of a triangular matrix is a special
-//      case that is simpler than that of the original dense matrix A. We use a method
-//      described in "Towards Highly Parallel and Compute-Bound Computation of
-//      Eigenvectors of Matrices in Schur Form" by Adlerborn et al:
-//      <https://webapps.cs.umu.se/uminf/reports/2017/010/part1.pdf>.
+//      case that is simpler than that of the original dense matrix A.
 //
 //   4. Calculate the eigenvectors of B and undo the initial balancing:
 //
@@ -2637,6 +2647,13 @@ static void encode_eig_kernel(MPSStream* stream,
 //        m = V'[j, k]
 //        V"[:, k] = V'[:, k] (m)^*
 //        V[:, k] = V"[:, k] / ||V"[:, k]||
+//
+// The operation uses four specialized Metal kernels to do much of the work:
+//  eig_balance     Balance the input, `B = D^-1 A D`.
+//  eig_hessenberg  Reduce B to Hessenberg form, `H = P^* B P`.
+//  eig_qr_iterate  Apply the Hessenberg QR algorithm to convert H to triangular
+//                  form T.
+//  eig_vectors     Obtain the eigenvectors X of T.
 static void linalg_eig_kernel_mps(Tensor& eigenvalues,
                                   Tensor& eigenvectors,
                                   Tensor& infos,
@@ -2656,13 +2673,13 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
   const int64_t h_bytes = n * n * static_cast<int64_t>(sizeof(c10::complex<float>));
   const int64_t threadgroup_limit =
       static_cast<int64_t>([MPSDevice::getInstance()->device() maxThreadgroupMemoryLength]);
-  // eig_schur keeps H in threadgroup memory if it fits next to the kernel's
+  // eig_qr_iterate keeps H in threadgroup memory if it fits next to the kernel's
   // own threadgroup variables
   constexpr int64_t kReservedThreadgroupBytes = 1024;
   const bool stage_h = h_bytes + kReservedThreadgroupBytes <= threadgroup_limit;
   const EigParams params{n, compute_eigenvectors, stage_h};
 
-  // Working copy of A, which becomes H and then T
+  // Working copy of A, which will be overwritten with B, then H, then T.
   Tensor H = cloneBatchedColumnMajor(input.resolve_conj().resolve_neg()).reshape({batch, n, n});
   Tensor D = at::empty({batch, n}, options.dtype(kFloat));
   Tensor tau = at::empty({batch, std::max<int64_t>(n - 2, 0)}, options);
@@ -2678,9 +2695,10 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
 
   Tensor U;
   if (compute_eigenvectors) {
-    // P = diag(1, Q), where Q is the product of the reflectors that
-    // eig_hessenberg stored below the subdiagonal of H. U starts as P and
-    // eig_schur multiplies it by Q.
+    // Begin forming the Schur vectors U by setting it to P, the product of the
+    // Householder reflectors. Calculate the product from tau (`tau_k`) and the
+    // values below the first subdiagonal of H (`v_k`), both of which were
+    // calculated in eig_hessenberg.
     U = at::zeros({batch, n, n}, options).mT();
     U.select(-1, 0).select(-1, 0).fill_(1);
     if (n > 1) {
@@ -2688,15 +2706,17 @@ static void linalg_eig_kernel_mps(Tensor& eigenvalues,
       U.narrow(-2, 1, n - 1).narrow(-1, 1, n - 1).copy_(at::linalg_householder_product(reflectors, tau));
     }
   }
+  // Zero out the elements below the first subdiagonal of H, since we no longer
+  // need the `v_k` vectors that were stored there.
   H.triu_(-1);
 
   Tensor rotations = at::empty({batch, n, 4}, options.dtype(kFloat));
   Tensor U_arg = compute_eigenvectors ? U : at::empty({1}, options);
-  const int64_t schur_threadgroup_memory = stage_h ? ceil_div<int64_t>(h_bytes, 16) * 16 : 16;
+  const int64_t threadgroup_memory = stage_h ? ceil_div<int64_t>(h_bytes, 16) * 16 : 16;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       encode_eig_kernel(
-          stream, "eig_schur", H, batch, n, schur_threadgroup_memory, H, U_arg, rotations, eigenvalues, infos, params);
+          stream, "eig_qr_iterate", H, batch, n, threadgroup_memory, H, U_arg, rotations, eigenvalues, infos, params);
     }
   });
   if (!compute_eigenvectors) {

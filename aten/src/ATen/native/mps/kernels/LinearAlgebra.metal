@@ -4643,37 +4643,18 @@ kernel void eigh_jacobi(
 REGISTER_EIGH_JACOBI(float);
 REGISTER_EIGH_JACOBI(float2);
 
-// linalg.eig
-//
-// The eigendecomposition of a batch of complex matrices A runs as a sequence of
-// kernels, each using one threadgroup per matrix:
-//   eig_balance     A <- D^-1 A D, with a diagonal D that evens out the row and
-//                   column norms (LAPACK's xGEBAL, scaling only)
-//   eig_hessenberg  A <- P^H A P = H, upper Hessenberg [Arbenz, Section 4.3]
-//   eig_schur       H <- Q^H H Q = T, upper triangular, by the shifted
-//                   Hessenberg QR algorithm [Arbenz, Sections 4.2 and 4.4]
-//   eig_vectors     the eigenvectors X of T [Adlerborn et al., Sections 3.1
-//                   and 4.1]
-// The host forms U = P Q and the eigenvectors D U X of A.
-//
-// [Arbenz] P. Arbenz, "The QR Algorithm", chapter 4 of the ETH Zurich lecture
-//   notes "Numerical Methods for Solving Large Scale Eigenvalue Problems",
-//   https://people.inf.ethz.ch/arbenz/ewp/Lnotes/chapter4.pdf
-// [Adlerborn et al.] B. Adlerborn, C. C. Kjelgaard Mikkelsen, L. Karlsson and
-//   B. Kagstrom, "Towards Highly Parallel and Compute-Bound Computation of
-//   Eigenvectors of Matrices in Schur Form", Report UMINF 17.10, Umea
-//   University, 2017,
-//   https://webapps.cs.umu.se/uminf/reports/2017/010/part1.pdf
-//
-// Matrices are column-major: element (i, j) of an n x n matrix M is
-// M[i + j * n]. Indices are 64-bit, so any matrix that fits in memory works.
+// See Note [linalg.eig for MPS]
+// Helper functions and kernels for linalg.eig. Matrices are column-major:
+// element (i, j) of an n x n matrix M is `M[i + j * n]`. Indices are 64-bit, so
+// any matrix that fits in memory works.
 
+// TODO: Support 32-bit indexing when indices are small enough, for better
+// performance.
 namespace eig {
 
 constant constexpr float kEps = numeric_limits<float>::epsilon();
 // Magnitudes below kSafeMin * n count as zero, as with LAPACK's SMLNUM
-constant constexpr float kSafeMin =
-    numeric_limits<float>::min() / numeric_limits<float>::epsilon();
+constant constexpr float kSafeMin = numeric_limits<float>::min() / kEps;
 
 // |re| + |im|, which is cheap and within a factor sqrt(2) of |z|
 inline float abs1(float2 z) {
@@ -4715,6 +4696,19 @@ inline float2 sqrt_complex(float2 z) {
 
 // A Givens rotation G = [c, s; -conj(s), c] with real c and c^2 + |s|^2 = 1
 // [Arbenz, eq. (4.4), with complex s so that G is unitary]
+//
+// A Givens rotation G(i, j, c, s) represents a rotation of a vector in a plane
+// spanned by basis vectors e_i and e_j. It can be constructed by starting with
+// an identity matrix and setting four elements like so:
+//   G := I
+//   G[i, i] = c
+//   G[i, j] = s
+//   G[j, i] = -s^*
+//   G[j, j] = c
+// However, we don't have to form the full Givens matrix and calculate the full
+// `G H G^*` matrix multiplications when applying a Givens rotation. Instead we
+// can just apply the rotation directly to the rows or columns that the Givens
+// rotation will affect.
 struct Givens {
   float c;
   float2 s;
@@ -4742,7 +4736,7 @@ inline void rotate_rows(Givens g, thread float2& a, thread float2& b) {
   a = a_new;
 }
 
-// (a, b) <- (a, b) G^H: G^H applied to a pair of columns
+// (a, b) <- (a, b) G^*: G^* applied to a pair of columns
 inline void rotate_columns(Givens g, thread float2& a, thread float2& b) {
   const float2 a_new = g.c * a + c10::metal::mul(c10::metal::conj(g.s), b);
   b = g.c * b - c10::metal::mul(g.s, a);
@@ -4797,20 +4791,30 @@ int find_active_window(
   return l;
 }
 
-// The shift mu for a QR step on the active window ending at row ihi. Usually
-// this is the Wilkinson shift: the eigenvalue of the trailing 2x2 block
-// [a, b; c, d] that is closer to d [Arbenz, eq. (4.9)]. With x = (a - d) / 2
-// and y = sqrt(x^2 + bc) the eigenvalues are d + x -+ y, and choosing the sign
-// of y so that |x + y| >= |x - y| makes d + x - y = d - bc / (x + y) the closer
-// one, without cancellation. Every 10 iterations without deflation it is an
-// exceptional shift instead, as in LAPACK's xLAHQR, to break out of cycles.
+// The shift mu for a QR step on the active window ending at row ihi. Most of
+// the time, this is the Wilkinson shift (See Note [linalg.eig for MPS]). But
+// the Wilkinson shift alone does not always converge, so for every 10
+// iterations where deflation has not occurred yet, we use an exceptional shift
+// to break out of cycles.
 template <typename P>
 float2 qr_shift(P H, long n, int ihi, int its) {
+  // Pick out the lower right 2x2 corner of the active window:
+  //  . . . .
+  //  . . . .
+  //  . . a b
+  //  . . c d
   const float2 d = H[ihi + ihi * n];
   const float2 c = H[ihi + (ihi - 1) * n];
   if (its > 0 && its % 10 == 0) {
+    // 10th iteration without deflation, apply exceptional shift, taken directly
+    // from LAPACK's xLAHQR.
     return d + float2(0.75f * fabs(c.x), 0.0f);
   }
+  // Eigenvalues of the 2x2 corner are:
+  //   l (+/-) r
+  // where
+  //   l = (a + d) / 2
+  //   r = sqrt((a - d)^2 + 4 b c) / 2
   const float2 a = H[(ihi - 1) + (ihi - 1) * n];
   const float2 bc = c10::metal::mul(H[(ihi - 1) + ihi * n], c);
   const float2 x = 0.5f * (a - d);
@@ -4871,7 +4875,7 @@ void chase_bulge(
       H[(k + 1) + j * n] = b;
     }
     matrix_barrier<P>();
-    // G_k^H on columns k and k+1, which are nonzero down to row k+2
+    // G_k^* on columns k and k+1, which are nonzero down to row k+2
     for (int i = l + tid; i <= min(k + 2, ihi); i += nthreads) {
       float2 a = H[i + k * n];
       float2 b = H[i + (k + 1) * n];
@@ -4946,12 +4950,14 @@ void apply_rotations_outside_window(
   }
 }
 
-// Reduces the Hessenberg H to upper triangular T = Q^H H Q and updates
-// U <- U Q, by QR steps with deflation [Arbenz, Algorithm 4.4, with the shifts
-// of qr_shift and the implicit steps of chase_bulge]. Returns 0 on success,
-// or like LAPACK's xLAHQR, i > 0 if eigenvalues 0..i-1 failed to converge.
+// Reduces the Hessenberg H to upper triangular T = Q^* H Q and updates
+// U <- U Q, by QR steps with deflation.
+//
+// Like LAPACK's xLAHQR returns 0 on success, if all subdiagonal elements
+// converged close to 0; otherwise, returns the number of dimensions remaining
+// if it did not converge after `max_iterations`.
 template <typename P>
-int schur_iterate(
+int qr_iterate(
     P H,
     device float2* U,
     device float4* rotations,
@@ -5105,9 +5111,9 @@ kernel void eig_balance(
   }
 }
 
-// Reduces A to upper Hessenberg form H = P^H A P [Arbenz, Algorithm 4.3]. The
+// Reduces A to upper Hessenberg form H = P^* A P [Arbenz, Algorithm 4.3]. The
 // unitary P = P_0 P_1 ... P_{n-3} is a product of Householder reflectors
-// P_k = I - tau_k v_k v_k^H, where P_k zeroes column k below the subdiagonal.
+// P_k = I - tau_k v_k v_k^*, where P_k zeroes column k below the subdiagonal.
 // As in LAPACK's xGEHRD, v_k (whose first entry is 1) is stored below the
 // subdiagonal of column k and tau_k in `tau`, so that the host can form P with
 // linalg.householder_product.
@@ -5141,7 +5147,7 @@ kernel void eig_hessenberg(
 
     // beta = -e^{i arg(alpha)} ||x|| avoids cancellation in alpha - beta
     // [Arbenz, Section 4.3.1]. Then v = (x - beta e_0) / (alpha - beta), and
-    // tau = 2 / ||v||^2 = 1 + |alpha| / ||x|| is real, so P_k^H = P_k.
+    // tau = 2 / ||v||^2 = 1 + |alpha| / ||x|| is real, so P_k^* = P_k.
     float t = 0;
     if (tail_norm2 > 0) {
       const float alpha_abs = eig::abs_complex(alpha);
@@ -5199,10 +5205,10 @@ kernel void eig_hessenberg(
   }
 }
 
-// Reduces the Hessenberg H to upper triangular T = Q^H H Q, writing the
-// eigenvalues diag(T), and if params.compute_eigenvectors, updates U <- U Q.
-// See eig::schur_iterate.
-kernel void eig_schur(
+// Reduces the Hessenberg H to upper triangular T = Q^* H Q.
+// If params.compute_eigenvectors, updates U <- U Q.
+// See eig::qr_iterate.
+kernel void eig_qr_iterate(
     device float2* H [[buffer(0)]],
     device float2* U [[buffer(1)]],
     device float4* rotations [[buffer(2)]],
@@ -5228,14 +5234,14 @@ kernel void eig_schur(
       H_staged[i] = H_b[i];
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    status = eig::schur_iterate(
+    status = eig::qr_iterate(
         H_staged, U_b, rotations_b, n, update_u, scratch, tid, nthreads);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (long i = tid; i < n * n; i += nthreads) {
       H_b[i] = H_staged[i];
     }
   } else {
-    status = eig::schur_iterate(
+    status = eig::qr_iterate(
         H_b, U_b, rotations_b, n, update_u, scratch, tid, nthreads);
   }
   threadgroup_barrier(mem_flags::mem_device);
@@ -5248,13 +5254,14 @@ kernel void eig_schur(
   }
 }
 
-// Computes the eigenvectors of the upper triangular T: the upper triangular X
-// with T X = X diag(T), whose column k solves (T - T(k, k) I) x = 0 with
-// x_k = 1, up to scaling.
+// Computes the eigenvectors of an upper triangular matrix T.  The output X is
+// also upper triangular with T X = X diag(T), so each column k solves
+// (T - T[k, k] I) X[:, k] = 0, scaled so that the largest |Re| + |Im| in each
+// column is 1.
 //
-// This is ScalarSimEigenvector [Adlerborn et al., Algorithm 10], which computes
-// all the eigenvectors at once, one row of X at a time from the bottom up.
-// Each row j is divided by T(j, j) - T(k, k) in every column k > j, with a
+// Based on ScalarSimEigenvector [Adlerborn et al., Algorithm 10], which
+// computes all the eigenvectors at once, one row of X at a time from the bottom
+// up. Each row j is divided by T(j, j) - T(k, k) in every column k > j, with a
 // thread per column, and then T(0:j, j) X(j, :) is subtracted from the rows
 // above, with a thread per row.
 //

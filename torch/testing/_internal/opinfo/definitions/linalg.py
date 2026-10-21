@@ -931,6 +931,51 @@ def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwar
         sample.output_process_fn_grad = out_fn
         yield sample
 
+    if torch.device(device).type == "mps":
+        make_fn = make_fullrank_matrices_with_distinct_singular_values
+        make_arg = partial(
+            make_fn, dtype=dtype, device=device, requires_grad=requires_grad
+        )
+
+        batches = [(), (3,)]
+        # With 32 KB of threadgroup memory, eig_qr_iterate keeps H in
+        # threadgroup memory up to n = 62 and in device memory above that,
+        # so test a few sizes above and below the cutoff
+        ns = [32, 62, 63, 150]
+
+        for batch, n in product(batches, ns):
+            sample = SampleInput(make_arg(*batch, n, n))
+            sample.output_process_fn_grad = out_fn
+            yield sample
+
+        # The backward for most of these special matrices is ill-defined
+        if not requires_grad:
+            n = 8
+            scale = 2.0 ** torch.arange(0, 4 * n, 4)
+
+            special_matrices = [
+                torch.zeros(n, n, dtype=dtype),
+                torch.eye(n, dtype=dtype),
+                # Repeated eigenvalues
+                torch.diag(
+                    torch.tensor(
+                        [2, 2, 2, -1, -1, 3, 3, 3],
+                        dtype=dtype,
+                    )
+                ),
+                torch.triu(torch.randn(n, n, dtype=dtype)),
+                # A cyclic permutation, on which Wilkinson shifts make no progress
+                torch.roll(torch.eye(n, dtype=dtype), 1, 0),
+                # A Jordan block, which is defective: all eigenvectors are parallel
+                2 * torch.eye(n, dtype=dtype)
+                + torch.diag(torch.ones(n - 1, dtype=dtype), 1),
+                # A badly scaled matrix
+                torch.randn(n, n, dtype=dtype) * scale.unsqueeze(-1) / scale,
+            ]
+
+            for m in special_matrices:
+                yield SampleInput(m.to(device))
+
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -1607,7 +1652,7 @@ op_db: list[OpInfo] = [
             # this op (vjp/vmapvjp/jvp/etc.) only generate f32 variants and pass.
             DecorateInfo(
                 unittest.skip("ROCm: 2nd-order vmap(vjp(vjp)) precision accumulation"),
-                "TestOperators",
+                "TestOperatorsDevice",
                 "test_vmapvjpvjp",
                 device_type="cuda",
                 dtypes=(torch.float32,),

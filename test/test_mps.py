@@ -11917,58 +11917,6 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(Vh @ Vh.mH, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
         self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
 
-    def _check_eig(self, A, w, V):
-        # The eigenvectors have unit norm and A V == V diag(w) up to roundoff
-        n = A.shape[-1]
-        self.assertTrue(V.isfinite().all())
-        self.assertEqual(torch.linalg.vector_norm(V, dim=-2), torch.ones(A.shape[:-1]), atol=1e-5, rtol=0)
-        A = A.to(V.dtype)
-        tol = 1e-6 * n * A.abs().max().item()
-        self.assertEqual(A @ V, V * w.unsqueeze(-2), atol=tol, rtol=0)
-
-    @parametrize("n", [1, 2, 3, 32, 62, 63, 150])
-    @parametrize("batch", [(), (3,)])
-    @dtypes(torch.float32, torch.complex64)
-    def test_linalg_eig(self, device, dtype, n, batch):
-        # With 32 KB of threadgroup memory, eig_schur keeps H in threadgroup
-        # memory up to n = 62 and in device memory above that
-        torch.manual_seed(0)
-        A = torch.randn(*batch, n, n, dtype=dtype)
-        w, V = (t.cpu() for t in torch.linalg.eig(A.to(device)))
-        self._check_eig(A, w, V)
-        # The eigenvalues match LAPACK's, up to order
-        w_ref = torch.linalg.eigvals(A)
-        distance = (w_ref.unsqueeze(-1) - w.unsqueeze(-2)).abs().amin(-1)
-        self.assertLessEqual(distance.max().item(), 1e-4 * n)
-
-    @dtypes(torch.float32, torch.complex64)
-    def test_linalg_eig_special_matrices(self, device, dtype):
-        torch.manual_seed(0)
-        n = 8
-        B = torch.randn(n, n, dtype=dtype)
-        scale = 2.0 ** torch.arange(0, 4 * n, 4)
-        matrices = [
-            torch.zeros(n, n, dtype=dtype),
-            torch.eye(n, dtype=dtype),
-            # Repeated eigenvalues
-            torch.diag(torch.tensor([2, 2, 2, -1, -1, 3, 3, 3], dtype=dtype)),
-            torch.triu(B),
-            # A Jordan block, which is defective: all eigenvectors are parallel
-            2 * torch.eye(n, dtype=dtype) + torch.diag(torch.ones(n - 1, dtype=dtype), 1),
-            # A cyclic permutation, on which Wilkinson shifts make no progress
-            torch.roll(torch.eye(n, dtype=dtype), 1, 0),
-        ]
-        for A in matrices:
-            w, V = (t.cpu() for t in torch.linalg.eig(A.to(device)))
-            self._check_eig(A, w, V)
-
-        # Balancing keeps the eigenvalues of a badly scaled matrix accurate
-        A = B * scale.unsqueeze(-1) / scale
-        w = torch.linalg.eig(A.to(device)).eigenvalues.cpu()
-        w_ref = torch.linalg.eigvals(B)
-        distance = (w_ref.unsqueeze(-1) - w.unsqueeze(-2)).abs().amin(-1)
-        self.assertLessEqual(distance.max().item(), 1e-4)
-
     @parametrize("n", [5, 32, 600])
     @parametrize("left", [True, False])
     @parametrize("b_row_major", [True, False])
@@ -15849,13 +15797,20 @@ class TestConsistency(TestCaseMPS):
 
     def _assert_eigvals_match(self, w_m, w_c, atol, rtol):
         # Eigenvalues come in an implementation-defined order. Match each CPU
-        # eigenvalue to the closest MPS one and compare them. Returns the indices
+        # eigenvalue to the closest MPS one not matched yet, so that repeated
+        # eigenvalues give a permutation, and compare them. Returns the indices
         # of the matching MPS eigenvalues.
         w_m, w_c = w_m.detach().cpu(), w_c.detach()
         if w_c.numel() == 0:
             self.assertEqual(w_c.shape, w_m.shape)
             return torch.empty(w_c.shape, dtype=torch.long)
-        perm = (w_c.unsqueeze(-1) - w_m.unsqueeze(-2)).abs().argmin(-1)
+        n = w_c.shape[-1]
+        distance = (w_c.unsqueeze(-1) - w_m.unsqueeze(-2)).abs().reshape(-1, n, n)
+        perm = torch.empty(distance.shape[:-1], dtype=torch.long)
+        for b, i in itertools.product(range(distance.shape[0]), range(distance.shape[1])):
+            perm[b, i] = distance[b, i].argmin()
+            distance[b, :, perm[b, i]] = float("inf")
+        perm = perm.reshape(w_c.shape)
         self.assertEqual(w_c, w_m.gather(-1, perm), atol=atol, rtol=rtol)
         return perm
 
@@ -16296,7 +16251,8 @@ class TestConsistency(TestCaseMPS):
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
         # MPSGraph matrixMultiplication produces incorrect results with stride-0
-        # inputs on macOS < 26.4 (only every 16th row is correct).
+        # inputs on macOS < 26.4 and on macOS 27.0.0 (only every 16th row is correct);
+        # mm contiguifies such inputs on those versions.
         expanded = torch.ones(1, 1, device="mps").expand(64, 1)
         w = torch.randn(1, 16, device="mps")
         result = expanded.mm(w)

@@ -84,7 +84,7 @@
 
 ```{eval-rst}
 .. autosummary::
-    :toctree: generated
+    :toctree: ../generated
     :nosignatures:
 
     run_benchmark
