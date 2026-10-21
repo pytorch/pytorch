@@ -12,7 +12,7 @@ import pickle
 import sys
 import tokenize
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
@@ -335,6 +335,7 @@ def install_config_module(module: ModuleType) -> None:
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     cls: type[ConfigModule] = ConfigModuleInstance
     implications: dict[str, tuple[tuple[str, Any, Any], ...]] = {}
+    sources: set[str] = set()
     if any(entry.implies for entry in config.values()):
 
         class ImplicationConfigModuleInstance(_ImplicationConfigModule):
@@ -365,6 +366,13 @@ def install_config_module(module: ModuleType) -> None:
         ):
             setattr(owner, attr, _ConfigAttr(attr, entry))
 
+    # Keys that patch() can set and restore directly, without the rollback that
+    # _set_raw_values does for aliases and implications
+    module._plain_patch_keys = frozenset(  # type: ignore[attr-defined]
+        name
+        for name, entry in config.items()
+        if entry.alias is None and name not in implications and name not in sources
+    )
     module.__class__ = cls
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
     module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
@@ -518,6 +526,10 @@ class _ConfigEntry:
                 )
 
 
+# Names, entries, and prior user overrides and hide flags, from _set_plain_overrides
+_PlainPrior = list[tuple[str, _ConfigEntry, object, bool]]
+
+
 def _matches_implication_type(value: object, value_type: Any) -> bool:
     if type(value) not in (bool, int, str, type(None)):
         return False
@@ -606,6 +618,7 @@ class ConfigModule(ModuleType):
     _config: dict[str, _ConfigEntry]
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
+    _plain_patch_keys: frozenset[str]
     _hash_dirty_var: ContextVar[bool]
     _hash_cache_var: ContextVar[bytes | None]
     # Per-thread cache state, backed by ContextVar so each thread/context gets
@@ -633,22 +646,22 @@ class ConfigModule(ModuleType):
             config._deprecation_warned = True
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in self._bypass_keys:
+        config = self._config.get(name)
+        if config is None:
+            if name not in self._bypass_keys:
+                raise AttributeError(f"{self.__name__}.{name} does not exist")
             super().__setattr__(name, value)
-        elif name not in self._config:
-            raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
             # Issue deprecation warning on write (once per config)
-            config = self._config[name]
-            self._warn_if_deprecated(name, config)
+            if config.deprecated:
+                self._warn_if_deprecated(name, config)
 
             if config.alias is not None:
                 self._set_alias_val(config, value)
             else:
                 config.user_override.set(value)
-                self._hash_dirty_var.set(True)
-                self._mark_get_dict_dirty(name)
                 config.hide = False
+                self._mark_dirty((name,))
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -658,7 +671,8 @@ class ConfigModule(ModuleType):
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
 
             # Issue deprecation warning on read (once per config)
-            self._warn_if_deprecated(name, config)
+            if config.deprecated:
+                self._warn_if_deprecated(name, config)
 
             if config.alias is not None:
                 return self._get_alias_val(config)
@@ -689,12 +703,12 @@ class ConfigModule(ModuleType):
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name: str) -> None:
-        self._hash_dirty_var.set(True)
-        self._mark_get_dict_dirty(name)
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override.set(_UNSET_SENTINEL)
-        self._config[name].hide = True
+        config = self._config[name]
+        config.user_override.set(_UNSET_SENTINEL)
+        config.hide = True
+        self._mark_dirty((name,))
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
@@ -799,6 +813,7 @@ class ConfigModule(ModuleType):
                         raw_rollback.callback(restore_hide, entry, hide)
                     else:
                         external_undo.append((module, key, value))
+                external_prior = {}
                 for name, value in changes.items():
                     resolved, touched = self._resolve_patch_changes({name: value})
                     targets.extend(resolved)
@@ -817,15 +832,11 @@ class ConfigModule(ModuleType):
                         rollback.callback(restore_hide, entry, entry.hide)
                         raw_rollback.callback(entry.user_override.reset, token)
                         raw_rollback.callback(restore_hide, entry, entry.hide)
-                external_prior = {}
-                for module, key, _ in targets:
-                    if isinstance(module, ConfigModule):
-                        continue
-                    target = (module, key)
-                    if target not in external_prior and (
-                        prior is None or target not in prior
+                    elif (module, key) not in external_prior and (
+                        prior is None or (module, key) not in prior
                     ):
-                        external_prior[target] = getattr(module, key)
+                        # Likewise for external targets
+                        external_prior[module, key] = getattr(module, key)
                 for module, key, value in targets:
                     if isinstance(module, ConfigModule):
                         entry = module._config[key]
@@ -867,6 +878,43 @@ class ConfigModule(ModuleType):
         dirty.add(name)
         if len(dirty) > self._GET_DICT_DIRTY_KEYS_CAP:
             self._get_dict_dirty_keys_var.set(None)
+
+    def _mark_dirty(self, names: Iterable[str]) -> None:
+        """Marks the config hash, and cached _get_dict results for names, as stale."""
+        # Setting a ContextVar costs more than reading it, and the flag is usually
+        # already set
+        if not self._hash_dirty_var.get():
+            self._hash_dirty_var.set(True)
+        dirty = self._get_dict_dirty_keys_var.get()
+        if dirty is not None:
+            dirty.update(names)
+            if len(dirty) > self._GET_DICT_DIRTY_KEYS_CAP:
+                self._get_dict_dirty_keys_var.set(None)
+
+    def _set_plain_overrides(self, changes: dict[str, Any]) -> _PlainPrior:
+        """Sets changes, whose keys must be in _plain_patch_keys, as user overrides.
+        Returns their prior raw state, for _restore_overrides."""
+        prior: _PlainPrior = []
+        for name in changes:
+            entry = self._config[name]
+            # Warn before changing anything, in case warnings are errors
+            if entry.deprecated:
+                self._warn_if_deprecated(name, entry)
+            prior.append((name, entry, entry.user_override.get(), entry.hide))
+        for name, value in changes.items():
+            entry = self._config[name]
+            entry.user_override.set(value)
+            entry.hide = False
+        self._mark_dirty(changes)
+        return prior
+
+    def _restore_overrides(self, prior: _PlainPrior) -> None:
+        names = []
+        for name, entry, value, hide in prior:
+            entry.user_override.set(value)
+            entry.hide = hide
+            names.append(name)
+        self._mark_dirty(names)
 
     def _is_default(self, name: str) -> bool:
         """
@@ -1313,79 +1361,7 @@ class ConfigModule(ModuleType):
                 )
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
-        if isinstance(self, _ImplicationConfigModule):
-            return _ImplicationConfigPatch(self, changes)
-        config = self
-
-        class ConfigPatch(ContextDecorator):
-            def __init__(self) -> None:
-                self.changes = changes
-                self._prior: ContextVar[
-                    tuple[dict[str, Any] | Callable[[], None], ...]
-                ] = ContextVar(
-                    f"{config.__name__}.ConfigPatch[{id(self)}]",
-                    default=(),
-                )
-
-            def __enter__(self) -> None:
-                has_alias = any(
-                    config._config[key].alias
-                    for key in self.changes
-                    if key in config._config
-                )
-                prior: dict[str, Any] = {}
-                raw_prior: dict[tuple[ModuleType, str], tuple[Any, bool]] = {}
-                for key, value in self.changes.items():
-                    if has_alias and key in config._config:
-                        module, name = config, key
-                        if config._config[key].alias:
-                            targets, modules = config._resolve_patch_changes(
-                                {key: value}
-                            )
-                            if any(
-                                isinstance(m, _ImplicationConfigModule) for m in modules
-                            ):
-                                revert = config._set_raw_values(
-                                    self.changes, prior=raw_prior
-                                )
-                                self._prior.set((*self._prior.get(), revert))
-                                return
-                            module, name, _ = targets[0]
-                        if isinstance(module, ConfigModule):
-                            entry = module._config[name]
-                            raw_prior.setdefault(
-                                (module, name), (entry.user_override.get(), entry.hide)
-                            )
-                        else:
-                            prior[key] = config.__getattr__(key)
-                            raw_prior.setdefault((module, name), (prior[key], False))
-                            continue
-                    # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
-                prior_stack = self._prior.get()
-                self._prior.set((*prior_stack, prior))
-                try:
-                    for k, v in self.changes.items():
-                        config.__setattr__(k, v)
-                except Exception:
-                    self._prior.set(prior_stack)
-                    raise
-
-            def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-                prior_stack = self._prior.get()
-                if not prior_stack:
-                    raise AssertionError(
-                        "prior should not be empty when exiting ConfigPatch"
-                    )
-                prior = prior_stack[-1]
-                self._prior.set(prior_stack[:-1])
-                if callable(prior):
-                    prior()
-                else:
-                    for k, v in prior.items():
-                        config.__setattr__(k, v)
-
-        return ConfigPatch()
+        return _ConfigPatch(self, changes)
 
     def _make_closure_patcher(self, **changes: dict[str, Any]) -> Any:
         """
@@ -1405,20 +1381,18 @@ class ConfigModule(ModuleType):
                 revert()
 
         """
-        config = self._config
+        entries = [self._config[name] for name in changes]
 
         def change() -> Callable[[], None]:
-            prior = {k: config[k].user_override.get() for k in changes}
-            for k, v in changes.items():
-                config[k].user_override.set(v)
-                self._hash_dirty_var.set(True)
-                self._mark_get_dict_dirty(k)
+            prior = [entry.user_override.get() for entry in entries]
+            for entry, value in zip(entries, changes.values()):
+                entry.user_override.set(value)
+            self._mark_dirty(changes)
 
             def revert() -> None:
-                for k, v in prior.items():
-                    config[k].user_override.set(v)
-                    self._hash_dirty_var.set(True)
-                    self._mark_get_dict_dirty(k)
+                for entry, value in zip(entries, prior):
+                    entry.user_override.set(value)
+                self._mark_dirty(changes)
 
             return revert
 
@@ -1593,26 +1567,39 @@ class ContextDecorator(contextlib.ContextDecorator):
         return super().__call__(func)
 
 
-class _ImplicationConfigPatch(ContextDecorator):
-    def __init__(
-        self, config: _ImplicationConfigModule, changes: dict[str, Any]
-    ) -> None:
+class _ConfigPatch(ContextDecorator):
+    """Context manager and decorator for ConfigModule.patch. Restores the prior
+    raw state exactly on exit."""
+
+    def __init__(self, config: ConfigModule, changes: dict[str, Any]) -> None:
         self.config = config
         self.changes = changes
-        self._prior: ContextVar[tuple[Callable[[], None], ...]] = ContextVar(
-            f"{config.__name__}.ImplicationConfigPatch[{id(self)}]", default=()
+        # Each entry undoes one __enter__: a prior from _set_plain_overrides, or a
+        # revert function from _set_raw_values
+        self._undo: ContextVar[tuple[_PlainPrior | Callable[[], None], ...]] = (
+            ContextVar(f"{config.__name__}.ConfigPatch", default=())
         )
 
     def __enter__(self) -> None:
-        revert = self.config._set_raw_values(self.changes)
-        self._prior.set((*self._prior.get(), revert))
+        config = self.config
+        undo: _PlainPrior | Callable[[], None]
+        if self.changes.keys() <= config._plain_patch_keys:
+            undo = config._set_plain_overrides(self.changes)
+        else:
+            # Aliases and implications need _set_raw_values
+            undo = config._set_raw_values(self.changes)
+        self._undo.set((*self._undo.get(), undo))
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        prior = self._prior.get()
-        if not prior:
-            raise AssertionError("prior should not be empty when exiting config patch")
-        self._prior.set(prior[:-1])
-        prior[-1]()
+        undo_stack = self._undo.get()
+        if not undo_stack:
+            raise AssertionError("exited config patch without entering it")
+        self._undo.set(undo_stack[:-1])
+        undo = undo_stack[-1]
+        if callable(undo):
+            undo()
+        else:
+            self.config._restore_overrides(undo)
 
 
 class SubConfigProxy:
