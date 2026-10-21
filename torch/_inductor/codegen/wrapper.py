@@ -2291,8 +2291,9 @@ class PythonWrapperCodegen(CodeGen):
         # Each module-level kernel that reads its launch config from KERNEL_CONFIGS, and
         # that config, which generate_and_run_autotune_block fills in.
         self.kernel_configs: dict[str, dict[str, Any] | None] = {}
-        # The kernels the autotune block launches, subgraphs' included.
-        self.kernel_configs_tuned: OrderedSet[str] = OrderedSet()
+        # kernel_autotune_names across the root and its subgraphs: the kernels the
+        # autotune block launches.
+        self.kernel_autotune_names_all_graphs: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
         self.kernel_autotune_example_arg_cache: dict[str, AutotuneExampleArg] = {}
@@ -3700,7 +3701,7 @@ class PythonWrapperCodegen(CodeGen):
                 raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
         # Only the kernels the block launched: async_compile precompiles every kernel,
         # so one launcher alone does not show that it was tuned.
-        for name in self.kernel_configs.keys() & self.kernel_configs_tuned:
+        for name in self.kernel_configs.keys() & self.kernel_autotune_names_all_graphs:
             kernel = scope.get(name)
             if isinstance(kernel, CachingAutotuner) and len(kernel.launchers) == 1:
                 launched = kernel.launchers[0].config
@@ -5786,7 +5787,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 )
             self.kernel_autotune_names.add(kernel_name)
-            self.kernel_configs_tuned.add(kernel_name)
+            self.kernel_autotune_names_all_graphs.add(kernel_name)
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return
@@ -6691,7 +6692,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # does not splice in can only keep a preamble line, never drop one.
         self.names_used_unscanned = root.names_used_unscanned
         self.kernel_configs = root.kernel_configs
-        self.kernel_configs_tuned = root.kernel_configs_tuned
+        self.kernel_autotune_names_all_graphs = root.kernel_autotune_names_all_graphs
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
