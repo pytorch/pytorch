@@ -18,27 +18,41 @@ configuration a capture runs under. The filter lives here, with that tooling,
 rather than beside the serializer's pre-check in ``guards.py``: it is the
 capture's policy over that pre-check, not part of it. Everything here is
 internal; the filter alone is unprefixed because the capture session passes it
-as the default a caller may name. The multi-graph Dynamo capture session that
-drives it is a follow-up stack; nothing under ``torch/`` calls into this module
-yet.
+as the default a caller may name. ``PrecompileSession`` at the end of the module
+is the multi-graph capture itself.
 """
 
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import functools
+import hashlib
 import importlib.machinery
 import os
+import re
 import site
 import sys
 import sysconfig
 import types
-from typing import TYPE_CHECKING
+from typing import Generic, ParamSpec, TYPE_CHECKING, TypeVar
 
+import torch
+import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource
+from torch.compiler._precompile_types import GuardFact as _GuardFact, PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
-from .guards import CheckFunctionManager
+from .convert_frame import ConvertFrame
+from .exc import PackageError
+from .guards import (
+    CheckFunctionManager,
+    is_portable_function_guard,
+    is_portable_identity_guard,
+    strip_local_scope,
+)
+from .package import CompilePackage
 from .source import (
     AttrSource,
     DictGetItemSource,
@@ -50,11 +64,163 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from typing import Any, NoReturn
 
     from torch._guards import Source
 
-    from .types import GuardFilterEntry
+    from .convert_frame import ConvertFrameReturn
+    from .hooks import Hooks
+    from .package import _BackendId, _DynamoCacheEntry
+    from .precompile_context import BackendCacheArtifact
+    from .repro.after_dynamo import WrapBackendDebug
+    from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
+    from .variables.builder import FrameStateSizeEntry
+
+
+# Built once: config.patch() allocates a class and a ContextVar each time it is
+# called, and this runs on every frame Dynamo compiles for a package.
+_ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
+    allow_empty_graphs=True
+)
+
+
+@contextlib.contextmanager
+def _capture_config() -> Iterator[None]:
+    """The compiler configuration a multi-graph capture's calls run under.
+
+    Backends serialize into the artifact (``bundled_autograd_cache``) rather
+    than the process-local inductor cache. The backward lowers eagerly:
+    AOTAutograd otherwise defers it to the first ``.backward()``, and a graph
+    compiled with grad enabled whose backward was never lowered is never saved,
+    so a capture that never makes one -- a training step, or an inference call
+    made outside ``torch.no_grad()`` -- would record no backend at all. Such an
+    inference call therefore compiles a backward too, and a backward the
+    backend cannot compile fails the capture; capturing under
+    ``torch.no_grad()`` avoids both.
+    The bundled autotune remote cache stays off: AutotuneCacheBundler keeps one
+    bundle per compile context, left open on a remote-cache miss until the
+    first compiled call, but eager lowering compiles the forward and the
+    backward in one context before either runs, so on a miss the backward
+    fails opening its own. Every eager backward lowering can hit this, not only
+    capture's; CompilePackage.install() turns it off for the same reason.
+    ``allow_empty_graphs`` keeps an empty graph as a compiled frame so its
+    guards reach the artifact; it also extends the lifetime of objects the frame
+    holds -- with it on, a weakref callback on a value the frame captured does
+    not fire when the caller drops its reference (test/dynamo/test_repros.py
+    ReproTests.test_weakref_callback).
+
+    Every scope patches and restores for itself: ``config.patch`` is re-entrant
+    and per-thread, so nested scopes unwind in order and a worker thread sees
+    only its own.
+    """
+    if torch.compiler.config.force_disable_caches:
+        raise PackageError(
+            "Cannot precompile with torch.compiler.config.force_disable_caches=True: "
+            "compiled backends reach the artifact through the AOTAutograd cache, "
+            "which that setting turns off, so the capture would record no graphs"
+        )
+    functorch_patch = {
+        "bundled_autograd_cache": True,
+        "force_non_lazy_backward_lowering": True,
+        # AOTAutogradCache refuses to KEY a graph it cannot address soundly -- a
+        # graph calling anything outside its allowlist -- and a refusal means it
+        # never saves, so the bundled artifact precompile needs is never
+        # recorded and the capture ends with nothing to serialize. That gate
+        # asks whether the key tells this graph's behaviour apart from
+        # another's, which a precompile artifact does not depend on: it is
+        # addressed by backend id and pinned to one torch build, so fall back to
+        # a nonce key rather than declining, as torch._dynamo.aot_compile and
+        # aot_compile_joint_with_descriptors already do.
+        "bypass_autograd_cache_key": True,
+    }
+    # AOTAutogradCache honours strict_precompile when it loads but not when it
+    # saves: a bundled entry that fails to pickle is dropped with a warning and
+    # the capture is short one backend, so raise where the pickle fails instead.
+    if torch._dynamo.config.strict_precompile:
+        functorch_patch["strict_autograd_cache"] = True
+    import torch._inductor.config as inductor_config
+
+    # TODO: drop the bundled_autotune_remote_cache patch once
+    # AutotuneCacheBundler keeps one bundle per compiled module rather than one
+    # per CompileContext, which fixes every eager-backward caller.
+    with (
+        functorch_config.patch(functorch_patch),
+        inductor_config.patch(bundled_autotune_remote_cache=False),
+        torch._dynamo.config.patch(allow_empty_graphs=True),
+    ):
+        yield
+
+
+class _AllowEmptyGraphsConvertFrame(ConvertFrame):
+    """The package's frame converter, compiling its frames with allow_empty_graphs.
+
+    An uncovered no-op branch must become a guarded variant rather than Dynamo's
+    ordinary eager-only SkipFrame: a skip applies to the code object, so one
+    fallback call permanently skips that frame and no later call can capture
+    its other variants. Applied here as well as in _capture_config so the
+    package's frames get it -- with the object-lifetime side effect noted there
+    -- whenever this converter compiles them, including recompiles of a loaded
+    artifact outside any capture-config scope. Beneath CatchErrorsWrapper
+    rather than replacing it: frames its skipfile checks reject never pay the
+    patch, and this frame stays out of the user stack dynamo_start reports.
+    A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
+    refused by name when a package is attached; _clone_with_backend below, the
+    hook CatchErrorsWrapper calls only for that frame, says why. Without a
+    package the DDP clone keeps this subclass, so the flag survives it.
+    """
+
+    @property
+    def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
+        # CatchErrorsWrapper asks for this clone only for a frame under an
+        # active DDP module in ddp_optimizer mode (the default, optimize_ddp=True);
+        # the other optimize_ddp modes never reach it. DDPOptimizer compiles the
+        # graph one bucket at a time and no bucket carries the backend id the
+        # package records, so the artifact could never be completed; the base
+        # clone would drop the package silently instead. The wrapper probes the
+        # attribute with hasattr before calling it, and hasattr swallows only
+        # AttributeError, so a getter that raised would raise PackageError out of
+        # the probe itself; raising from the returned callable puts the error at
+        # the call the wrapper actually makes. A package-less converter is what
+        # the tests build, and what a capture session may build before it
+        # attaches a package; its clone keeps the subclass, hooks and limit. The
+        # stance path (eval_frame._create_wrapped_callback, behind set_stance)
+        # rebuilds a plain ConvertFrame with no package and is outside a capture
+        # session's contract.
+        if self._inner_convert._package is None:
+            return lambda backend: type(self)(
+                backend, self._hooks, recompile_limit=self._recompile_limit
+            )
+
+        def refuse(backend: WrapBackendDebug) -> NoReturn:
+            raise PackageError(
+                "Cannot precompile a DistributedDataParallel forward with "
+                f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
+                "DDPOptimizer compiles the graph one bucket at a time and no bucket "
+                "records a backend under the id the package saves. Set "
+                'torch._dynamo.config.optimize_ddp="no_optimization" to precompile '
+                "a DDP forward (this disables DDPOptimizer's comm/compute overlap); "
+                'the "python_reducer" and "python_reducer_without_compiled_forward" '
+                "modes bypass DDPOptimizer as well"
+            )
+
+        return refuse
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        hooks: Hooks,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+        skip: int = 0,
+    ) -> ConvertFrameReturn:
+        revert = _ALLOW_EMPTY_GRAPHS()
+        try:
+            return super().__call__(
+                frame, cache_entry, hooks, frame_state, skip=skip + 1
+            )
+        finally:
+            revert()
 
 
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
@@ -65,18 +231,42 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
     identity guards ID_MATCH, FUNCTION_MATCH, MODULE_MATCH, NN_MODULE,
     CLASS_MATCH and CLOSURE_MATCH (a function by its ``__code__`` id), plus
-    DICT_VERSION and WEAKREF_ALIVE. Dropping one gives up on noticing that the
-    guarded object was rebound, mutated or collected: rebind a global function
-    between capture and load and the artifact serves the graph traced against
-    the old one, with no error
-    (``test_default_guard_filter_through_serialize_guards``). Every dropped
-    slot is reported in ``PrecompileSummary.dropped_guards``, once however many
-    variants dropped it.
+    DICT_VERSION and WEAKREF_ALIVE. An ID_MATCH, FUNCTION_MATCH, MODULE_MATCH or
+    CLASS_MATCH is still kept when ``is_portable_identity_guard`` finds that
+    its object unpickles by reference to the loading process's own: a module
+    that is its ``sys.modules`` entry, a class or function that its
+    ``__module__`` and ``__qualname__`` lead back to, a member of such an
+    enum, or a top-level global of its ``__module__`` whose class is neither
+    nested nor local and whose reduction (its ``copyreg.dispatch_table``
+    entry, else ``__reduce_ex__``) names that global, such as
+    ``typing.List``. A ``<locals>`` class, a module missing from
+    ``sys.modules``, a ``functools.wraps`` wrapper, a NamedTuple class nested
+    in a class (the guard-state pickler rebuilds it as a fresh class) and a
+    singleton stored as a class attribute are still dropped, and so is a class
+    whose metaclass is nested or local. An object defined in
+    ``__main__`` is kept like any other and resolves against the loading
+    process's ``__main__``: a serving script that does not define it fails the
+    load with an ``AttributeError`` rather than serving without the guard.
+    A CLOSURE_MATCH on a plain function is kept when
+    ``is_portable_function_guard`` finds that an importable module owns the
+    function's globals: the save rewrites it into a FUNCTION_CODE_MATCH, which
+    the loaded artifact checks against the function's code and that module by
+    value. An ID_MATCH or CLOSURE_MATCH on a builtin bound to a class that
+    unpickles by reference, like an autograd Function's ``apply``, is kept too:
+    the save rewrites it into a NATIVE_METHOD_MATCH, which compares the value
+    with that class's attribute by equality. Dropping a guard gives up on
+    noticing that the guarded object was rebound, mutated or collected: rebind
+    a global function whose globals no importable module owns between capture
+    and load, and the artifact serves the graph traced against the old one,
+    with no error (``test_default_guard_filter_through_serialize_guards``).
+    Every dropped slot is reported in ``PrecompileSummary.dropped_guards``,
+    once however many variants dropped it.
 
-    The criterion is the pre-check's own: a guard is dropped if its type is
-    refused or a derived type is (a CONSTANT_MATCH on a code object runs
-    through ID_MATCH), and TYPE_MATCH and BUILTIN_MATCH are kept whatever they
-    derive, as the pre-check accepts them before it looks at derived types.
+    The criterion is the pre-check's own: apart from those portable identity
+    and function guards, a guard is dropped if its type is refused or a
+    derived type is (a CONSTANT_MATCH on a code object runs through ID_MATCH),
+    and TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the
+    pre-check accepts them before it looks at derived types.
     That keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH that
     the loaded artifact still checks against the loading process's builtins.
 
@@ -94,7 +284,9 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     ``torch._dynamo.config.caching_precompile``: its wrapper around every guard
     filter trips over the same artifact and drops, with a warning, any guard
     of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION or deriving
-    ID_MATCH or DICT_VERSION.
+    ID_MATCH or DICT_VERSION, except for direct TYPE_MATCH and BUILTIN_MATCH
+    guards. The serializer accepts those two by their own type; in particular,
+    BUILTIN_MATCH normally derives ID_MATCH but still has a serializable guard.
 
     Passing this filter does not mean the artifact serializes: the pre-check
     also refuses a kept TYPE_MATCH on a local-scope type, which cannot be
@@ -114,8 +306,14 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
             # The pre-check's accepted-by-type pair, a literal in serialize_guards,
             # in test_aot_compile.py's keep_builtin_guards and in
             # test_precompile_package.py's _pre_check_accepts too; a type added
-            # to one is not seen by the others.
+            # to one is not seen by the others. _pre_check_accepts leaves out the
+            # portable identity branch on purpose.
             g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
+            or (
+                g.has_value
+                and is_portable_identity_guard(g.guard_type, derived, g.value)
+            )
+            or (g.has_value and is_portable_function_guard(g.guard_type, g.value))
             or (
                 g.guard_type not in unsupported
                 and not any(d in unsupported for d in derived)
@@ -765,4 +963,1215 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
         )
         and _owning_module(value) == "builtins"
         and getattr(value, "__name__", None) == source.index
+    )
+
+
+def _is_risky_drop(
+    entry: GuardFilterEntry, namespaces: dict[str, types.ModuleType]
+) -> bool:
+    """
+    Whether losing this identity guard can plausibly change results.
+
+    Intersect the binding SITE with who owns the value; either test alone is
+    wrong. Site alone: ``self.act = getattr(F, cfg.activation)`` and
+    ``self.act = cfg.act_fn`` are the same swappable slot, so calling the first
+    benign because ``F.gelu`` is torch-owned waves through the exact divergence
+    this check exists for -- capture gelu, serve silu, get the gelu graph and no
+    error. Ownership alone: ``if flag: import impl_b as impl`` then ``impl.op``
+    is a read off a module namespace exactly like ``F.gelu``, and the module is
+    user code an env var chose; so is ``self.act = abs``, where the value is a
+    builtin nothing can repoint but the attribute holding it is a slot. The site
+    survives the name stripping that makes source spelling useless -- a guard on
+    ``self.act`` arrives as ``'self.act'`` -- because the structured source is
+    still on the guard.
+
+    For a capture-here / serve-there deployment the concern is not in-process
+    rebinding but DIVERGENCE: the serving machine runs the same source but picks
+    a different object because config, a flag, or an env var differs. Three
+    bindings are waived -- a builtin read the ordinary way (see
+    ``_reads_a_builtin``), a read off a TRUSTED namespace (see
+    ``_module_namespaces``) that torch or the stdlib owns or that owns a def
+    statement of that name, and a global bound to a def of that same name when
+    torch or the stdlib owns the def or it lives in the file doing the reading.
+    Both def-name tests compare ``__qualname__``, as ``_defined_where_read``
+    does, so a def lifted off a class or returned by a factory is a slot. The
+    rest are slots whose occupant config chooses: instance attributes, closure
+    cells, aliased imports, cross-module ``from x import op``, registry
+    lookups.
+
+    Trusting a namespace is not trusting everything read off it. ``F.gelu`` is
+    waived because torch owns torch.nn.functional and there is only one of it;
+    ``own_helpers.call`` is waived because own_helpers owns a def of that same
+    name, subject to the gap below. ``mypkg.op`` re-exported from
+    ``mypkg.impl_b``, ``dispatch.op``, ``own_helpers.act`` bound to some other
+    def, ``own_helpers.op`` bound to a staticmethod lifted off a class, and
+    ``mypkg.impl.op`` where ``mypkg/__init__`` did ``from . import impl_b as
+    impl`` are not waived: the import or assignment that chose the
+    implementation lives in a file the inlined-source checksum never sees, so
+    capture and serve can disagree with every other rail passing.
+    ``test_risky_drop_decision_table`` in test_precompile_package.py pins these
+    shapes and every other one found so far.
+
+    KNOWN GAP, and it is a wrong-answer one. EVERY waiver above judges the
+    object capture happened to bind, not the statement that bound it, so any
+    name bound CONDITIONALLY is waived whenever the branch taken on the capture
+    machine is one of the waived shapes. This is not specific to the def-name
+    arm and it is not limited to the file being read:
+
+    - def-name arm. ``if HAVE_FAST: from fastops import gelu`` / ``else: from
+      torch.nn.functional import gelu``, captured without the flag, drops
+      ``G['gelu']`` and reports nothing; a serving machine that has fastops
+      runs torch's gelu instead, with no error. A def the reading file itself
+      redefines under an ``if`` is the same shape.
+    - namespace-owns-the-value arm. A module that binds a name under an ``if``
+      and is read as a namespace by an ordinary ``import mod`` elsewhere is
+      also waived, because at capture time the module really does own whichever
+      def the branch produced. The reading file binds nothing conditionally,
+      so it looks covered and is not.
+    - library-namespace arm, and this one needs no conditional at all. The
+      waiver trusts the owner, not the binding, so a third party that rebinds a
+      torch or stdlib attribute -- ``F.gelu = _fast_gelu`` executed at import
+      by a package that happens to be installed on the serving host -- is
+      waived even though the model itself reads ``F.gelu`` unconditionally.
+      ``functools.wraps(F.gelu)(user_fn)`` reaches the same waiver by a
+      different route, since it copies ``__name__`` and ``__module__`` off the
+      torch function it wraps. So does an alias config picks between two torch
+      modules: ``F`` bound to torch.nn.functional or torch._refs.nn.functional
+      is trusted either way, and ``F.gelu`` names a different function.
+
+    An ``allow_in_graph`` function passes too, and Dynamo traces it opaquely so
+    the inlined-source checksum never covers it either. Nothing at capture time
+    distinguishes a conditional bind from an unconditional one -- only the
+    resulting object is visible -- so this is a limit of the approach rather
+    than a missing check. ``dropped_guards`` is the authoritative list; this
+    predicate is a lint over it, not a proof of safety.
+    """
+    source = entry.orig_guard.originating_source
+    value = entry.value
+    stack = entry.orig_guard.user_stack
+    if _is_dynamo_synthesized(source):
+        return False
+    if source.name in namespaces:
+        return False
+    if _reads_a_builtin(source, value):
+        return False
+    if not entry.has_value:
+        return True  # nothing to judge ownership by
+    if isinstance(source, AttrSource):
+        namespace = namespaces.get(source.base.name)
+        if namespace is not None:
+            return not (
+                _is_library_module(namespace.__name__)
+                or (
+                    _owning_module(value) == namespace.__name__
+                    and getattr(value, "__qualname__", None) == source.member
+                )
+            )
+    if (
+        isinstance(source, GlobalSource)
+        and getattr(value, "__name__", None) == source.global_name
+    ):
+        return not (
+            _is_library_module(_owning_module(value))
+            or _defined_where_read(value, source.global_name, stack)
+        )
+    return True
+
+
+# The guards that pin a Python value by equality. CONSTANT_MATCH is the front
+# door: it delegates a bool to BOOL_MATCH, None to NONE_MATCH, a code object to
+# ID_MATCH and everything else -- ints included -- to EQUALS_MATCH, and it is
+# the only guard method that derives into another one of these, so a slot's
+# top-level guard type is enough here. CONSTANT_SUBCLASS_MATCH pins the base
+# value of an int/float/str subclass argument; the two iterator guards pin an
+# iterator argument's exact position. Length and key-set guards
+# (SEQUENCE_LENGTH, TUPLE_ITERATOR_LEN, MAPPING_KEYS_CHECK) pin a container's
+# structure rather than a value and are deliberately not counted; the set keys
+# on guard type alone, so an EQUALS_MATCH installed on a container argument
+# itself (a dict_keys or a frozenset of torch ops, variables/builder.py) IS
+# counted, its contents being the value the artifact then serves only for.
+_VALUE_EQUALITY_GUARD_TYPES = frozenset(
+    {
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "EQUALS_MATCH",
+        "RANGE_ITERATOR_MATCH",
+    }
+)
+
+
+def _pins_a_value(guard_type: str, name: str) -> bool:
+    """
+    Whether this kept guard makes the artifact serve only the value it saw.
+
+    Two things have to line up, and keying on either one alone is wrong.
+
+    The guard has to be a value-equality one. TENSOR_MATCH, SHAPE_ENV and the
+    global-state guards are what every capture has and they generalize fine --
+    a TENSOR that crosses a graph break gets TENSOR_MATCH on a ``___stackN``
+    source and is emphatically not a pin.
+
+    And the source has to be a BARE name -- a plain local of some traced frame,
+    or the ``___stackN`` Dynamo gives a value crossing a graph break. Anything
+    dotted or subscripted (``self.eps``, ``model._modules['ln'].eps``,
+    ``G['CFG'].width``) is reached THROUGH an argument rather than being one,
+    which is where model config lives: every LayerNorm and Dropout contributes
+    a CONSTANT_MATCH there, so counting those would flag every model and make
+    the field noise. The EMPTY source of a guard checked against no source
+    (``GuardFact.source`` for SHAPE_ENV, GLOBAL_STATE) is not a name either.
+
+    KNOWN GAP: a constant inside a container argument is guarded on a
+    subscripted source (``dims[0]`` for ``x.sum(dim=[0])``) and is not counted.
+    ``kept_guards`` is the authoritative list; this is a lint over it.
+    """
+    return (
+        bool(name)
+        and guard_type in _VALUE_EQUALITY_GUARD_TYPES
+        and not any(c in name for c in ".[")
+    )
+
+
+# Object addresses differ every run, so they are scrubbed from rendered guard
+# facts. Keep these anchored to the call shapes that carry addresses: a bare
+# \b\d{9,}\b also eats a user constant (a dict key, a slice bound), so two
+# variants guarding different values render the same fact and invent an
+# invariant neither holds.
+_OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
+_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+# Dynamo appends a per-process counter to the builtins dict it installs, so the
+# same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
+# Of the globals Dynamo mints, only the three families in
+# aot_compile._MINTED_GLOBAL_PREFIXES can root a serializable guard: this one and
+# the two install_global_by_id shapes the pattern below covers. __compiled_fn_*
+# and __resume_at_* are codegen-only LOAD_GLOBAL targets, never guard subjects.
+_DYNAMO_COUNTER = re.compile(re.escape(_BUILTINS_DICT_PREFIX) + r"_\d+")
+# OutputGraph.install_global_by_id names a global "<prefix>_<id(value)>_c<n>",
+# so a guard reading one carries BOTH an address and a compile counter inside
+# an identifier, where neither pattern above can see it. Real models reach this
+# -- transformers' Qwen2 installs three -- and the report then differs run to
+# run, which is exactly what the "commit and diff" contract rules out. The
+# prefix can be empty (torch itself is installed as "_<id>_c<n>"), so the digit
+# width is the anchor: it is what keeps a user identifier such as w_1_c2 intact.
+_DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
+
+
+def _normalize(text: str) -> str:
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
+    text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
+    return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
+
+
+def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(_normalize(part) for part in (code_list or ()))
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+# Guards whose check IS object identity, directly or through a derived guard,
+# which is the same test default_guard_filter_fn drops on.
+_IDENTITY_GUARD_TYPES = frozenset(
+    CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+)
+
+
+# Ellipsis and NotImplemented repr by name, so they are as stable as a literal.
+_STABLE_CONST_TYPES = (
+    str,
+    int,
+    float,
+    complex,
+    bytes,
+    bool,
+    type(None),
+    type(Ellipsis),
+    type(NotImplemented),
+)
+
+
+def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
+    """
+    co_consts reduced to the part that reprs the same in every process.
+
+    A nested code object reprs with its ADDRESS, so it cannot go into a digest
+    that ends up in a file meant to be committed and diffed. Containers are
+    filtered recursively rather than dropped whole: two lambdas differing only
+    in a tuple or frozenset constant -- ``x * (1, 2)`` against ``x * (1, 3)`` --
+    are genuinely different variants, and dropping the container is what let
+    them collide. A const of any other type keeps its SLOT as a type marker:
+    ``x[..., 0]`` and ``x[0, ...]`` fold to one const tuple at the same index,
+    so with the slot dropped they would collide the same way.
+    """
+    out: list[object] = []
+    for c in consts:
+        if isinstance(c, _STABLE_CONST_TYPES):
+            out.append(c)
+        elif isinstance(c, types.CodeType):
+            # A nested code object reprs with its ADDRESS, so it cannot go in
+            # verbatim -- but dropping it merges two lambdas that differ only in
+            # a comprehension or an inner lambda, which is this same bug one
+            # level down. Recurse into its own fingerprint instead.
+            out.append(_code_fingerprint(c))
+        elif isinstance(c, tuple):
+            out.append(_stable_consts(c))
+        elif isinstance(c, frozenset):
+            # Sorted by repr so the digest does not inherit set iteration order.
+            out.append(tuple(sorted(_stable_consts(tuple(c)), key=repr)))
+        else:
+            out.append(f"<{type(c).__name__}>")
+    return tuple(out)
+
+
+def _code_fingerprint(code: types.CodeType) -> str:
+    """
+    Name a code object by its body, for callables a definition site cannot tell
+    apart -- an ACT2FN table written on one source line makes every lambda in it
+    agree on file AND lineno.
+
+    Everything hashed is derived from the source, so the digest is identical in
+    another process. It is NOT stable across Python versions, since co_code is
+    version-specific bytecode: a committed invariants file churns wholesale on
+    an interpreter upgrade even with unchanged source.
+    """
+    return _hash_text(
+        repr(
+            (
+                code.co_code,
+                code.co_names,
+                code.co_varnames,
+                # LOAD_DEREF addresses a cell by INDEX, so two closures that
+                # capture different variables have identical co_code and are
+                # told apart only by the names they close over.
+                code.co_freevars,
+                code.co_cellvars,
+                _stable_consts(code.co_consts),
+            )
+        )
+    )
+
+
+def _object_identity(value: object) -> str:
+    """
+    A stable stand-in for the id ``_normalize`` stripped.
+
+    A qualname alone does not separate the case this exists for: an ACT2FN-style
+    table whose entries are all ``<lambda>`` in one module, where two variants
+    holding different entries would render identically and the CLOSURE_MATCH
+    that split them would be reported as an invariant of both. So a callable is
+    also named by where it is DEFINED (basename, so no checkout path) and by a
+    digest of its body, both source-derived and so stable across processes.
+
+    The discriminating part goes FIRST: truncation bounds this string, and a
+    transformers lambda nested in a long module path exceeds the limit on the
+    qualname alone, so a digest appended at the end would be cut off exactly on
+    the names that need it most.
+
+    Only the code object is named, not the data bound to it. Two closures from
+    one factory (``make(2)`` and ``make(3)``), two functions differing only in
+    ``__defaults__``, bound methods of two instances, and every
+    ``functools.partial`` render the same, as do two instances of one class.
+    """
+    if isinstance(value, types.ModuleType):
+        return f"is module {value.__name__}"
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if isinstance(name, str):
+        code = getattr(value, "__code__", None)
+        where = ""
+        if isinstance(code, types.CodeType):
+            filename = os.path.basename(code.co_filename or "?")
+            where = f"@{filename}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        return _normalize(f"is {where}{_owning_module(value) or '?'}.{name}")[:160]
+    return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
+
+
+# Guard types that pin an input's shape, value or kind. An invariance policy
+# never drops one, and the report compares them across variants.
+_SHAPE_BEARING_GUARD_TYPES = frozenset(
+    {
+        "BOOL_MATCH",
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "COW_TENSOR_MATCH",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "DUPLICATE_INPUT",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "EQUALS_MATCH",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        "FUNCTION_CODE_MATCH",
+        "HASATTR",
+        "LIST_REVERSEITERATOR_LEN",
+        "MAPPING_KEYS_CHECK",
+        "NATIVE_METHOD_MATCH",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "ORDERED_DICT_KEYS_MATCH",
+        "RANGE_ITERATOR_MATCH",
+        "SEQUENCE_LENGTH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TENSOR_MATCH",
+        "TUPLE_ITERATOR_LEN",
+        "TYPE_MATCH",
+    }
+)
+
+
+# Guard types on ambient or process state that the guard leaf checks for itself
+# and nothing in this module fingerprints. Never dropped, never compared.
+_UNMODELLED_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "CURRENT_STREAM_MATCH",
+        "DEFAULT_DEVICE",
+        "DISPATCH_KEY_SET_MATCH",
+        "DTENSOR_SPEC_MATCH",
+        "DUAL_LEVEL",
+        "FSDP_TRAINING_STATE",
+        "FUNCTORCH_STACK_MATCH",
+        "FX_ANNOTATION",
+        "GLOBAL_STATE",
+        "OPAQUE_OBJ_GUARD_FN_MATCH",
+        "SHAPE_ENV",
+        "TENSOR_SUBCLASS_METADATA_MATCH",
+        "TORCH_FUNCTION_STATE",
+    }
+)
+
+
+# Guard types whose GuardBuilder method is `pass`: the guard is a marker, and
+# the check it names is made by GLOBAL_STATE's leaf. Nothing about them is
+# serialized or dropped, so they never appear in a dropped-guard report --
+# listing GRAD_MODE as "a precondition nothing checks" would be false, since
+# GlobalStateGuard checks it on every call. Their facts ARE compared, from the
+# same process state GlobalStateGuard snapshots (see _value_fingerprint).
+_NOOP_GUARD_TYPES = frozenset({"DETERMINISTIC_ALGORITHMS", "GRAD_MODE"})
+
+
+def _is_noop_guard_type(guard_type: str) -> bool:
+    # EMPTY_NN_MODULE_HOOKS_DICT is classified shape-bearing for the config
+    # where it emits a check; under skip_nnmodule_hook_guards, the default,
+    # GuardBuilder emits nothing for it, so a report must not call it a
+    # precondition.
+    return guard_type in _NOOP_GUARD_TYPES or (
+        guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
+        and torch._dynamo.config.skip_nnmodule_hook_guards
+    )
+
+
+# The ONLY guard types the invariance policy may drop, and only when proven
+# invariant across every captured variant: the identity guards the default
+# filter drops anyway as unserializable, plus BUILTIN_MATCH, an identity match
+# on a builtin that the default filter keeps. The four sets are a total,
+# disjoint classification of GuardBuilder's guard methods, pinned by
+# test_guard_policy_classification_is_total: a guard type in none of them --
+# any type added to GuardBuilder after this list -- is KEPT unconditionally
+# until someone classifies it, so a new value-pinning guard can never become
+# silently droppable. Guards installed outside GuardBuilder (the root manager's
+# DuplicateInputs and StorageOverlap exprs, the dimension-marking lambda) never
+# reach the guard filter and are outside the policy as well.
+_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_MATCH"})
+
+
+def _saved_hooks_fingerprint() -> str:
+    """
+    Name the installed saved-tensors hooks the way the saved guard compares them.
+
+    A serialized AUTOGRAD_SAVED_TENSORS_HOOKS guard compares
+    ``guards._saved_tensors_hooks_fingerprint``: None for hooks it cannot inline,
+    so plain-Python hooks and no hooks at all are one value, and otherwise a
+    content hash of each hook's graph and fx.wrap ``user_cache_hash``es, with
+    None for a graph the guard never accepts. Reusing it keeps two hook sets one
+    line here exactly when the loaded guard treats them alike; an id could not
+    go in a committed, diffable file anyway.
+    """
+    try:
+        from torch._dynamo.guards import _saved_tensors_hooks_fingerprint
+        from torch._functorch._aot_autograd.utils import top_saved_tensors_hooks
+
+        fingerprint = _saved_tensors_hooks_fingerprint(top_saved_tensors_hooks())
+        if fingerprint is None:
+            return "hooks=None"
+        return (
+            "hooks=("
+            + ", ".join("unverifiable" if p is None else p[:12] for p in fingerprint)
+            + ")"
+        )
+    except Exception:
+        # Distinct from the "" that means "the rendered code already names the
+        # check": a failed read must not merge two variants.
+        return "hooks=<unreadable>"
+
+
+def _value_fingerprint(entry: GuardFilterEntry) -> str:
+    """
+    What the guard checks, when the rendered code does not say.
+
+    TENSOR_MATCH is the case that matters: its code_list carries only the
+    _dynamo_*_indices hasattr checks, while everything it really compares lives
+    in the C++ leaf. Without those two specializations of one frame look
+    identical and wrongly land in the intersection, so this mirrors TensorCheck
+    -- python type and the full dispatch key set included, since a Parameter
+    against a Tensor, a conjugated view against a plain one, or an
+    inference-mode tensor against a no_grad one, splits a compilation exactly
+    as dtype does. KNOWN GAP: that leaf checks nothing for a dim the compile
+    made dynamic, so under ``dynamic=True`` the concrete shape here is narrower
+    than the guard and a shape-generic TENSOR_MATCH is reported as varying
+    rather than invariant.
+
+    An identity guard needs one too, because ``_normalize`` strips the id its
+    code renders: without a name for the object, two variants holding different
+    callables at one source collapse into one fact and are reported as an
+    invariant neither of them holds.
+
+    Every other guard takes its value from its own rendered code, which names
+    it, so fingerprinting it again SPLITS identical guards: TYPE_MATCH on an
+    unspecialized int checks only that the int is an int, and stamping 1 on one
+    variant and 2 on the next demotes a real invariant into two identical
+    'varies' lines. So every branch dispatches on the guard type, never on the
+    value's: the NOT_NONE_MATCH Dynamo installs on an optimizer's .grad, or a
+    TYPE_MATCH on a tensor attribute, holds a tensor whose shape and dtype it
+    never checks.
+    """
+    if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
+        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
+        # or the file churns -- but erasing it alone would merge two variants
+        # that differ ONLY in their hooks and report the guard that split them
+        # as an invariant. Put back a discriminator derived from what the hooks
+        # ARE rather than where they live, which is both stable across
+        # processes and still telling.
+        return _saved_hooks_fingerprint()
+    if entry.guard_type == "GRAD_MODE":
+        # Global-state guards carry no name, code or value, so two variants of
+        # one frame that differ only in grad mode render identically and land
+        # in the intersection. The filter runs in the traced frame's own state.
+        return f"grad_enabled={torch.is_grad_enabled()}"
+    if entry.guard_type == "DETERMINISTIC_ALGORITHMS":
+        # Same as GRAD_MODE: the two fields GlobalStateGuard snapshots for it.
+        warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        return f"deterministic={torch.are_deterministic_algorithms_enabled()}, warn_only={warn_only}"
+    if not entry.has_value:
+        return ""
+    value = entry.value
+    if entry.guard_type == "TENSOR_MATCH" and isinstance(value, torch.Tensor):
+        # Render exactly what TensorCheck stores (notably the TLS-adjusted
+        # dispatch key set, not the tensor's own) rather than reconstructing it.
+        # The fact's source already names the tensor, so no name goes in.
+        from .guards import convert_to_concrete_values, get_tensor_guard_code_part
+
+        try:
+            return get_tensor_guard_code_part(
+                value,
+                "<value>",
+                convert_to_concrete_values(value.size()),
+                convert_to_concrete_values(value.stride()),
+                type(value),
+                torch._C._dispatch_keys(value),
+            )
+        except Exception:
+            # A subclass whose __torch_function__ refuses attribute reads got
+            # here; type() is the one read that cannot raise.
+            return f"type={type(value).__name__}, <unrenderable>"
+    if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
+        d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
+    ):
+        return _object_identity(value)
+    return ""
+
+
+def _fact_order(fact: _GuardFact) -> tuple[str, str, str, str]:
+    # value is part of the key: once the boilerplate code parts are filtered a
+    # TENSOR_MATCH renders no code, so two shape specializations would otherwise
+    # tie and sort unstably, making the file differ run to run.
+    return (fact.source, fact.guard_type, " ".join(fact.code), fact.value)
+
+
+def _wont_generalize(
+    kept: set[tuple[str, str]],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> tuple[str, ...]:
+    """Sources no captured variant will serve a new value for.
+
+    A source pinned in ONE variant is not pinned for the artifact: the union of
+    kept guards says "some graph equality-matched this", while what the warning
+    claims is "no graph will take anything else". A frame whose other variant
+    guards the same source generically -- the ordinary shape once two examples
+    are captured -- serves the new value fine, and warning about it tells the
+    caller to enumerate values that already work.
+
+    Cancellation is per frame, like every comparison in this module: a bare
+    name means nothing across frames, and ``___stack0`` names whatever crossed
+    the break in EVERY resume frame -- a tensor in one, an ``.item()`` int in
+    the next -- so a generic mention elsewhere must not erase a real pin here.
+    ``GuardFact.source`` and a kept slot's name share one spelling, the
+    ``GuardFilterEntry.name`` with local scope stripped (``L['x']`` -> ``x``).
+    A fact whose guard the filter dropped (``enforced`` False) checks nothing,
+    so its variant counts as serving the source generically, not as pinning it;
+    the drop itself is what ``dropped_guards`` reports, so the case changes
+    fields rather than disappearing. A variant's OWN companion guards on a
+    source it pins (the SEQUENCE_LENGTH beside a dict_keys EQUALS_MATCH) are
+    not a generic mention, hence the ``- here`` below.
+
+    KNOWN GAP: "reached it without pinning it" is read as "serves other
+    values", and an unspecialized int breaks that: its variant carries only a
+    TYPE_MATCH on the name, and if the trace then specializes the symbol the
+    ``L['scale'] == 3`` check is a SHAPE_ENV fact with an EMPTY source, so the
+    variant looks generic and cancels a sibling's pin that nothing serves.
+    """
+    pinned = {n for t, n in kept if _pins_a_value(t, n)}
+    if not pinned:
+        return ()
+    # A source survives if SOME frame pins it and never serves it generically;
+    # a frame that does both cancels only its own pin, not another frame's.
+    survivors: set[str] = set()
+    for variants in guard_sets.values():
+        pins: set[str] = set()
+        generic: set[str] = set()
+        for facts in variants:
+            here = {
+                f.source
+                for f in facts
+                if f.enforced and _pins_a_value(f.guard_type, f.source)
+            }
+            pins |= here
+            # A variant that reached the source without pinning it is the
+            # graph that serves other values.
+            generic |= {f.source for f in facts} - here
+        survivors |= pins - generic
+    return tuple(sorted(pinned & survivors))
+
+
+def _varying_guard_slots(
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> frozenset[tuple[str, str]]:
+    """The guard slots that actually discriminate between captured variants.
+
+    A slot is ``(guard_type, source)``, the source as ``GuardFact.source``
+    spells it: the ``GuardFilterEntry.name`` with local scope stripped
+    (``L['x']`` -> ``x``). It varies when two variants of one frame
+    recorded DIFFERENT facts for it, and also when it is present in some
+    variants and absent in others -- a guard only one variant carries is what
+    tells that variant apart, and comparing values alone would call it
+    invariant and drop it. That present-in-some case is the majority of what is
+    kept, not an edge. A fact is its rendered code and value; ``enforced`` says
+    whether the serialized copy keeps the guard, not what it checks, so two
+    variants that differ only there agree. One variant can hold several facts
+    on one slot (a ``HASATTR`` per attribute name, all on the parent source),
+    so what is compared across variants is each variant's SET of facts for the
+    slot, never one fact against another inside a variant.
+
+    Everything else held identically in every variant, which is what licenses a
+    caller to leave it out of the serialized copy.
+    """
+    varying: set[tuple[str, str]] = set()
+    for variants in guard_sets.values():
+        seen: dict[tuple[str, str], list[frozenset[tuple[tuple[str, ...], str]]]] = {}
+        for facts in variants:
+            rendered: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
+            for f in facts:
+                slot = (f.guard_type, f.source)
+                rendered.setdefault(slot, set()).add((f.code, f.value))
+            for slot, facts_here in rendered.items():
+                seen.setdefault(slot, []).append(frozenset(facts_here))
+        for slot, per_variant in seen.items():
+            if len(per_variant) != len(variants) or len(set(per_variant)) > 1:
+                varying.add(slot)
+    return frozenset(varying)
+
+
+def _frame_key(code: Any) -> tuple[str, str, int]:
+    return (code.co_name, code.co_filename, code.co_firstlineno)
+
+
+class _CapturePackage(CompilePackage):
+    """A CompilePackage that remembers which frames compiled any compute.
+
+    A frame is recorded once any compile of it registers a backend graph or a
+    graph-break continuation, or traces a graph that output_graph bypasses before
+    registering it, whether or not that compile is later bypassed.
+    """
+
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        super().__init__(fn)
+        self.computing_frames: set[tuple[str, str, int]] = set()
+
+    def note_compute(self) -> None:
+        if self._current_entry is not None:
+            self.computing_frames.add(_frame_key(self._current_entry.python_code))
+
+    def _add_backend_id(
+        self, backend_id: _BackendId, backend: Any | None = None
+    ) -> None:
+        self.note_compute()
+        super()._add_backend_id(backend_id, backend)
+
+    def add_resume_function(
+        self,
+        python_code: types.CodeType,
+        python_module: str,
+        function_name: str,
+    ) -> None:
+        self.note_compute()
+        super().add_resume_function(python_code, python_module, function_name)
+
+
+def _is_variantless_entry_fallback(entry: _DynamoCacheEntry) -> bool:
+    # The artifact build refuses an entry frame that fell back on its first
+    # call (it has no variant to dispatch to), so that one stays uncovered.
+    if not entry.codes:
+        return False
+    first = entry.codes[0]
+    return first.eager_fallback and not first.bypassed and not first.guarded_codes
+
+
+def _variantless_entry_fallback_message(fn_name: str) -> str:
+    return (
+        f"precompile captured no dispatchable graph for {fn_name!r}: Dynamo gave up "
+        f"on the entry frame at its first call, so it holds no variant to serve. "
+        f"Dynamo gives up on, and skips for the rest of the capture, a frame with a "
+        f"graph break it cannot resume from (such as one inside a loop; check "
+        f"TORCH_LOGS=graph_breaks), a frame that calls torch._dynamo.skip_frame(), "
+        f"a frame it refuses to trace such as a generator, a frame whose UserError "
+        f"Dynamo suppressed, or one whose graph the backend declined by raising "
+        f"SkipFrame or failed on with an error Dynamo falls back on, such as "
+        f"DynamicOutputShapeException (check the backend's log). Fix that, or "
+        f"capture the functions the entry calls instead."
+    )
+
+
+def _served_as_eager_fallback(entry: _DynamoCacheEntry, code: Any) -> bool:
+    return (
+        code.eager_fallback
+        and not code.bypassed
+        and not (code is entry.codes[0] and _is_variantless_entry_fallback(entry))
+    )
+
+
+def _summarize(
+    entry: _DynamoCacheEntry,
+    *,
+    dropped: set[tuple[str, str]],
+    kept: set[tuple[str, str]],
+    policy_dropped: set[tuple[str, str]],
+    risky: set[tuple[str, str]],
+    truncated: frozenset[str],
+    capture_errors: Sequence[str],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
+    served_eagerly: frozenset[tuple[str, str, int]] = frozenset(),
+) -> PrecompileSummary:
+    """Assemble the report. ``dropped_code`` maps a dropped slot to the one
+    rendering the report carries for it, the caller's pick among the variants
+    that dropped it; a slot without one gets no ``dropped_guard_code`` entry.
+
+    ``bypassed`` and ``uncovered_frames`` are read off the entry, one bare
+    ``co_name`` per frame, so a repeated name is two frames and both lists are
+    subsets of ``frames`` by construction. Uncovered is the coverage gap: the
+    frame entered Dynamo (``has_compile_id``, or ``eager_fallback`` for a
+    generator entry, flagged before ``_compile``), holds no guarded code, and
+    was neither bypassed nor served as an ``eager_fallback`` (Dynamo gave up on
+    it, so a load serves any variants it has and runs a call they miss
+    eagerly; those are ``eager_fallbacks``). ``install()`` ``skip_code()``s
+    every entry that is not bypassed and has no guarded codes whether or not it
+    entered Dynamo, so a generated-but-never-executed resume entry is skipped
+    there and is not a gap here. ``backend_graphs`` counts the backend ids of
+    the entries that are not bypassed, the ones ``install()`` loads: a
+    save-time bypass (``PrecompileCacheEntry.from_cache_entry``, backend
+    artifact missing) marks the entry and leaves its ids in place.
+    ``truncated`` comes from the compile path, which sees a frame hit the limit
+    once and records it as ``co_name (filename:firstlineno)``, so that set
+    cannot merge two frames. ``served_eagerly`` names the frames
+    ``PrecompileSession._served_entry`` emptied: they hold no guarded code by
+    design, not for lack of coverage.
+    """
+    return PrecompileSummary(
+        frames=len(entry.codes),
+        resume_functions=sum(1 for c in entry.codes if c.install_to_global),
+        guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
+        backend_graphs=len(
+            {b for c in entry.codes if not c.bypassed for b in c.backend_ids}
+        ),
+        bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
+        truncated=tuple(sorted(truncated)),
+        uncovered_frames=tuple(
+            c.python_code.co_name
+            for c in entry.codes
+            if (c.has_compile_id or c.eager_fallback)
+            and not c.guarded_codes
+            and not c.bypassed
+            and _frame_key(c.python_code) not in served_eagerly
+            and not _served_as_eager_fallback(entry, c)
+        ),
+        eager_fallbacks=tuple(
+            f"{c.python_code.co_name} "
+            f"({c.python_code.co_filename}:{c.python_code.co_firstlineno})"
+            for c in entry.codes
+            if _served_as_eager_fallback(entry, c)
+        ),
+        wont_generalize=_wont_generalize(kept, guard_sets),
+        dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped)
+            if (gtype, name) in dropped_code
+        ),
+        kept_guards=tuple(sorted(kept)),
+        risky_dropped_guards=tuple(sorted(risky)),
+        policy_dropped_guards=tuple(sorted(policy_dropped)),
+        capture_errors=tuple(capture_errors),
+    )
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+class PrecompileSession(Generic[_P, _R]):
+    """A caller-driven multi-graph capture in progress.
+
+    Enter it to get the callable to exercise, call that with real inputs inside
+    the block, and :meth:`snapshot_artifact` renders everything captured so far as
+    a ``(python_code, cache)`` pair. The calls run under ``_capture_config``, so
+    every backend graph reaches the artifact as a bundled AOTAutograd entry, and
+    under the package's guard filter, which this session wraps to record what it
+    kept and dropped for the :class:`PrecompileSummary`.
+
+    The artifact is STANDALONE: it rebuilds each captured frame from its code
+    object and guard trees (see ``torch._precompile_driver._build_multigraph_forward``)
+    and installs nothing, unless the entry cannot reach a frame through a
+    graph-break continuation -- one entered by an ordinary call, such as a child
+    module's forward that graph-breaks. That artifact is rendered installed-mode
+    instead (see ``torch._precompile_driver._build_installed_forward``).
+    """
+
+    def __init__(
+        self,
+        fn: Callable[_P, _R],
+        *,
+        backend: str = "inductor",
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
+        recompile_limit: int = 256,
+        dynamic: bool | None = None,
+    ) -> None:
+        self._fn = fn
+        self._backend = backend
+        self._recompile_limit = recompile_limit
+        self._dynamic = dynamic
+        self._custom_guard_filter = guard_filter_fn is not None
+        self._dropped_guard_code: dict[tuple[str, str], str] = {}
+        # slot -> the frames whose compiles kept / dropped / riskily dropped it
+        self._keep_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        self._drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        self._risky_drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
+        self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
+        self._capture_errors: list[str] = []
+        self._backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]] = {}
+        self._package = _CapturePackage(fn)
+        self._guard_filter_fn = self._recording_filter(
+            default_guard_filter_fn if guard_filter_fn is None else guard_filter_fn
+        )
+        self._compiled: Callable[_P, _R] | None = None
+        self._entered = False
+        self._finished = False
+
+    def _recording_filter(
+        self,
+        inner: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
+    ) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
+        """Record what the filter kept and dropped, per compilation, for the summary.
+
+        A dropped guard does not fail at serving time; it silently widens what a
+        graph is reused for, so the set has to be inspectable. One filter call is
+        one compilation, and the package knows which frame is being compiled.
+        """
+
+        def filter_fn(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
+            decisions = list(inner(entries))
+            # A drop the default filter would not have made is risky by
+            # construction: nothing here can say what the caller gave up.
+            default_kept = (
+                default_guard_filter_fn(entries)
+                if self._custom_guard_filter
+                else decisions
+            )
+            current = self._package.current_entry
+            key = (
+                _frame_key(current.python_code)
+                if current is not None
+                else ("<unknown>", "<unknown>", 0)
+            )
+            namespaces = _module_namespaces(entries)
+            global_state_kept = any(
+                keep and e.guard_type == "GLOBAL_STATE"
+                for keep, e in zip(decisions, entries)
+            )
+            facts: set[_GuardFact] = set()
+            for keep, by_default, entry in zip(decisions, default_kept, entries):
+                # One spelling for every slot and fact, so the dropped, risky and
+                # kept sets and the per-variant facts compare as equals.
+                slot = (entry.guard_type, _normalize(strip_local_scope(entry.name)))
+                # A no-op type's check, where it has one, is GLOBAL_STATE's leaf.
+                enforced = keep or (
+                    _is_noop_guard_type(entry.guard_type) and global_state_kept
+                )
+                if enforced:
+                    self._keep_frames.setdefault(slot, set()).add(key)
+                else:
+                    self._drop_frames.setdefault(slot, set()).add(key)
+                    rendered = " ; ".join(_render_code(entry.code_parts))
+                    if rendered:
+                        self._dropped_guard_code.setdefault(slot, rendered)
+                    if by_default or _is_risky_drop(entry, namespaces):
+                        self._risky_drop_frames.setdefault(slot, set()).add(key)
+                if entry.guard_type in _UNMODELLED_GUARD_TYPES:
+                    # Never compared, so never claimed to hold or to vary.
+                    continue
+                facts.add(
+                    _GuardFact(
+                        guard_type=entry.guard_type,
+                        source=slot[1],
+                        code=_render_code(entry.code_parts),
+                        value=_value_fingerprint(entry),
+                        enforced=enforced,
+                    )
+                )
+            self._guard_sets.setdefault(key, []).append(frozenset(facts))
+            return decisions
+
+        return filter_fn
+
+    def __enter__(self) -> Callable[_P, _R]:
+        if self._entered:
+            raise PackageError(
+                "PrecompileSession cannot be re-entered; start a new capture."
+            )
+        self._entered = True
+        # Its own cache region: a function captured (or compiled) earlier in
+        # this process would otherwise serve its existing cache entries, and
+        # this package would record nothing.
+        self._compiled = torch._dynamo.optimize(
+            self._backend,
+            package=self._package,
+            guard_filter_fn=self._guard_filter_fn,
+            dynamic=self._dynamic,
+            recompile_limit=self._recompile_limit,
+            isolate_recompiles=True,
+        )(self._fn)
+        return self._call
+
+    def _call(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if self._compiled is None or self._finished:
+            raise PackageError("PrecompileSession is not active")
+        # The compiler configuration is per call, not per block: user code
+        # between calls (optimizer.step, data loading, save()) runs in the
+        # ambient configuration. The ambient accumulated limit is raised so the
+        # explicit per-frame limit is the effective one.
+        limit = max(
+            self._recompile_limit, torch._dynamo.config.accumulated_recompile_limit
+        )
+        try:
+            with (
+                _capture_config(),
+                torch._dynamo.config.patch(accumulated_recompile_limit=limit),
+            ):
+                return self._compiled(*args, **kwargs)
+        except Exception as e:
+            message = f"{type(e).__name__}: {e}"
+            if message not in self._capture_errors:
+                self._capture_errors.append(message)
+            raise
+        finally:
+            self._take_backend_artifacts()
+
+    def __exit__(self, *exc: object) -> None:
+        self._finished = True
+        self._compiled = None
+
+    def _take_backend_artifacts(self) -> None:
+        """Move this capture's backend artifacts out of the process-global list.
+
+        The AOTAutograd cache records a bundled entry under each graph's backend
+        id as the graph compiles; taking them after every call keeps another
+        capture's ``PrecompileContext.clear()`` between calls from losing them.
+        """
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        for backend_id in self._package.cache_entry().backend_ids:
+            if backend_id not in self._backend_artifacts:
+                artifact = PrecompileContext.take_artifact(backend_id)
+                if artifact is not None:
+                    self._backend_artifacts[backend_id] = artifact
+
+    def _collect_backends(self) -> dict[str, BackendCacheArtifact[Any]]:
+        """The compiled subgraphs this capture produced, keyed by backend id."""
+        from torch._dynamo.output_graph import noop_graph_call
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+
+        self._take_backend_artifacts()
+        entry = self._package.cache_entry()
+        collected: dict[str, BackendCacheArtifact[Any]] = {}
+        missing: list[_BackendId] = []
+        for backend_id in sorted(entry.backend_ids):
+            artifact = self._backend_artifacts.get(backend_id)
+            backend = self._package.cached_backends.get(backend_id)
+            if artifact is None and backend is not None:
+                # An eager "backend" is an fx graph with no compiled artifact of
+                # its own, and output_graph short-circuits an empty graph to
+                # noop_graph_call without filing anything under its id, which
+                # the bytecode still names; both are carried as-is.
+                if self._backend == "eager" or backend is noop_graph_call:
+                    artifact = EagerCacheArtifact(key=backend_id, content=backend)
+            if artifact is None:
+                missing.append(backend_id)
+            else:
+                collected[str(backend_id)] = artifact
+        if missing:
+            raise PackageError(
+                f"precompile captured {len(entry.backend_ids)} backend graph(s) but "
+                f"{len(missing)} of them recorded no serializable artifact: "
+                f"{missing}. The {self._backend!r} backend reaches the artifact "
+                f"through the AOTAutograd cache (bundled_autograd_cache); a graph "
+                f"that cache bypassed cannot be served. Check TORCH_LOGS=+aot for "
+                f"the bypass reason."
+            )
+        return collected
+
+    def _served_entry(
+        self,
+    ) -> tuple[_DynamoCacheEntry, frozenset[tuple[str, str, int]]]:
+        """The entry to render, and the frames it serves eagerly.
+
+        A frame Dynamo compiled on its own can hold no graph at all, e.g. a
+        ``WeakKeyDictionary`` lookup called from a non-recursively disabled
+        frame. Its variants fold what they read into constants behind guards,
+        so one that lost a guard to the filter, or whose guards could not be
+        serialized at all (a bypass), could serve a stale answer or none.
+        Running its original bytecode instead is always correct and gives up
+        no compiled code, which is how torch.compile treats a frame that traced
+        no ops. Such a frame is rendered with no variants and not bypassed:
+        install() skips it and everything it calls (its variants inlined its
+        Python callees, which have no entries of their own to serve), and the
+        standalone driver runs it as plain Python. The entry frame is left alone, since the artifact serves it.
+        """
+        entry = self._package.cache_entry()
+        lossy = {frame for frames in self._drop_frames.values() for frame in frames}
+        computing = self._package.computing_frames
+        eager: set[tuple[str, str, int]] = set()
+        codes = list(entry.codes)
+        for i, code in enumerate(codes[1:], start=1):
+            key = _frame_key(code.python_code)
+            if (
+                code.has_compile_id
+                and key not in computing
+                and (code.bypassed or (code.guarded_codes and key in lossy))
+            ):
+                codes[i] = dataclasses.replace(
+                    code,
+                    guarded_codes=[],
+                    bypassed=False,
+                    skip_recursive=True,
+                    eager_fallback=False,
+                )
+                eager.add(key)
+        return dataclasses.replace(entry, codes=codes), frozenset(eager)
+
+    def summary(self) -> PrecompileSummary:
+        """Coverage and guard information for everything captured so far."""
+        return self._summary_of(*self._served_entry())
+
+    def _summary_of(
+        self, entry: _DynamoCacheEntry, eager: frozenset[tuple[str, str, int]]
+    ) -> PrecompileSummary:
+        # A frame served eagerly checks no guard, so neither its guards nor
+        # its drops describe what the artifact serves.
+        guard_sets = {k: v for k, v in self._guard_sets.items() if k not in eager}
+
+        dropped = {s for s, frames in self._drop_frames.items() if not frames <= eager}
+        kept = {s for s, frames in self._keep_frames.items() if not frames <= eager}
+
+        # A dropped slot is risky when the SAME source held DIFFERENT values
+        # across a frame's variants: a dropped guard that told the variants
+        # apart cannot pick between them at serve time. Merely being absent
+        # from one variant (a MODULE_MATCH a branch does not touch) is not.
+        # Only variants some kept guard split apart can be compared, so a
+        # dropped slot that is the sole difference between two calls never
+        # recompiles and is never reported here.
+        risky = {
+            s for s, frames in self._risky_drop_frames.items() if not frames <= eager
+        }
+        for variants in guard_sets.values():
+            values: dict[tuple[str, str], set[str]] = {}
+            for facts in variants:
+                for f in facts:
+                    if not f.enforced:
+                        values.setdefault((f.guard_type, f.source), set()).add(f.value)
+            risky |= {slot for slot, seen in values.items() if len(seen) > 1}
+        return _summarize(
+            entry,
+            dropped=dropped,
+            kept=kept,
+            policy_dropped=set(),
+            risky=risky,
+            truncated=frozenset(),
+            capture_errors=self._capture_errors,
+            guard_sets=guard_sets,
+            dropped_code=self._dropped_guard_code,
+            served_eagerly=eager,
+        )
+
+    def _gated_summary(
+        self,
+        *,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+    ) -> PrecompileSummary:
+        """Run the coverage and guard gates, or raise saying which one failed."""
+        entry, eager = self._served_entry()
+        summary = self._summary_of(entry, eager)
+        if _is_variantless_entry_fallback(entry):
+            # The artifact build refuses this too, so no flag is a way out; say
+            # so rather than suggest one. Checked before every other gate and
+            # whatever require_complete says: the entry did run, and the later
+            # gates either suggest a flag or say it never ran.
+            name = entry.codes[0].python_code.co_name
+            raise PackageError(
+                f"{_variantless_entry_fallback_message(name)} The artifact build "
+                f"refuses this whatever require_complete says."
+            )
+        if require_no_risky_drops and summary.risky_dropped_guards:
+            raise PackageError(
+                f"Precompilation dropped guard(s) that can affect dispatch on "
+                f"{[n for _, n in summary.risky_dropped_guards]}. Each of those names "
+                f"a slot whose value differed between captured variants, a "
+                f"configuration-dependent identity slot, or a guard discarded by a "
+                f"custom filter. Nothing checks it at load time, so a different value "
+                f"can silently select the wrong graph instead of recompiling. Make the "
+                f"value reachable through a serializable guard, pin both machines to "
+                f"the same value, or pass require_no_risky_drops=False to accept the "
+                f"risk explicitly."
+            )
+        if require_complete:
+            if summary.capture_errors:
+                raise PackageError(
+                    "Precompilation is incomplete because a captured call raised: "
+                    f"{list(summary.capture_errors)}. Re-run every example "
+                    "successfully, or pass require_complete=False to save the partial "
+                    "artifact."
+                )
+            if summary.guarded_codes == 0:
+                raise PackageError(
+                    "Precompilation captured no compiled code. Capture happens by "
+                    "execution, so the callable must actually be run inside the "
+                    "capture block."
+                )
+            if summary.backend_graphs == 0:
+                raise PackageError(
+                    "Precompilation compiled no graph: every captured frame was "
+                    "empty, so the artifact carries no compiled compute. Pass "
+                    "require_complete=False to write the guards-only artifact anyway."
+                )
+            if summary.uncovered_frames:
+                raise PackageError(
+                    f"Precompilation exercised frame(s) that produced NO guarded code "
+                    f"at all: {list(summary.uncovered_frames)}. Those paths are absent "
+                    f"from the artifact. This is expected for a frame that only "
+                    f"dispatches to covered submodules; it also looks exactly like a "
+                    f"frame whose compile error was suppressed (suppress_errors=True; "
+                    f"Dynamo logs that error as a warning). Pass require_complete=False "
+                    f"once you have confirmed which."
+                )
+            if summary.bypassed:
+                raise PackageError(
+                    f"Precompilation is incomplete: {len(summary.bypassed)} frame(s) "
+                    f"were bypassed and will serve nothing: {list(summary.bypassed)}. "
+                    f"This usually means their guards could not be serialized. Pass "
+                    f"require_complete=False to accept a partial artifact."
+                )
+            # Backstop: the branches above only add detail, and any reason they
+            # do not name (a truncated frame) still refuses.
+            if not summary.complete:
+                raise PackageError(
+                    f"Precompilation is incomplete: {summary}. Pass "
+                    "require_complete=False to save the partial artifact."
+                )
+        return summary
+
+    def snapshot_artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+    ) -> tuple[str, bytes]:
+        """Render everything captured SO FAR as ``(python_code, cache)``.
+
+        Leaves the session able to capture more, which is what lets a capture
+        checkpoint mid-block. The gates run first, so a refusal renders nothing.
+        Under inductor the cache half bundles whatever ``CacheArtifactManager``
+        recorded, so run the session under ``with_fresh_cache()`` (``capture()``
+        does) to keep it to this session's compiles.
+        """
+        from torch._precompile import _build_multigraph_artifact
+
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+        )
+        backends = self._collect_backends()
+        return _build_multigraph_artifact(
+            self._served_entry()[0], backends, summary, self._backend, self._fn
+        )
+
+
+def precompile_capture(
+    fn: Callable[_P, _R],
+    *,
+    backend: str = "inductor",
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
+    recompile_limit: int = 256,
+    dynamic: bool | None = None,
+) -> PrecompileSession[_P, _R]:
+    """Begin capturing ``fn`` into a multi-graph artifact.
+
+    ``recompile_limit`` defaults well above Dynamo's usual 8 because a precompile
+    deliberately wants one compiled variant per condition, whereas the normal
+    limit exists to catch runaway recompilation. ``guard_filter_fn`` applies to
+    the runtime guards as well as the serialized ones, so a dropped guard never
+    triggers a recompile during capture, just as it cannot pick a graph at serve
+    time.
+    """
+    if isinstance(fn, functools.partial):
+        raise PackageError(
+            "precompile cannot capture a partial. Pass the underlying function "
+            "and give its bound arguments as call arguments."
+        )
+    if isinstance(fn, torch.nn.Module):
+        # Dynamo compiles the module through its own wrapper frame, whose graphs
+        # close over the module; a standalone artifact cannot rebuild that.
+        raise PackageError(
+            "precompile cannot capture an nn.Module directly: capture the function "
+            "that CALLS the model, e.g. a module-level 'def step(model, x): return "
+            "model(x)'."
+        )
+    if isinstance(fn, types.MethodType):
+        # The artifact rebuilds fn from its code object, which takes the
+        # receiver as its first argument: served, it would not take fn's calls.
+        raise PackageError(
+            "precompile cannot capture a bound method: capture a module-level "
+            "function that takes the receiver as an argument, e.g. 'def step(model, "
+            "x): return model(x)'."
+        )
+    return PrecompileSession(
+        fn,
+        backend=backend,
+        guard_filter_fn=guard_filter_fn,
+        recompile_limit=recompile_limit,
+        dynamic=dynamic,
     )

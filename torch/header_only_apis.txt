@@ -6,8 +6,14 @@
 # torch/headeronly/util/shim_utils.h
 TORCH_ERROR_CODE_CHECK
 
-# c10/util/TypeCast.h
+# torch/headeronly/util/TypeCast.h
+checked_convert
 convert
+report_overflow
+unsafe_wrapping_convert
+
+# torch/headeronly/util/overflows.h
+overflows
 
 # torch/headeronly/util/bit_cast.h
 bit_cast
@@ -224,6 +230,12 @@ HeaderOnlyGenericPackedTensorAccessor
 # HeaderOnlyTensorAccessorBase and
 # HeaderOnlyGenericPackedTensorAccessorBase are tested through
 # HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor
+
+# torch/headeronly/core/AccumulateType.h
+AccumulateTypeDevice
+AccumulateType
+acc_type_device
+acc_type
 
 # torch/headeronly/util/Deprecated.h
 # C10_DEPRECATED, C10_DEPRECATED_MESSAGE, and

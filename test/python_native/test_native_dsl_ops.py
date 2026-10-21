@@ -12,6 +12,7 @@ import textwrap
 import uuid
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import call, patch
 
 from torch._native import common_utils as native_common_utils, triton_utils
@@ -138,6 +139,7 @@ class TestNativeDSLOps(TestCase):
                 "torch._native.triton_utils",
                 [
                     "_check_runtime_available",
+                    "_try_initialize_driver",
                     "_version_is_sufficient",
                     "check_native_jit_disabled",
                     "check_native_version_skip",
@@ -328,6 +330,25 @@ class TestNativeDSLOps(TestCase):
         )
         self.assertIsNotNone(reason)
         self.assertIn("nonexistent_pkg_xyz", reason)
+
+    def test_triton_driver_initialization_is_cached(self):
+        from torch._native import triton_utils
+
+        calls = 0
+
+        class Driver:
+            @property
+            def active(self):
+                nonlocal calls
+                calls += 1
+                raise RuntimeError("unavailable")
+
+        runtime = ModuleType("triton.runtime")
+        runtime.driver = Driver()
+        with patch.dict(sys.modules, {"triton.runtime": runtime}):
+            self.assertFalse(triton_utils._try_initialize_driver())
+            self.assertFalse(triton_utils._try_initialize_driver())
+        self.assertEqual(calls, 1)
 
     def test_available_version_parsing(self):
         """Test _available_version parses various version formats and handles invalid ones."""
@@ -559,6 +580,11 @@ class TestNativeDSLOps(TestCase):
                         1,
                         f"{module.__name__}: impl not called under skip flag",
                     )
+                    if module is triton_utils:
+                        self.assertIs(
+                            mock.call_args.kwargs["try_initialize_runtime"],
+                            triton_utils._try_initialize_driver,
+                        )
 
     @parametrize("env_value, expected", [(None, False), ("1", True)])
     def test_check_native_version_skip_environment_variable(self, env_value, expected):

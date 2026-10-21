@@ -1459,14 +1459,10 @@ void LoopNest::sliceHead(
     }
   }
 
-  if (!f) {
-    throw malformed_input("sliceHead attempted on null loop");
-  }
+  TORCH_CHECK(f, "MALFORMED INPUT: sliceHead attempted on null loop");
 
   BlockPtr p = to<Block>(f->get_parent());
-  if (!p) {
-    throw malformed_input("sliceHead attempted on loop with no parent");
-  }
+  TORCH_CHECK(p, "MALFORMED INPUT: sliceHead attempted on loop with no parent");
 
   ExprPtr head_end = alloc<Min>(
       alloc<Add>(f->start(), immLike(f->stop(), factor)), f->stop(), true);
@@ -1502,14 +1498,10 @@ void LoopNest::sliceTail(
     }
   }
 
-  if (!f) {
-    throw malformed_input("sliceTail attempted on null loop");
-  }
+  TORCH_CHECK(f, "MALFORMED INPUT: sliceTail attempted on null loop");
 
   BlockPtr p = to<Block>(f->get_parent());
-  if (!p) {
-    throw malformed_input("sliceTail attempted on loop with no parent");
-  }
+  TORCH_CHECK(p, "MALFORMED INPUT: sliceTail attempted on loop with no parent");
 
   ExprPtr tail_start = alloc<Max>(
       f->start(), alloc<Sub>(f->stop(), immLike(f->stop(), factor)), true);
@@ -1539,14 +1531,11 @@ void LoopNest::splitWithTail(
     int factor,
     ForPtr* inner,
     ForPtr* tail) {
-  if (!f) {
-    throw malformed_input("splitWithTail attempted on null loop");
-  }
+  TORCH_CHECK(f, "MALFORMED INPUT: splitWithTail attempted on null loop");
 
   BlockPtr p = to<Block>(f->get_parent());
-  if (!p) {
-    throw malformed_input("splitWithTail attempted on loop with no parent");
-  }
+  TORCH_CHECK(
+      p, "MALFORMED INPUT: splitWithTail attempted on loop with no parent");
 
   // Normalize the loop to simplify start and stop bound computation
   normalize(f);
@@ -1650,9 +1639,7 @@ void LoopNest::splitWithMask(const ForPtr& f, int factor, ForPtr* inner) {
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
     auto start = intValue(f->start());
-    if (!start || *start != 0) {
-      throw unimplemented_lowering();
-    }
+    TORCH_CHECK(start && *start == 0, "UNIMPLEMENTED LOWERING");
 
     ExprPtr predicate =
         CompareSelect::make(ExprHandle(f->var()), ExprHandle(f->stop()), kLT)
@@ -1678,14 +1665,15 @@ std::vector<ForPtr> LoopNest::distributeLoop(
       buildErrorMessage(
           "Expected non-null loop in distributeLoop in the fuser."));
   auto root = loop->get_parent();
-  if (root == nullptr) {
-    throw malformed_input("Loop without parent: ", loop);
-  }
+  TORCH_CHECK(
+      root != nullptr,
+      "MALFORMED INPUT: Loop without parent:  - ",
+      std::to_string(loop));
   auto root_block = to<Block>(root);
-  if (root_block == nullptr) {
-    throw malformed_input(
-        "Loop's parent must be a Block, instead found ", root);
-  }
+  TORCH_CHECK(
+      root_block != nullptr,
+      "MALFORMED INPUT: Loop's parent must be a Block, instead found  - ",
+      std::to_string(root));
 
   // Extract bodies for all the loops after distribution.
   std::vector<BlockPtr> new_loop_bodies;
@@ -2025,9 +2013,7 @@ void LoopNest::reorderAxis(const ForPtr& a, const ForPtr& b) {
   }
   // find inner and outer.
   ForPtr outer = findOuterFor(a, b);
-  if (outer == nullptr) {
-    throw std::runtime_error("Reordered a loop not in LoopNest");
-  }
+  TORCH_CHECK(outer != nullptr, "Reordered a loop not in LoopNest");
 
   ForPtr inner = a == outer ? b : a;
   std::deque<ForPtr> internal_axes;
@@ -2160,26 +2146,26 @@ static bool isValidPermutation(std::vector<size_t> permutation) {
 std::vector<ForPtr> LoopNest::reorder(
     const std::vector<ForPtr>& loops,
     const std::vector<size_t>& permutation) {
-  if (loops.size() != permutation.size()) {
-    throw malformed_input("invalid permutation size");
-  }
+  TORCH_CHECK(
+      loops.size() == permutation.size(),
+      "MALFORMED INPUT: invalid permutation size");
   if (isTrivialPermutation(permutation)) {
     return loops;
   }
-  if (!isValidPermutation(permutation)) {
-    throw malformed_input("invalid permutation for reorder");
-  }
+  TORCH_CHECK(
+      isValidPermutation(permutation),
+      "MALFORMED INPUT: invalid permutation for reorder");
   if (loops.size() < 2) {
     return loops;
   }
-  if (!areLoopsPerfectlyNested(loops)) {
-    throw malformed_input("reorder is only allowed on perfectly nested loops");
-  }
+  TORCH_CHECK(
+      areLoopsPerfectlyNested(loops),
+      "MALFORMED INPUT: reorder is only allowed on perfectly nested loops");
 
   auto parent = to<Block>(loops.front()->get_parent());
-  if (parent == nullptr) {
-    throw malformed_input("parent of the loops must be a Block");
-  }
+  TORCH_CHECK(
+      parent != nullptr,
+      "MALFORMED INPUT: parent of the loops must be a Block");
 
   // Reorder the loops according to the permutation.
   std::vector<ForPtr> result(loops.size());
@@ -2216,9 +2202,7 @@ ForPtr LoopNest::getLoopAt(ForPtr root, const std::vector<int>& indices) const {
   if (indices.empty()) {
     return root;
   }
-  if (root == nullptr) {
-    throw malformed_input("root loop is null");
-  }
+  TORCH_CHECK(root != nullptr, "MALFORMED INPUT: root loop is null");
 
   ForPtr curr = std::move(root);
   for (auto i : indices) {
@@ -2242,12 +2226,12 @@ ForPtr LoopNest::tile(
     int x_factor,
     int y_factor) {
   auto parent = to<Block>(x->get_parent());
-  if (parent == nullptr) {
-    throw malformed_input("parent of the loops must be a Block");
-  }
-  if (!areLoopsPerfectlyNested({x, y})) {
-    throw malformed_input("two loops must be perfectly nested");
-  }
+  TORCH_CHECK(
+      parent != nullptr,
+      "MALFORMED INPUT: parent of the loops must be a Block");
+  TORCH_CHECK(
+      areLoopsPerfectlyNested({x, y}),
+      "MALFORMED INPUT: two loops must be perfectly nested");
 
   // Split x, y axes by x_factor and y_factor
   ForPtr yi, ytail;
@@ -2291,20 +2275,15 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
 
 void LoopNest::fullUnroll(const ForPtr& f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
-  if (!f) {
-    throw malformed_input("unroll attempted on null loop");
-  } else if (!p) {
-    throw malformed_input("unroll attempted on loop with no parent");
-  }
+  TORCH_CHECK(f, "MALFORMED INPUT: unroll attempted on null loop");
+  TORCH_CHECK(p, "MALFORMED INPUT: unroll attempted on loop with no parent");
 
   auto start_expr = IRSimplifier::simplify(f->start());
   auto stop_expr = IRSimplifier::simplify(f->stop());
-  if (!start_expr->isConstant()) {
-    throw std::runtime_error("Can't unroll due to non-constant loop start!");
-  }
-  if (!stop_expr->isConstant()) {
-    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
-  }
+  TORCH_CHECK(
+      start_expr->isConstant(), "Can't unroll due to non-constant loop start!");
+  TORCH_CHECK(
+      stop_expr->isConstant(), "Can't unroll due to non-constant loop stop!");
 
   std::vector<StmtPtr> unrolled_stmts;
   int start_val = immediateAs<int>(start_expr);
@@ -2348,9 +2327,7 @@ bool LoopNest::isNormalized(const ForPtr& f) {
 }
 
 bool LoopNest::normalize(const ForPtr& f) {
-  if (!f) {
-    throw malformed_input("normalize attempted on null loop");
-  }
+  TORCH_CHECK(f, "MALFORMED INPUT: normalize attempted on null loop");
 
   if (isNormalized(f)) {
     // No need to normalize anymore here.
@@ -2388,13 +2365,11 @@ std::vector<ForPtr> LoopNest::getLoopStmtsInLoopNest(
 }
 
 bool LoopNest::flatten(const std::vector<ForPtr>& loops, ForPtr* flattened) {
-  if (loops.empty()) {
-    throw malformed_input("flatten attempted on empty set of loops");
-  }
+  TORCH_CHECK(
+      !loops.empty(),
+      "MALFORMED INPUT: flatten attempted on empty set of loops");
   BlockPtr p = to<Block>(loops[0]->get_parent());
-  if (!p) {
-    throw malformed_input("flatten attempted on loops with no parent");
-  }
+  TORCH_CHECK(p, "MALFORMED INPUT: flatten attempted on loops with no parent");
 
   if (loops.size() == 1) {
     // This loop nest is already flattened.
@@ -2827,10 +2802,9 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         continue;
       }
 
-      if (reduceOp) {
-        throw std::runtime_error(
-            "can only cache accesses used by at most a single reduceOp");
-      }
+      TORCH_CHECK(
+          !reduceOp,
+          "can only cache accesses used by at most a single reduceOp");
 
       reduceOp = ro;
     }
@@ -2839,9 +2813,9 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   // Check bounds but don't care about AccessKind.
   auto consumer_bounds_info = inferBounds(consumer, false);
   auto bounds_it = consumer_bounds_info.find(producer);
-  if (bounds_it == consumer_bounds_info.end()) {
-    throw std::runtime_error("consumer does not use the Tensor produced");
-  }
+  TORCH_CHECK(
+      bounds_it != consumer_bounds_info.end(),
+      "consumer does not use the Tensor produced");
 
   TORCH_INTERNAL_ASSERT(
       bounds_it->second.size() == 1,
