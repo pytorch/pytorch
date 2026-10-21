@@ -2,6 +2,7 @@
 
 import ast
 import contextlib
+import functools
 import os
 import re
 import tempfile
@@ -278,7 +279,7 @@ class TestKernelConfigs(TestCase):
         block = PythonWrapperCodegen.generate_and_run_autotune_block
 
         def launch_nothing(self, *args, **kwargs):
-            self.kernel_configs_tuned.clear()
+            self.kernel_autotune_names_all_graphs.clear()
             return block(self, *args, **kwargs)
 
         fn = lambda x: (x.sin() * 2).relu()  # noqa: E731
@@ -562,12 +563,18 @@ class TestKernelConfigs(TestCase):
         _, code = _code_for(_softmax, x)
         ns = _load_from_file(code)
         ns["call"]([x])
+        cached = {
+            attr
+            for cls in CachingAutotuner.__mro__
+            for attr, value in vars(cls).items()
+            if isinstance(value, functools.cached_property)
+        }
         for name in _kernels(code):
             kernel = ns[name]
             after_init = set(vars(kernel)) - set(vars(kernel.fallback()))
-            dropped = after_init - set(CachingAutotuner._kept_on_fallback)
-            # Both are the pinned kernel's own: its fallback, and a cached property.
-            self.assertEqual(dropped, {"fallback", "_could_rblock_scale"}, name)
+            # A cached property is recomputed by the unpinned kernel, so it is dropped.
+            dropped = after_init - set(CachingAutotuner._kept_on_fallback) - cached
+            self.assertEqual(dropped, {"fallback"}, name)
 
     @requires_cuda_and_triton
     def test_an_unrelated_error_in_a_pinned_kernel_does_not_fall_back(self):
