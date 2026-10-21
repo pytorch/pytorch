@@ -4,6 +4,7 @@ import functools
 import torch
 import torch.xpu
 from torch.testing._internal.common_utils import IS_WINDOWS, LazyVal, TEST_XPU
+from torch.types import Device
 
 
 XPU_ALREADY_INITIALIZED_ON_IMPORT = torch.xpu.is_initialized()
@@ -57,13 +58,13 @@ _CODENAME_TO_ARCH = {
 
 
 @functools.lru_cache(1)
-def get_xpu_codename(device: torch.device | None = None) -> XPUCodename | None:
+def get_xpu_codename(device: Device = None) -> XPUCodename | None:
     device_id = torch.xpu.get_device_capability(device)["device_id"]
     return _DEVICE_ID_TO_CODENAME.get(device_id)
 
 
 @functools.lru_cache(1)
-def get_xpu_arch(device: torch.device | None = None) -> XPUArch:
+def get_xpu_arch(device: Device = None) -> XPUArch:
     codename = get_xpu_codename(device)
     return _CODENAME_TO_ARCH.get(codename, XPUArch.Unknown)
 
