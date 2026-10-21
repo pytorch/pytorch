@@ -192,7 +192,14 @@ class MetalShaderLibrary {
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt,
       const std::optional<c10::ScalarType> natural_output_dtype = std::nullopt,
       const std::optional<uint32_t> ilp_threshold = std::nullopt);
-  void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
+  // `alpha` is the scalar ternary ops such as addcmul carry next to their
+  // three tensors; `scalar_arg_type` is the dtype it is narrowed to before
+  // binding (defaults to the kernel's compute dtype).
+  void exec_ternary_kernel(
+      TensorIteratorBase& iter,
+      const std::string& name,
+      const std::optional<c10::Scalar> alpha = std::nullopt,
+      const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
 
   template <typename T>
   void exec_unary_kernel_with_params(

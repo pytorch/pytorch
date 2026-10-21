@@ -279,22 +279,17 @@ void f8f8bf16_rowwise_impl(
 
   // Check the problem size is supported or not
   cutlass::Status status = gemm.can_implement(arguments);
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("cutlass cannot implement");
-  }
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot implement");
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
   status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("cutlass cannot initialize");
-  }
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot initialize");
 
   status = gemm(at::cuda::getCurrentCUDAStream());
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error(
-        std::string("cutlass cannot run") +
-        cutlass::cutlassGetStatusString(status));
-  }
+  TORCH_CHECK(
+      status == cutlass::Status::kSuccess,
+      "cutlass cannot run",
+      cutlass::cutlassGetStatusString(status));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -478,22 +473,17 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
 
   // Check the problem size is supported or not
   cutlass::Status status = gemm.can_implement(arguments);
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("cutlass cannot implement");
-  }
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot implement");
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
   status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("cutlass cannot initialize");
-  }
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot initialize");
 
   status = gemm(at::cuda::getCurrentCUDAStream());
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error(
-        std::string("cutlass cannot run") +
-        cutlass::cutlassGetStatusString(status));
-  }
+  TORCH_CHECK(
+      status == cutlass::Status::kSuccess,
+      "cutlass cannot run",
+      cutlass::cutlassGetStatusString(status));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -694,22 +684,17 @@ void f8f8bf16_rowwise_impl_sm89(
 
   // Check the problem size is supported or not
   cutlass::Status status = gemm.can_implement(arguments);
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("cutlass cannot implement");
-  }
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot implement");
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
   status = gemm.initialize(arguments, workspace.mutable_data_ptr(), at::cuda::getCurrentCUDAStream());
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("cutlass cannot initialize");
-  }
+  TORCH_CHECK(status == cutlass::Status::kSuccess, "cutlass cannot initialize");
 
   status = gemm(at::cuda::getCurrentCUDAStream());
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error(
-        std::string("cutlass cannot run") +
-        cutlass::cutlassGetStatusString(status));
-  }
+  TORCH_CHECK(
+      status == cutlass::Status::kSuccess,
+      "cutlass cannot run",
+      cutlass::cutlassGetStatusString(status));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

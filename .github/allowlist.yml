@@ -39,7 +39,6 @@
 L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
-  - google-pytorch/torch_tpu
 
 L2:
   - NVIDIA/pytorch-windows-ci:
@@ -48,12 +47,21 @@ L2:
   - TorchedHat/pytorch-redhat-ci:
       events:
         - nightly
-  - torch-spyre/torch-spyre
+  - torch-spyre/torch-spyre:
+      events:
+        - pull_request
+        - nightly
   # vLLM reports its scheduled nightly results directly through CRCR.
   - vllm-project/vllm:
       events:
         - nightly
-  - Isalia20/pytorch-mps-ci
+  - Isalia20/pytorch-mps-ci:
+      events:
+        - nightly
+  - google-pytorch/torch_tpu:
+      events:
+        - pull_request
+        - nightly
 
 L3:
   # Canonical test repos for CRCR.

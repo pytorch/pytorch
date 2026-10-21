@@ -956,6 +956,11 @@ def nan_to_num(
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return a.clone()
 
+    if utils.is_complex_dtype(a.dtype):
+        real = nan_to_num(torch.real(a), nan, posinf, neginf)
+        imag = nan_to_num(torch.imag(a), nan, posinf, neginf)
+        return torch.complex(real, imag)
+
     if nan is None:
         nan = 0.0
 
@@ -3569,13 +3574,15 @@ def _scalar_type_name(dtype: torch.dtype) -> str:
     return dtype_name[:1].upper() + dtype_name[1:]
 
 
-def _check_native_layer_norm_cuda_param_dtype(
+def _check_native_layer_norm_gpu_param_dtype(
     input: Tensor,
     normalized_ndim: int,
     weight: Tensor | None,
     bias: Tensor | None,
 ) -> None:
-    if input.device.type != "cuda":
+    # CUDA and XPU kernels reject mismatched weight/bias dtypes once there is
+    # at least one row to normalize.
+    if input.device.type not in ("cuda", "xpu"):
         return
 
     mismatched_dtype = None
@@ -3653,7 +3660,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
-    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
+    _check_native_layer_norm_gpu_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -5546,30 +5553,71 @@ def arange(
     utils.check_pin_memory(pin_memory)
     device = torch.device(utils.device_or_default(device))
 
-    if isinstance(start, complex):
-        raise AssertionError("arange does not support complex start")
-    if isinstance(end, complex):
-        raise AssertionError("arange does not support complex end")
-    if isinstance(step, complex):
-        raise AssertionError("arange does not support complex step")
+    has_complex = (
+        isinstance(start, complex)
+        or isinstance(end, complex)
+        or isinstance(step, complex)
+        or (dtype is not None and dtype.is_complex)
+    )
 
     # Case: torch.arange(5)
     if end is None:
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    if step > 0:
-        torch._check(
-            end >= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
-    elif step < 0:
-        torch._check(
-            end <= start,
-            lambda: "upper bound and lower bound inconsistent with step sign",
-        )
+
+    if has_complex:
+        start = complex(start)
+        end = complex(end)
+        step = complex(step)
+
+        if step.real == 0:
+            torch._check(
+                end.real == start.real,
+                lambda: "step real part is zero but real range is nonzero",
+            )
+        elif step.real > 0:
+            torch._check(
+                end.real >= start.real,
+                lambda: "upper bound and lower bound inconsistent with step sign in real part",
+            )
+        elif step.real < 0:
+            torch._check(
+                end.real <= start.real,
+                lambda: "upper bound and lower bound inconsistent with step sign in real part",
+            )
+
+        if step.imag == 0:
+            torch._check(
+                end.imag == start.imag,
+                lambda: "step imaginary part is zero but imaginary range is nonzero",
+            )
+        elif step.imag > 0:
+            torch._check(
+                end.imag >= start.imag,
+                lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
+            )
+        elif step.imag < 0:
+            torch._check(
+                end.imag <= start.imag,
+                lambda: "upper bound and lower bound inconsistent with step sign in imaginary part",
+            )
+
+    else:
+        if step > 0:  # type: ignore[operator not supported]
+            torch._check(
+                end >= start,  # type: ignore[operator not supported]
+                lambda: "upper bound and lower bound inconsistent with step sign",
+            )
+        elif step < 0:  # type: ignore[operator not supported]
+            torch._check(
+                end <= start,  # type: ignore[operator not supported]
+                lambda: "upper bound and lower bound inconsistent with step sign",
+            )
 
     def is_finite(x):
+        if isinstance(x, complex):
+            return is_finite(x.real) and is_finite(x.imag)
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
 
     torch._check(
@@ -5582,7 +5630,9 @@ def arange(
     )
 
     args = (start, end, step)
-    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+    integer_args = (
+        builtins.all(isinstance(arg, IntLike) for arg in args) and not has_complex
+    )
 
     if dtype is None:
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
@@ -5598,8 +5648,27 @@ def arange(
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
+    elif has_complex:
+        real_length = (
+            math.ceil((end.real - start.real) / step.real)
+            if step.real != 0 and math.isfinite(step.real)
+            else 0
+        )
+        imag_length = (
+            math.ceil((end.imag - start.imag) / step.imag)
+            if step.imag != 0 and math.isfinite(step.imag)
+            else 0
+        )
+        if step.real != 0 and step.imag != 0:
+            torch._check(
+                real_length == imag_length,
+                lambda: f"inconsistent number of elements required given the step "
+                f"between real {real_length} and imag {imag_length}. They must be the same.",
+            )
+
+        length = max(real_length, imag_length)
     else:
-        length = math.ceil((end - start) / step)
+        length = math.ceil((end - start) / step)  # type: ignore[operator not supported]
 
     if is_integer and integer_args:
         return prims.iota(
@@ -5811,7 +5880,7 @@ def logspace(
         dtype = default_complex_dtype
         _dtype = None  # torch.linspace will update the correct dtype
     else:
-        _dtype = torch.float64
+        _dtype = highest_precision_float(device)
 
     if isinstance(base, complex):
         raise AssertionError(f"base must not be complex, got {type(base)}")  # for mypy
@@ -6724,15 +6793,9 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # NOTE: the device and dtype will be ignored when shape is None
+# NOTE: normal follows its native overload's output dtype instead of promoting.
 @register_decomposition(aten.normal)
 @out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=(
-        "mean",
-        "std",
-    ),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
 def normal(
     mean=0,
     std=1,
@@ -6766,6 +6829,11 @@ def normal(
         size = _broadcast_shapes(*(t.shape for t in tensors))
         dtype = tensors[0].dtype
         device = tensors[0].device
+
+        if isinstance(mean, TensorLike):
+            mean = _maybe_convert_to_dtype(mean, dtype)
+        if isinstance(std, TensorLike):
+            std = _maybe_convert_to_dtype(std, dtype)
     else:
         torch._check(
             not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
@@ -6788,6 +6856,7 @@ def normal(
 
 @register_decomposition(aten.normal_)
 def normal_(self, mean=0, std=1, *, generator=None):
+    # pyrefly: ignore [unexpected-keyword]
     return normal(mean, std, self.shape, out=self, generator=generator)
 
 

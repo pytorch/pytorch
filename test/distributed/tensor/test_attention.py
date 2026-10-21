@@ -107,7 +107,7 @@ class SDPAWrapper(torch.nn.Module):
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @property
     def destroy_pg_upon_exit(self) -> bool:
@@ -526,7 +526,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         lb_types: list[str],
     ) -> None:
         torch.use_deterministic_algorithms(True)
-        torch.cuda.manual_seed(1234)
+        torch.manual_seed(1234)
 
         dtype = torch.float32
         bs = B if B > 1 else 2
@@ -621,6 +621,34 @@ class CPFlexAttentionTest(DTensorTestBase):
                 self.world_size,
             )
         raise ValueError(f"load_balancer type {lb_type} is not supported!")
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_cp_flex_attention_preserves_block_size(self) -> None:
+        qkv_size = 256 * self.world_size
+        device_mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+        block_mask = create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
+            device=self.device_type,
+            BLOCK_SIZE=(256, 128),
+        )
+
+        (cp_block_mask,) = _context_parallel_shard(
+            device_mesh,
+            [block_mask],
+            [2],
+        )
+        self.assertEqual(cp_block_mask.BLOCK_SIZE, block_mask.BLOCK_SIZE)
+        expected_mask = block_mask.to_dense().chunk(self.world_size, dim=-2)[self.rank]
+        self.assertEqual(cp_block_mask.to_dense(), expected_mask)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -1195,6 +1223,7 @@ CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Missing support for batched tensors
         "test_cp_flex_attention_document_mask",
+        "test_cp_flex_attention_preserves_block_size",
     ],
 )
 
