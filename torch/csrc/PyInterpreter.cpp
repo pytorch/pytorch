@@ -1069,7 +1069,7 @@ std::function<py::object(py::object)> make_fake_device_stamp(
     if (!THPVariable_Check(obj.ptr())) {
       return obj;
     }
-    at::Tensor t = THPVariable_Unpack(obj.ptr());
+    const at::Tensor& t = THPVariable_Unpack(obj.ptr());
     if (!t.defined() || t.is_fake()) {
       return obj;
     }
