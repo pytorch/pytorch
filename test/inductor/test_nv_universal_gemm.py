@@ -4586,8 +4586,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         "case",
         (
             (0, 16, True),
-            (0, 32, False),
-            (0, 64, False),
+            (0, 32, True),
+            (0, 64, True),
             (1, 16, True),
             (1, 64, True),
         ),
@@ -4595,6 +4595,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     def test_bf16_grouped_reduce_swap_ab_dense_2cta_layouts(self, case):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernelWrapper,
         )
 
         axis, group, expect_swapped_2cta = case
@@ -4624,6 +4627,12 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             )
             return 0.1 if is_target else 1.0
 
+        original_run = NVUniversalGemmKernelWrapper.run
+
+        def run(kernel, a, b, out, reduced, **kwargs):
+            reduced.fill_(float("nan"))
+            return original_run(kernel, a, b, out, reduced, **kwargs)
+
         torch._dynamo.reset()
         with (
             config.patch(
@@ -4647,6 +4656,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             mock.patch.object(
                 NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
             ),
+            mock.patch.object(NVUniversalGemmKernelWrapper, "run", new=run),
         ):
             result, code_list = run_and_get_code(torch.compile(fn), a, b)
 
