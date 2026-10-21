@@ -179,17 +179,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata_ref, scales_ref = _quantize_mxfp8_reference(data_hp, -1, False, swizzled)
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-2, -1), False, swizzled)
         self.assertEqual(qdata, qdata_ref)
+        self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales.flatten(), scales_ref.flatten())
         if len(shape) == 3:
             _, M, K = shape
             self.assertEqual(qdata.shape, shape)
             self.assertEqual(qdata.stride(), (M * K, K, 1))
-            self.assertEqual(scales.shape, scales_ref.shape)
             if swizzled:
                 scales = from_blocked_3d(qdata, scales, 32)
         else:
-            if not swizzled:
-                self.assertEqual(scales.shape, scales_ref.shape)
             if swizzled:
                 scales = from_blocked(qdata, scales.flatten(), 32)
         dequantized = from_blocked_format(qdata, scales).float()
@@ -216,9 +214,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.shape, shape)
         M, K = shape[-2:]
         self.assertEqual(qdata.stride(), (M * K, 1, M) if len(shape) == 3 else (1, M))
+        self.assertEqual(scales.shape, scales_ref.shape)
         self.assertEqual(scales.flatten(), scales_ref.flatten())
-        if len(shape) == 3:
-            self.assertEqual(scales.shape, scales_ref.shape)
 
     @parametrize("input_dtype", (torch.bfloat16, torch.float16))
     @parametrize(
@@ -235,7 +232,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = _quantize_mxfp8_tma(data_hp, (-1, -2), False, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(
-            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
+            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8).flatten()
         )
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
