@@ -9,6 +9,7 @@ from unittest import mock
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_heuristics import (
     AutotuneCache,
@@ -37,12 +38,13 @@ def _kernels(code):
 
 
 def _load_from_file(code):
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "module.py")
-        with open(path, "w") as f:
-            f.write(code)
-        ns = {"__file__": path, "__name__": "_kernel_configs"}
-        exec(compile(code, path, "exec"), ns)
+    # A module-level kernel reads its source from the module's file, so the file must
+    # outlive the load. The test case's fresh cache dir is removed after the test.
+    path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "module.py")
+    with open(path, "w") as f:
+        f.write(code)
+    ns = {"__file__": path, "__name__": "_kernel_configs"}
+    exec(compile(code, path, "exec"), ns)
     return ns
 
 
@@ -63,8 +65,10 @@ def _no_runtime_tuning():
 
 @contextlib.contextmanager
 def _configs_tuned_at_compile_time():
-    """Each kernel's config after its launch inside the compile-time autotune block,
-    read from the kernel itself rather than from what the wrapper records."""
+    """Each kernel's config right after its launch in the compile-time autotune block,
+    from the kernel object that launched. The wrapper reads the same objects once the
+    block is done, so this checks it pins each kernel's own finished config; it does
+    not check that tuning chose well."""
     tuned, in_block = {}, [False]
     block = PythonWrapperCodegen.generate_and_run_autotune_block
     run = CachingAutotuner.run
