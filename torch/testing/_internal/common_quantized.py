@@ -725,11 +725,7 @@ def to_mxfp(
     if swizzle_type == SwizzleType.SWIZZLE_32_4_4:
         if scale_e8m0_biased.dim() != 2:
             raise ValueError("swizzled MXFP scales require a 2D input")
-        rows, cols = scale_e8m0_biased.shape
-        scale_e8m0_biased = to_blocked(scale_e8m0_biased)
-        scale_e8m0_biased = scale_e8m0_biased.view(
-            ceil_div(rows, 128), ceil_div(cols, 4), 32, 16
-        )
+        scale_e8m0_biased = to_blocked(scale_e8m0_biased).unsqueeze(0)
     return scale_e8m0_biased, data_lp
 
 
@@ -758,7 +754,7 @@ def mxfp8_32x32_swizzle_f(x):
 
     # expand and swizzle scale
     scale_e8m0 = scale_e8m0.squeeze(-1).repeat_interleave(32, dim=0)
-    scale_e8m0 = to_blocked(scale_e8m0)
+    scale_e8m0 = to_blocked(scale_e8m0).view(torch.float8_e8m0fnu).unsqueeze(0)
 
     return qdata, scale_e8m0
 
