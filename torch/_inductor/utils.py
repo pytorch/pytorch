@@ -1348,11 +1348,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1398,8 +1393,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -4824,6 +4818,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
 
+    if config.avoid_32bit_indexing_guards:
+        return False
+
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
     # However, to prevent possible perf regressions on pre-existing AOTI models
@@ -5848,6 +5845,12 @@ def forwarded_cuda_compile_options() -> list[str]:
 
 def tlx_only_hip_options() -> list[str]:
     return _tlx_registry_options("tlx_only_hip_options")
+
+
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP compiler options forwarded to Triton."""
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
 
 
 def _round_up(x: int, y: int) -> int:
