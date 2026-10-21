@@ -1,5 +1,6 @@
 #include <vector>
 
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/mkldnn/xpu/Conv.h>
 #include <ATen/native/mkldnn/xpu/FusionUtils.h>
@@ -325,16 +326,13 @@ Tensor _convolution_out(
   auto bias = bias_r.defined() ? make_contiguous_and_aligned(bias_r) : bias_r;
   input = make_contiguous_and_aligned(input, mfmt);
   weight = make_contiguous_and_aligned(weight, mfmt);
-  attr.normalize_post_binary(mfmt, input.ndimension());
   check_shape_forward(input, weight, bias, params);
 
-  // a caller-supplied output needs the same normalization as input/weight: the
-  // primitives describe dst to oneDNN by format tag alone, so a dst that is not
-  // contiguous in mfmt would be read and written under the wrong strides
+  // a caller-supplied output is described to oneDNN by its own strides, so it
+  // is written in place in any non-overlapping layout
   Tensor output;
   if (output_r.defined()) {
-    Tensor out = ndim == 3 ? view4d(output_r) : output_r;
-    output = make_contiguous_and_aligned(out, mfmt);
+    output = ndim == 3 ? view4d(output_r) : output_r;
   }
   if (transposed_) {
     // create output and propagate memory format
@@ -355,7 +353,6 @@ Tensor _convolution_out(
         input,
         weight,
         bias,
-        /*is_channels_last=*/is_channels_last_suggested,
         params.stride,
         params.padding,
         params.output_padding,
@@ -397,7 +394,6 @@ Tensor _convolution_out(
         input,
         weight,
         bias,
-        /*is_channels_last=*/is_channels_last_suggested,
         padding_front_top_left,
         padding_back_bottom_right,
         params.stride,
@@ -406,14 +402,8 @@ Tensor _convolution_out(
         attr);
   }
 
-  if (ndim == 3) {
-    output = view3d(output);
-  }
   if (!output_r.defined()) {
-    output_r = output;
-  } else if (!output.is_alias_of(output_r)) {
-    // normalizing output_r had to copy, so write the result back
-    output_r.copy_(output);
+    output_r = ndim == 3 ? view3d(output) : output;
   }
   return output_r;
 }
@@ -560,7 +550,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_input,
             grad_output_,
             weight_,
-            /*is_channels_last=*/is_channels_last_suggested,
             stride_,
             padding_,
             output_padding_,
@@ -572,7 +561,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_input,
             grad_output_,
             weight_,
-            /*is_channels_last=*/is_channels_last_suggested,
             padding_,
             padding_,
             stride_,
@@ -595,7 +583,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_bias,
             grad_output_,
             input_,
-            /*is_channels_last=*/is_channels_last_suggested,
             stride_,
             padding_,
             output_padding_,
@@ -607,7 +594,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             grad_bias,
             grad_output_,
             input_,
-            /*is_channels_last=*/is_channels_last_suggested,
             weight_.sizes(),
             padding_,
             padding_,
@@ -716,6 +702,9 @@ Tensor& convolution_pointwise_binary_(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm) {
   c10::DeviceGuard device_guard(input_t.device());
+  at::assert_no_internal_overlap(other_t);
+  at::assert_no_overlap(other_t, input_t);
+  at::assert_no_overlap(other_t, weight_t);
   Tensor bias = bias_opt.has_value() ? bias_opt.value() : at::Tensor();
   // Step1: Construct binary attr
   Attr attr;

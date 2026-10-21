@@ -18,16 +18,6 @@ static inline dnnl::memory::dims deconv_compatible_dilation(
   return ret;
 }
 
-static inline std::vector<int64_t> compatible_groups_deconv_strides(
-    const at::Tensor& weight,
-    dnnl::memory::dims group_size) {
-  std::vector<int64_t> strides = weight.strides().vec();
-  strides[0] = weight.strides()[1];
-  strides[1] = weight.strides()[0];
-  strides.insert(strides.begin(), group_size[2] * weight.strides()[0]);
-  return strides;
-}
-
 dnnl::memory::dims deconv_dst_size(
     IntArrayRef src_size,
     IntArrayRef weight_size,
@@ -49,102 +39,18 @@ dnnl::memory::dims deconv_dst_size(
   return dst_size;
 }
 
-static inline dnnl::memory::format_tag deconv_src_fmt(
-    const int64_t ndim,
-    const bool is_channels_last = false) {
-  // 3D: n/c/w (n/w/c)         [a/b/c (a/c/b)]
-  // 4D: n/c/h/w (n/h/w/c)     [a/b/c/d (a/c/d/b)]
-  // 5D: n/c/d/h/w (n/d/h/w/c) [a/b/c/d/e (a/c/d/e/b)]
-  if (!is_channels_last) {
-    return (ndim == 3)
-        ? dnnl::memory::format_tag::ncw
-        : ((ndim == 4) ? dnnl::memory::format_tag::nchw
-                       : ((ndim == 5) ? dnnl::memory::format_tag::ncdhw
-                                      : dnnl::memory::format_tag::undef));
-  } else {
-    return (ndim == 3)
-        ? dnnl::memory::format_tag::nwc
-        : ((ndim == 4) ? dnnl::memory::format_tag::nhwc
-                       : ((ndim == 5) ? dnnl::memory::format_tag::ndhwc
-                                      : dnnl::memory::format_tag::undef));
-  }
-}
-
-static inline std::vector<int64_t> deconv_weight_fmt(
-    const at::Tensor& weight,
-    const int64_t ndim,
-    dnnl::memory::dims weight_size,
-    const bool grouped = false) {
-  // 3D fmt: (g)i/o/w ((g)i/w/o)  [b/a/c  (b/c/a)]
-  // 4D fmt: (g)i/o/h/w ((g)i/h/w/o) [b/a/c/d (b/c/d/a)]
-  // 5D fmt: (g)i/o/d/h/w ((g)i/d/h/w/o) [b/a/c/d/e (b/c/d/e/a)]
-  auto strides_ = weight.strides().vec();
-  std::vector<int64_t> strides;
-  if (grouped) {
-    strides = compatible_groups_deconv_strides(weight, weight_size);
-  } else {
-    strides = strides_;
-    std::swap(strides[0], strides[1]);
-  }
-  return strides;
-}
-
-static inline dnnl::memory::dims deconv_compatible_weight_dims(
-    int64_t ndim,
-    int64_t groups,
-    int64_t oc,
-    int64_t ic,
-    IntArrayRef weight_size) {
-  if (ndim == 3) {
-    auto kw = weight_size[2];
-    return (groups != 1)
-        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
-        : dnnl::memory::dims({oc, ic, kw});
-  } else if (ndim == 4) {
-    auto kh = weight_size[2];
-    auto kw = weight_size[3];
-    return (groups != 1)
-        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kh, kw})
-        : dnnl::memory::dims({oc, ic, kh, kw});
-  } else if (ndim == 5) {
-    auto kd = weight_size[2];
-    auto kh = weight_size[3];
-    auto kw = weight_size[4];
-    return (groups != 1)
-        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kd, kh, kw})
-        : dnnl::memory::dims({oc, ic, kd, kh, kw});
-  } else {
-    TORCH_CHECK(0, "unsupported dimension in xpu oneDNN deconvolution...");
-  }
-}
-
 static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc>
 deconv_get_plain_md(
     const at::Tensor& src,
     const at::Tensor& weight,
     const at::Tensor& dst,
-    int64_t groups,
-    bool is_channels_last) {
-  auto ndim = src.ndimension();
-  auto src_data_t = get_onednn_dtype_include_double(src);
-  auto fmt_src = deconv_src_fmt(ndim, is_channels_last);
-  auto src_usr_md = dnnl::memory::desc(src.sizes().vec(), src_data_t, fmt_src);
-
-  auto dst_data_t = get_onednn_dtype_include_double(dst);
-  auto dst_usr_md = dnnl::memory::desc(dst.sizes().vec(), dst_data_t, fmt_src);
-
-  auto ic = src.size(1);
-  auto oc = dst.size(1);
-  dnnl::memory::dims weight_size =
-      deconv_compatible_weight_dims(ndim, groups, oc, ic, weight.sizes());
-  auto weight_dt = get_onednn_dtype_include_double(weight);
-  // the deconv weight md is stride-derived, so it does not depend on the
-  // computation format the way src and dst do
-  auto fmt_weight = deconv_weight_fmt(weight, ndim, weight_size, groups != 1);
-  dnnl::memory::desc weight_usr_md =
-      dnnl::memory::desc(weight_size, weight_dt, fmt_weight);
-
-  return {src_usr_md, weight_usr_md, dst_usr_md};
+    int64_t groups) {
+  // oneDNN takes a deconv weight as (g, oc/g, ic/g, k...), aten stores it as
+  // (ic, oc/g, k...)
+  auto wei = groups == 1
+      ? weight.transpose(0, 1)
+      : weight.unflatten(0, {groups, weight.size(0) / groups}).transpose(1, 2);
+  return {get_onednn_md(src), get_onednn_md(wei), get_onednn_md(dst)};
 }
 
 sycl::event deconvolution(
@@ -152,7 +58,6 @@ sycl::event deconvolution(
     const at::Tensor& src,
     const at::Tensor& weight,
     const at::Tensor& bia,
-    bool is_channels_last,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dst_padding,
@@ -163,11 +68,9 @@ sycl::event deconvolution(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  check_conv_layout_agreement(is_channels_last, src, weight, dst);
-
   // create usr_md for tensors, and md for conv primitive
   auto [src_md, weight_md, dst_md] =
-      deconv_get_plain_md(src, weight, dst, groups, is_channels_last);
+      deconv_get_plain_md(src, weight, dst, groups);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = bia.defined()
@@ -247,7 +150,6 @@ sycl::event deconvolution_backward_data(
     at::Tensor& diff_src,
     const at::Tensor& diff_dst,
     const at::Tensor& weight,
-    bool is_channels_last,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dst_padding,
@@ -258,10 +160,9 @@ sycl::event deconvolution_backward_data(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  check_conv_layout_agreement(is_channels_last, diff_src, weight, diff_dst);
   // create memory desc
   auto [src_md, weight_md, dst_md] =
-      deconv_get_plain_md(diff_src, weight, diff_dst, groups, is_channels_last);
+      deconv_get_plain_md(diff_src, weight, diff_dst, groups);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bias_md = bias_defined
@@ -349,7 +250,6 @@ sycl::event deconvolution_backward_weights(
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
     const at::Tensor& src,
-    bool is_channels_last,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dst_padding,
@@ -359,11 +259,9 @@ sycl::event deconvolution_backward_weights(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  check_conv_layout_agreement(is_channels_last, src, diff_weight, diff_dst);
-
   // create memory desc
   auto [src_md, weight_md, dst_md] =
-      deconv_get_plain_md(src, diff_weight, diff_dst, groups, is_channels_last);
+      deconv_get_plain_md(src, diff_weight, diff_dst, groups);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = diff_bia.defined()

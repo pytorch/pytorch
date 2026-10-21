@@ -92,14 +92,9 @@ struct PostOpParam {
   PostOpParam(
       at::Tensor& binary,
       dnnl::memory::desc& binary_md,
-      dnnl::memory::desc& expected_md,
       dnnl::algorithm algo,
       kind_t kind)
-      : binary_(binary),
-        meta_(binary_md),
-        expected_meta_(expected_md),
-        algo_(algo),
-        kind_(kind) {}
+      : binary_(binary), meta_(binary_md), algo_(algo), kind_(kind) {}
   // prelu post op constructor
   PostOpParam(int mask, kind_t kind) : mask_(mask), kind_(kind) {}
 
@@ -122,7 +117,6 @@ struct PostOpParam {
   at::Tensor expected_binary_ = at::Tensor();
   void* binary_ptr_ = nullptr;
   dnnl::memory::desc meta_ = dnnl::memory::desc();
-  dnnl::memory::desc expected_meta_ = dnnl::memory::desc();
   // for prelu
   int mask_ = 0;
   // common
@@ -197,39 +191,15 @@ class Attr {
   template <bool is_matmul = false>
   Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
     auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
-    bool binary_is_channels_last =
-        (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
-         binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
-
     if constexpr (!is_matmul) {
-      binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
+      if (is_broadcast(binary_) || !onednn_strides_check(binary_)) {
+        binary_ = binary_.contiguous();
+      }
     }
     dnnl::memory::desc md = get_onednn_md(binary_);
-    auto expected_md = dnnl::memory::desc(
-        md.get_dims(), md.get_data_type(), dnnl::memory::format_tag::any);
-    if constexpr (is_matmul) {
-      ops_params_.push_back(PostOpParam(binary_, md, md, algo, kind_t::binary));
-    } else {
-      ops_params_.push_back(
-          PostOpParam(binary_, md, expected_md, algo, kind_t::binary));
-    }
+    ops_params_.push_back(PostOpParam(binary_, md, algo, kind_t::binary));
 
     return *this;
-  }
-
-  // A conv post-op binary operand is described to oneDNN with
-  // format_tag::any, which the primitive resolves to the dst layout: the
-  // operand is read under that layout and not under the md we bind here, so it
-  // has to be normalized to the format the conv entry point picked.
-  void normalize_post_binary(at::MemoryFormat mfmt, int64_t ndim) {
-    for (auto& param : ops_params_) {
-      if (param.kind_ != kind_t::binary || param.binary_.dim() != ndim ||
-          param.binary_.is_contiguous(mfmt)) {
-        continue;
-      }
-      param.binary_ = param.binary_.contiguous(mfmt);
-      param.meta_ = get_onednn_md(param.binary_);
-    }
   }
 
   Attr& append_scale_binary(
@@ -273,9 +243,8 @@ class Attr {
         TORCH_INTERNAL_ASSERT(
             0, "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
     }
-    // In this case, expected_md = binary_md
-    ops_params_.push_back(PostOpParam(
-        binary_, binary_md, binary_md, kind_with_binary_add, kind_t::binary));
+    ops_params_.push_back(
+        PostOpParam(binary_, binary_md, kind_with_binary_add, kind_t::binary));
     return *this;
   }
 
@@ -308,15 +277,7 @@ class Attr {
         }
         case kind_t::binary: {
           dnnl::algorithm algo = ops_params_[i].algo_;
-          auto expected_md = ops_params_[i].expected_meta_;
-          // In this case user may create src1 memory descriptor with
-          // format_tag::any or set a specific tag. However, in later case if
-          // tags mismatch with dst, it would result in suboptimal performance.
-          // So here we use format_tag::any to make sure the fast can be
-          // selected.
-          // Thus we use expected_md (with format_any) here to create pd instead
-          // of original md
-          dnnl_post_ops_.append_binary(algo, expected_md);
+          dnnl_post_ops_.append_binary(algo, ops_params_[i].meta_);
           break;
         }
         default:
@@ -361,19 +322,6 @@ class Attr {
         dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
-        auto expected_md = pd.query_md(
-            dnnl::query::exec_arg_md,
-            DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
-        // the primitive reads the operand under the layout it resolved
-        // format_tag::any to, not under the md bound below, so a mismatch here
-        // means the caller handed over a transposed buffer
-        TORCH_INTERNAL_ASSERT(
-            expected_md == md,
-            "xpu oneDNN post-op binary operand with sizes ",
-            binary.sizes(),
-            " and strides ",
-            binary.strides(),
-            " is not laid out the way the primitive expects to read it");
 
         binary_m = at::native::onednn::make_onednn_memory(
             md, engine, binary.const_data_ptr());
