@@ -1854,6 +1854,48 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    def _test_sdpa_rewriter_24_params_check(self):
+        # _sfdp_pattern_24 must be gated by _sfdp_params_check like the other
+        # patterns.  That check rejects a 0-d attention mask, which the fused
+        # replacement cannot take: compiling used to fail with an IndexError.
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor,
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, n_head, seq_len, embed_dim)"""
+            bs = query.size(0)
+            n_head = query.size(1)
+            seq_len = query.size(2)
+            embed_dim = query.size(3)
+            q = query.view(bs * n_head, seq_len, embed_dim)
+            k = key.reshape(bs * n_head, seq_len, embed_dim)
+            v = value.reshape(bs * n_head, seq_len, embed_dim)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            attn_weights = attn_weights.view(bs, n_head, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs * n_head, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            attn_output = torch.bmm(attn_weights, v)
+            attn_output = attn_output.view(bs, n_head, seq_len, embed_dim)
+            return attn_output
+
+        tensor_shape = (4, 2, 16, 32)
+        args = [
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.randn(tensor_shape, device=self.device, dtype=torch.float),
+            torch.tensor(0.5, device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_sdpa_rewriter_25(self):
         def dot_prod_attention(
             query: torch.Tensor,
@@ -2423,6 +2465,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_24_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
+        test_sdpa_rewriter_24_params_check_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24_params_check
+        )
         test_cache_sdpa_constraint_shared_kv_gpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
         )
@@ -2577,6 +2622,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_24_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
+        )
+        test_sdpa_rewriter_24_params_check_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24_params_check
         )
         test_cache_sdpa_constraint_shared_kv_cpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
