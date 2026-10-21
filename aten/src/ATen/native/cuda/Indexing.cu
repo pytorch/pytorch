@@ -344,13 +344,17 @@ __global__ void indexing_backward_kernel_stride_1(
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
   using opmath_t = at::opmath_type<scalar_t>;
 
+  // blockDim.x equals warp_size, so idx and the early return are warp-uniform
+  int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
+  if (idx >= numel) {
+    return;
+  }
+
   // Number of values processed by each thread (grain size)
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
-    int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
     int64_t crnt_sorted_idx = sorted_indices[idx];
 
-    if ((idx < numel) &&
-        (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
+    if (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1])
     {
       // Determine the number of duplicates in advance
       int64_t num_duplicates = 1;
@@ -401,14 +405,18 @@ __global__ void indexing_backward_kernel_small_stride(
   int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim, bool accumulate) {
   using opmath_t = at::opmath_type<scalar_t>;
 
+  // blockDim.x equals warp_size, so idx and the early return are warp-uniform
+  int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
+  if (idx >= numel) {
+    return;
+  }
+
   // Number of values processed by each thread (grain size)
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
-    int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
     int64_t tidx = threadIdx.x;
     int64_t crnt_sorted_idx = sorted_indices[idx];
 
-    if ((idx < numel) &&
-        (tidx < stride) &&
+    if ((tidx < stride) &&
         (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
     {
       // Determine the number of duplicates in advance
