@@ -104,7 +104,7 @@ bool AccessInfo::dependsOnVar(const VarPtr& v) {
     i->accept(&vf);
   }
 
-  return vf.vars().count(v);
+  return vf.vars().contains(v);
 }
 
 std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
@@ -174,7 +174,7 @@ void Scope::filterClosed() {
 void RegisterizerAnalysis::closeAccessIntoScope(
     const std::shared_ptr<AccessInfo>& info,
     const std::shared_ptr<Scope>& scope) {
-  if (exprConditionals_.count(info->conditionId()) != 0) {
+  if (exprConditionals_.contains(info->conditionId())) {
     return;
   }
 
@@ -186,11 +186,10 @@ void RegisterizerAnalysis::closeAccessIntoScope(
 }
 
 void RegisterizerAnalysis::visit(const ForPtr& v) {
-  if (v->loop_options().is_gpu_block_index() ||
-      v->loop_options().is_gpu_thread_index()) {
-    throw malformed_input(
-        "Registerization must occur after parallelism flattening");
-  }
+  TORCH_CHECK(
+      !v->loop_options().is_gpu_block_index() &&
+          !v->loop_options().is_gpu_thread_index(),
+      "MALFORMED INPUT: Registerization must occur after parallelism flattening");
 
   auto parent = currentScope_;
   currentScope_ = std::make_shared<Scope>(v->body(), parent);
@@ -659,7 +658,7 @@ ExprPtr RegisterizerReplacer::mutate(const LoadPtr& v) {
 }
 
 StmtPtr RegisterizerReplacer::mutate(const StorePtr& v) {
-  if (eliminatedIntializers_.count(v) != 0) {
+  if (eliminatedIntializers_.contains(v)) {
     // This store is the initializer for a scalar var that is already inserted.
     return nullptr;
   }

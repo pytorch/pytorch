@@ -4,7 +4,12 @@ import importlib
 import pkgutil
 
 import torch
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
@@ -24,6 +29,8 @@ do_imports()
 
 @skipIfTorchDynamo("not applicable")
 class TestHOPInfra(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_all_hops_have_opinfo(self):
         """All HOPs should have an OpInfo in torch/testing/_internal/hop_db.py"""
         from torch._ops import _higher_order_ops
@@ -89,6 +96,7 @@ class TestHOPInfra(TestCase):
             "triton_kernel_wrapper_functional",
             "triton_kernel_wrapper_mutation",
             "wrap",  # Really weird failure -- importing this causes Dynamo to choke on checkpoint
+            "control_deps",  # Inductor-internal ordering HOP, not a public torch.ops.higher_order API
         }
         not_imported_hops = registered_hops - imported_hops
         not_imported_hops = not_imported_hops - FIXME_ALLOWLIST
@@ -121,13 +129,17 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_functional,
         )
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+            is_fake_tensor,
+            maybe_get_fake_mode,
+        )
 
         mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
-        self.assertIsInstance(fake_output, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_output))
 
         out = triton_kernel_wrapper_functional(
             kernel_idx=0,
@@ -139,8 +151,8 @@ class TestHOPInfra(TestCase):
         )
 
         self.assertEqual(set(out.keys()), {"out_ptr"})
-        self.assertIsInstance(out["out_ptr"], FakeTensor)
-        self.assertIs(out["out_ptr"].fake_mode, mode)
+        self.assertTrue(is_fake_tensor(out["out_ptr"]))
+        self.assertIs(maybe_get_fake_mode(out["out_ptr"]), mode)
         self.assertEqual(out["out_ptr"].size(), fake_output.size())
         self.assertEqual(out["out_ptr"].stride(), fake_output.stride())
 
@@ -148,13 +160,13 @@ class TestHOPInfra(TestCase):
         from torch._higher_order_ops.triton_kernel_wrap import (
             triton_kernel_wrapper_mutation,
         )
-        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 
         mode = FakeTensorMode()
         with mode:
             fake_output = torch.empty_strided((2, 3), (3, 1))
 
-        self.assertIsInstance(fake_output, FakeTensor)
+        self.assertTrue(is_fake_tensor(fake_output))
 
         out = triton_kernel_wrapper_mutation(
             kernel_idx=0,

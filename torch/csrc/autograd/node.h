@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/utils/python_stub.h>
 
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
@@ -14,6 +15,11 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+
+#ifdef USE_ROCM
+// For at::ROCmBackwardPassGuard
+#include <ATen/Context.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -58,6 +64,18 @@ class NodeGuard {
 // This is only set during the backward pass while a Node is being
 // executed.
 TORCH_API c10::intrusive_ptr<Node> get_current_node();
+
+// Runs torch.autograd.graph.node_creation_hook callbacks on `node` if any are
+// registered in this thread and they haven't run for this node yet. Called
+// from the sites that attach a grad_fn to output tensors rather than the Node
+// constructor: at construction the node has no owning intrusive_ptr yet, so
+// it cannot be safely wrapped in a PyObject, and next_edges aren't wired.
+//
+// Each attachment path fires only after the node is fully populated: all
+// outputs' input_metadata are bound and, for output-saving ops, saved
+// variables have been stored. A hook that inspects the node therefore sees
+// its complete state.
+TORCH_API void fire_node_creation_hooks(const c10::intrusive_ptr<Node>& node);
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
@@ -401,6 +419,16 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
     return thread_id_;
   }
 
+  // Used by fire_node_creation_hooks to assert that each node fires exactly
+  // once; every creation path guarantees single-firing by construction.
+  bool node_creation_hooks_fired() const noexcept {
+    return node_creation_hooks_fired_;
+  }
+
+  void set_node_creation_hooks_fired() noexcept {
+    node_creation_hooks_fired_ = true;
+  }
+
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
@@ -630,6 +658,10 @@ struct TORCH_API Node : c10::intrusive_ptr_target {
   // via set_next_edge(s), which always calls topological_nr() of all its
   // children See NOTE [ Topological Number ] for why we need this.
   mutable bool has_parent_ = false;
+
+  // See node_creation_hooks_fired() above. Placed next to has_parent_ so it
+  // packs into the padding before thread_id_.
+  bool node_creation_hooks_fired_ = false;
 
   // Id of the thread that created the instance
   uint64_t thread_id_ = 0;

@@ -20,37 +20,37 @@ TORCH_LIBRARY(c10d, m) {
         return self->op_;
       });
   m.def(
-      "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allreduce_coalesced_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
+      "allreduce_coalesced_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
+      "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
-      "allgather_coalesced_(Tensor[][] output_lists, Tensor[] input_list, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True) -> __torch__.torch.classes.c10d.Work");
+      "allgather_coalesced_(Tensor[][] output_lists, Tensor[] input_list, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "allgather_into_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True) -> __torch__.torch.classes.c10d.Work");
+      "allgather_into_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
-      "reduce_scatter_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
+      "reduce_scatter_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
+      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int root_rank, int root_tensor, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
+      "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
-      "gather_into_tensor_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "gather_into_tensor_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
       "scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "alltoall_base_(Tensor output, Tensor input, __torch__.torch.classes.c10d.ProcessGroup process_group, int[] output_split_sizes, int[] input_split_sizes, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
+      "alltoall_base_(Tensor output, Tensor input, __torch__.torch.classes.c10d.ProcessGroup process_group, int[] output_split_sizes, int[] input_split_sizes, bool async_op=True, int timeout=-1, Dict(str, Any)? config=None) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "barrier(Tensor tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, int[] device_ids, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work");
   m.def(
@@ -152,7 +152,8 @@ IMPL_RECV_ANY_SOURCE(PrivateUse1)
       int64_t root_rank,                                        \
       int64_t root_tensor,                                      \
       bool asyncOp,                                             \
-      int64_t timeout) {                                        \
+      int64_t timeout,                                          \
+      OptionalCollectiveConfig config) {                        \
     auto tensor_vec = tensors.vec();                            \
     auto hook_op_id = process_group->firePreHook(               \
         HookOpName::REDUCE, asyncOp, root_rank, tensor_vec);    \
@@ -164,7 +165,8 @@ IMPL_RECV_ANY_SOURCE(PrivateUse1)
                             root_rank,                          \
                             root_tensor,                        \
                             std::chrono::milliseconds(timeout), \
-                            asyncOp});                          \
+                            asyncOp,                            \
+                            std::move(config)});                \
     process_group->firePostHook(                                \
         HookOpName::REDUCE, asyncOp, hook_op_id, work);         \
     return work;                                                \
@@ -182,7 +184,8 @@ IMPL_REDUCE(PrivateUse1)
           int64_t root_rank,                                              \
           int64_t root_tensor,                                            \
           bool asyncOp,                                                   \
-          int64_t timeout) {                                              \
+          int64_t timeout,                                                \
+          OptionalCollectiveConfig config) {                              \
     auto tensor_vec = tensors.vec();                                      \
     auto hook_op_id = process_group->firePreHook(                         \
         HookOpName::BROADCAST, asyncOp, root_rank, tensor_vec);           \
@@ -193,7 +196,8 @@ IMPL_REDUCE(PrivateUse1)
                             root_rank,                                    \
                             root_tensor,                                  \
                             std::chrono::milliseconds(timeout),           \
-                            asyncOp});                                    \
+                            asyncOp,                                      \
+                            std::move(config)});                          \
     process_group->firePostHook(                                          \
         HookOpName::BROADCAST, asyncOp, hook_op_id, work);                \
     return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>( \
@@ -207,54 +211,58 @@ IMPL_BROADCAST(PrivateUse1)
 // Return input tensors as output tensors to make inplace allreduce look like
 // a functional API, so that make_fx can correctly build the dependencies in
 // the graph later.
-#define IMPL_ALLREDUCE(DEV)                                               \
-  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>           \
-      allreduce_##DEV(                                                    \
-          at::TensorList tensors,                                         \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,          \
-          const c10::intrusive_ptr<ReduceOp>& reduce_op,                  \
-          const std::optional<at::Tensor>& sparse_indices,                \
-          bool asyncOp,                                                   \
-          int64_t timeout) {                                              \
-    auto tensor_vec = tensors.vec();                                      \
-    auto hook_op_id = process_group->firePreHook(                         \
-        HookOpName::ALLREDUCE, asyncOp, -1, tensor_vec);                  \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
-                    ->allreduce(                                          \
-                        tensor_vec,                                       \
-                        AllreduceOptions{                                 \
-                            *reduce_op.get(),                             \
-                            std::chrono::milliseconds(timeout),           \
-                            asyncOp});                                    \
-    process_group->firePostHook(                                          \
-        HookOpName::ALLREDUCE, asyncOp, hook_op_id, work);                \
-    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>( \
-        std::move(tensor_vec), work);                                     \
+#define IMPL_ALLREDUCE(DEV)                                                \
+  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>            \
+      allreduce_##DEV(                                                     \
+          at::TensorList tensors,                                          \
+          const c10::intrusive_ptr<ProcessGroup>& process_group,           \
+          const c10::intrusive_ptr<ReduceOp>& reduce_op,                   \
+          const std::optional<at::Tensor>& sparse_indices,                 \
+          bool asyncOp,                                                    \
+          int64_t timeout,                                                 \
+          OptionalCollectiveConfig config) {                               \
+    auto tensor_vec = tensors.vec();                                       \
+    auto hook_op_id = process_group->firePreHook(                          \
+        HookOpName::ALLREDUCE, asyncOp, -1, tensor_vec);                   \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)            \
+                    ->allreduce(                                           \
+                        tensor_vec,                                        \
+                        AllreduceOptions{                                  \
+                            .reduceOp = *reduce_op.get(),                  \
+                            .timeout = std::chrono::milliseconds(timeout), \
+                            .asyncOp = asyncOp,                            \
+                            .config = std::move(config)});                 \
+    process_group->firePostHook(                                           \
+        HookOpName::ALLREDUCE, asyncOp, hook_op_id, work);                 \
+    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(  \
+        std::move(tensor_vec), work);                                      \
   }
 
 IMPL_ALLREDUCE(CPU)
 IMPL_ALLREDUCE(CUDA)
 IMPL_ALLREDUCE(PrivateUse1)
 
-#define IMPL_ALLREDUCE_COALESCED(DEV)                             \
-  c10::intrusive_ptr<Work> allreduce_coalesced_##DEV(             \
-      at::TensorList tensors,                                     \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,      \
-      const c10::intrusive_ptr<ReduceOp>& reduce_op,              \
-      bool asyncOp,                                               \
-      int64_t timeout) {                                          \
-    auto tensor_vec = tensors.vec();                              \
-    AllreduceCoalescedOptions opts = AllreduceCoalescedOptions{}; \
-    opts.reduceOp = *reduce_op.get();                             \
-    opts.timeout = std::chrono::milliseconds(timeout);            \
-    opts.asyncOp = asyncOp;                                       \
-    auto hook_op_id = process_group->firePreHook(                 \
-        HookOpName::ALLREDUCE, asyncOp, -1, tensor_vec);          \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)   \
-                    ->allreduce_coalesced(tensor_vec, opts);      \
-    process_group->firePostHook(                                  \
-        HookOpName::ALLREDUCE, asyncOp, hook_op_id, work);        \
-    return work;                                                  \
+#define IMPL_ALLREDUCE_COALESCED(DEV)                                \
+  c10::intrusive_ptr<Work> allreduce_coalesced_##DEV(                \
+      at::TensorList tensors,                                        \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,         \
+      const c10::intrusive_ptr<ReduceOp>& reduce_op,                 \
+      bool asyncOp,                                                  \
+      int64_t timeout,                                               \
+      OptionalCollectiveConfig config) {                             \
+    auto tensor_vec = tensors.vec();                                 \
+    AllreduceCoalescedOptions opts = AllreduceCoalescedOptions{};    \
+    opts.reduceOp = *reduce_op.get();                                \
+    opts.timeout = std::chrono::milliseconds(timeout);               \
+    opts.asyncOp = asyncOp;                                          \
+    opts.config = std::move(config);                                 \
+    auto hook_op_id = process_group->firePreHook(                    \
+        HookOpName::ALLREDUCE_COALESCED, asyncOp, -1, tensor_vec);   \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)      \
+                    ->allreduce_coalesced(tensor_vec, opts);         \
+    process_group->firePostHook(                                     \
+        HookOpName::ALLREDUCE_COALESCED, asyncOp, hook_op_id, work); \
+    return work;                                                     \
   }
 
 IMPL_ALLREDUCE_COALESCED(CPU)
@@ -270,7 +278,8 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
           at::TensorList input_tensors,                                        \
           const c10::intrusive_ptr<ProcessGroup>& process_group,               \
           bool asyncOp,                                                        \
-          int64_t timeout) {                                                   \
+          int64_t timeout,                                                     \
+          OptionalCollectiveConfig config) {                                   \
     auto input_tensors_vec = input_tensors.vec();                              \
     auto hook_op_id = process_group->firePreHook(                              \
         HookOpName::ALLGATHER,                                                 \
@@ -284,7 +293,9 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
                             output_tensors),                                   \
                         input_tensors_vec,                                     \
                         AllgatherOptions{                                      \
-                            std::chrono::milliseconds(timeout), asyncOp});     \
+                            std::chrono::milliseconds(timeout),                \
+                            asyncOp,                                           \
+                            std::move(config)});                               \
     process_group->firePostHook(                                               \
         HookOpName::ALLGATHER, asyncOp, hook_op_id, work);                     \
     return std::                                                               \
@@ -297,25 +308,28 @@ IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
 
-#define IMPL__ALLGATHER_BASE(DEV)                                          \
-  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV(  \
-      at::Tensor& output_tensor,                                           \
-      at::Tensor& input_tensor,                                            \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,               \
-      bool asyncOp,                                                        \
-      int64_t timeout) {                                                   \
-    auto hook_op_id = process_group->firePreHook(                          \
-        HookOpName::ALLGATHER, asyncOp, -1, input_tensor, output_tensor);  \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)            \
-                    ->all_gather_single(                                   \
-                        output_tensor,                                     \
-                        input_tensor,                                      \
-                        AllgatherOptions{                                  \
-                            std::chrono::milliseconds(timeout), asyncOp}); \
-    process_group->firePostHook(                                           \
-        HookOpName::ALLGATHER, asyncOp, hook_op_id, work);                 \
-    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(               \
-        output_tensor, work);                                              \
+#define IMPL__ALLGATHER_BASE(DEV)                                              \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV(      \
+      at::Tensor& output_tensor,                                               \
+      at::Tensor& input_tensor,                                                \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,                   \
+      bool asyncOp,                                                            \
+      int64_t timeout,                                                         \
+      OptionalCollectiveConfig config) {                                       \
+    auto hook_op_id = process_group->firePreHook(                              \
+        HookOpName::ALLGATHER_BASE, asyncOp, -1, input_tensor, output_tensor); \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)                \
+                    ->all_gather_single(                                       \
+                        output_tensor,                                         \
+                        input_tensor,                                          \
+                        AllgatherOptions{                                      \
+                            std::chrono::milliseconds(timeout),                \
+                            asyncOp,                                           \
+                            std::move(config)});                               \
+    process_group->firePostHook(                                               \
+        HookOpName::ALLGATHER_BASE, asyncOp, hook_op_id, work);                \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                   \
+        output_tensor, work);                                                  \
   }
 
 IMPL__ALLGATHER_BASE(CPU)
@@ -327,12 +341,18 @@ IMPL__ALLGATHER_BASE(PrivateUse1)
       const std::vector<std::vector<at::Tensor>>& output_lists,            \
       const at::TensorList& input_list,                                    \
       const c10::intrusive_ptr<ProcessGroup>& process_group,               \
-      bool asyncOp) {                                                      \
+      bool asyncOp,                                                        \
+      OptionalCollectiveConfig config) {                                   \
     auto input_list_vec = input_list.vec();                                \
     auto opts = AllgatherOptions{};                                        \
     opts.asyncOp = asyncOp;                                                \
+    opts.config = std::move(config);                                       \
     auto hook_op_id = process_group->firePreHook(                          \
-        HookOpName::ALLGATHER, asyncOp, -1, input_list_vec, output_lists); \
+        HookOpName::ALLGATHER_COALESCED,                                   \
+        asyncOp,                                                           \
+        -1,                                                                \
+        input_list_vec,                                                    \
+        output_lists);                                                     \
     auto work = process_group->getBackend(c10::DeviceType::DEV)            \
                     ->allgather_coalesced(                                 \
                         const_cast<std::vector<std::vector<at::Tensor>>&>( \
@@ -340,7 +360,7 @@ IMPL__ALLGATHER_BASE(PrivateUse1)
                         input_list_vec,                                    \
                         opts);                                             \
     process_group->firePostHook(                                           \
-        HookOpName::ALLGATHER, asyncOp, hook_op_id, work);                 \
+        HookOpName::ALLGATHER_COALESCED, asyncOp, hook_op_id, work);       \
     return work;                                                           \
   }
 
@@ -353,18 +373,27 @@ IMPL_ALLGATHER_COALESCED(PrivateUse1)
       at::TensorList outputs,                                           \
       at::TensorList inputs,                                            \
       const c10::intrusive_ptr<ProcessGroup>& process_group,            \
-      bool asyncOp) {                                                   \
+      bool asyncOp,                                                     \
+      OptionalCollectiveConfig config) {                                \
     auto output_vec = outputs.vec();                                    \
     auto input_vec = inputs.vec();                                      \
     auto opts = AllgatherOptions{};                                     \
     opts.asyncOp = asyncOp;                                             \
+    opts.config = std::move(config);                                    \
     auto hook_op_id = process_group->firePreHook(                       \
-        HookOpName::ALLGATHER, asyncOp, -1, input_vec, output_vec);     \
+        HookOpName::ALLGATHER_INTO_TENSOR_COALESCED,                    \
+        asyncOp,                                                        \
+        -1,                                                             \
+        input_vec,                                                      \
+        output_vec);                                                    \
     auto work =                                                         \
         process_group->getBackend(c10::DeviceType::DEV)                 \
             ->all_gather_single_coalesced(output_vec, input_vec, opts); \
     process_group->firePostHook(                                        \
-        HookOpName::ALLGATHER, asyncOp, hook_op_id, work);              \
+        HookOpName::ALLGATHER_INTO_TENSOR_COALESCED,                    \
+        asyncOp,                                                        \
+        hook_op_id,                                                     \
+        work);                                                          \
     return work;                                                        \
   }
 
@@ -380,7 +409,8 @@ IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
           const c10::intrusive_ptr<ProcessGroup>& process_group,           \
           const c10::intrusive_ptr<ReduceOp>& reduce_op,                   \
           bool asyncOp,                                                    \
-          int64_t timeout) {                                               \
+          int64_t timeout,                                                 \
+          OptionalCollectiveConfig config) {                               \
     auto output_tensors_vec = output_tensors.vec();                        \
     auto hook_op_id = process_group->firePreHook(                          \
         HookOpName::REDUCE_SCATTER,                                        \
@@ -396,7 +426,8 @@ IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
                         ReduceScatterOptions{                              \
                             *reduce_op.get(),                              \
                             std::chrono::milliseconds(timeout),            \
-                            asyncOp});                                     \
+                            asyncOp,                                       \
+                            std::move(config)});                           \
     process_group->firePostHook(                                           \
         HookOpName::REDUCE_SCATTER, asyncOp, hook_op_id, work);            \
     return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(  \
@@ -414,9 +445,14 @@ IMPL_REDUCE_SCATTER(PrivateUse1)
       const c10::intrusive_ptr<ProcessGroup>& process_group,                   \
       const c10::intrusive_ptr<ReduceOp>& reduce_op,                           \
       bool asyncOp,                                                            \
-      int64_t timeout) {                                                       \
+      int64_t timeout,                                                         \
+      OptionalCollectiveConfig config) {                                       \
     auto hook_op_id = process_group->firePreHook(                              \
-        HookOpName::REDUCE_SCATTER, asyncOp, -1, input_tensor, output_tensor); \
+        HookOpName::REDUCE_SCATTER_BASE,                                       \
+        asyncOp,                                                               \
+        -1,                                                                    \
+        input_tensor,                                                          \
+        output_tensor);                                                        \
     auto work = process_group->getBackend(c10::DeviceType::DEV)                \
                     ->reduce_scatter_single(                                   \
                         output_tensor,                                         \
@@ -424,9 +460,10 @@ IMPL_REDUCE_SCATTER(PrivateUse1)
                         ReduceScatterOptions{                                  \
                             *reduce_op.get(),                                  \
                             std::chrono::milliseconds(timeout),                \
-                            asyncOp});                                         \
+                            asyncOp,                                           \
+                            std::move(config)});                               \
     process_group->firePostHook(                                               \
-        HookOpName::REDUCE_SCATTER, asyncOp, hook_op_id, work);                \
+        HookOpName::REDUCE_SCATTER_BASE, asyncOp, hook_op_id, work);           \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                   \
         output_tensor, work);                                                  \
   }
@@ -435,61 +472,73 @@ IMPL__REDUCE_SCATTER_BASE(CPU)
 IMPL__REDUCE_SCATTER_BASE(CUDA)
 IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
 
-#define IMPL_REDUCE_SCATTER_TENSOR_COALESCED(DEV)                        \
-  c10::intrusive_ptr<c10d::Work> reduce_scatter_tensor_coalesced_##DEV(  \
-      at::TensorList outputs,                                            \
-      at::TensorList inputs,                                             \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,             \
-      const c10::intrusive_ptr<ReduceOp>& reduce_op,                     \
-      bool asyncOp,                                                      \
-      int64_t timeout) {                                                 \
-    auto output_vec = outputs.vec();                                     \
-    auto input_vec = inputs.vec();                                       \
-    auto hook_op_id = process_group->firePreHook(                        \
-        HookOpName::REDUCE_SCATTER, asyncOp, -1, input_vec, output_vec); \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)          \
-                    ->reduce_scatter_single_coalesced(                   \
-                        output_vec,                                      \
-                        input_vec,                                       \
-                        ReduceScatterOptions{                            \
-                            *reduce_op.get(),                            \
-                            std::chrono::milliseconds(timeout),          \
-                            asyncOp});                                   \
-    process_group->firePostHook(                                         \
-        HookOpName::REDUCE_SCATTER, asyncOp, hook_op_id, work);          \
-    return work;                                                         \
+#define IMPL_REDUCE_SCATTER_TENSOR_COALESCED(DEV)                       \
+  c10::intrusive_ptr<c10d::Work> reduce_scatter_tensor_coalesced_##DEV( \
+      at::TensorList outputs,                                           \
+      at::TensorList inputs,                                            \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,            \
+      const c10::intrusive_ptr<ReduceOp>& reduce_op,                    \
+      bool asyncOp,                                                     \
+      int64_t timeout,                                                  \
+      OptionalCollectiveConfig config) {                                \
+    auto output_vec = outputs.vec();                                    \
+    auto input_vec = inputs.vec();                                      \
+    auto hook_op_id = process_group->firePreHook(                       \
+        HookOpName::REDUCE_SCATTER_TENSOR_COALESCED,                    \
+        asyncOp,                                                        \
+        -1,                                                             \
+        input_vec,                                                      \
+        output_vec);                                                    \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)         \
+                    ->reduce_scatter_single_coalesced(                  \
+                        output_vec,                                     \
+                        input_vec,                                      \
+                        ReduceScatterOptions{                           \
+                            *reduce_op.get(),                           \
+                            std::chrono::milliseconds(timeout),         \
+                            asyncOp,                                    \
+                            std::move(config)});                        \
+    process_group->firePostHook(                                        \
+        HookOpName::REDUCE_SCATTER_TENSOR_COALESCED,                    \
+        asyncOp,                                                        \
+        hook_op_id,                                                     \
+        work);                                                          \
+    return work;                                                        \
   }
 
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CPU)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CUDA)
 IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
 
-#define IMPL_GATHER(DEV)                                                      \
-  c10::intrusive_ptr<Work> gather_##DEV(                                      \
-      const std::vector<std::vector<at::Tensor>>& output_tensors,             \
-      const at::TensorList& input_tensors,                                    \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,                  \
-      int64_t root_rank,                                                      \
-      bool asyncOp,                                                           \
-      int64_t timeout) {                                                      \
-    auto input_tensors_vec = input_tensors.vec();                             \
-    auto hook_op_id = process_group->firePreHook(                             \
-        HookOpName::GATHER,                                                   \
-        asyncOp,                                                              \
-        root_rank,                                                            \
-        input_tensors_vec,                                                    \
-        output_tensors);                                                      \
-    auto work =                                                               \
-        process_group->getBackend(c10::DeviceType::DEV)                       \
-            ->gather(                                                         \
-                const_cast<std::vector<std::vector<at::Tensor>>&>(            \
-                    output_tensors),                                          \
-                input_tensors_vec,                                            \
-                GatherOptions{                                                \
-                    root_rank, std::chrono::milliseconds(timeout), asyncOp}); \
-    process_group->firePostHook(                                              \
-        HookOpName::GATHER, asyncOp, hook_op_id, work);                       \
-    return work;                                                              \
+#define IMPL_GATHER(DEV)                                                   \
+  c10::intrusive_ptr<Work> gather_##DEV(                                   \
+      const std::vector<std::vector<at::Tensor>>& output_tensors,          \
+      const at::TensorList& input_tensors,                                 \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,               \
+      int64_t root_rank,                                                   \
+      bool asyncOp,                                                        \
+      int64_t timeout,                                                     \
+      OptionalCollectiveConfig config) {                                   \
+    auto input_tensors_vec = input_tensors.vec();                          \
+    auto hook_op_id = process_group->firePreHook(                          \
+        HookOpName::GATHER,                                                \
+        asyncOp,                                                           \
+        root_rank,                                                         \
+        input_tensors_vec,                                                 \
+        output_tensors);                                                   \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)            \
+                    ->gather(                                              \
+                        const_cast<std::vector<std::vector<at::Tensor>>&>( \
+                            output_tensors),                               \
+                        input_tensors_vec,                                 \
+                        GatherOptions{                                     \
+                            root_rank,                                     \
+                            std::chrono::milliseconds(timeout),            \
+                            asyncOp,                                       \
+                            std::move(config)});                           \
+    process_group->firePostHook(                                           \
+        HookOpName::GATHER, asyncOp, hook_op_id, work);                    \
+    return work;                                                           \
   }
 
 IMPL_GATHER(CPU)
@@ -503,16 +552,19 @@ IMPL_GATHER(PrivateUse1)
       const c10::intrusive_ptr<ProcessGroup>& process_group,                  \
       int64_t root_rank,                                                      \
       bool asyncOp,                                                           \
-      int64_t timeout) {                                                      \
+      int64_t timeout,                                                        \
+      OptionalCollectiveConfig config) {                                      \
     auto hook_op_id = process_group->firePreHook(                             \
         HookOpName::GATHER, asyncOp, root_rank, input_tensor, output_tensor); \
-    auto work =                                                               \
-        process_group->getBackend(c10::DeviceType::DEV)                       \
-            ->gather_into_tensor(                                             \
-                output_tensor,                                                \
-                input_tensor,                                                 \
-                GatherOptions{                                                \
-                    root_rank, std::chrono::milliseconds(timeout), asyncOp}); \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)               \
+                    ->gather_single(                                          \
+                        output_tensor,                                        \
+                        input_tensor,                                         \
+                        GatherOptions{                                        \
+                            root_rank,                                        \
+                            std::chrono::milliseconds(timeout),               \
+                            asyncOp,                                          \
+                            std::move(config)});                              \
     process_group->firePostHook(                                              \
         HookOpName::GATHER, asyncOp, hook_op_id, work);                       \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(                  \
@@ -556,60 +608,66 @@ IMPL_SCATTER(CPU)
 IMPL_SCATTER(CUDA)
 IMPL_SCATTER(PrivateUse1)
 
-#define IMPL_ALLTOALL(DEV)                                                     \
-  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>                \
-      alltoall_##DEV(                                                          \
-          const at::TensorList& output_tensors,                                \
-          const at::TensorList& input_tensors,                                 \
-          const c10::intrusive_ptr<ProcessGroup>& process_group,               \
-          bool asyncOp,                                                        \
-          int64_t timeout) {                                                   \
-    auto output_tensors_vec = output_tensors.vec();                            \
-    auto input_tensors_vec = input_tensors.vec();                              \
-    auto hook_op_id = process_group->firePreHook(                              \
-        HookOpName::ALLTOALL,                                                  \
-        asyncOp,                                                               \
-        -1,                                                                    \
-        input_tensors_vec,                                                     \
-        output_tensors_vec);                                                   \
-    auto work =                                                                \
-        process_group->getBackend(c10::DeviceType::DEV)                        \
-            ->alltoall(                                                        \
-                output_tensors_vec,                                            \
-                input_tensors_vec,                                             \
-                AllToAllOptions{std::chrono::milliseconds(timeout), asyncOp}); \
-    process_group->firePostHook(                                               \
-        HookOpName::ALLTOALL, asyncOp, hook_op_id, work);                      \
-    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(      \
-        std::move(output_tensors_vec), work);                                  \
+#define IMPL_ALLTOALL(DEV)                                                \
+  std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>           \
+      alltoall_##DEV(                                                     \
+          const at::TensorList& output_tensors,                           \
+          const at::TensorList& input_tensors,                            \
+          const c10::intrusive_ptr<ProcessGroup>& process_group,          \
+          bool asyncOp,                                                   \
+          int64_t timeout,                                                \
+          OptionalCollectiveConfig config) {                              \
+    auto output_tensors_vec = output_tensors.vec();                       \
+    auto input_tensors_vec = input_tensors.vec();                         \
+    auto hook_op_id = process_group->firePreHook(                         \
+        HookOpName::ALLTOALL,                                             \
+        asyncOp,                                                          \
+        -1,                                                               \
+        input_tensors_vec,                                                \
+        output_tensors_vec);                                              \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
+                    ->alltoall(                                           \
+                        output_tensors_vec,                               \
+                        input_tensors_vec,                                \
+                        AllToAllOptions{                                  \
+                            std::chrono::milliseconds(timeout),           \
+                            asyncOp,                                      \
+                            std::move(config)});                          \
+    process_group->firePostHook(                                          \
+        HookOpName::ALLTOALL, asyncOp, hook_op_id, work);                 \
+    return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>( \
+        std::move(output_tensors_vec), work);                             \
   }
 
 IMPL_ALLTOALL(CPU)
 IMPL_ALLTOALL(CUDA)
 IMPL_ALLTOALL(PrivateUse1)
 
-#define IMPL_ALLTOALL_BASE(DEV)                                                \
-  c10::intrusive_ptr<Work> alltoall_base_##DEV(                                \
-      at::Tensor& output,                                                      \
-      at::Tensor& input,                                                       \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,                   \
-      std::vector<int64_t> output_split_sizes,                                 \
-      std::vector<int64_t> input_split_sizes,                                  \
-      bool asyncOp,                                                            \
-      int64_t timeout) {                                                       \
-    auto hook_op_id = process_group->firePreHook(                              \
-        HookOpName::ALLTOALL, asyncOp, -1, input, output);                     \
-    auto work =                                                                \
-        process_group->getBackend(c10::DeviceType::DEV)                        \
-            ->all_to_all_single(                                               \
-                output,                                                        \
-                input,                                                         \
-                output_split_sizes,                                            \
-                input_split_sizes,                                             \
-                AllToAllOptions{std::chrono::milliseconds(timeout), asyncOp}); \
-    process_group->firePostHook(                                               \
-        HookOpName::ALLTOALL, asyncOp, hook_op_id, work);                      \
-    return work;                                                               \
+#define IMPL_ALLTOALL_BASE(DEV)                                 \
+  c10::intrusive_ptr<Work> alltoall_base_##DEV(                 \
+      at::Tensor& output,                                       \
+      at::Tensor& input,                                        \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,    \
+      std::vector<int64_t> output_split_sizes,                  \
+      std::vector<int64_t> input_split_sizes,                   \
+      bool asyncOp,                                             \
+      int64_t timeout,                                          \
+      OptionalCollectiveConfig config) {                        \
+    auto hook_op_id = process_group->firePreHook(               \
+        HookOpName::ALLTOALL_BASE, asyncOp, -1, input, output); \
+    auto work = process_group->getBackend(c10::DeviceType::DEV) \
+                    ->all_to_all_single(                        \
+                        output,                                 \
+                        input,                                  \
+                        output_split_sizes,                     \
+                        input_split_sizes,                      \
+                        AllToAllOptions{                        \
+                            std::chrono::milliseconds(timeout), \
+                            asyncOp,                            \
+                            std::move(config)});                \
+    process_group->firePostHook(                                \
+        HookOpName::ALLTOALL_BASE, asyncOp, hook_op_id, work);  \
+    return work;                                                \
   }
 
 IMPL_ALLTOALL_BASE(CPU)
@@ -665,7 +723,8 @@ allreduce_sparse_cuda_(
     const c10::intrusive_ptr<ReduceOp>& reduce_op,
     const std::optional<at::Tensor>& sparse_indices,
     bool asyncOp,
-    int64_t timeout) {
+    int64_t timeout,
+    OptionalCollectiveConfig config) {
   auto tensor_vec = tensors.vec();
   auto hook_op_id = process_group->firePreHook(
       HookOpName::ALLREDUCE, asyncOp, -1, tensor_vec);
@@ -676,7 +735,8 @@ allreduce_sparse_cuda_(
                           .reduceOp = *reduce_op,
                           .timeout = std::chrono::milliseconds(timeout),
                           .asyncOp = asyncOp,
-                          .sparseIndices = sparse_indices});
+                          .sparseIndices = sparse_indices,
+                          .config = std::move(config)});
 
   process_group->firePostHook(HookOpName::ALLREDUCE, asyncOp, hook_op_id, work);
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(

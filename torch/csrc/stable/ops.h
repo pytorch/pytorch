@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
@@ -677,6 +678,28 @@ inline torch::stable::Tensor view(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+/// Stable version of the view.dtype op.
+///
+/// Returns a view of the input tensor with the same data reinterpreted as the
+/// given dtype. This is a different overload than the shape-based view op.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor.
+/// @param dtype The dtype to reinterpret the data as.
+/// @return A view of the input tensor with the specified dtype.
+inline torch::stable::Tensor view(
+    const torch::stable::Tensor& self,
+    torch::headeronly::ScalarType dtype) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dtype)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::view", "dtype", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 /// Creates a tensor from an existing data blob.
 ///
 /// Creates a tensor that uses the provided data pointer as its storage.
@@ -1135,6 +1158,464 @@ inline torch::stable::Tensor full(
   return torch::stable::Tensor(ret0);
 }
 
+/// Stable version of the bitwise_and.Tensor op.
+///
+/// Computes the element-wise bitwise AND of self and other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The first input tensor.
+/// @param other The second input tensor.
+/// @return The result of the bitwise AND.
+inline torch::stable::Tensor bitwise_and(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_and", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the bitwise_or.Tensor op.
+///
+/// Computes the element-wise bitwise OR of self and other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The first input tensor.
+/// @param other The second input tensor.
+/// @return The result of the bitwise OR.
+inline torch::stable::Tensor bitwise_or(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_or", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the bitwise_left_shift.Tensor op.
+///
+/// Computes the element-wise left bitwise shift of self by other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor to shift.
+/// @param other The tensor of shift amounts.
+/// @return The result of the left bitwise shift.
+inline torch::stable::Tensor bitwise_left_shift(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_left_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the bitwise_right_shift.Tensor op.
+///
+/// Computes the element-wise right bitwise shift of self by other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor to shift.
+/// @param other The tensor of shift amounts.
+/// @return The result of the right bitwise shift.
+inline torch::stable::Tensor bitwise_right_shift(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bitwise_right_shift", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the permute op.
+///
+/// Returns a view of the input tensor with its dimensions rearranged according
+/// to dims. The returned tensor shares the same underlying data with the input.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor.
+/// @param dims The desired ordering of dimensions.
+/// @return A permuted view of the input tensor.
+inline torch::stable::Tensor permute(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef dims) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::permute", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the index_select op.
+///
+/// Returns a new tensor which indexes the input tensor along dimension dim
+/// using the entries in index.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to index along.
+/// @param index A 1-D tensor of indices to select.
+/// @return A tensor with values selected along dim.
+inline torch::stable::Tensor index_select(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    const torch::stable::Tensor& index) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(index)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::index_select", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the floor_divide op.
+///
+/// Computes the element-wise floor division of self by other.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The dividend tensor.
+/// @param other The divisor tensor.
+/// @return The result of floor division.
+inline torch::stable::Tensor floor_divide(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::floor_divide", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the is_pinned op.
+///
+/// Returns true if the tensor's storage is allocated in pinned memory.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.14.
+///
+/// @param self The input tensor.
+/// @return true if the tensor is pinned, false otherwise.
+inline bool is_pinned(const torch::stable::Tensor& self) {
+  const auto num_args = 2;
+  // Pass nullopt for aten::is_pinned's deprecated optional Device arg.
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(std::nullopt)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::is_pinned", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<bool>(stack[0]);
+}
+
+/// Stable version of the sort op.
+///
+/// Sorts the input tensor along dim, returning the values and their indices.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to sort along.
+/// @param descending Whether to sort in descending order.
+/// @return A tuple of the sorted values and their indices.
+inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
+    const torch::stable::Tensor& self,
+    int64_t dim = -1,
+    bool descending = false) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(descending)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::sort", "", stack.data(), TORCH_ABI_VERSION));
+  return std::make_tuple(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
+      torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+}
+
+/// Stable version of the sort.stable op.
+///
+/// Sorts the input tensor along dim, returning the values and their indices.
+/// This is a different overload than the sort op without the stable argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param stable Whether equal elements keep their original order.
+/// @param dim The dimension to sort along.
+/// @param descending Whether to sort in descending order.
+/// @return A tuple of the sorted values and their indices.
+inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
+    const torch::stable::Tensor& self,
+    std::optional<bool> stable,
+    int64_t dim = -1,
+    bool descending = false) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(stable),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(descending)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::sort", "stable", stack.data(), TORCH_ABI_VERSION));
+  return std::make_tuple(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
+      torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+}
+
+/// Stable version of the masked_select op.
+///
+/// Returns a 1-D tensor of the elements of self where mask is true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param mask A boolean tensor broadcastable with self.
+/// @return A 1-D tensor of the selected elements.
+inline torch::stable::Tensor masked_select(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mask) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(mask)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::masked_select", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the mm.out op.
+///
+/// Computes the matrix product of the 2-D tensors self and mat2, storing the
+/// result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the mm.dtype_out op.
+///
+/// Computes the matrix product of self and mat2 in out_dtype. This is a
+/// different overload than mm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.out op.
+///
+/// Computes the batch matrix product of the 3-D tensors self and mat2,
+/// storing the result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.dtype_out op.
+///
+/// Computes the batch matrix product of self and mat2 in out_dtype. This is a
+/// different overload than bmm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the flip op.
+///
+/// Reverses the order of elements along the given dimensions and returns
+/// the result as a new tensor. Negative dimensions are wrapped.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param dims The dimensions to flip.
+/// @return A new tensor with the given dimensions reversed.
+inline torch::stable::Tensor flip(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef dims) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::flip", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the from_file op.
+///
+/// Creates a CPU tensor backed by a memory-map of the file at filename.
+/// Unlike at::from_file, filename is a const std::string& rather than a
+/// std::string_view.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param filename Path of the file to read.
+/// @param shared Optional flag to write tensor changes back to the file.
+/// @param size Optional number of elements to read from the file.
+/// @param dtype Optional scalar type for the tensor elements.
+/// @param layout Optional memory layout, which must be strided for this op.
+/// @param device Optional device, which must be CPU for this op.
+/// @param pin_memory Optional pinning flag, which must be false for this op.
+/// @return A new tensor holding the file contents.
+inline torch::stable::Tensor from_file(
+    const std::string& filename,
+    std::optional<bool> shared = std::nullopt,
+    std::optional<int64_t> size = 0,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 7;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(filename),
+      torch::stable::detail::from(shared),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::from_file", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+/// Stable version of the add.Tensor op.
+///
+/// Adds the other tensor to self, scaled by alpha: self + alpha * other.
+/// Unlike at::add, alpha is a double rather than a Scalar. Adding two
+/// integral or boolean tensors is not supported.
+///
+/// Minimum compatible version: PyTorch 2.16.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @param self The input tensor.
+/// @param other The tensor to add.
+/// @param alpha The scaling factor for other. Defaults to 1.0.
+/// @return The result of self + alpha * other.
+inline torch::stable::Tensor add(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other,
+    double alpha = 1.0) {
+  AtenTensorHandle ret0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_add_Tensor(self.get(), other.get(), alpha, &ret0));
+  return torch::stable::Tensor(ret0);
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

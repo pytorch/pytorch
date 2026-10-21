@@ -3,6 +3,7 @@
 import dataclasses
 import functools
 import inspect
+import itertools
 import logging
 import re
 import sys
@@ -70,7 +71,13 @@ from torch._functorch.aot_autograd import (
     _detect_attribute_assignment,
     aot_export_joint_with_descriptors,
 )
-from torch._guards import detect_fake_mode, tracing, TracingContext
+from torch._guards import (
+    compile_context,
+    CompileContext,
+    detect_fake_mode,
+    tracing,
+    TracingContext,
+)
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
@@ -117,7 +124,11 @@ from .exported_program import (
     ModuleCallEntry,
     ModuleCallSignature,
 )
-from .graph_signature import _convert_to_export_graph_signature, ExportGraphSignature
+from .graph_signature import (
+    _convert_to_export_graph_signature,
+    ArgumentSpec,
+    ExportGraphSignature,
+)
 
 
 log = logging.getLogger(__name__)
@@ -650,6 +661,79 @@ def _add_input_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
             )
 
 
+def _apply_renames_to_signature(
+    signature: ExportGraphSignature,
+    renamed: dict[str, str],
+) -> None:
+    """Apply a batch of old-name-to-new-name renames to the signature."""
+    for spec in [*signature.input_specs, *signature.output_specs]:
+        arg = spec.arg
+        if isinstance(arg, ArgumentSpec) and arg.name in renamed:
+            arg.name = renamed[arg.name]
+
+
+class _ExportSafeToReorder:
+    """Barrier predicate for export canonicalization.
+
+    Wraps ``_is_safe_to_reorder`` with an additional constraint: nodes from
+    different ``nn_module_stack`` scopes are never reordered past each other,
+    because ``unflatten`` expects nodes within the same module scope to be
+    contiguous.
+    """
+
+    def __init__(self) -> None:
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        self._is_safe_to_reorder = _is_safe_to_reorder
+        self._prev_stack: tuple[str, ...] | None = None
+
+    def __call__(self, node: torch.fx.Node) -> bool:
+        if not self._is_safe_to_reorder(node):
+            self._prev_stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+            return False
+        stack = tuple(node.meta.get("nn_module_stack", {}).keys())
+        if stack != self._prev_stack:
+            self._prev_stack = stack
+            return False
+        return True
+
+
+def _canonicalize_export_graph(
+    gm: torch.fx.GraphModule,
+    signature: ExportGraphSignature,
+) -> None:
+    """Canonicalize node order and names in an export graph and all subgraphs.
+
+    Reorders nodes into a deterministic topological order and renames them to
+    canonical names so that strict and non-strict export produce identical
+    graphs.  Updates ``signature`` to reflect the new node names.
+    """
+    from torch.fx.passes.canonicalize import _canonical_node_key, canonicalize_graph
+
+    for mod in gm.modules():
+        if isinstance(mod, torch.fx.GraphModule):
+            placeholder_ord = itertools.count()
+
+            def _key(
+                node: torch.fx.Node,
+                canonical_idx: dict[torch.fx.Node, int],
+                _ord: itertools.count = placeholder_ord,
+            ) -> object:
+                if node.op == "placeholder":
+                    return (0, next(_ord))
+                return _canonical_node_key(node, canonical_idx)
+
+            renamed = canonicalize_graph(
+                mod.graph,
+                _key,
+                _ExportSafeToReorder(),
+                skip_rename_ops=frozenset({"placeholder"}),
+                group_getitems=True,
+            )
+            if mod is gm and renamed:
+                _apply_renames_to_signature(signature, renamed)
+
+
 def _produce_aten_artifact(
     *,
     gm: torch.fx.GraphModule,
@@ -756,6 +840,9 @@ def _produce_aten_artifact(
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
     )
+
+    if torch._dynamo.config.canonicalize_output_graph_node_order:
+        _canonicalize_export_graph(gm, export_graph_signature)
 
     return ATenExportArtifact(
         gm,
@@ -1395,50 +1482,63 @@ _EXPORT_FLAGS: set[str] | None = None
 _EXPORT_MODULE_HIERARCHY: dict[str, str] | None = None
 
 
+@contextmanager
+def _non_strict_export_compile_context(strict: bool):
+    if strict or CompileContext.current_compile_id() is not None:
+        yield
+        return
+
+    from torch._dynamo.convert_frame import get_compile_id
+
+    with compile_context(CompileContext(get_compile_id(frame_state={}))):
+        yield
+
+
 def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
-        try:
-            start = time.time()
-            ep = fn(*args, **kwargs)
-            end = time.time()
-            log_export_usage(
-                event="export.time",
-                metrics=end - start,
-                flags=_EXPORT_FLAGS,
-                **get_ep_stats(ep),
-            )
-        except Exception as e:
-            t = type(e)
-            error_type = t.__module__ + "." + t.__qualname__
-            case_name = get_class_if_classified_error(e)
-            if case_name is not None:
-                log.error(exportdb_error_message(case_name))
+        with _non_strict_export_compile_context(kwargs.get("strict", True)):
+            try:
+                start = time.time()
+                ep = fn(*args, **kwargs)
+                end = time.time()
                 log_export_usage(
-                    event="export.error.classified",
-                    type=error_type,
-                    message=str(e),
+                    event="export.time",
+                    metrics=end - start,
                     flags=_EXPORT_FLAGS,
+                    **get_ep_stats(ep),
                 )
-            else:
-                log_export_usage(
-                    event="export.error.unclassified",
-                    type=error_type,
-                    message=str(e),
-                    flags=_EXPORT_FLAGS,
-                )
+            except Exception as e:
+                t = type(e)
+                error_type = t.__module__ + "." + t.__qualname__
+                case_name = get_class_if_classified_error(e)
+                if case_name is not None:
+                    log.error(exportdb_error_message(case_name))
+                    log_export_usage(
+                        event="export.error.classified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
+                else:
+                    log_export_usage(
+                        event="export.error.unclassified",
+                        type=error_type,
+                        message=str(e),
+                        flags=_EXPORT_FLAGS,
+                    )
 
-            if hasattr(e, "partial_fx_graph"):
-                print(
-                    e.partial_fx_graph,
-                    file=sys.stderr,
-                )
+                if hasattr(e, "partial_fx_graph"):
+                    print(
+                        e.partial_fx_graph,
+                        file=sys.stderr,
+                    )
 
-            raise e
-        finally:
-            _EXPORT_FLAGS = None
-            _EXPORT_MODULE_HIERARCHY = None
+                raise e
+            finally:
+                _EXPORT_FLAGS = None
+                _EXPORT_MODULE_HIERARCHY = None
 
         return ep
 

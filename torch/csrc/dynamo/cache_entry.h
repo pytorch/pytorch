@@ -29,7 +29,7 @@ and the optimized code.
 The FrameState is a PyDict that enables sharing between different frames. This
 is used to detect dynamism in automatic dynamic shapes.
 
-These two are encapsulated into a ExtraState.
+These two are encapsulated into an ExtraState.
 */
 
 typedef struct CacheEntry CacheEntry;
@@ -54,8 +54,10 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
   py::object backend;
-  // Reference to owning ExtraState
+  // Reference to owning ExtraState; null for copies handed to Python
   ExtraState* _owner{nullptr};
+  // The cached entry a copy was taken from, for equality only
+  const CacheEntry* _source{nullptr};
   // Reference to this CacheEntry's location in owner's linked list
   std::list<CacheEntry>::iterator _owner_loc;
   // The isolate_recompiles_id for this entry's bucket in cache_entry_map
@@ -73,17 +75,22 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void invalidate(py::object deleted_guard_manager);
   // Called from the python side to update the diff guard root manager
   void update_diff_guard_root_manager();
+  // A copy that owns its references and does not belong to the cache.  The
+  // non-owning pointers into the cache and guard managers are cleared.
+  CacheEntry copy_for_python() const;
+  // Unique identity for a cache entry, used for equality checks.
+  const CacheEntry* identity() const;
+
+  // Implements __eq__ for Python.
+  bool py_equal(const CacheEntry& other) const;
+  // Implements __hash__ for Python.
+  std::size_t py_hash() const;
+
 } CacheEntry;
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 #endif
-
-// Returns borrowed reference
-PyCodeObject* CacheEntry_get_code(CacheEntry* e);
-
-// Returns borrowed string representation of CompileContext
-const char* CacheEntry_get_trace_annotation(CacheEntry* e);
 
 // Returns a borrowed reference to CacheEntry as a PyObject
 // Warning: lifetime is controlled by C++
