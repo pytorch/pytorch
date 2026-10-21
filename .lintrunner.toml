@@ -226,7 +226,6 @@ exclude_patterns = [
     'c10/test/**/*.cpp',
     'third_party/**/*',
     'torch/csrc/profiler/kineto/benchmarks/**',
-    'torch/csrc/profiler/kineto/libkineto/stress_test/**',
     'torch/csrc/profiler/kineto/libkineto/test/**',
     'torch/csrc/profiler/kineto/libkineto/third_party/**',
     # Need ROCm/XPU SDK headers, which the lint image doesn't have
@@ -938,6 +937,7 @@ include_patterns = [
 exclude_patterns = [
     'tools/**',
     'third_party/kineto/libkineto/third_party/**',  # Kineto's own third_party
+    'torch/csrc/profiler/kineto/libkineto/third_party/**',  # Kineto's own third_party
     'test/**',
     'benchmarks/**',
     'torch/distributed/run.py',
