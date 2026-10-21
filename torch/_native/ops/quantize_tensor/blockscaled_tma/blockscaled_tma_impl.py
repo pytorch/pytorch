@@ -288,7 +288,7 @@ def _format_blockscaled_tma_output(
             raise AssertionError(
                 f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
             )
-        scale_m_shape = (spec.s_num_row_blk_m, spec.s_num_col_blk_m, 32, 16)
+        scale_m_shape = (1, spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16)
         scale_m = scale_m.view(
             (spec.B, *scale_m_shape) if spec.is_batched else scale_m_shape
         ).view(torch.float8_e8m0fnu)
@@ -307,7 +307,7 @@ def _format_blockscaled_tma_output(
                 f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
             )
         if spec.is_scale_swizzled:
-            scale_k_shape = (spec.s_num_row_blk_k, spec.s_num_col_blk_k, 32, 16)
+            scale_k_shape = (1, spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16)
         else:
             scale_k_shape = (spec.M, spec.K // 32)
         scale_k = scale_k.view(
