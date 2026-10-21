@@ -3046,6 +3046,7 @@ class TMACompatibilityChecker:
                     and config.assume_aligned_inputs
                 )
                 or device_type == "xpu"
+                or (device_type == "npu" and config.assume_aligned_inputs)
             )
             and config.triton.use_tensor_descriptor
             and has_triton_stable_tma_api()
