@@ -172,8 +172,6 @@ void matmul_int4_impl(
   Tensor b = with_bias ? bias.value() : Tensor();
   dnnl::memory::desc b_md;
   if (with_bias) {
-    // oneDNN matmul requires bias to have the same number of dims as dst;
-    // reshape a 1D [N] bias to [1, N] (see QMatmul.cpp's _scaled_mm_v2).
     if (b.dim() == 1) {
       b = b.reshape({1, b.size(0)});
     }
@@ -222,8 +220,6 @@ void matmul_int4_impl(
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, act_zp_m});
   }
   dnnl::sycl_interop::execute(matmul_p, stream, args);
-  if (!dst.is_same(result))
-    result.copy_(dst);
 }
 
 static inline void set_quant_primitive_attr(
