@@ -100,15 +100,18 @@ class TestWrapperPreamble(TestCase):
         self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\nprint(sep)\n")
 
     def test_a_line_with_explicit_names_is_not_read_as_a_binding(self):
-        # Kept for y, but its right-hand side is not a use of os; and torch among a
-        # line's names does not make it unconditional.
+        # Kept for its names, a line uses all it reads, x and os included; torch among
+        # its names does not make it unconditional.
         wrapper, buf = self._wrapper(), IndentedBuffer()
-        wrapper.write_if_used(buf, "import os")
-        wrapper.write_if_used(buf, "x = os.sep", names=("y",))
+        for line in ("import os", "import sys", "x = sys.path"):
+            wrapper.write_if_used(buf, line)
+        wrapper.write_if_used(buf, "y, z = os.sep, x", names=("y", "z"))
         wrapper.write_if_used(buf, "torch.manual_seed(0)", names=("torch", "seed"))
         buf.writeline("print(y)")
         wrapper.scan_for_used_names(buf)
-        self.assertEqual(buf.getvalue(), "x = os.sep\nprint(y)\n")
+        expected = "import os\nimport sys\nx = sys.path\ny, z = os.sep, x\nprint(y)\n"
+        self.assertEqual(buf.getvalue(), expected)
+        exec(buf.getvalue(), {})
 
     def test_a_name_only_a_subgraph_uses_keeps_the_lines_it_needs(self):
         # The subgraph's code, spliced into the root unscanned, uses sep, whose binding
@@ -247,6 +250,7 @@ class TestWrapperPreamble(TestCase):
 
         p, x = torch.tensor(True), torch.randn(8)
         result, code = _code_for(fn, p, x)
+        self.assertNotIn("cpp_fused_", code.split("def call(")[-1])
         self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
         self.assertEqual(_run_from_file(code, [p, x])[0], result)
 
@@ -265,7 +269,7 @@ class TestWrapperPreamble(TestCase):
                 _, code = _code_for(fn, x, **cfg)
                 if cfg:
                     self.assertIn("def partition_0(", code)
-                self.assertNotIn("async_compile.triton(", code)
+                self.assertEqual(code.count("async_compile."), 1)
                 self.assertIn("async_compile = AsyncCompile()", code)
                 self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
 
