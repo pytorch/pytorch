@@ -4599,6 +4599,7 @@ class PythonWrapperCodegen(CodeGen):
         compile_wrapper.writeline(f"''', device_str='{device_type}')")
         return compile_wrapper.getvalue()
 
+    @cache_on_self
     def get_root_graph(self) -> PythonWrapperCodegen:
         root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
         while isinstance(root, SubgraphPythonWrapperCodegen):
@@ -6799,7 +6800,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
 
-    @cache_on_self
     def generate_and_run_autotune_block(self):
         # Only execute auto-tuning block in the main graph
         pass
