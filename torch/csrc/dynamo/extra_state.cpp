@@ -228,6 +228,9 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager) {
+  TORCH_CHECK(
+      cache_entry != nullptr && cache_entry->_owner == this,
+      "cache entry does not belong to this ExtraState");
   // Sometimes setting the cache_entry->code to None causes the orig_code to be
   // freed. This calls destroy_extra_state, which deletes the extra_state and
   // all the cache_entries. This causes the `this` pointer to be a dangling
@@ -236,7 +239,6 @@ void ExtraState::invalidate(
   // function is running.
   Py_INCREF(this->orig_code);
 
-  CHECK(cache_entry->_owner == this);
   CHECK(cache_entry == &*cache_entry->_owner_loc);
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
@@ -472,10 +474,21 @@ static PyCodeObject* code_from_handle(const py::handle& code_obj) {
   return (PyCodeObject*)code_obj.ptr();
 }
 
+// Callers copy entries out before building the list, as allocating Python
+// objects can run GC finalizers that mutate the cache being walked.
+template <typename T>
+static py::list to_py_list(std::vector<T>&& entries) {
+  py::list result;
+  for (T& e : entries) {
+    result.append(py::cast(std::move(e), py::return_value_policy::move));
+  }
+  return result;
+}
+
 py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
-  py::list result;
+  std::vector<CacheEntry> copies;
   if (extra != nullptr) {
     // Sort by isolate_recompiles_id for deterministic iteration order.
     std::vector<int64_t> ids;
@@ -485,12 +498,12 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
     }
     std::sort(ids.begin(), ids.end());
     for (int64_t id : ids) {
-      for (CacheEntry& e : extra->cache_entry_map[id]) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntry& e : extra->cache_entry_map[id]) {
+        copies.push_back(e.copy_for_python());
       }
     }
   }
-  return result;
+  return to_py_list(std::move(copies));
 }
 
 py::list _get_cache_entries_for_region(
@@ -501,16 +514,16 @@ py::list _get_cache_entries_for_region(
       "expected a code object!");
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
-  py::list result;
+  std::vector<CacheEntry> copies;
   if (extra != nullptr) {
     auto it = extra->cache_entry_map.find(isolate_recompiles_id);
     if (it != extra->cache_entry_map.end()) {
-      for (CacheEntry& e : it->second) {
-        result.append(py::cast(e, py::return_value_policy::reference));
+      for (const CacheEntry& e : it->second) {
+        copies.push_back(e.copy_for_python());
       }
     }
   }
-  return result;
+  return to_py_list(std::move(copies));
 }
 
 size_t _get_total_cache_entry_count(const py::handle& code_obj) {
@@ -561,11 +574,10 @@ bool _set_lru_cache(py::object boolean) {
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   PyCodeObject* code = code_from_handle(code_obj);
   ExtraState* extra = get_extra_state(code);
-  py::list result;
+  std::vector<PrecompileEntry> copies;
   if (extra != nullptr) {
-    for (PrecompileEntry& e : extra->precompile_entries) {
-      result.append(py::cast(e, py::return_value_policy::reference));
-    }
+    copies.assign(
+        extra->precompile_entries.begin(), extra->precompile_entries.end());
   }
-  return result;
+  return to_py_list(std::move(copies));
 }
