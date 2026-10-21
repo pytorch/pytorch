@@ -13,6 +13,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
@@ -205,7 +206,25 @@ void parseKernelArgs(
   }
 }
 
-inline ze_module_handle_t _createModule(
+// A Level Zero handle owns its resource until make_kernel_bundle/make_kernel
+// transfers it to SYCL. The ZE_CHECKs in between throw, and nothing else holds
+// the handle, so the load path keeps one of these over that window.
+struct ZeModuleDeleter {
+  void operator()(ze_module_handle_t module) const {
+    ze().zeModuleDestroy(module);
+  }
+};
+struct ZeKernelDeleter {
+  void operator()(ze_kernel_handle_t kernel) const {
+    ze().zeKernelDestroy(kernel);
+  }
+};
+using ZeModulePtr =
+    std::unique_ptr<std::remove_pointer_t<ze_module_handle_t>, ZeModuleDeleter>;
+using ZeKernelPtr =
+    std::unique_ptr<std::remove_pointer_t<ze_kernel_handle_t>, ZeKernelDeleter>;
+
+inline ZeModulePtr _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
     const int device_idx) {
@@ -226,9 +245,10 @@ inline ze_module_handle_t _createModule(
   moduleDescription.pInputModule = binaryPtr;
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
-  ze_module_handle_t module = nullptr;
+  ze_module_handle_t rawModule = nullptr;
   ze_result_t error_no = ze().zeModuleCreate(
-      context, device, &moduleDescription, &module, &buildLog);
+      context, device, &moduleDescription, &rawModule, &buildLog);
+  ZeModulePtr module(rawModule);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     // Retrieve the build log on a best-effort basis; failures here must not
@@ -251,24 +271,38 @@ inline ze_module_handle_t _createModule(
   return module;
 }
 
-inline sycl::kernel* _createKernel(
-    ze_module_handle_t module,
+inline std::unique_ptr<sycl::kernel> _createKernel(
+    ZeModulePtr module,
     const char* kernelName,
     uint32_t* nSpillsPtr = nullptr) {
   assert(module);
   assert(kernelName);
-  ze_kernel_handle_t kernel = nullptr;
+  auto& syclContext = c10::xpu::get_device_context();
+  // Hand the module to SYCL before creating a kernel from it. zeModuleDestroy
+  // requires every kernel handle created from the module to be destroyed first,
+  // so the bundle has to be declared ahead of the kernel guard to be torn down
+  // after it when anything below throws.
+  ze_module_handle_t rawModule = module.get();
+  auto mod = sycl::make_kernel_bundle<
+      sycl::backend::ext_oneapi_level_zero,
+      sycl::bundle_state::executable>(
+      {rawModule, sycl::ext::oneapi::level_zero::ownership::transfer},
+      syclContext);
+  module.release();
+
+  ze_kernel_handle_t rawKernel = nullptr;
   ze_kernel_desc_t kernelDescription = {};
   kernelDescription.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
   kernelDescription.pNext = nullptr;
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
-  ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
+  ZE_CHECK(ze().zeKernelCreate(rawModule, &kernelDescription, &rawKernel));
+  ZeKernelPtr kernel(rawKernel);
   if (nSpillsPtr) {
     ze_kernel_properties_t props{};
     props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
     props.pNext = nullptr;
-    ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
+    ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
     // Level Zero reports spillMemSize in bytes per hardware thread, while
     // CUDA/HIP report n_spills as LOCAL_SIZE_BYTES / 4, i.e. dword-equivalents
     // per lane. Inductor's spill thresholds are calibrated on the latter, so
@@ -286,17 +320,11 @@ inline sycl::kernel* _createKernel(
     *nSpillsPtr = subgroupSize != 0 ? props.spillMemSize / (4 * subgroupSize)
                                     : props.spillMemSize;
   }
-  auto& syclContext = c10::xpu::get_device_context();
-  auto mod = sycl::make_kernel_bundle<
-      sycl::backend::ext_oneapi_level_zero,
-      sycl::bundle_state::executable>(
-      {module, sycl::ext::oneapi::level_zero::ownership::transfer},
+  auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+      {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
-  auto fun =
-      new sycl::kernel(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
-          {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-          syclContext));
-  return fun;
+  kernel.release();
+  return std::make_unique<sycl::kernel>(std::move(fun));
 }
 
 std::unique_ptr<sycl::kernel> loadKernel(
@@ -312,8 +340,7 @@ std::unique_ptr<sycl::kernel> loadKernel(
   auto mod = _createModule(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
-  return std::unique_ptr<sycl::kernel>(
-      _createKernel(mod, funcName, nSpillsPtr));
+  return _createKernel(std::move(mod), funcName, nSpillsPtr);
 }
 
 template <typename T>
@@ -451,9 +478,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
   func.release();
 
-  // "N" steals the capsule reference PyCapsule_New returned. With "O" the
-  // capsule keeps that extra reference for the process lifetime, its destructor
-  // never runs, and close() cannot release the kernel or its Level Zero module.
+  // "N": the tuple takes ownership of the capsule reference.
   return Py_BuildValue("(Nii)", kernel_py, n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
