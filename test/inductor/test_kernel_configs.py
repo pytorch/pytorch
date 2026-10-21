@@ -9,6 +9,8 @@ from unittest import mock
 
 import torch
 from torch._inductor import config
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.runtime.hints import HeuristicType
@@ -20,6 +22,7 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -115,6 +118,14 @@ def _bucketize(x):
     return torch.bucketize(x, torch.linspace(-1, 1, 8, device=x.device))
 
 
+def _foreach(x):
+    return tuple(torch._foreach_add([x, x.t()], 1))
+
+
+def _mix_order(x):
+    return x.sum(dim=1), x.sum(dim=0)
+
+
 class TestKernelConfigs(TestCase):
     """Under triton.autotune_at_compile_time, the module launches each kernel with the
     config the compile tuned it to."""
@@ -128,27 +139,79 @@ class TestKernelConfigs(TestCase):
             ("pointwise", lambda x: (x.sin() * 2).relu(), (4096,)),
             ("bucketize", _bucketize, (4096,)),
             ("subgraph", _cond_softmax, (64, 128)),
+            ("split_scan", lambda x: x.abs().cumsum(0), (2**20,)),
+            ("foreach", _foreach, (64, 128)),
+            ("mix_order_reduction", _mix_order, (8192, 8192)),
+            (
+                "cooperative_reduction",
+                lambda x: x.sum(-1),
+                (8, 2**16),
+                {"triton.force_cooperative_reductions": True},
+            ),
         ],
         name_fn=lambda case: case[0],
     )
     @config.patch(coordinate_descent_tuning=True, max_autotune_pointwise=True)
     def test_kernels_launch_with_their_compile_time_config(self, case):
-        _, fn, shape = case
+        _, fn, shape, *cfg = case
         x = torch.randn(shape, device=GPU_TYPE)
         with _configs_tuned_at_compile_time() as tuned:
-            _, code = _code_for(fn, x)
+            _, code = _code_for(fn, x, **(cfg[0] if cfg else {}))
         kernels = _kernels(code)
         self.assertTrue(kernels)
         with _no_runtime_tuning():
             ns = _load_from_file(code)
             # -x takes the other torch.cond branch, so every kernel launches
             for arg in (x, -x):
-                self.assertEqual(ns["call"]([arg])[0], fn(arg), atol=1e-4, rtol=1e-4)
+                out, expected = ns["call"]([arg]), fn(arg)
+                if not isinstance(expected, tuple):
+                    out = out[0]
+                self.assertEqual(out, expected, atol=1e-4, rtol=1e-4)
         self.assertEqual(set(ns["KERNEL_CONFIGS"]), kernels)
         for name, cfg in ns["KERNEL_CONFIGS"].items():
             self.assertEqual(cfg, tuned[name], name)
             (launcher,) = ns[name].launchers
             self.assertEqual(config_to_dict(launcher.config), cfg, name)
+
+    @requires_gpu_and_triton
+    def test_a_fixed_config_kernel_keeps_its_config(self):
+        cfg = {"XBLOCK": 128}
+
+        class FixedChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                return {**kernel_kwargs, "fixed_config": FixedTritonConfig(cfg)}
+
+        fn = lambda x: (x.sin() * 2).relu()  # noqa: E731
+        x = torch.randn(4096, device=GPU_TYPE)
+        with V.set_choices_handler(FixedChoices()):
+            _, code = _code_for(fn, x)
+        self.assertIn("@triton_heuristics.fixed_config(", code)
+        with _no_runtime_tuning():
+            ns = _load_from_file(code)
+            self.assertEqual(ns["call"]([x])[0], fn(x))
+        ((name, pinned),) = ns["KERNEL_CONFIGS"].items()
+        self.assertLessEqual(cfg.items(), pinned.items())
+        (launcher,) = ns[name].launchers
+        self.assertEqual(config_to_dict(launcher.config), pinned)
+
+    @requires_gpu_and_triton
+    @config.patch(coordinate_descent_tuning=True)
+    def test_inductor_keeps_the_pool_kernel_in_process(self):
+        # compiled_kernels_for_load binds the pool-built kernel ahead of the
+        # pinned_config check, so inductor's own load does not pin.
+        launched = []
+        run = CachingAutotuner.run
+
+        def run_spy(self, *args, **kwargs):
+            launched.append(self.heuristic_type)
+            return run(self, *args, **kwargs)
+
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        with mock.patch.object(CachingAutotuner, "run", run_spy):
+            _, code = _code_for(lambda x: x.sum(-1), x)
+        self.assertIn("KERNEL_CONFIGS = {", code)
+        self.assertIn(HeuristicType.REDUCTION, launched)
+        self.assertNotIn(HeuristicType.FIXED, launched)
 
     @requires_gpu_and_triton
     @config.patch(coordinate_descent_tuning=True)
