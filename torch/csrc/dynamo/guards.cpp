@@ -268,23 +268,21 @@ bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  // In terms of a sparse_csr tensor, it does not support strides information
-  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
-  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
-      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
-      v.layout() == c10::kSparseBsr;
-  if (!does_not_support_stride) {
-    sym_strides = v.sym_strides();
+  auto check_with_strides = [&](c10::SymIntArrayRef sym_strides) {
+    return check(
+        state,
+        v.key_set(),
+        v.dtype().toScalarType(),
+        v.device(),
+        v.sym_sizes(),
+        sym_strides,
+        v.requires_grad());
+  };
+  // Compressed sparse layouts don't support strides; compare against -1s.
+  if (at::sparse_csr::is_sparse_compressed(v)) {
+    return check_with_strides(std::vector<SymInt>(v.ndimension(), -1));
   }
-
-  return check(
-      state,
-      v.key_set(),
-      v.dtype().toScalarType(),
-      v.device(),
-      v.sym_sizes(),
-      sym_strides,
-      v.requires_grad());
+  return check_with_strides(v.sym_strides());
 }
 
 bool TensorCheck::check(
@@ -309,17 +307,13 @@ bool TensorCheck::check(
   const auto& sizes = sym_sizes;
   const auto& strides = sym_strides;
   for (auto i : c10::irange(ndim)) {
-    auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
-    if (known_size.has_value()) {
-      if (known_size.value() != sizes[i]) {
-        return false;
-      }
+    const auto& known_size = sizes_[i];
+    const auto& known_stride = strides_[i];
+    if (known_size && *known_size != sizes[i]) {
+      return false;
     }
-    if (known_stride.has_value()) {
-      if (known_stride.value() != strides[i]) {
-        return false;
-      }
+    if (known_stride && *known_stride != strides[i]) {
+      return false;
     }
   }
   return true;
