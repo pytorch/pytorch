@@ -545,6 +545,10 @@ class CachingAutotunerPlugin:
         launcher creation from this point on, including any
         ``TritonBundler`` interaction (the standard
         ``static_triton_bundle_key`` bundling path is skipped).
+
+        A pinned kernel whose config does not fit the GPU falls back to tuning: it
+        becomes a fresh unpinned kernel in place, which drops any state a plugin set
+        on it, and ``pre_compile`` fires again.
         """
         return DEFER
 
