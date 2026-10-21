@@ -515,11 +515,18 @@ class DelayGraphBreakVariable(UnknownVariable):
         self,
         msg: str | None = None,
         hints: list[str] | None = None,
+        callable_var: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.msg = msg
         self.hints = hints or []
+        self.callable_var = callable_var
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.callable_var is None:
+            return super().reconstruct(codegen)
+        codegen(self.callable_var)
 
     def call_function(
         self,
@@ -819,6 +826,31 @@ class AutogradFunctionVariable(VariableTracker):
 
         setup_context = self.fn_cls.setup_context
         is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
+
+        if torch._C._are_functorch_transforms_active():
+            from torch._C._functorch import TransformType
+            from torch._functorch.autograd_function import has_overridden_vmap_rule
+            from torch._functorch.pyfunctorch import (
+                retrieve_current_functorch_interpreter,
+            )
+
+            # Under vmap, Function.apply goes through custom_function_call_vmap.
+            # Inlining forward matches it only for generate_vmap_rule=True; a
+            # vmap staticmethod (and its output checks) is not traced.
+            interpreter = retrieve_current_functorch_interpreter()
+            if interpreter.key() == TransformType.Vmap and (
+                not self.fn_cls.generate_vmap_rule
+                or has_overridden_vmap_rule(self.fn_cls)
+            ):
+                unimplemented(
+                    gb_type="autograd.Function without a generated vmap rule under vmap",
+                    context=f"call_apply {self}",
+                    explanation=f"vmap over {self.fn_cls.__name__} runs custom_function_call_vmap, which Dynamo only models for generate_vmap_rule=True without a vmap staticmethod.",
+                    hints=[
+                        "Use generate_vmap_rule=True if the generated rule is enough.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs, is_setup_ctx_defined)
@@ -1161,6 +1193,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "proxy",
         "inference",
         "saved_tensors",
+        "output_grad_dtypes",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -1172,6 +1205,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         saved_tensors: Any | None = None,
         non_differentiable: Any | None = None,
         dirty_tensors: list[VariableTracker] | None = None,
+        output_grad_dtypes: tuple[torch.dtype | None, ...] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value=value, value_type=value_type, **kwargs)
@@ -1179,6 +1213,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
+        self.output_grad_dtypes = output_grad_dtypes
 
     @staticmethod
     def create(
@@ -1248,6 +1283,35 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.dirty_tensors = args
         return variables.ConstantVariable.create(None)
 
+    def set_output_grad_dtype(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        no_keywords(tx, "set_output_grad_dtype", kwargs)
+        dtypes = (
+            tuple(arg.as_python_constant() for arg in args)
+            if all(arg.is_python_constant() for arg in args)
+            else None
+        )
+        if (
+            getattr(self, "proxy", None) is None
+            or self.output_grad_dtypes is not None
+            or dtypes is None
+            or not all(d is None or isinstance(d, torch.dtype) for d in dtypes)
+        ):
+            unimplemented(
+                gb_type="Unsupported autograd.Function context `set_output_grad_dtype`",
+                context=f"call_method {self} set_output_grad_dtype {args}",
+                explanation="Dynamo only supports tracing a single "
+                "ctx.set_output_grad_dtype call with constant torch.dtype or "
+                "None arguments inside autograd.Function.apply.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        self.output_grad_dtypes = dtypes
+        return variables.ConstantVariable.create(None)
+
     def save_for_backward(
         self,
         tx: "InstructionTranslatorBase",
@@ -1289,12 +1353,18 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         "mark_non_differentiable": Method(mark_non_differentiable),
         "mark_dirty": Method(mark_dirty),
         "save_for_backward": Method(save_for_backward),
+        "set_output_grad_dtype": Method(set_output_grad_dtype),
     }
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
-        if name in ["save_for_backward", "mark_dirty", "mark_non_differentiable"]:
+        if name in [
+            "save_for_backward",
+            "mark_dirty",
+            "mark_non_differentiable",
+            "set_output_grad_dtype",
+        ]:
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
