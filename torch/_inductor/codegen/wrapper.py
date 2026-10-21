@@ -925,11 +925,17 @@ class _LineIfNamesUsed(DeferredLineBase):
     """
 
     def __init__(
-        self, line: str, names: tuple[str, ...], wrapper: PythonWrapperCodegen
+        self,
+        line: str,
+        names: tuple[str, ...],
+        wrapper: PythonWrapperCodegen,
+        binds: bool,
     ) -> None:
         super().__init__(line)
         self.names = names
         self.wrapper = wrapper
+        # Whether ``names`` are the ones the line binds, so its right-hand side is a use.
+        self.binds = binds
 
     def __call__(self) -> str | None:
         if self.wrapper.scanning_for_uses:
@@ -940,7 +946,7 @@ class _LineIfNamesUsed(DeferredLineBase):
         return self.line if used is None or not used.isdisjoint(self.names) else None
 
     def _new_line(self, line: str) -> _LineIfNamesUsed:
-        return _LineIfNamesUsed(line, self.names, self.wrapper)
+        return _LineIfNamesUsed(line, self.names, self.wrapper, self.binds)
 
 
 class _OmittedFromScan(DeferredLineBase):
@@ -2421,13 +2427,14 @@ class PythonWrapperCodegen(CodeGen):
     ) -> None:
         """Write a line that is kept only if the module uses a name in ``names``, by
         default the names the import or binding on it binds."""
+        binds = names is None
         if names is None:
             names = self._names_bound_by(line)
-        if "torch" in names:
-            # The rest of the preamble is written in terms of it.
-            buf.writeline(line)
-            return
-        self.conditional_lines.append(_LineIfNamesUsed(line, names, self))
+            if "torch" in names:
+                # The rest of the preamble is written in terms of it.
+                buf.writeline(line)
+                return
+        self.conditional_lines.append(_LineIfNamesUsed(line, names, self, binds))
         buf.writeline(self.conditional_lines[-1])
 
     @staticmethod
@@ -2496,6 +2503,7 @@ class PythonWrapperCodegen(CodeGen):
         rhs_words = [
             (line.names, re.findall(r"(?<![.\w])\w+", line.line.partition(" = ")[2]))
             for line in self.conditional_lines
+            if line.binds
         ]
         while (
             new := OrderedSet(

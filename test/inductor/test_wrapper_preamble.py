@@ -99,6 +99,17 @@ class TestWrapperPreamble(TestCase):
         wrapper.scan_for_used_names(buf)
         self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\nprint(sep)\n")
 
+    def test_a_line_with_explicit_names_is_not_read_as_a_binding(self):
+        # Kept for y, but its right-hand side is not a use of os; and torch among a
+        # line's names does not make it unconditional.
+        wrapper, buf = self._wrapper(), IndentedBuffer()
+        wrapper.write_if_used(buf, "import os")
+        wrapper.write_if_used(buf, "x = os.sep", names=("y",))
+        wrapper.write_if_used(buf, "torch.manual_seed(0)", names=("torch", "seed"))
+        buf.writeline("print(y)")
+        wrapper.scan_for_used_names(buf)
+        self.assertEqual(buf.getvalue(), "x = os.sep\nprint(y)\n")
+
     def test_a_name_only_a_subgraph_uses_keeps_the_lines_it_needs(self):
         # The subgraph's code, spliced into the root unscanned, uses sep, whose binding
         # in turn keeps import os.
