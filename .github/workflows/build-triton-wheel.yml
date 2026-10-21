@@ -12,6 +12,7 @@ on:
       - 'ciflow/triton_binaries/*'
     paths:
       - .github/workflows/build-triton-wheel.yml
+      - .github/workflows/_build-triton-wheel-linux.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .github/scripts/windows/install_vs2022.ps1
@@ -22,6 +23,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
+      - .github/workflows/_build-triton-wheel-linux.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .github/scripts/windows/install_vs2022.ps1
@@ -87,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
+        py_vers: [ "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:

@@ -45,6 +45,8 @@ class CuptiActivityApi {
   CuptiActivityApi() = default;
   CuptiActivityApi(const CuptiActivityApi&) = delete;
   CuptiActivityApi& operator=(const CuptiActivityApi&) = delete;
+  CuptiActivityApi(CuptiActivityApi&&) = delete;
+  CuptiActivityApi& operator=(CuptiActivityApi&&) = delete;
 
   virtual ~CuptiActivityApi() = default;
 
@@ -78,7 +80,7 @@ class CuptiActivityApi {
 
   static void forceLoadCupti();
 
-  // CUPTI configuraiton that needs to be set before CUDA context creation
+  // CUPTI configuration that needs to be set before CUDA context creation
   static void preConfigureCUPTI();
 
  private:

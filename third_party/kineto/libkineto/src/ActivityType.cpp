@@ -31,7 +31,7 @@ ActivityType toActivityType(const std::string& str) {
 }
 
 std::array<ActivityType, activityTypeCount> activityTypes() {
-  std::array<ActivityType, activityTypeCount> res;
+  std::array<ActivityType, activityTypeCount> res{};
   for (int i = 0; i < activityTypeCount; i++) {
     res[i] = _activityTypeNames[i].type;
   }
@@ -39,7 +39,7 @@ std::array<ActivityType, activityTypeCount> activityTypes() {
 }
 
 std::array<ActivityType, defaultActivityTypeCount> defaultActivityTypes() {
-  std::array<ActivityType, defaultActivityTypeCount> res;
+  std::array<ActivityType, defaultActivityTypeCount> res{};
   for (int i = 0; i < defaultActivityTypeCount; i++) {
     res[i] = _activityTypeNames[i].type;
   }

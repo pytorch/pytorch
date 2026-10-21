@@ -46,12 +46,12 @@ class Config : public AbstractConfig {
         activitiesOnDemandTimestamp_.time_since_epoch().count() > 0;
   }
 
-  // Log activitiy trace to this file
+  // Log activity trace to this file
   [[nodiscard]] const std::string& activitiesLogFile() const {
     return activitiesLogFile_;
   }
 
-  // Log activitiy trace to this url
+  // Log activity trace to this url
   [[nodiscard]] const std::string& activitiesLogUrl() const {
     return activitiesLogUrl_;
   }
@@ -365,9 +365,9 @@ class Config : public AbstractConfig {
   // Only profile nets that includes this in the name
   std::vector<std::string> activitiesExternalAPIFilter_;
   // Only profile nets with at least this many operators
-  int activitiesExternalAPINetSizeThreshold_;
+  int activitiesExternalAPINetSizeThreshold_{};
   // Only profile nets with at least this many GPU operators
-  int activitiesExternalAPIGpuOpCountThreshold_;
+  int activitiesExternalAPIGpuOpCountThreshold_{};
   // Last activity profiler request
   std::chrono::time_point<std::chrono::system_clock>
       activitiesOnDemandTimestamp_;

@@ -73,9 +73,9 @@ static inline string stripComment(const string& s) {
 
 string AbstractConfig::toLower(string& s) const {
   string res = s;
-  for (size_t i = 0; i < res.size(); i++) {
-    if (res[i] >= 'A' && res[i] <= 'Z') {
-      res[i] += ('a' - 'A');
+  for (char& c : res) {
+    if (c >= 'A' && c <= 'Z') {
+      c += ('a' - 'A');
     }
   }
   return res;
@@ -97,6 +97,7 @@ int64_t AbstractConfig::toIntRange(const string& val, int64_t min, int64_t max)
     const {
   char* invalid = nullptr;
   int64_t res = strtoll(val.c_str(), &invalid, 10);
+  // NOLINTNEXTLINE(facebook-hte-NullableDereference)
   if (val.empty() || *invalid) {
     KINETO_THROW(
         std::invalid_argument, fmt::format("Invalid integer: {}", val));
