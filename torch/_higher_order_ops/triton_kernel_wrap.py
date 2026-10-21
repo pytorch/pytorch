@@ -421,6 +421,7 @@ def get_reset_to_zero_args(kernel: "TritonAutotunerType") -> list[str]:
     if hasattr(kernel, "reset_idx"):
         # pyrefly: ignore [missing-attribute]
         return [kernel.fn.arg_names[i] for i in kernel.reset_idx]
+    # pyrefly: ignore [missing-attribute]
     return list(kernel.reset_to_zero)
 
 
@@ -428,6 +429,7 @@ def get_restore_value_args(kernel: "TritonAutotunerType") -> list[str]:
     if hasattr(kernel, "restore_idx"):
         # pyrefly: ignore [missing-attribute]
         return [kernel.fn.arg_names[i] for i in kernel.restore_idx]
+    # pyrefly: ignore [missing-attribute]
     return list(kernel.restore_value)
 
 
