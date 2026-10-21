@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/BatchNorm.h>
 #include <c10/metal/common.h>
 #include <c10/metal/reduction_utils.h>
 #include <metal_simdgroup>
@@ -220,3 +221,141 @@ kernel void layer_norm_looped(
 instantiate_layer_norm(float);
 instantiate_layer_norm(half);
 instantiate_layer_norm(bfloat);
+
+template <typename I>
+inline vec<I, 2> batch_norm_offset(constant BatchNormLayout<>& layout, I o) {
+  constant auto& dims = layout.outer_dims;
+  const uint last = layout.outer_ndim - 1;
+  vec<I, 2> off = 0;
+  for (uint d = 0; d < last; ++d) {
+    off += (o % I(dims[d].x)) * vec<I, 2>(dims[d].yz);
+    o /= I(dims[d].x);
+  }
+  return off + o * vec<I, 2>(dims[last].yz);
+}
+
+template <typename T, bool STRIDED, typename I>
+[[max_total_threads_per_threadgroup(c10::metal::max_threadgroup_size)]]
+kernel void batch_norm_reduce(
+    device const T* x [[buffer(0)]],
+    device packed_float3* out [[buffer(1)]],
+    constant BatchNormLayout<>& layout [[buffer(2)]],
+    uint3 tg [[threadgroup_position_in_grid]],
+    uint3 ntg [[threadgroups_per_grid]],
+    uint3 pos [[thread_position_in_threadgroup]],
+    uint3 tptg [[threads_per_threadgroup]]) {
+  const uint C = layout.channel.x;
+  const I outer = layout.outer_numel, inner = layout.inner.x;
+  const bool channels_last = inner == 1;
+  const uint c = channels_last ? tg.x * tptg.x + pos.x : tg.x;
+  const I o0 = tg.y * tptg.y + pos.y,
+          r0 = channels_last ? 0 : tg.z * tptg.x + pos.x;
+  const I cr = STRIDED ? c * I(layout.channel.y) + r0 * I(layout.inner.y)
+                       : c * inner + r0;
+  const I step = tptg.x * ntg.z * (STRIDED ? I(layout.inner.y) : 1);
+  float3 acc = 0;
+  if (c < C && o0 < outer && r0 < inner) {
+    const I first =
+        cr + (STRIDED ? batch_norm_offset(layout, o0).x : o0 * C * inner);
+    const float shift = float(x[first]);
+    float3 sum = 0;
+    for (I o = o0; o < outer; o += tptg.y * ntg.y) {
+      I i = cr + (STRIDED ? batch_norm_offset(layout, o).x : o * C * inner);
+      for (I r = r0; r < inner; r += tptg.x * ntg.z, i += step) {
+        const float v = float(x[i]) - shift;
+        sum += float3(v, v * v, 1);
+      }
+    }
+    acc = float3(shift + sum.x / sum.z, sum.y - sum.x * sum.x / sum.z, sum.z);
+  }
+  threadgroup float3 buf[c10::metal::max_threadgroup_size];
+  const uint tid = channels_last ? pos.y : pos.y * tptg.x + pos.x;
+  const uint base = channels_last ? pos.x * tptg.y : 0;
+  buf[base + tid] = acc;
+  acc = threadgroup_welford_combine(
+      buf + base, tid, channels_last ? tptg.y : tptg.x * tptg.y);
+  if (tid == 0 && c < C) {
+    out[(tg.z * ntg.y + tg.y) * C + c] = packed_float3(acc);
+  }
+}
+
+template <typename P>
+kernel void batch_norm_stats(
+    device const packed_float3* part [[buffer(0)]],
+    device float* stats [[buffer(1)]],
+    constant BatchNormStatsParams& params [[buffer(2)]],
+    device const P* weight [[buffer(3)]],
+    device const P* bias [[buffer(4)]],
+    device P* running_mean [[buffer(5)]],
+    device P* running_var [[buffer(6)]],
+    device P* save_mean [[buffer(7)]],
+    device P* save_invstd [[buffer(8)]],
+    uint c [[thread_position_in_grid]]) {
+  constant auto& strides = params.strides;
+  device P* rm = running_mean + c * strides[bn_idx(BNParam::RunningMean)];
+  device P* rv = running_var + c * strides[bn_idx(BNParam::RunningVar)];
+  float3 acc =
+      part != nullptr ? float3(part[c]) : float3(float(*rm), float(*rv), 1);
+  for (uint i = 1; i < params.num_partials; ++i) {
+    acc = welford_combine(acc, float3(part[i * params.num_channels + c]));
+  }
+  const float invstd = metal::precise::rsqrt(acc.y / acc.z + params.eps);
+  device float* s = stats + bn_idx(BNStat::NumStats) * c;
+  s[bn_idx(BNStat::Mean)] = acc.x;
+  s[bn_idx(BNStat::Scale)] = weight != nullptr
+      ? invstd * float(weight[c * strides[bn_idx(BNParam::Weight)]])
+      : invstd;
+  s[bn_idx(BNStat::Shift)] =
+      bias != nullptr ? float(bias[c * strides[bn_idx(BNParam::Bias)]]) : 0;
+  if (part != nullptr) {
+    save_mean[c * strides[bn_idx(BNParam::SaveMean)]] = static_cast<P>(acc.x);
+    save_invstd[c * strides[bn_idx(BNParam::SaveInvstd)]] =
+        static_cast<P>(invstd);
+  }
+  if (part != nullptr && running_mean != nullptr) {
+    const float momentum = params.momentum;
+    *rm = static_cast<P>(mix(float(*rm), acc.x, momentum));
+    *rv = static_cast<P>(mix(float(*rv), acc.y / (acc.z - 1), momentum));
+  }
+}
+
+template <typename T, bool STRIDED, typename I>
+kernel void batch_norm_elemt(
+    device T* out [[buffer(0)]],
+    device const T* x [[buffer(1)]],
+    device const float* stats [[buffer(2)]],
+    constant BatchNormLayout<>& layout [[buffer(3)]],
+    uint3 pos [[thread_position_in_grid]],
+    uint3 size [[threads_per_grid]]) {
+  device const float* s = stats + pos.y * bn_idx(BNStat::NumStats);
+  const float mean = s[bn_idx(BNStat::Mean)];
+  const float scale = s[bn_idx(BNStat::Scale)];
+  const float shift = s[bn_idx(BNStat::Shift)];
+  I o = pos.z;
+  do {
+    vec<I, 2> i = (o * size.y + pos.y) * size.x + pos.x;
+    if IF_CONSTEXPR (STRIDED) {
+      i = batch_norm_offset(layout, o) + pos.y * vec<I, 2>(layout.channel.yz) +
+          pos.x * vec<I, 2>(layout.inner.yz);
+    }
+    out[i.y] = static_cast<T>((float(x[i.x]) - mean) * scale + shift);
+    o += size.z;
+  } while (is_same_v<I, ulong> && o < I(layout.outer_numel));
+}
+
+#define REGISTER_BATCH_NORM_KERNELS(T, SUFFIX, STRIDED, I)                     \
+  template [[host_name("batch_norm_reduce_" SUFFIX #T)]] [[kernel]]            \
+  decltype(batch_norm_reduce<T, STRIDED, I>) batch_norm_reduce<T, STRIDED, I>; \
+  template [[host_name("batch_norm_elemt_" SUFFIX #T)]] [[kernel]]             \
+  decltype(batch_norm_elemt<T, STRIDED, I>) batch_norm_elemt<T, STRIDED, I>
+
+#define REGISTER_BATCH_NORM_OPS(T)                           \
+  REGISTER_BATCH_NORM_KERNELS(T, "", false, uint);           \
+  REGISTER_BATCH_NORM_KERNELS(T, "strided_", true, uint);    \
+  REGISTER_BATCH_NORM_KERNELS(T, "strided64_", true, ulong); \
+  template [[host_name("batch_norm_stats_" #T)]] [[kernel]]  \
+  decltype(batch_norm_stats<T>) batch_norm_stats<T>
+
+REGISTER_BATCH_NORM_OPS(float);
+REGISTER_BATCH_NORM_OPS(half);
+REGISTER_BATCH_NORM_OPS(bfloat);
