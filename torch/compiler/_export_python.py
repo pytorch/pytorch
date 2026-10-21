@@ -569,7 +569,11 @@ class ExportedPythonArtifact:
         # precompile.load round-trip). A broken hand-edit and an environment or version
         # mismatch (an import that fails under the current torch) surface as distinct,
         # actionable PrecompileErrors rather than one catch-all "delete to regenerate".
-        from torch._precompile import _make_inlined_forward, PrecompileError
+        from torch._precompile import (
+            _make_inlined_forward,
+            _NoForwardError,
+            PrecompileError,
+        )
 
         if not from_disk:
             # Source this call just captured is precompile's own output, so a failure
@@ -583,26 +587,11 @@ class ExportedPythonArtifact:
         )
         try:
             return _make_inlined_forward(code, warn=False, filename=self._path)
+        except _NoForwardError as e:
+            msg = f"{e} A hand-edit may have dropped or renamed it."
+            raise PrecompileError(msg) from None
         except PrecompileError:
             raise
-        except SyntaxError as e:
-            if e.filename != self._path:
-                # Raised by code the artifact runs (an import, a nested exec); the
-                # line belongs to that file, so report it like any other failure.
-                raise PrecompileError(
-                    "torch.compiler.export_python: an unexpected error occurred running "
-                    f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it "
-                    "there, or delete it to regenerate."
-                ) from e
-            # Kernels are hoisted to module level, so Python reports a typo in one
-            # against this file at the right line. Say so: telling someone to delete an
-            # artifact they are midway through tuning is the wrong advice.
-            where = f" at line {e.lineno}" if e.lineno else ""
-            raise PrecompileError(
-                f"torch.compiler.export_python: the artifact at {self._path} does not "
-                f"parse{where}: {e.msg}. Fix it there, or delete the file to regenerate "
-                "from the original function."
-            ) from e
         except ImportError as e:
             raise PrecompileError(
                 f"torch.compiler.export_python: the artifact at {self._path} failed "
@@ -611,6 +600,17 @@ class ExportedPythonArtifact:
                 "to regenerate against the current torch."
             ) from e
         except Exception as e:
+            # Kernels are hoisted to module level, so Python reports a typo in one
+            # against this file at the right line. Say so: telling someone to delete an
+            # artifact they are midway through tuning is the wrong advice. A SyntaxError
+            # from a file the artifact runs (an import, a nested exec) is not this case.
+            if isinstance(e, SyntaxError) and e.filename == self._path:
+                where = f" at line {e.lineno}" if e.lineno else ""
+                raise PrecompileError(
+                    f"torch.compiler.export_python: the artifact at {self._path} does "
+                    f"not parse{where}: {e.msg}. Fix it there, or delete the file to "
+                    "regenerate from the original function."
+                ) from e
             raise PrecompileError(
                 "torch.compiler.export_python: an unexpected error occurred running "
                 f"the artifact at {self._path} ({type(e).__name__}: {e}). Fix it there, "
