@@ -1186,15 +1186,17 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
     // MPS TODO:
     // Strided API doesn't play nice with complex data types (at least not in case of matmul).
     // MPSGraph's matrixMultiplication produces incorrect results with stride-0 NDArray
-    // inputs on macOS < 26.4 (only every 16th row is computed). Contiguify such tensors
-    // by disabling the strided API so they go through the gather/clone path first.
+    // inputs (only every 16th row is computed) on macOS < 26.4, and again on macOS 27.0.0;
+    // 26.4+ and 27.0.1+ are fine. On affected versions, contiguify such tensors by disabling
+    // the strided API so they go through the gather/clone path first.
     // See https://github.com/pytorch/pytorch/issues/180201
-    static const bool is_macOS_26_4_or_newer = is_macos_at_least(MacOSVersion::MACOS_26_4);
+    static const bool has_stride_zero_mm_bug = !is_macos_at_least(MacOSVersion::MACOS_26_4) ||
+        (is_macos_at_least(MacOSVersion::MACOS_27_0) && !is_macos_at_least(MacOSVersion::MACOS_27_0_1));
     auto hasZeroStride = [](const Tensor& t) {
       return std::ranges::any_of(t.strides(), [](auto s) { return s == 0; });
     };
-    auto useStridedSelf = !isComplexType(self.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(self));
-    auto useStridedOther = !isComplexType(other.scalar_type()) && (is_macOS_26_4_or_newer || !hasZeroStride(other));
+    auto useStridedSelf = !isComplexType(self.scalar_type()) && (!has_stride_zero_mm_bug || !hasZeroStride(self));
+    auto useStridedOther = !isComplexType(other.scalar_type()) && (!has_stride_zero_mm_bug || !hasZeroStride(other));
     auto selfPlaceholder = self.numel() != 0
         ? Placeholder(cachedGraph->inputTensor_, self, nil, true, MPSDataTypeInvalid, useStridedSelf)
         : Placeholder();
