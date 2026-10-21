@@ -623,6 +623,9 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
+    # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
+    fallback: Callable[[], CachingAutotuner] | None = None
+
     def __init__(
         self,
         fn,
@@ -679,8 +682,6 @@ class CachingAutotuner(KernelInterface):
             size_hints, fn, self.inductor_meta, heuristic_type
         )
         self.configs = [cached_config] if cached_config else configs
-        # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
-        self.fallback: Callable[[], CachingAutotuner] | None = None
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -909,7 +910,7 @@ class CachingAutotuner(KernelInterface):
     def _fall_back_to_tuning(self, e: Exception) -> None:
         # The pinned config fit the GPU it was tuned on; this one may be smaller, which
         # Triton reports when it loads the binary.
-        log.warning("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
+        log.info("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
         # Live state, which the unpinned instance holds fresh: the held lock, and the
         # launch a lazy precompile from run() is part of.
         keep = ("lock", "_reload_kernel", "compile_id", "is_backward", "_debug_call")
@@ -918,8 +919,7 @@ class CachingAutotuner(KernelInterface):
         # Become the unpinned kernel in place, since the module-level name binds self.
         # CachingAutotuner keeps all of its state in __dict__ (no __slots__), and the
         # unpinned instance is never compiled or run, so nothing else refers to it.
-        # Attributes only self has (set after construction) are kept as well.
-        self.__dict__ = {**vars(self), **vars(self.fallback()), **state}
+        self.__dict__ = {**vars(self.fallback()), **state}
         self._plugins = get_caching_autotuner_plugins(self)
 
     def _precompile_worker(self):
