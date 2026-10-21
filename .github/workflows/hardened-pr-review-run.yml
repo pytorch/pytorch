@@ -944,6 +944,12 @@ jobs:
               reason for Request Changes, `minor` for other problems, `info`
               for suggestions.
 
+            Keep each finding's `message` to at most 1200 characters, counting
+            each `&`, `<` and `>` as five, since posting escapes them. A longer
+            one is cut short when posted, so condense the point: say what is
+            wrong and what change it asks for, and drop restatement before
+            evidence.
+
             Every finding must name a file this PR changed (listed in
             /tmp/pr-files.txt) and a line its diff (/tmp/pr-diff.txt) touches;
             findings that do not are DISCARDED. When a point is not about one
