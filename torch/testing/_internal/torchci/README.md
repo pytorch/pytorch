@@ -1,10 +1,12 @@
 # Test run reports
 
 `plugin.py` writes one JSON Lines file per test process for the `tests.*`
-ClickHouse tables: a report line, then one line per completed test run. Lines are
-flushed as tests finish; readers skip a torn last line. Split lines on `\n`, not
-with `str.splitlines()`, which also breaks at U+2028, U+2029 and U+0085 inside
-strings.
+ClickHouse tables: a report line, then one line per completed test run. A process
+that ends without starting a test removes its file, which would hold only the
+report line, unless an error turned the writer off first; one that started a test
+keeps it (see Crashes and timeouts). Lines are flushed as tests finish; readers
+skip a torn last line. Split lines on `\n`, not with `str.splitlines()`, which
+also breaks at U+2028, U+2029 and U+0085 inside strings.
 
 ## Path
 
@@ -118,10 +120,11 @@ given `--save-torchci-reports DIR`. A test file's reports are
 replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
 
-In CI, `run_test.py` defaults to `test/torchci-reports`, which is uploaded as
-described below, in the jobs `_torchci_reports_default` selects: for now, the
-trunk and pull workflows' jobs. `run_tests` has no default, so a test file run
-some other way writes no report.
+In pytorch/pytorch's CI (`GITHUB_REPOSITORY`), `run_test.py` defaults to
+`test/torchci-reports`, which is uploaded as described below, in every job except
+on XPU builds, which write none until the XPU CI image has `pyzes`: with it, the
+writer counts XPU devices with Level Zero Sysman instead of the XPU runtime.
+`run_tests` has no default, so a test file run some other way writes no report.
 
 ## Upload
 
