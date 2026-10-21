@@ -64,7 +64,10 @@ from torch._dynamo.utils import (
 )
 from torch._guards import compile_context, CompileContext, tracing
 from torch.overrides import TorchFunctionMode
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -5673,6 +5676,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
     @torch._dynamo.config.patch({"strict_precompile": True})
     def test_unused_stream(self, device):
         def foo(inputs):
@@ -5690,7 +5694,6 @@ class TestGuardSerializationAccelerator(TestGuardSerializationBase):
 instantiate_device_type_tests(
     TestGuardSerializationAccelerator,
     globals(),
-    except_for="cpu",
     allow_xpu=True,
     allow_mps=True,
 )
