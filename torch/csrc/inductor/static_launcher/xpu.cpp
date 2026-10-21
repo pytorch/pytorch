@@ -14,6 +14,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
@@ -71,14 +72,6 @@ syclDevicePtr_t callDataPtrMethod(PyObject* obj) {
       "Pointer argument must be either uint64 or have data_ptr method")
   auto empty_tuple = THPObjectPtr{PyTuple_New(0)};
   auto ret = THPObjectPtr{PyObject_Call(ptr, empty_tuple, nullptr)};
-  // THPUtils_checkLong dereferences its argument, so without this a raising
-  // data_ptr() segfaults instead of reporting the python error.
-  if (ret == nullptr) {
-    // TORCH_CHECK would report a RuntimeError of its own and leave the python
-    // error data_ptr() raised set.
-    // @allow-raw-throw: re-raises the error data_ptr() raised
-    throw python_error();
-  }
   TORCH_CHECK(
       THPUtils_checkLong(ret),
       "data_ptr method of Pointer object must return 64-bit int");
@@ -227,7 +220,25 @@ void parseKernelArgs(
   }
 }
 
-inline ze_module_handle_t _createModule(
+// A Level Zero handle owns its resource until make_kernel_bundle/make_kernel
+// transfers it to SYCL. The ZE_CHECKs in between throw, and nothing else holds
+// the handle, so the load path keeps one of these over that window.
+struct ZeModuleDeleter {
+  void operator()(ze_module_handle_t module) const {
+    ze().zeModuleDestroy(module);
+  }
+};
+struct ZeKernelDeleter {
+  void operator()(ze_kernel_handle_t kernel) const {
+    ze().zeKernelDestroy(kernel);
+  }
+};
+using ZeModulePtr =
+    std::unique_ptr<std::remove_pointer_t<ze_module_handle_t>, ZeModuleDeleter>;
+using ZeKernelPtr =
+    std::unique_ptr<std::remove_pointer_t<ze_kernel_handle_t>, ZeKernelDeleter>;
+
+inline ZeModulePtr _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
     const int device_idx) {
@@ -248,9 +259,10 @@ inline ze_module_handle_t _createModule(
   moduleDescription.pInputModule = binaryPtr;
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
-  ze_module_handle_t module = nullptr;
+  ze_module_handle_t rawModule = nullptr;
   ze_result_t error_no = ze().zeModuleCreate(
-      context, device, &moduleDescription, &module, &buildLog);
+      context, device, &moduleDescription, &rawModule, &buildLog);
+  ZeModulePtr module(rawModule);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     // Retrieve the build log on a best-effort basis; failures here must not
@@ -274,22 +286,36 @@ inline ze_module_handle_t _createModule(
 }
 
 inline LoadedKernel _createKernel(
-    ze_module_handle_t module,
+    ZeModulePtr module,
     const char* kernelName,
     uint32_t* nSpillsPtr) {
   assert(module);
   assert(kernelName);
-  ze_kernel_handle_t kernel = nullptr;
+  auto& syclContext = c10::xpu::get_device_context();
+  // Hand the module to SYCL before creating a kernel from it. zeModuleDestroy
+  // requires every kernel handle created from the module to be destroyed first,
+  // so the bundle has to be declared ahead of the kernel guard to be torn down
+  // after it when anything below throws.
+  ze_module_handle_t rawModule = module.get();
+  auto mod = sycl::make_kernel_bundle<
+      sycl::backend::ext_oneapi_level_zero,
+      sycl::bundle_state::executable>(
+      {rawModule, sycl::ext::oneapi::level_zero::ownership::transfer},
+      syclContext);
+  module.release();
+
+  ze_kernel_handle_t rawKernel = nullptr;
   ze_kernel_desc_t kernelDescription = {};
   kernelDescription.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
   kernelDescription.pNext = nullptr;
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
-  ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
+  ZE_CHECK(ze().zeKernelCreate(rawModule, &kernelDescription, &rawKernel));
+  ZeKernelPtr kernel(rawKernel);
   ze_kernel_properties_t props{};
   props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
   props.pNext = nullptr;
-  ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
+  ZE_CHECK(ze().zeKernelGetProperties(kernel.get(), &props));
   // requiredSubgroupSize is the intel_reqd_sub_group_size attribute triton
   // always emits, and is exactly what the per-launch
   // sycl::info::kernel_device_specific::compile_sub_group_size query it
@@ -315,15 +341,15 @@ inline LoadedKernel _createKernel(
   auto mod = sycl::make_kernel_bundle<
       sycl::backend::ext_oneapi_level_zero,
       sycl::bundle_state::executable>(
-      {module, sycl::ext::oneapi::level_zero::ownership::transfer},
+      {module.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
+  module.release();
+  auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+      {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
+      syclContext);
+  kernel.release();
   // numKernelArgs is the same value sycl::info::kernel::num_args reports.
-  return LoadedKernel{
-      sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
-          {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-          syclContext),
-      threadsPerWarp,
-      props.numKernelArgs};
+  return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
 
 std::unique_ptr<LoadedKernel> loadKernel(
@@ -340,7 +366,7 @@ std::unique_ptr<LoadedKernel> loadKernel(
       reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), device_idx);
 
   return std::make_unique<LoadedKernel>(
-      _createKernel(mod, funcName, nSpillsPtr));
+      _createKernel(std::move(mod), funcName, nSpillsPtr));
 }
 
 template <typename T>
@@ -393,23 +419,35 @@ void setKernelArg(
 }
 
 /**
-  Submits `kernel` with the arguments packed in `argStorage`. `localRangeX` is
-  the work-group size (num_warps * the SIMD width the kernel was compiled for),
-  and `bindLocal` says whether the kernel takes a trailing dynamic shared memory
-  argument.
+  Submits the kernel with the arguments packed in `argStorage`. `numParams` is
+  the number of those arguments, and `bindLocal` says whether the kernel takes a
+  trailing dynamic shared memory argument.
+
+  Neither is checked here, so a caller must guarantee:
+    - numParams == strlen(argTypes), and argStorage has numParams slots. It may
+      only be null when numParams is 0.
+    - bindLocal only if the kernel's own argument count is numParams + 1.
+      Otherwise set_arg(numParams, ...) binds an argument it does not have.
+  The kernel argument count check in launchKernel() is what establishes the
+  second one today.
+
+  `argTypes` sits between the two counts, and `bindLocal` after the queue, so
+  that swapping either for its neighbour does not compile.
 */
 void submitKernel(
-    const sycl::kernel& kernel,
+    const LoadedKernel* loadedKernel,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
-    size_t localRangeX,
-    uint32_t numParams,
-    const char* argTypes,
-    const uint64_t* argStorage,
+    uint32_t numWarps,
     uint32_t sharedMemBytes,
-    bool bindLocal,
-    sycl::queue* queuePtr) {
+    const char* argTypes,
+    uint32_t numParams,
+    const uint64_t* argStorage,
+    sycl::queue* queuePtr,
+    bool bindLocal) {
+  size_t localRangeX =
+      static_cast<size_t>(numWarps) * loadedKernel->threadsPerWarp;
   sycl::range<3> globalRange(gridZ, gridY, gridX * localRangeX);
   sycl::range<3> localRange(1, 1, localRangeX);
   sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
@@ -422,9 +460,9 @@ void submitKernel(
       using share_mem_t = sycl::local_accessor<int8_t, 1>;
       share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
       cgh.set_arg(static_cast<int>(numParams), localBuffer);
-      cgh.parallel_for(parallelWorkSize, kernel);
+      cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
     } else {
-      cgh.parallel_for(parallelWorkSize, kernel);
+      cgh.parallel_for(parallelWorkSize, loadedKernel->kernel);
     }
   };
   queuePtr->submit(cgf);
@@ -451,17 +489,17 @@ void launchKernel(
       numParams,
       " scalar/pointer arguments");
   submitKernel(
-      loadedKernel->kernel,
+      loadedKernel,
       gridX,
       gridY,
       gridZ,
-      static_cast<size_t>(numWarps) * loadedKernel->threadsPerWarp,
-      numParams,
-      argTypes,
-      argStorage,
+      numWarps,
       sharedMemBytes,
-      bindLocal,
-      queuePtr);
+      argTypes,
+      numParams,
+      argStorage,
+      queuePtr,
+      bindLocal);
 }
 
 /* Load the kernel into memory (called during torch.compile), and
@@ -498,9 +536,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
   func.release();
 
-  // "N" steals the capsule reference PyCapsule_New returned. With "O" the
-  // capsule keeps that extra reference for the process lifetime, its destructor
-  // never runs, and close() cannot release the kernel or its Level Zero module.
+  // "N": the tuple takes ownership of the capsule reference.
   return Py_BuildValue("(Nii)", kernel_py, n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
