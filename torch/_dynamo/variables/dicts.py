@@ -89,6 +89,11 @@ if TYPE_CHECKING:
 # - Implement tp_richcompare_impl() for key equality
 
 
+# dir() of an OrderedDict instance is its type's names plus the instance
+# __dict__ keys, independent of the container contents.
+_ORDERED_DICT_DIR_NAMES = tuple(dir(collections.OrderedDict()))
+
+
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
     # This is a simplified version of the CPython's PyDict_Check function:
     return issubclass(obj.python_type(), dict)
@@ -560,7 +565,12 @@ class ConstDictVariable(VariableTracker):
     ) -> "ConstDictVariable":
         # items is already hashed (e.g. self.items.copy()), same as the
         # "cloning" case ConstDictVariable.__init__ documents/supports.
-        return type(self)(items, mutation_type=ValueMutationNew())
+        kwargs: dict[str, Any] = {"mutation_type": ValueMutationNew()}
+        if type(self) is OrderedDictVariable:
+            # A copy/binary-op result is a brand-new in-frame OrderedDict whose
+            # instance __dict__ starts empty (eager does not copy attributes).
+            kwargs["fresh"] = True
+        return type(self)(items, **kwargs)
 
     def dict_copy(
         self,
@@ -890,6 +900,34 @@ class OrderedDictVariable(ConstDictVariable):
     # gives move_to_end/popitem(last=) below their real backing storage.
     items: "collections.OrderedDict[HashableTracker, VariableTracker]"  # pyrefly: ignore[bad-override]
 
+    _nonvar_fields = {
+        "fresh",
+        "_format_deferred",
+        *ConstDictVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        items: dict[VariableTracker, VariableTracker]
+        | dict[HashableTracker, VariableTracker],
+        fresh: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        # Non-variable state added to __dict__; clone() passes it back as a
+        # constructor keyword, so consume it instead of forwarding to the base.
+        format_deferred = kwargs.pop("_format_deferred", False)
+        super().__init__(items, **kwargs)
+        # Provenance. True only for exact OrderedDicts Dynamo itself constructs
+        # inside the traced frame (see UserDefinedClassVariable's
+        # OrderedDict.__new__ handler); their instance __dict__ starts empty and
+        # every attribute write is modeled in the side-effects table. False for
+        # source-backed objects and for real objects wrapped by
+        # SourcelessBuilder, whose instance __dict__ is not modeled at all.
+        self.fresh = fresh
+        # Set when a deferred format()/f-string will observe this fresh object
+        # at restore_stack time; see mark_deferred_format_observation.
+        self._format_deferred = format_deferred
+
     # OrderedDict-exclusive C methods, declared like CPython's odict tp_methods.
     # move_to_end is odict-only; popitem honors last= (vs dict's LIFO popitem).
     # OrderedDict exposes no tp_getset / tp_members.
@@ -942,6 +980,278 @@ class OrderedDictVariable(ConstDictVariable):
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # __setattr__/__delattr__ are C-level slots (tp_setattro), so they are
+        # handled here rather than declared in tp_methods.
+        if name == "__setattr__":
+            if len(args) != 2 or kwargs:
+                # CPython's slot wrapper rejects keyword arguments/arity
+                # mismatches before dispatch, with its own exact TypeError text
+                # (note the leading space in the arity message); mirror it the
+                # same way the __delattr__ branch below does.
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        "wrapper __setattr__() takes no keyword arguments"
+                        if kwargs
+                        else f" expected 2 arguments, got {len(args)}"
+                    ],
+                )
+            return self.call_setattr(tx, args[0], args[1])
+        if name == "__delattr__":
+            if len(args) != 1 or kwargs:
+                # CPython's slot wrapper rejects the call before dispatch.
+                # Mirror its exact TypeError text; raise_args_mismatch would
+                # report Dynamo's generic arity message instead.
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        "wrapper __delattr__() takes no keyword arguments"
+                        if kwargs
+                        else f"expected 1 argument, got {len(args)}"
+                    ],
+                )
+            unimplemented(
+                gb_type="attribute deletion on OrderedDict",
+                context=f"delattr({self.debug_repr()}, {args[0]})",
+                explanation="Dynamo does not model attribute deletion on an "
+                "OrderedDict: the deleted name may or may not exist on the live "
+                "object, and replaying the delete is not implemented.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().call_method(tx, name, args, kwargs)
+
+    def call_setattr(
+        self,
+        tx: "InstructionTranslatorBase",
+        name_var: VariableTracker,
+        value: VariableTracker,
+    ) -> VariableTracker:
+        """tp_setattro for an exact OrderedDict: store into the modeled instance
+        __dict__ (the same compartment DunderDictVariable reads back)."""
+        from .user_defined import is_data_descriptor
+
+        if not self.fresh:
+            unimplemented(
+                gb_type="setattr() on a pre-existing OrderedDict",
+                context=f"setattr({self.debug_repr()}, {name_var}, {value})",
+                explanation="Dynamo models instance attributes of an OrderedDict "
+                "only when the object is built inside the traced region; writing "
+                "an attribute of a pre-existing OrderedDict is not modeled.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if self._format_deferred:
+            # An earlier deferred format()/f-string observes this object before
+            # its attribute replay, so writing now would change the rendered
+            # result; decline the same way the format itself does.
+            from .misc import StringFormatVariable
+
+            StringFormatVariable.decline_attributed_format()
+        if not name_var.is_python_constant():
+            unimplemented(
+                gb_type="non-constant attribute name in OrderedDict setattr",
+                context=f"setattr({self.debug_repr()}, {name_var}, {value})",
+                explanation="Dynamo requires the attribute name to be a constant.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        name = name_var.as_python_constant()
+        if not isinstance(name, str):
+            # CPython's setattr() rejects non-str names before touching __dict__.
+            raise_type_error(
+                tx,
+                f"attribute name must be string, not '{name_var.python_type_name()}'",
+            )
+        type_attr = mro_lookup(self.python_type(), name)
+        if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
+            unimplemented(
+                gb_type="data descriptor attribute write on OrderedDict",
+                context=f"setattr({self.debug_repr()}, {name!r}, {value})",
+                explanation="Dynamo does not model writes to attributes that are "
+                "data descriptors on the OrderedDict type (e.g. __dict__, __class__).",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        se = tx.output.side_effects
+        if id(self) not in se.id_to_variable:
+            # First modeled write: a constructor that already observed this
+            # container cannot be replayed against a shell whose contents are
+            # filled afterwards. (The other order is caught at construction.)
+            se.check_ordered_dict_constructor_read(self)
+        # Reject an outer-scope write from inside a HOP body before registering,
+        # so a rejected write leaves no half-registered mutation behind.
+        se.check_allowed_side_effect(self)
+        se.track_ordered_dict_attr_mutation_new(self)
+        se.store_instance_dict_attr(self, name, value)
+        return ConstantVariable.create(None)
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker | None:
+        if not self.fresh:
+            return None
+        se = tx.output.side_effects
+        if se.has_pending_mutation_of_attr(self, name):
+            value = se.load_attr(self, name, deleted_ok=True)
+            if not isinstance(value, variables.DeletedVariable):
+                return value
+        return None
+
+    def mark_deferred_format_observation(self) -> None:
+        """Record that a deferred format()/f-string will observe this fresh
+        OrderedDict at restore_stack time, so a later attribute write must
+        decline instead of changing what the format renders.
+
+        The flag is monotonic: it is never cleared (no liveness information is
+        available to retract it) and survives ``clone()`` through
+        ``_nonvar_fields``. That can only add conservative declines, never a
+        wrong answer."""
+        self._format_deferred = True
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "__dict__":
+            # The instance __dict__ view is unmodeled for every OrderedDict,
+            # pre-existing ones included, so this branches before the fresh
+            # check below. The pre-fix deferred read was only safe when the view
+            # escaped untouched: any use folded through as_python_constant() on
+            # a rebuilt copy and answered wrongly (e.g. len(od.__dict__) was 0
+            # for a live object with one attribute). Decline instead of ever
+            # returning a stale snapshot.
+            unimplemented(
+                gb_type="__dict__ access on OrderedDict",
+                context=f"getattr({self.debug_repr()}, '__dict__')",
+                explanation="Dynamo does not model the instance __dict__ view of an "
+                "OrderedDict.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        if not self.fresh:
+            # Other attribute names keep the pre-fix deferred read: the
+            # attribute may live in the (unmodeled) instance __dict__ and is
+            # resolved from the live object by the generated bytecode.
+            return super().tp_getattro_impl(tx, name)
+        # CPython PyObject_GenericGetAttr precedence: a type data descriptor wins
+        # over the instance __dict__, which wins over non-data descriptors and
+        # class attributes. LOAD_ATTR consults pending instance-dict writes
+        # before calling this; direct calls (d.__getattribute__(name) or
+        # object.__getattribute__(d, name)) must do the same instead of letting
+        # ConstDictVariable's method shortcut resolve a shadowed method.
+        from .user_defined import is_data_descriptor
+
+        type_attr = mro_lookup(self.python_type(), name)
+        if type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr):
+            instance_attr = self.lookup_instance_dict(tx, name)
+            if instance_attr is not None:
+                return instance_attr
+        try:
+            return super().tp_getattro_impl(tx, name)
+        except NotImplementedError:
+            # A fresh OrderedDict starts with an empty instance __dict__, so an
+            # unresolvable name is definitely absent: raise like eager instead
+            # of leaving a deferred read that cannot be resolved. CPython formats
+            # the message with tp_name, which stays dotted for this C type.
+            tp = self.python_type()
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{tp.__module__}.{tp.__qualname__}' object has no attribute '{name}'"
+                ],
+            )
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        result = self._hasattr_check_side_effects(tx, name)
+        if result is not None and result.is_constant_match(True):
+            return result
+        if mro_lookup(self.python_type(), name) is not NO_SUCH_SUBOBJ:
+            return ConstantVariable.create(True)
+        if self.fresh:
+            # The fresh instance __dict__ is fully modeled, so an attribute that
+            # is neither on the type MRO nor pending is definitely absent.
+            return ConstantVariable.create(False)
+        unimplemented(
+            gb_type="attribute lookup on OrderedDict with unmodeled __dict__",
+            context=f"hasattr({self.debug_repr()}, {name!r})",
+            explanation="Dynamo does not model the instance __dict__ of this "
+            "OrderedDict, so it cannot tell whether the attribute exists.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def dir_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        """``dir()`` for an OrderedDict.
+
+        ``object.__dir__`` returns the type's names plus the instance
+        ``__dict__`` keys, so an eager fold through ``as_python_constant()``
+        would drop the modeled instance attributes.
+        """
+        if not self.fresh:
+            unimplemented(
+                gb_type="dir() on OrderedDict with unmodeled __dict__",
+                context=f"dir({self.debug_repr()})",
+                explanation="Dynamo does not model the instance __dict__ of this "
+                "OrderedDict, so it cannot tell which attribute names dir() reports.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        # dir() does not depend on the container contents, so do not go through
+        # as_python_constant() (which would fail for non-constant items): the
+        # type-level names plus the modeled instance __dict__ keys are enough.
+        names = list(_ORDERED_DICT_DIR_NAMES)
+        names.extend(tx.output.side_effects.store_attr_mutations.get(self, ()))
+        return VariableTracker.build(tx, sorted(set(names)))
+
+    def has_instance_attributes(self, tx: "InstructionTranslatorBase") -> bool:
+        """Whether this fresh OrderedDict carries modeled instance attributes."""
+        return self.fresh and tx.output.side_effects.has_pending_mutation(self)
+
+    def eager_attr_fold_is_unsound(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> bool:
+        """Whether an eager ``as_python_constant()`` fold of attribute *name*
+        would answer wrongly. ``as_python_constant()`` rebuilds the container
+        without any instance __dict__, and a pre-existing object's live __dict__
+        is not modeled at all."""
+        if name == "__dict__":
+            # The instance __dict__ view of an OrderedDict is not modeled
+            # (subclasses such as NNModuleHooksDictVariable included); folding
+            # would return the rebuilt copy's detached __dict__ instead of
+            # declining.
+            return True
+        if type(self) is not OrderedDictVariable:
+            # Non-__dict__ OrderedDict subclasses keep their pre-fix behavior.
+            return False
+        # A fresh __dict__ is modeled, so folding it is only unsound once it
+        # holds attributes; a pre-existing __dict__ is unmodeled entirely.
+        return not self.fresh or self.has_instance_attributes(tx)
+
+    def _load_ordered_dict_type(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections),
+                    codegen.create_load_attr("OrderedDict"),
+                ]
+            )
+        )
+
+    def reconstruct_empty(self, codegen: "PyCodegen") -> None:
+        """Emit ``collections.OrderedDict()`` leaving the empty shell on TOS.
+
+        Escaping attributed OrderedDicts are materialized as a shell first so
+        that the instance identity exists before contents and attributes are
+        replayed onto it.
+        """
+        self._load_ordered_dict_type(codegen)
+        codegen.extend_output(create_call_function(0, False))
 
     def as_python_constant(self) -> "collections.OrderedDict[Any, Any]":
         return collections.OrderedDict(super().as_python_constant())
@@ -1003,14 +1313,7 @@ class OrderedDictVariable(ConstDictVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # emit `OrderedDict(constructed_dict)`
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(collections),
-                    codegen.create_load_attr("OrderedDict"),
-                ]
-            )
-        )
+        self._load_ordered_dict_type(codegen)
         if self._contains_self_reference() and self.source is None:
             codegen.extend_output(
                 [

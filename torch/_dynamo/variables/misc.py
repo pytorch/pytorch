@@ -104,6 +104,7 @@ if TYPE_CHECKING:
 
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.dicts import OrderedDictVariable
 
 
 class SuperVariable(VariableTracker):
@@ -1529,7 +1530,10 @@ class GetAttrVariable(VariableTracker):
         except NotImplementedError:
             resolved = None
         if resolved is None or isinstance(resolved, GetAttrVariable):
-            if self.obj.is_python_constant():
+            if self.obj.is_python_constant() and not (
+                isinstance(self.obj, variables.OrderedDictVariable)
+                and self.obj.eager_attr_fold_is_unsound(tx, self.name)
+            ):
                 val = getattr(self.obj.as_python_constant(), self.name)
                 resolved = VariableTracker.build(tx, val)
             else:
@@ -2066,6 +2070,76 @@ class StringFormatVariable(VariableTracker):
     def python_type(self) -> type:
         return str
 
+    @staticmethod
+    def _walk_format_args(
+        sym_args: "Sequence[VariableTracker]",
+        sym_kwargs: "dict[str, VariableTracker]",
+    ) -> list[VariableTracker]:
+        vts: list[VariableTracker] = []
+        for arg in itertools.chain(sym_args, sym_kwargs.values()):
+            VariableTracker.visit(vts.append, arg)
+        return vts
+
+    @staticmethod
+    def decline_attributed_format() -> NoReturn:
+        """Decline formatting a fresh OrderedDict that has instance attributes.
+
+        Constant folding rebuilds the container from its contents only and the
+        shell-first escape replay has not filled in its attributes yet, so the
+        instance __dict__ would be missing from what gets formatted.
+        """
+        unimplemented(
+            gb_type="string formatting of an attributed OrderedDict",
+            context="format()/f-string of an attributed OrderedDict",
+            explanation="Formatting rebuilds the OrderedDict from its contents "
+            "only or observes it before its attributes/contents replay, so its "
+            "modeled instance attributes would be missing.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    @classmethod
+    def check_attributed_format(
+        cls,
+        tx: "InstructionTranslatorBase",
+        sym_args: "Sequence[VariableTracker]",
+        sym_kwargs: "dict[str, VariableTracker]",
+    ) -> None:
+        # O(1) early-out so that the common case (no OrderedDict carries modeled
+        # instance attributes) does not deep-walk every format() argument.
+        if not tx.output.side_effects.has_attributed_ordered_dicts():
+            return
+        from .dicts import OrderedDictVariable
+
+        if any(
+            istype(vt, OrderedDictVariable) and vt.has_instance_attributes(tx)
+            for vt in cls._walk_format_args(sym_args, sym_kwargs)
+        ):
+            cls.decline_attributed_format()
+
+    @classmethod
+    def _check_and_collect_fresh(
+        cls,
+        tx: "InstructionTranslatorBase",
+        sym_args: "Sequence[VariableTracker]",
+        sym_kwargs: "dict[str, VariableTracker]",
+    ) -> list["OrderedDictVariable"]:
+        """One deep walk over the format arguments.
+
+        Declines an attributed OrderedDict, and returns the fresh ones that a
+        deferred format()/f-string will observe at restore_stack time.
+        """
+        from .dicts import OrderedDictVariable
+
+        fresh: list[OrderedDictVariable] = []
+        for vt in cls._walk_format_args(sym_args, sym_kwargs):
+            if not istype(vt, OrderedDictVariable):
+                continue
+            if vt.has_instance_attributes(tx):
+                cls.decline_attributed_format()
+            if vt.fresh:
+                fresh.append(vt)
+        return fresh
+
     @classmethod
     def create(
         cls,
@@ -2074,6 +2148,7 @@ class StringFormatVariable(VariableTracker):
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        fresh_ordered_dicts = cls._check_and_collect_fresh(tx, sym_args, sym_kwargs)
         if all(
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
@@ -2086,6 +2161,11 @@ class StringFormatVariable(VariableTracker):
             except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return variables.ConstantVariable.create(result)
+        # A deferred format()/f-string observes these fresh OrderedDicts at
+        # restore_stack time; a later attribute write must decline instead of
+        # changing what the format renders.
+        for vt in fresh_ordered_dicts:
+            vt.mark_deferred_format_observation()
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(
