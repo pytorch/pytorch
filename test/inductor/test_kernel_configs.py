@@ -13,6 +13,7 @@ from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.runtime.hints import HeuristicType
 from torch._inductor.runtime.triton_heuristics import (
     AutotuneCache,
+    cached_autotune,
     CachingAutotuner,
     config_to_dict,
 )
@@ -237,6 +238,36 @@ class TestKernelConfigs(TestCase):
         self.assertNotIn(user_kernel, ns["KERNEL_CONFIGS"])
         self.assertEqual(ns[user_kernel].heuristic_type, HeuristicType.USER_AUTOTUNE)
         self.assertEqual(ns["call"]([x])[0], result)
+
+    @requires_cuda_and_triton
+    def test_pinned_kernel_keeps_the_backends_autotuner_class(self):
+        # An out-of-tree backend's heuristics pass their own CachingAutotuner subclass.
+        import triton.language as tl
+
+        def triton_fn(XBLOCK: tl.constexpr):
+            pass
+
+        class FakeJitFunction:
+            fn = staticmethod(triton_fn)
+
+        class BackendAutotuner:
+            def __init__(self, *args, configs, heuristic_type, **kwargs):
+                self.configs = configs
+                self.heuristic_type = heuristic_type
+
+        meta = {"kernel_name": "triton_poi_0", "pinned_config": {"XBLOCK": 128}}
+        kernel = cached_autotune(
+            [1024],
+            [],
+            triton_meta={},
+            heuristic_type=HeuristicType.POINTWISE,
+            inductor_meta=meta,
+            caching_autotuner_cls=BackendAutotuner,
+        )(FakeJitFunction())
+        self.assertIsInstance(kernel, BackendAutotuner)
+        self.assertEqual(kernel.heuristic_type, HeuristicType.FIXED)
+        (cfg,) = kernel.configs
+        self.assertEqual(cfg.kwargs, {"XBLOCK": 128})
 
     @requires_cuda_and_triton
     def test_without_compile_time_autotuning_nothing_is_pinned(self):
