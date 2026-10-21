@@ -6594,7 +6594,10 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This subgraph's kernels are spliced into the root module.
         self.kernel_sources = root.kernel_sources
         self.kernel_harness_modules = root.kernel_harness_modules
-        # Its code goes into the root unscanned, so it reports its own uses.
+        # Its code goes into the root unscanned, so it reports its own uses. The set is
+        # the root's, as kernel_sources is, so that a nested subgraph reports straight to
+        # the root rather than through each parent; a name reported for code the root
+        # does not splice in can only keep a preamble line, never drop one.
         self.names_used_unscanned = root.names_used_unscanned
 
     def set_launcher_fn_name(self) -> None:
@@ -6615,7 +6618,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def scan_for_used_names(self, module: IndentedBuffer) -> None:
         """Add the names ``module``, this subgraph's code, uses to the set shared with
-        the root, which splices that code in unscanned."""
+        the root, which splices that code in unscanned. Unlike the root's scan, it sets
+        no ``used_names``: it keeps or drops no line of its own."""
         if self.conditional_lines:
             # Only the root keeps or drops them; this scan never would.
             name = self.subgraph_name
