@@ -2238,8 +2238,8 @@ class PythonWrapperCodegen(CodeGen):
         # The lines write_if_used wrote. The FX wrapper writes this header too but has
         # its own _generate, which never scans, so it keeps every line.
         self.conditional_lines: list[_LineIfNamesUsed] = []
-        # The names used by code the scan leaves out, such as each subgraph's, which
-        # the subgraph scans itself.
+        # The names each subgraph uses, which the subgraph's own scan adds, since the
+        # root splices its code in unscanned.
         self.names_used_unscanned: OrderedSet[str] = OrderedSet()
         self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # Kernel argument name -> cached tensor and its lifetime/storage metadata.
@@ -6610,8 +6610,11 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
     def scan_for_used_names(self, module: IndentedBuffer) -> None:
         """Add the names ``module``, this subgraph's code, uses to the set shared with
-        the root, which splices that code in unscanned. A subgraph has no conditional
-        lines of its own to keep or drop."""
+        the root, which splices that code in unscanned."""
+        if self.conditional_lines:
+            # Only the root keeps or drops them; this scan never would.
+            name = self.subgraph_name
+            raise AssertionError(f"subgraph {name} wrote a line kept only if used")
         self.names_used_unscanned |= self.names_used_in(module)
 
     def benchmark_compiled_module(self, output):
