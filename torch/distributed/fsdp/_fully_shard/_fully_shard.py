@@ -769,7 +769,9 @@ class FSDPModule:
         """
         Overrides the default ``all_gather`` communication behavior,
         to have better control over the communication and memory usage.
-        See `Comm` and `ReduceScatter` for details.
+        See `Comm` and `ReduceScatter` for details. A custom comm receives the
+        unpadded layout, so FSDP no longer pads each rank's chunk to a 16-byte
+        multiple for NCCL.
 
         Args:
             comm (AllGather): Custom all-gather communication.
@@ -788,7 +790,9 @@ class FSDPModule:
         """
         Overrides the default ``reduce_scatter`` communication behavior,
         to have better control over the communication and memory usage.
-        See `Comm` and `ReduceScatter` for details.
+        See `Comm` and `ReduceScatter` for details. A custom comm receives the
+        unpadded layout, so FSDP no longer pads each rank's chunk to a 16-byte
+        multiple for NCCL.
 
         Args:
             comm (ReduceScatter): Custom reduce_scatter communication.
@@ -911,7 +915,9 @@ class FSDPModule:
         run under ``torch.no_grad()`` on the current stream, also when
         ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients afterward,
         so keep neither. See :mod:`torch.distributed.fsdp.experimental` for a
-        native implementation.
+        native implementation. With a custom ``fn``, rows are exactly as wide as
+        the padded shards, so FSDP no longer widens them to a 16-byte multiple
+        for NCCL.
 
         Args:
             fn (Optional[Callable]): Function returning the copy-in function, or
