@@ -250,9 +250,9 @@ def _format_blockscaled_tma_output(
             raise AssertionError(
                 f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
             )
-        scale_m = scale_m.view(spec.s_num_row_blk_m, spec.s_num_col_blk_m, 32, 16).view(
-            torch.float8_e8m0fnu
-        )
+        scale_m = scale_m.view(
+            1, spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16
+        ).view(torch.float8_e8m0fnu)
     if spec.do_dim_k:
         if output_k is None:
             raise AssertionError("expected output_k, got None")
@@ -267,7 +267,9 @@ def _format_blockscaled_tma_output(
                 f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
             )
         if spec.is_scale_swizzled:
-            scale_k = scale_k.view(spec.s_num_row_blk_k, spec.s_num_col_blk_k, 32, 16)
+            scale_k = scale_k.view(
+                1, spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16
+            )
         else:
             scale_k = scale_k.view(spec.M, spec.K // 32)
         scale_k = scale_k.view(torch.float8_e8m0fnu)
