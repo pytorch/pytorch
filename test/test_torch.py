@@ -1917,6 +1917,24 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x.amin(dim=(0, 2)), expected)
         self.assertEqual(x.amax(dim=(0, 2)), expected)
 
+    @onlyCUDA
+    @largeTensorTest('20GB')
+    @parametrize("num_rows,row_size", [(2**32 - 1, 1), (2**32 - 16, 2)])
+    def test_cumsum_inner_dim_large_rows(self, device, num_rows, row_size):
+        # Near UINT_MAX rows, the innermost scan's grid stride
+        # blockDim.y * gridDim.x overflowed to 0 in unsigned int and the row
+        # counter wrapped, so the kernel hung.
+        x = torch.ones(num_rows, row_size, dtype=torch.int8, device=device)
+        expected = torch.arange(1, row_size + 1, dtype=torch.int8, device=device)
+        out = torch.zeros_like(x)
+        torch.cumsum(x, dim=-1, out=out)
+        self.assertEqual(out.amin(dim=0), expected)
+        self.assertEqual(out.amax(dim=0), expected)
+        del out
+        x.cumsum_(-1)
+        self.assertEqual(x.amin(dim=0), expected)
+        self.assertEqual(x.amax(dim=0), expected)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):

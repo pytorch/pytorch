@@ -357,9 +357,10 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
                                       const uint32_t log_num_threads_x,
                                       T init, BinaryFunction binary_op){
   const index_t num_threads_x = 1 << log_num_threads_x;
+  const size_t row_stride = static_cast<size_t>(blockDim.y) * gridDim.x;
+  // The loops break before incrementing so that no counter steps past its bound and wraps.
   for (index_t block_row = blockIdx.x * (index_t) blockDim.y;
-       block_row < num_rows;
-       block_row += blockDim.y * gridDim.x) {
+       block_row < num_rows;) {
     index_t row = block_row + (index_t) threadIdx.y;
     T block_total = init;
 
@@ -369,7 +370,7 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
     // Perform scan on one block at a time, keeping track of the total value of
     // all blocks processed so far.
-    for (index_t block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
+    for (index_t block_col = 0; block_col < row_size;) {
       // Load data into shared memory (two values per thread).
       index_t col1 = block_col + (index_t) threadIdx.x;
       index_t col2 = block_col + num_threads_x + (index_t) threadIdx.x;
@@ -413,7 +414,15 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
       }
       block_total = row_buf[2 * num_threads_x - 1];
       __syncthreads();
+      if (row_size - block_col <= 2 * num_threads_x) {
+        break;
+      }
+      block_col += 2 * num_threads_x;
     }
+    if (num_rows - block_row <= row_stride) {
+      break;
+    }
+    block_row += static_cast<index_t>(row_stride);
   }
 }
 
