@@ -2235,11 +2235,8 @@ class PythonWrapperCodegen(CodeGen):
         # until _generate scans the module, and until then every such line is emitted.
         self.used_names: OrderedSet[str] | None = None
         self.scanning_for_uses = False
-        # Whether _generate scans the module for uses: set once write_if_used writes a
-        # line, and always on a subgraph, whose uses the root needs. The FX wrapper
-        # writes this header too but has its own _generate, which never scans, so it
-        # keeps every line.
-        self.needs_use_scan = False
+        # The lines write_if_used wrote. The FX wrapper writes this header too but has
+        # its own _generate, which never scans, so it keeps every line.
         self.conditional_lines: list[_LineIfNamesUsed] = []
         # The names used by code the scan leaves out, such as each subgraph's, which
         # the subgraph scans itself.
@@ -2419,7 +2416,6 @@ class PythonWrapperCodegen(CodeGen):
             # The rest of the preamble is written in terms of it.
             buf.writeline(line)
             return
-        self.needs_use_scan = True
         self.conditional_lines.append(_LineIfNamesUsed(line, names, self))
         buf.writeline(self.conditional_lines[-1])
 
@@ -2455,6 +2451,10 @@ class PythonWrapperCodegen(CodeGen):
         buf.writelines([""] * code_start)
         if text:
             buf.writeline(_OmittedFromScan(text[code_start:], self))
+
+    def needs_use_scan(self) -> bool:
+        """Whether _generate scans the finished module for uses of the preamble's names."""
+        return bool(self.conditional_lines)
 
     def names_used_in(self, module: IndentedBuffer) -> OrderedSet[str]:
         self.scanning_for_uses = True
@@ -3581,7 +3581,7 @@ class PythonWrapperCodegen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
-        if self.needs_use_scan:
+        if self.needs_use_scan():
             self.scan_for_used_names(result)
 
         return (
@@ -6590,7 +6590,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.kernel_harness_modules = root.kernel_harness_modules
         # Its code goes into the root unscanned, so it reports its own uses.
         self.names_used_unscanned = root.names_used_unscanned
-        self.needs_use_scan = True
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
@@ -6604,7 +6603,14 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     def add_benchmark_harness(self, output):
         pass
 
+    def needs_use_scan(self) -> bool:
+        # The root needs this subgraph's uses even if it writes no conditional line.
+        return True
+
     def scan_for_used_names(self, module: IndentedBuffer) -> None:
+        """Add the names ``module``, this subgraph's code, uses to the set shared with
+        the root, which splices that code in unscanned. A subgraph has no conditional
+        lines of its own to keep or drop."""
         self.names_used_unscanned |= self.names_used_in(module)
 
     def benchmark_compiled_module(self, output):
