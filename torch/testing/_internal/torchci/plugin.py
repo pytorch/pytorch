@@ -161,6 +161,8 @@ class ReportWriter:
         # published (take_inflight).
         self.cache: pytest.Cache | None = None
         self.inflight_key = ""
+        # A session that starts no test removes its report (pytest_sessionfinish).
+        self.started_test = False
 
     def _publish(self, inflight: dict[str, Any] | None) -> None:
         # Best effort: a failed publication must not turn the report off.
@@ -192,6 +194,7 @@ class ReportWriter:
             self.tests = {item.nodeid: identity(item) for item in session.items}
 
     def pytest_runtest_logstart(self, nodeid: str) -> None:
+        self.started_test = True
         if _disabled or self.file is None:
             return
         with _guard():
@@ -284,6 +287,12 @@ class ReportWriter:
             if self.file is not None:
                 self.file.close()
                 self.file = None
+                # Nothing to upload from a session that started no test, like
+                # run_test.py's serial pass over a file without serial tests. One
+                # that started a test keeps its report even with no run in it:
+                # run_test.py appends the run an interrupt or timeout left in flight.
+                if not self.started_test:
+                    os.remove(self.path)
 
 
 def take_inflight(cache_dir: str | os.PathLike[str]) -> dict[str, Any] | None:
