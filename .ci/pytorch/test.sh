@@ -473,9 +473,28 @@ test_cpuset_num_threads() {
   assert_git_not_dirty
 }
 
+# H100 needs a targeted list; B200 discovers all python_native suites below. Install
+# CuTeDSL before either run. H100 reproduced all 112 B200-generated hashes.
+PYTHON_NATIVE_CUTEDSL_SUITES=(
+  python_native/test_cutedsl_smoketest
+  python_native/test_sum_cutedsl
+  python_native/test_sum_inner_tree_plan
+  python_native/test_inner_tree_order
+  python_native/test_kernel_coltile
+  python_native/test_kernel_xcta
+  python_native/test_kernel_rowtile
+  python_native/test_kernel_general
+  python_native/test_hw_caps
+  python_native/test_traits
+  python_native/test_instrumentation
+  python_native/test_tile_datapath
+)
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
+  install_flash_attn_cute
+  time python test/run_test.py --include "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_triton_kernels -k test_tma_descriptor_subclass_codegen $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
@@ -485,30 +504,40 @@ test_python_smoke() {
   assert_git_not_dirty
 }
 
-# PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
-# shellcheck disable=SC2086
-test_python_smoke_b200() {
-  # Targeted smoke tests for B200 including FlashAttention CuTe coverage
-  install_flash_attn_cute
-  install_cutlass_operators
-  (
-    local test_library_path="${LD_LIBRARY_PATH:-}"
-    if [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]]; then
-      pip install 'cuda-bindings>=13.4,<14'
-      local driver_version
-      driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
-      if [[ "$driver_version" -lt 13040 ]]; then
-        local compat_dir compat_package compat_sha256
-        compat_dir=$(mktemp -d)
-        trap 'rm -rf "$compat_dir"' EXIT
+# Call from a subshell so the compat path and cleanup trap stay scoped to this test.
+setup_cuda_smoke_compat() {
+  CUDA_COMPAT_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+  [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]] || return 0
+
+  pip install 'cuda-bindings>=13.4,<14'
+  local driver_version
+  driver_version=$(cd test && python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')
+  if [[ "$driver_version" -lt 13040 ]]; then
+    local compat_package compat_repo_arch compat_sha256
+    CUDA_COMPAT_DIR=$(mktemp -d)
+    trap_add "rm -rf \"$CUDA_COMPAT_DIR\"" EXIT
+    case "$(dpkg --print-architecture)" in
+      amd64)
+        compat_repo_arch=x86_64
         compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_amd64.deb
         compat_sha256=1b814aa705b4dfe955420c967bd545f39ef7b67f32bd0f285a005ea296b02831
-        curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/$compat_package" -o "$compat_dir/$compat_package"
-        echo "$compat_sha256  $compat_dir/$compat_package" | sha256sum --check
-        dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
-        test_library_path="$compat_dir/usr/local/cuda-13.4/compat${test_library_path:+:$test_library_path}"
-      fi
-      (cd test && env LD_LIBRARY_PATH="$test_library_path" python - <<'PY'
+        ;;
+      arm64)
+        compat_repo_arch=sbsa
+        compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_arm64.deb
+        compat_sha256=83cdca90db73a36784a077693e3b48565d852158c63f604194c1f0d42c2e5458
+        ;;
+      *)
+        echo "Unsupported architecture for CUDA 13.4 compatibility package" >&2
+        return 1
+        ;;
+    esac
+    curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/$compat_repo_arch/$compat_package" -o "$CUDA_COMPAT_DIR/$compat_package"
+    echo "$compat_sha256  $CUDA_COMPAT_DIR/$compat_package" | sha256sum --check
+    dpkg-deb --extract "$CUDA_COMPAT_DIR/$compat_package" "$CUDA_COMPAT_DIR"
+    CUDA_COMPAT_LIBRARY_PATH="$CUDA_COMPAT_DIR/usr/local/cuda-13.4/compat${CUDA_COMPAT_LIBRARY_PATH:+:$CUDA_COMPAT_LIBRARY_PATH}"
+  fi
+  (cd test && env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python - <<'PY'
 import torch
 from torch.cuda import green_contexts
 
@@ -516,11 +545,20 @@ torch.cuda.init()
 print(f"CUDA driver API version: {green_contexts._get_driver_version()}")
 green_contexts._ensure_locality_supported()
 if not green_contexts.is_localization_supported():
-    raise RuntimeError("B200 CUDA 13.4 smoke tests require locality-domain support")
+    raise RuntimeError("Blackwell CUDA 13.4 smoke tests require locality-domain support")
 PY
-      )
-    fi
-    time env LD_LIBRARY_PATH="$test_library_path" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  )
+}
+
+# PYTHON_TEST_EXTRA_OPTION intentionally expands into multiple arguments.
+# shellcheck disable=SC2086
+test_python_smoke_b200() {
+  # Targeted Blackwell smoke tests including FlashAttention CuTe coverage
+  install_flash_attn_cute
+  install_cutlass_operators
+  (
+    setup_cuda_smoke_compat
+    time env LD_LIBRARY_PATH="$CUDA_COMPAT_LIBRARY_PATH" python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   )
   time python test/run_test.py \
     --include \
@@ -1909,6 +1947,10 @@ test_distributed() {
   echo "Testing distributed python tests (${multigpu_filter:-all})"
   # Same NVSHMEM team limit as test_b200_symm_mem; test_nvshmem.py runs here too.
   export NVSHMEM_MAX_TEAMS=512
+  # rocSHMEM FlyDSL tests import the same PyPI wheel as test_inductor_flydsl.
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* && "$multigpu_filter" != "not-multigpu" ]]; then
+    install_flydsl
+  fi
   # shellcheck disable=SC2086
   time python test/run_test.py --distributed-tests "${filter_arg[@]}" --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" $INCLUDE_CLAUSE --verbose
   assert_git_not_dirty
@@ -2461,7 +2503,7 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e .
+  pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao torchcomms)
