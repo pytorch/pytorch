@@ -3829,10 +3829,10 @@ def cached_autotune(
         # of tuning again: KERNEL_CONFIGS in the python wrapper module that defines it.
         table = getattr(fn.fn, "__globals__", {}).get(KERNEL_CONFIGS_NAME)
         pinned = table.get(name) if isinstance(table, dict) else None
-        if pinned is None:
+        # A user kernel keeps its own autotuning, even if a hand edit names it.
+        if pinned is None or heuristic_type == HeuristicType.USER_AUTOTUNE:
             return _cached_autotune(*args, **cls_kwargs)(fn)
-        cfg = {**pinned}
-        config = triton.Config(cfg, **_pop_config_kwargs(cfg))
+        config = config_from_dict(pinned)
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
         # A copy of triton_meta, which _cached_autotune pops from and the fallback reuses.
         fixed = (None, [config], {**triton_meta}, HeuristicType.FIXED, filename, meta)
