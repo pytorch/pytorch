@@ -164,30 +164,69 @@ def run_real(config):
     return counts or out.stderr[-2000:]
 
 
+# The real benchmark's work, measured after each of several pre-iteration actions
+PROBE = (
+    HOOK
+    + r"""
+import gc, runpy
+sys.path.insert(0, sys.argv[2])
+g = runpy.run_path(sys.argv[3], run_name="dbg")
+import torch._C._instruction_counter as ic
+from sympy.core.cache import clear_cache
+
+b = g["Benchmark"]()
+b._prepare_once()
+
+
+def rewarm():
+    clear_cache()
+    b._work()
+
+
+res = {}
+for name, pre in [
+    ("none", lambda: None),
+    ("sympy_clear", clear_cache),
+    ("type_cache_clear", sys._clear_type_cache),
+    ("sympy_clear_then_work", rewarm),
+    ("gc_collect", gc.collect),
+    ("sympy_clear2", clear_cache),
+    ("none2", lambda: None),
+]:
+    counts = []
+    for _ in range(5):
+        pre()
+        i = ic.start()
+        b._work()
+        counts.append(ic.end(i))
+    res[name] = counts
+print("DEBUGJSON " + json.dumps(res))
+"""
+)
+
+
+def run_probe(config):
+    script = os.path.join(HERE, "autograd_function.py")
+    out = subprocess.run(
+        [sys.executable, "-P", "-c", PROBE, config, HERE, script],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DEBUG_PRE_CONFIG": PRE_CONFIG},
+    )
+    for line in out.stdout.splitlines():
+        if line.startswith("DEBUGJSON "):
+            return line[len("DEBUGJSON ") :]
+    return out.stderr[-2000:]
+
+
 def main():
     print("=== DEBUG autograd_function_apply diagnostics")
     for config in ("cur", "pre"):
         for rep in range(2):
-            print(f"DEBUG real config={config} rep={rep}: {run_real(config)}")
+            print(f"DEBUG probe config={config} rep={rep}: {run_probe(config)}")
     for config in ("cur", "pre"):
-        for dyn in (0, 1):
-            for warm in (0, 1):
-                for named in (0, 1):
-                    r = run(config, dyn=dyn, warm=warm, named=named)
-                    keys = (
-                        "apply_cuda_first",
-                        "apply_cuda",
-                        "apply_cpu",
-                        "empty_call",
-                        "getattr_apply",
-                        "error",
-                    )
-                    summary = {k: r[k] for k in keys if k in r}
-                    print(
-                        f"DEBUG grid config={config} dyn={dyn} warm={warm} named={named}: {json.dumps(summary)}"
-                    )
-                    if config == "cur" and dyn and warm and named:
-                        print(f"DEBUG full: {json.dumps(r)}")
+        for rep in range(2):
+            print(f"DEBUG real config={config} rep={rep}: {run_real(config)}")
     print("=== DEBUG done")
 
 
