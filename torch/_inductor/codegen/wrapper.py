@@ -58,6 +58,7 @@ from .. import async_compile, config, debug as inductor_debug, ir
 from ..codecache import get_hash, output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
+from ..runtime.hints import KERNEL_CONFIGS_NAME
 from ..stream_constants import DEFAULT_STREAM, DEFAULT_STREAM_IDX, STREAM_NAME_TEMPLATE
 from ..stream_utils import (
     COOR_DEVICE_IDX_VAR,
@@ -980,7 +981,7 @@ class _KernelConfigs(DeferredLineBase):
             "# The config each kernel below launches with when this file is run on its own,\n"
             "# chosen by autotuning at compile time. A kernel missing here autotunes on its\n"
             "# first launch.\n"
-            f"KERNEL_CONFIGS = {{\n{rows}}}"
+            f"{KERNEL_CONFIGS_NAME} = {{\n{rows}}}"
         )
 
     def _new_line(self, line: str) -> _KernelConfigs:
