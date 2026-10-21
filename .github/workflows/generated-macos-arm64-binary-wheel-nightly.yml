@@ -43,7 +43,7 @@ jobs:
   wheel-build:
     needs: check-ci
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: xcode-27-xlarge
+    runs-on: macos-m2-27
     timeout-minutes: 280
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -226,7 +226,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-build
-    runs-on: xcode-27-xlarge
+    runs-on: macos-m2-27
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
