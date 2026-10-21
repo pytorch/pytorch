@@ -1,6 +1,7 @@
 #include <ATen/native/mps/kernels/LossOps.h>
 #include <c10/metal/atomic.h>
 #include <c10/metal/error.h>
+#include <c10/metal/indexing.h>
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 
@@ -408,6 +409,14 @@ kernel void ctc_loss_backward_collect(
   }
 }
 
+struct mse_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    const T diff = a - b;
+    return diff * diff;
+  }
+};
+
 #define INSTANTIATE_CTC_LOSS(T, T_target, T_index)                  \
   template [[host_name("ctc_loss_" #T "_" #T_target "_" #T_index)]] \
   kernel void ctc_loss<T, T_target, T_index>(                       \
@@ -502,3 +511,10 @@ INSTANTIATE_NLLND_LOSS_BACKWARD(half);
 INSTANTIATE_NLLND_LOSS_FORWARD(float);
 INSTANTIATE_NLLND_LOSS_FORWARD(bfloat);
 INSTANTIATE_NLLND_LOSS_FORWARD(half);
+
+REGISTER_BINARY_OP(mse, float, float);
+REGISTER_BINARY_OP(mse, half, half);
+REGISTER_BINARY_OP(mse, bfloat, bfloat);
+REGISTER_BINARY_CASTOUT_OP(mse, float, float);
+REGISTER_BINARY_CASTOUT_OP(mse, half, half);
+REGISTER_BINARY_CASTOUT_OP(mse, bfloat, bfloat);
