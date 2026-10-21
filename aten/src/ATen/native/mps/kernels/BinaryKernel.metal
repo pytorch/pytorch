@@ -268,6 +268,13 @@ struct laguerre_polynomial_l_functor {
   }
 };
 
+struct heaviside_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a == 0 ? b : static_cast<T>(a > 0);
+  }
+};
+
 struct nextafter_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -310,8 +317,7 @@ struct nextafter_functor {
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(
-        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
+    return static_cast<T>(c10::metal::hypot(a, b));
   }
 };
 
@@ -617,6 +623,12 @@ struct logical_xor_functor {
   REGISTER_BINARY_CASTOUT_OP(NAME, uchar, bool);  \
   REGISTER_BINARY_OP(NAME, char, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, char, bool);   \
+  REGISTER_BINARY_OP(NAME, ushort, bool);         \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ushort, bool); \
+  REGISTER_BINARY_OP(NAME, uint, bool);           \
+  REGISTER_BINARY_CASTOUT_OP(NAME, uint, bool);   \
+  REGISTER_BINARY_OP(NAME, ulong, bool);          \
+  REGISTER_BINARY_CASTOUT_OP(NAME, ulong, bool);  \
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 
@@ -702,6 +714,8 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_INTEGER_BINARY_OP(gcd);
 REGISTER_INTEGER_BINARY_OP(lcm);
+REGISTER_FLOAT_BINARY_OP(heaviside);
+REGISTER_INTEGER_BINARY_OP(heaviside);
 REGISTER_INTEGER_BINARY_OP(bitwise_and);
 REGISTER_INTEGER_BINARY_OP(bitwise_or);
 REGISTER_INTEGER_BINARY_OP(bitwise_xor);
@@ -731,14 +745,8 @@ REGISTER_BINARY_ALPHA_OP(add_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(add_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool, bool);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long, long);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float, float);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, float, half);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short, short);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, float, bfloat);
@@ -761,7 +769,7 @@ REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, float2, half2);
 
 // lerp with tensor weight: lerp(s, e, w) = s + w * (e - s)
 // Computed at opmath precision, matching the CPU/CUDA reference, which casts
@@ -777,4 +785,4 @@ REGISTER_OPMATH_TERNARY_OP(lerp, float, float);
 REGISTER_OPMATH_TERNARY_OP(lerp, half, half);
 REGISTER_OPMATH_TERNARY_OP(lerp, bfloat, bfloat);
 REGISTER_OPMATH_TERNARY_OP(lerp, float2, float2);
-REGISTER_OPMATH_TERNARY_OP(lerp, long, long);
+REGISTER_OPMATH_TERNARY_OP(lerp, half2, half2);

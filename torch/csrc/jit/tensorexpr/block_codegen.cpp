@@ -44,7 +44,7 @@ BufPtr BlockAnalysis::getMultiDimBuf(const BufPtr& buf) const {
   if (input_ != map_input_to_tensor_bufs_.end()) {
     return input_->second;
   } else {
-    throw std::runtime_error("BlockCodeGen: Entry not in input/Buffer map");
+    TORCH_CHECK(false, "BlockCodeGen: Entry not in input/Buffer map");
   }
 }
 
@@ -53,7 +53,7 @@ std::string BlockAnalysis::getInputName(const BufPtr& buf) const {
   if (input_ != map_input_to_tensor_bufs_.end()) {
     return input_->second->name_hint();
   } else {
-    throw std::runtime_error("BlockCodeGen: Entry not in input/Buffer map");
+    TORCH_CHECK(false, "BlockCodeGen: Entry not in input/Buffer map");
   }
 }
 
@@ -331,9 +331,9 @@ void BlockCodeGen::Initialize() {
   // Ensure all Bufs in reads/writes are in the map
   std::unordered_set<BufPtr> bufs(buf_reads.begin(), buf_reads.end());
   bufs.insert(buf_writes.begin(), buf_writes.end());
-  if (!block_analysis_->areBufsInMap(bufs)) {
-    throw std::runtime_error("BlockCodeGen: Entry not in input/Buffer map");
-  };
+  TORCH_CHECK(
+      block_analysis_->areBufsInMap(bufs),
+      "BlockCodeGen: Entry not in input/Buffer map");
 
   std::string func_name = GetUniqueFuncName("func");
   os() << "kernel " << func_name << '(';
@@ -351,10 +351,10 @@ void BlockCodeGen::Initialize() {
 }
 
 void BlockCodeGen::call(const std::vector<CallArg>& args) {
-  throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
+  TORCH_CHECK(false, "BlockCodeGen: Cannot call Block code ");
 }
 void BlockCodeGen::call_raw(const std::vector<void*>& args) {
-  throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
+  TORCH_CHECK(false, "BlockCodeGen: Cannot call Block code ");
 }
 
 BlockCodeGen::~BlockCodeGen() = default;

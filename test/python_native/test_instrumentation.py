@@ -21,6 +21,7 @@ from torch._native.instrumentation import (
     instrument_helion_kernel,
     instrument_triton_kernel,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 from torch.testing._internal.logging_utils import log_settings, preserve_log_state
 
@@ -940,7 +941,7 @@ class TestInstrumentationCoverage(TestCase):
         v, _ = _scan_for_raw_cute_compile(src, win.replace("\\", "/"))
         self.assertEqual(v, [], "a normalized Windows path was wrongly flagged")
 
-    @unittest.skipUnless(_HAS_CUDA, "cutedsl compile coverage needs CUDA")
+    @unittest.skipUnless(_HAS_CUDA and SM90OrLater, "Hopper+ required")
     @skipIfNoCuteDSL
     def test_every_cute_compile_hits_instrumented_frame(self):
         # Runtime coverage finds an instrumentation frame regardless of op factoring; the
