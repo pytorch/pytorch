@@ -13,7 +13,9 @@ TensorBase empty_cuda(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_cuda());
-  const DeviceGuard device_guard(device);
+  // A device without an index means the current device: nothing to switch to.
+  const OptionalDeviceGuard device_guard(
+      device.has_index() ? std::make_optional(device) : std::nullopt);
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
   return at::detail::empty_generic(
@@ -53,7 +55,8 @@ TensorBase empty_strided_cuda(
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   const auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT(device.is_cuda());
-  const DeviceGuard device_guard(device);
+  const OptionalDeviceGuard device_guard(
+      device.has_index() ? std::make_optional(device) : std::nullopt);
   auto* allocator = at::cuda::getCUDADeviceAllocator();
   constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
   return at::detail::empty_strided_generic(
