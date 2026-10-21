@@ -1850,6 +1850,8 @@ class TestMPS(TestCaseMPS):
         out = torch.empty(4, 3, device="mps")
         with self.assertRaises(RuntimeError):
             torch.linalg.cross(a, b, out=out)
+        with self.assertRaises(RuntimeError):
+            torch.linalg.cross(a, a, out=out.half())
 
     def test_bmm_conj(self):
         # bmm must respect the conjugate bit on input tensors.
