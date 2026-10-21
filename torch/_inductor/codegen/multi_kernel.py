@@ -12,7 +12,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
-from ..runtime.benchmarking import benchmarker
+from ..runtime.benchmarking import benchmarker, gpu_benchmark_lock
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg, WorkspaceArg
@@ -193,6 +193,18 @@ class MultiKernel:
             kernel.args.workspace_args = workspace_args
         return workspace_args
 
+    def launched_kernel_name(self) -> str:
+        """The kernel the generated code actually launches.
+
+        For the second pass of cpp-wrapper codegen the choice is already made,
+        so the concrete subkernel is called directly and the dispatcher name
+        never reaches the output. Anything naming the call -- a profiling guard
+        as much as the call itself -- has to use this rather than kernel_name.
+        """
+        if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
+            return MultiKernelCall.lookup_choice(self.kernel_name)
+        return self.kernel_name
+
     def call_kernel(self, kernel_name):
         """
         Collect the union of arguments from all subkernels as the arguments
@@ -218,10 +230,7 @@ class MultiKernel:
                     f"got {arg_types} != {other_arg_types}"
                 )
 
-        if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
-            # for the second pass of cpp-wrapper codegen, we should call
-            # the fast kernel directly
-            kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+        kernel_name = self.launched_kernel_name()
 
         if isinstance(self.kernels[0], TritonTemplateKernel) and isinstance(
             self.kernels[0].output_node, MultiTemplateBuffer
@@ -391,6 +400,7 @@ class MultiKernelCall:
 
         return self._kernels
 
+    @gpu_benchmark_lock
     def benchmark_sub_kernels(self, *args, **kwargs):
         """
         Benchmark all the sub kernels and return the execution time

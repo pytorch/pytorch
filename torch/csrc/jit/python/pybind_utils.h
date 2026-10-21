@@ -173,9 +173,9 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
           } catch (py::error_already_set& e) {
-            auto err = std::runtime_error(c10::str(
+            auto err = c10::str(
                 "Got the following error when running the callback: ",
-                e.what()));
+                e.what());
             {
               pybind11::gil_scoped_acquire ag;
               // Release ownership on py::objects and also restore Python
@@ -186,7 +186,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
 
-            throw std::runtime_error(err);
+            TORCH_CHECK(false, err);
           }
         },
         PyObjectType::get()));
@@ -782,6 +782,47 @@ c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
   return std::move(ivalue).toCustomClass<T>();
 }
 
+inline std::string basicTypeName(py::handle obj) {
+  return py::str(py::type::handle_of(obj).attr("__name__"));
+}
+
+constexpr size_t kMaxElements = 5;
+
+inline std::string sequenceTypeName(py::handle obj) {
+  auto seq = py::reinterpret_borrow<py::sequence>(obj);
+  auto length = py::len(seq);
+
+  if (length == 0) {
+    return basicTypeName(obj);
+  }
+
+  std::stringstream ss;
+  ss << basicTypeName(obj);
+  ss << "(";
+
+  size_t loop_bound = std::min(static_cast<size_t>(length), kMaxElements);
+  bool first = true;
+
+  // Readability cap on error-message output to prevent long sequences.
+  // Assumption: the sequence is homogeneous. This is true for the shape-derived
+  // lists this is meant for. This is NOT guaranteed for an arbitrary list a
+  // caller might pass.
+  for (const auto i : c10::irange(loop_bound)) {
+    if (!first) {
+      ss << ", ";
+    }
+    ss << basicTypeName(seq[i]);
+    first = false;
+  }
+
+  if (length > kMaxElements) {
+    ss << ", ...";
+  }
+
+  ss << ")";
+  return ss.str();
+}
+
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
 inline std::string friendlyTypeName(py::handle obj) {
@@ -789,7 +830,7 @@ inline std::string friendlyTypeName(py::handle obj) {
     auto field_names =
         py::cast<std::vector<std::string>>(py::getattr(obj, "_fields"));
     std::stringstream ss;
-    ss << py::str(py::type::handle_of(obj).attr("__name__"));
+    ss << basicTypeName(obj);
     ss << " (aka NamedTuple(";
     bool first = true;
     for (auto& field_name : field_names) {
@@ -801,8 +842,10 @@ inline std::string friendlyTypeName(py::handle obj) {
     }
     ss << "))";
     return std::move(ss).str();
+  } else if (py::isinstance<py::list>(obj) || py::isinstance<py::tuple>(obj)) {
+    return sequenceTypeName(obj);
   } else {
-    return py::str(py::type::handle_of(obj).attr("__name__"));
+    return basicTypeName(obj);
   }
 }
 
@@ -846,16 +889,18 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   try {
     return toIValue(object, type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(c10::str(
-        " expected value of type ",
-        type->str(),
-        " for return value but instead got value of type ",
-        py::str(py::type::handle_of(object).attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(object),
-        "\nCast error details: ",
-        error.what()));
+    TORCH_CHECK(
+        false,
+        c10::str(
+            " expected value of type ",
+            type->str(),
+            " for return value but instead got value of type ",
+            py::str(py::type::handle_of(object).attr("__name__")),
+            ".",
+            "\nValue: ",
+            py::repr(object),
+            "\nCast error details: ",
+            error.what()));
   }
 }
 
@@ -868,7 +913,7 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
     err << "Unknown reference to ScriptClass ";
     err << classType->name()->qualifiedName();
     err << ". (Did you forget to import it?)";
-    throw std::runtime_error(std::move(err).str());
+    TORCH_CHECK(false, std::move(err).str());
   }
   return py_class;
 }

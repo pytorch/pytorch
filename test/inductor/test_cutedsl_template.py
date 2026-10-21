@@ -6,6 +6,7 @@ from expecttest import assert_expected_inline
 
 import torch
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import MockGraphHandler
 
@@ -72,6 +73,12 @@ def {{kernel_name}}_jit(mA: cute.Tensor, mB: cute.Tensor, mC: cute.Tensor, strea
 class TestCuteDSLTemplate(TestCase):
     """Test cases for CuteDSL template functionality."""
 
+    # dense_gemm_efc imports cutlass.operators, which ships in a separate
+    # package that smoke_b200 cannot install (see TODO(#189590) in test.sh).
+    @unittest.skipIf(
+        not ensure_nv_universal_gemm_available(),
+        "NVIDIA Universal GEMM (cutlass_api) library not available",
+    )
     def test_vendored_dense_efc_kernel_configuration(self):
         from cutlass.cute.nvgpu import tcgen05
         from cutlass.operators.providers.cutedsl.evt.converter import EFCConverter
@@ -867,6 +874,36 @@ SCALE_FACTOR: cutlass.Constexpr = 1.5
             "result_type=(cutlass.Float32, cutlass.Float32, cutlass.Float32)",
             body,
         )
+
+    def test_cutedsl_constant_division_lowers_to_multiply(self):
+        # Reciprocal multiplication avoids costly division in GEMM epilogues.
+        from torch._inductor.codegen.common import CSEVariable
+        from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
+            CuteDSLOpOverrides,
+            use_cutedsl_fast_math,
+        )
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        x = MagicMock(spec=CSEVariable)
+        x.__str__.return_value = "x"
+        x.dtype = torch.float32
+        x.bounds = ValueRanges.unknown()
+        x.shape = (32, 64)
+
+        def lowered(divisor, fast_math):
+            kernel = CuteDSLTemplateKernel(
+                kernel_name="test_div", input_nodes=[], output_node=None
+            )
+            with V.set_kernel_handler(kernel), use_cutedsl_fast_math(fast_math):
+                CuteDSLOpOverrides.truediv(x, divisor)
+            return kernel.body.getvalue()
+
+        with V.set_graph_handler(MockGraphHandler()):
+            # 1 / 4 is exactly representable as a normal fp32; no fast math needed.
+            self.assertIn("x * cute.full_like(x, 0.25)", lowered(4.0, False))
+            self.assertIn("x / ", lowered(25.0, False))
+            self.assertIn("x * cute.full_like(x, 0.04)", lowered(25.0, True))
+            self.assertIn("x / ", lowered(0.0, True))
 
     def test_cutedsl_op_overrides_fast_math(self):
         from torch._inductor.codegen.common import CSEVariable

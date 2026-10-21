@@ -28,19 +28,12 @@ def get_env_variable_or_raise(env_name: str) -> str:
 
 
 def get_socket_with_port() -> socket.socket:
-    addrs = socket.getaddrinfo(
-        host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+    """See :func:`torch.distributed.elastic.utils.distributed.get_socket_with_port`."""
+    from torch.distributed.elastic.utils.distributed import (
+        get_socket_with_port as _get_socket_with_port,
     )
-    for addr in addrs:
-        family, type, proto, _, _ = addr
-        s = socket.socket(family, type, proto)
-        try:
-            s.bind(("localhost", 0))
-            s.listen(0)
-            return s
-        except OSError:
-            s.close()
-    raise RuntimeError("Failed to create a socket")
+
+    return _get_socket_with_port()
 
 
 class macros:

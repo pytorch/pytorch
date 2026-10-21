@@ -10,7 +10,6 @@
 #include <ATen/record_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
@@ -27,7 +26,6 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/saved_variable.h>
-#include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -36,7 +34,6 @@
 #include <ActivityType.h>
 #include <ITraceActivity.h>
 #endif
-#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -450,10 +447,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_prepare_profiler",
-      prepareProfiler,
+      [](const ProfilerConfig& config,
+         const std::set<ActivityType>& activities,
+         const ActivityFilter& activity_filter,
+         const ProfilerExtensionMap& profiler_extensions) {
+        prepareProfiler(
+            config, activities, activity_filter, profiler_extensions);
+      },
       py::arg("config"),
       py::arg("activities"),
-      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
+      py::arg("activity_filter") = ActivityFilter{},
+      py::arg("profiler_extensions") = ProfilerExtensionMap{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",
@@ -720,19 +724,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
             // of the hook functions for us
             s.register_hooks(
                 std::make_unique<torch::autograd::PySavedVariableHooks>(
-                    pack_hook, unpack_hook));
+                    std::move(pack_hook), std::move(unpack_hook)));
           })
       .def_property_readonly(
           "data",
           [](const torch::autograd::SavedVariable& s) -> py::object {
             if (s.has_hooks()) {
+              // has_hooks() guarantees a value here (or a throw).
               auto opt = s.retrieve_unpack_hook_data();
-              TORCH_INTERNAL_ASSERT(opt.has_value());
               py::gil_scoped_acquire gil;
               const auto& [_unpack_fn, data_obj] = *opt;
-              PyObject* raw = data_obj.ptr(getPyInterpreter());
-              TORCH_INTERNAL_ASSERT(raw != nullptr);
-              return py::reinterpret_borrow<py::object>(raw);
+              return py::reinterpret_borrow<py::object>(
+                  data_obj.ptr(getPyInterpreter()));
             } else {
               return py::cast(s.get_raw_data().value());
             }
@@ -740,14 +743,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def_property_readonly(
           "unpack_hook",
           [](const torch::autograd::SavedVariable& s) -> py::object {
-            auto opt = s.retrieve_unpack_hook_data();
+            auto opt = s.retrieve_unpack_hook();
             if (!opt.has_value()) {
               return py::none();
             }
             py::gil_scoped_acquire gil;
-            const auto& [unpack_safe, _unused_data] = *opt;
-            auto* unpack_ptr = unpack_safe.ptr(getPyInterpreter());
-            return py::reinterpret_borrow<py::function>(unpack_ptr);
+            return py::reinterpret_borrow<py::function>(
+                opt->ptr(getPyInterpreter()));
           });
 
   m.def(

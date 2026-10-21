@@ -304,6 +304,16 @@ _differentiable_doc = r"""differentiable (bool, optional): whether autograd shou
 _maximize_doc = r"""maximize (bool, optional): maximize the objective with respect to the
             params, instead of minimizing (default: False)"""
 
+_functional_api_doc = r"""Functional API that performs {optimizer} algorithm computation.
+
+This function updates the provided parameters and optimizer state in place.
+The caller must initialize and retain optimizer state. Unless intentionally
+constructing a differentiable update with a supported ``differentiable=True``
+argument, call this function under :class:`torch.no_grad`.
+See :ref:`functional-optimizer-api` for the common functional optimizer
+contract and examples, and :class:`~torch.optim.{optimizer}` for algorithm
+details."""
+
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers.
@@ -409,6 +419,14 @@ class Optimizer:
             raise TypeError(
                 "params argument given to the optimizer should be "
                 "an iterable of Tensors or dicts, but got " + torch.typename(params)
+            )
+        elif isinstance(params, set):
+            warnings.warn(
+                "optimizer parameters need to be organized in ordered collections, but "
+                "the ordering of tensors in sets will change between runs. Please use a "
+                "list instead. This will be an error in a future release.",
+                FutureWarning,
+                stacklevel=2,
             )
 
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)

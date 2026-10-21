@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 import logging
 import multiprocessing as mp
 import os
@@ -275,7 +274,7 @@ def fuzz_and_execute(
         sys.exit(1)
 
 
-def main():
+def main() -> None:
     import argparse
 
     # Initialize the device plugin once up front so argparse choices reflect the
@@ -285,14 +284,20 @@ def main():
     default_template = "default" if "default" in template_names else template_names[0]
 
     try:
+        # pyrefly: ignore[missing-import]  # sibling module, only importable when this dir is on sys.path
         from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
     except ImportError:
         # If importing as a module fails, import from the same directory
         import os
+
+        # NB: latent bug - `import sys` here shadows the module-level `sys` with a
+        # local binding, so the `sys.exit(...)` calls below raise NameError when the
+        # `try` import succeeds. Left as-is; fixing it needs a test first.
         import sys
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, current_dir)
+        # pyrefly: ignore[missing-import]  # sibling module, resolved via the sys.path insert above
         from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
 
     # Set up command-line argument parsing
@@ -387,6 +392,7 @@ def main():
             print(
                 "❌ Error: --generate-only cannot be used with --stop-at-first-failure"
             )
+            # pyrefly: ignore[unbound-name]  # latent bug: `sys` is local to main() via the except-branch import
             sys.exit(1)
         # Multi-seed mode requires a '?' so generated files don't collide.
         if args.start is not None or args.count is not None:

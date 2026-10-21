@@ -188,7 +188,7 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
     expect(",");
     TypePtr field_type = parse();
     field_names.emplace_back(field_name);
-    field_types.emplace_back(field_type);
+    field_types.emplace_back(std::move(field_type));
     expect("]");
     if (cur() == ",") {
       next();

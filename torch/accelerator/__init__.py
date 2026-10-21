@@ -7,9 +7,10 @@ from typing import Any
 from typing_extensions import deprecated
 
 import torch
+from torch.types import Device
 
 from . import random
-from ._utils import _device_t, _get_device_index
+from ._utils import _get_device_index
 from .graphs import Graph
 from .memory import (
     empty_cache,
@@ -160,7 +161,7 @@ current_device_idx.__doc__ = r"""
 
 
 @cache
-def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
+def get_device_capability(device: Device = None, /) -> dict[str, Any]:
     r"""Return the capability of the currently selected device.
 
     Args:
@@ -186,7 +187,7 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
     return torch._C._accelerator_getDeviceCapability(device_index)
 
 
-def set_device_index(device: _device_t, /) -> None:
+def set_device_index(device: Device, /) -> None:
     r"""Set the current device index to a given device.
 
     Args:
@@ -218,7 +219,7 @@ set_device_idx.__doc__ = r"""
     """
 
 
-def current_stream(device: _device_t = None, /) -> torch.Stream:
+def current_stream(device: Device = None, /) -> torch.Stream:
     r"""Return the currently selected stream for a given device.
 
     Args:
@@ -244,7 +245,7 @@ def set_stream(stream: torch.Stream) -> None:
     torch._C._accelerator_setStream(stream)
 
 
-def synchronize(device: _device_t = None, /) -> None:
+def synchronize(device: Device = None, /) -> None:
     r"""Wait for all kernels in all streams on the given device to complete.
 
     Args:

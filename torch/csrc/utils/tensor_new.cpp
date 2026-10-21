@@ -25,12 +25,13 @@
 #include <ATen/dlpack.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/core/Layout.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <optional>
 
-#include <stdexcept>
+#include <bit>
+#include <cctype>
+#include <string>
 #include <vector>
 
 using at::Device;
@@ -426,19 +427,22 @@ Tensor internal_new_from_data(
 
         // If the device is Meta, take the shortcut. We don't want to allocate
         // an empty CPU tensor which would break our contract for meta tensors.
-        if (device == at::kMeta) {
-          return at::empty(sizes, opts.device(device));
-        }
-        tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
-        if (c10::multiply_integers(tensor.sizes()) != 0) {
-          recursive_store(
-              (char*)tensor.data_ptr(),
-              tensor.sizes(),
-              tensor.strides(),
-              0,
-              inferred_scalar_type,
-              tensor.dtype().itemsize(),
-              data);
+        // Indexed Meta devices take the same path and, like plain Meta, skip
+        // recursive_store validation.
+        if (device.type() == DeviceType::Meta) {
+          tensor = at::empty(sizes, opts.device(device));
+        } else {
+          tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+          if (c10::multiply_integers(tensor.sizes()) != 0) {
+            recursive_store(
+                (char*)tensor.data_ptr(),
+                tensor.sizes(),
+                tensor.strides(),
+                0,
+                inferred_scalar_type,
+                tensor.dtype().itemsize(),
+                data);
+          }
         }
       }
     }
@@ -472,13 +476,28 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
-    if (!device.has_index() &&
-        !torch::utils::is_device_initialized(device.type())) {
-      // Infer device 0 to avoid device init
-      device = c10::Device(device.type(), 0);
+  // CPU and Meta tensors are already on their canonical devices, but tensors
+  // constructed from storage can still need a post-lift device move.
+  if (only_lift_cpu_tensors()) {
+    const auto tensor_device_type = tensor.device().type();
+    const bool already_on_canonical_device =
+        (device.type() == DeviceType::CPU &&
+         tensor_device_type == DeviceType::CPU) ||
+        (device.type() == DeviceType::Meta &&
+         tensor_device_type == DeviceType::Meta);
+    if (!already_on_canonical_device) {
+      if (device.type() == DeviceType::Meta) {
+        device = at::kMeta;
+      } else if (device.type() == DeviceType::CPU) {
+        device = at::kCPU;
+      } else if (
+          !device.has_index() &&
+          !torch::utils::is_device_initialized(device.type())) {
+        // Infer device 0 to avoid device init
+        device = c10::Device(device.type(), 0);
+      }
+      tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
     }
-    tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
   }
   return tensor;
 }
@@ -1544,7 +1563,8 @@ Tensor tensor_frombuffer(
   if (PyObject_GetBuffer(buffer, &view, PyBUF_WRITABLE) < 0) {
     TORCH_CHECK(
         PyObject_GetBuffer(buffer, &view, PyBUF_SIMPLE) >= 0,
-        "could not retrieve buffer from object");
+        "could not retrieve a contiguous buffer from the given object "
+        "(non-contiguous buffers are not supported)");
     TORCH_WARN_ONCE(
         "The given buffer is not writable, and PyTorch does "
         "not support non-writable tensors. This means you can write to the "
@@ -1671,6 +1691,166 @@ bool isValidDLPackCapsule(PyObject* data) {
       PyCapsule_IsValid(data, at::DLPackTraits<DLManagedTensor>::capsule);
 }
 
+// Infers a ScalarType from a buffer-protocol object's declared format.
+// Only native byte order is supported because tensor_frombuffer reinterprets
+// bytes without byte-swapping; unsupported/ambiguous formats raise, asking for
+// an explicit dtype rather than silently producing wrong results.
+ScalarType scalar_type_from_buffer_format(PyObject* obj) {
+  Py_buffer view;
+  if (PyObject_GetBuffer(obj, &view, PyBUF_FORMAT | PyBUF_STRIDES) < 0) {
+    PyErr_Clear();
+    TORCH_CHECK_VALUE(
+        false,
+        "could not infer a dtype from the buffer's format. "
+        "Please pass an explicit dtype= to torch.asarray.");
+  }
+  std::string format = view.format != nullptr ? view.format : "B";
+  auto itemsize = view.itemsize;
+  PyBuffer_Release(&view);
+
+  // PEP-3118 scalar format: [ws] [byteorder] [ws] [count] [ws] typecode
+  size_t i = 0;
+  auto skip_ws = [&]() {
+    while (i < format.size() &&
+           std::isspace(static_cast<unsigned char>(format[i]))) {
+      ++i;
+    }
+  };
+
+  skip_ws();
+
+  constexpr bool little_endian = std::endian::native == std::endian::little;
+  bool native_order = true;
+  if (i < format.size()) {
+    switch (format[i]) {
+      case '@':
+      case '=':
+        ++i;
+        break;
+      case '<':
+        native_order = little_endian;
+        ++i;
+        break;
+      case '>':
+      case '!':
+        native_order = !little_endian;
+        ++i;
+        break;
+      default:
+        break;
+    }
+  }
+  TORCH_CHECK_VALUE(
+      native_order,
+      "buffer has non-native byte order (format '",
+      format,
+      "'), which torch.asarray cannot reinterpret without copying. "
+      "Convert the buffer to native byte order first (e.g. with numpy's "
+      "arr.byteswap().view(arr.dtype.newbyteorder())).");
+
+  skip_ws();
+
+  size_t count_start = i;
+  while (i < format.size() && format[i] >= '0' && format[i] <= '9') {
+    ++i;
+  }
+  if (i > count_start) {
+    TORCH_CHECK_VALUE(
+        i - count_start == 1 && format[count_start] == '1',
+        "could not infer a dtype from buffer format '",
+        format,
+        "' (multi-element formats are not supported). "
+        "Please pass an explicit dtype= to torch.asarray.");
+  }
+
+  skip_ws();
+
+  const char code = i < format.size() ? format[i] : '\0';
+  const char sub = (i + 1) < format.size() ? format[i + 1] : '\0';
+  std::optional<ScalarType> scalar_type;
+  if (code == 'Z') {
+    switch (sub) {
+      case 'e':
+        scalar_type = ScalarType::ComplexHalf;
+        break;
+      case 'f':
+        scalar_type = ScalarType::ComplexFloat;
+        break;
+      case 'd':
+        scalar_type = ScalarType::ComplexDouble;
+        break;
+      default:
+        break;
+    }
+  } else {
+    switch (code) {
+      case '?':
+        scalar_type = ScalarType::Bool;
+        break;
+      case 'b':
+        scalar_type = ScalarType::Char;
+        break;
+      case 'c':
+      case 'B':
+        scalar_type = ScalarType::Byte;
+        break;
+      case 'h':
+        scalar_type = ScalarType::Short;
+        break;
+      case 'H':
+        scalar_type = ScalarType::UInt16;
+        break;
+      case 'i':
+        scalar_type = ScalarType::Int;
+        break;
+      case 'I':
+        scalar_type = ScalarType::UInt32;
+        break;
+      // 'l'/'n'/'q' (and unsigned) map to 32- or 64-bit ints depending on the
+      // platform's itemsize; the cross-check below guards the choice.
+      case 'l':
+      case 'n':
+      case 'q':
+        scalar_type = itemsize == 8 ? ScalarType::Long : ScalarType::Int;
+        break;
+      case 'L':
+      case 'N':
+      case 'Q':
+        scalar_type = itemsize == 8 ? ScalarType::UInt64 : ScalarType::UInt32;
+        break;
+      case 'e':
+        scalar_type = ScalarType::Half;
+        break;
+      case 'f':
+        scalar_type = ScalarType::Float;
+        break;
+      case 'd':
+        scalar_type = ScalarType::Double;
+        break;
+      default:
+        break;
+    }
+  }
+
+  TORCH_CHECK_VALUE(
+      scalar_type.has_value(),
+      "could not infer a dtype from buffer format '",
+      format,
+      "'. Please pass an explicit dtype= to torch.asarray.");
+
+  TORCH_CHECK_VALUE(
+      at::elementSize(*scalar_type) == static_cast<size_t>(itemsize),
+      "buffer format '",
+      format,
+      "' has itemsize ",
+      itemsize,
+      " which does not match the inferred dtype ",
+      *scalar_type,
+      ". Please pass an explicit dtype= to torch.asarray.");
+
+  return *scalar_type;
+}
+
 } // namespace
 
 Tensor tensor_fromDLPack(PyObject* data) {
@@ -1713,9 +1893,8 @@ Tensor asarray(
   bool force_alias = !copy.value_or(true);
   bool should_warn_numpy_not_writable = false;
 
-  // Used when:
-  // 1. 'obj' implements the buffer protocol and no type is given.
-  // 2. creating a new tensor from a Python sequence.
+  // Used when creating a new tensor from a Python sequence, in which case the
+  // element type is inferred (or forced to the given dtype).
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
 
@@ -1779,8 +1958,10 @@ Tensor asarray(
 
   // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
-    tensor =
-        tensor_frombuffer(obj, dtype_unwrapped, -1, 0, return_requires_grad);
+    // When no dtype is given, infer it from the buffer's declared format
+    ScalarType buffer_dtype =
+        dtype.has_value() ? *dtype : scalar_type_from_buffer_format(obj);
+    tensor = tensor_frombuffer(obj, buffer_dtype, -1, 0, return_requires_grad);
   }
 
   if (tensor.defined()) {

@@ -376,7 +376,9 @@ def record(
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             if error_handler is None:
                 raise AssertionError  # assertion for mypy type checker
-            error_handler.set_entrypoint_fn_name(f.__qualname__)
+            # f may be a functools.partial (or other callable) without a
+            # __qualname__; attribute the error to the fn name when available.
+            error_handler.set_entrypoint_fn_name(getattr(f, "__qualname__", None))
             error_handler.initialize()
             try:
                 result = f(*args, **kwargs)

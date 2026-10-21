@@ -7,8 +7,8 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import Int32, Boolean, const_expr
 
-from . import copy_utils
-from .cute_dsl_utils import mlir_namedtuple
+from torch._vendor.quack import copy_utils
+from torch._vendor.quack.cute_dsl_utils import mlir_namedtuple
 
 
 # Grouping arguments together that should be passed to __call__
@@ -17,6 +17,12 @@ class VarlenArguments(NamedTuple):
     mCuSeqlensM: Optional[cute.Tensor] = None
     mCuSeqlensK: Optional[cute.Tensor] = None
     mAIdx: Optional[cute.Tensor] = None
+    # Per-sequence M-tile prefix (num_seqs + 1,): cumsum of
+    # ceil(seqlen / cta_tile_M). Host-computed (device tensor) and only passed
+    # when an epilogue op needs per-sequence tile indexing (M-fold reduce
+    # sinks); the tile scheduler's m index is sequence-local, so a batchless
+    # per-M-tile buffer needs this offset to keep sequences' rows disjoint.
+    mCuTilesM: Optional[cute.Tensor] = None
 
 
 class VarlenManager:
@@ -25,6 +31,7 @@ class VarlenManager:
         cu_seqlens_m: Optional[cute.Tensor] = None
         cu_seqlens_k: Optional[cute.Tensor] = None
         mAIdx: Optional[cute.Tensor] = None
+        cu_tiles_m: Optional[cute.Tensor] = None
 
         @staticmethod
         @cute.jit
@@ -33,6 +40,7 @@ class VarlenManager:
                 cu_seqlens_m=args.mCuSeqlensM,
                 cu_seqlens_k=args.mCuSeqlensK,
                 mAIdx=args.mAIdx,
+                cu_tiles_m=args.mCuTilesM,
             )
 
     def __init__(
@@ -40,6 +48,7 @@ class VarlenManager:
         params: Params,
         len_m_static: Int32,
         len_k_static: Int32,
+        len_n_static: Int32,
         last_batch_idx: Int32 = Int32(-1),
         is_group_changed: Boolean = Boolean(True),
         *,
@@ -49,6 +58,7 @@ class VarlenManager:
         self.params = params
         self._len_m_static = len_m_static
         self._len_k_static = len_k_static
+        self._len_n_static = len_n_static
         self._last_batch_idx = last_batch_idx
         self._is_group_changed = is_group_changed
         self.varlen_m = const_expr(params.cu_seqlens_m is not None)
@@ -70,11 +80,17 @@ class VarlenManager:
         params: Params,
         len_m_static: Int32,
         len_k_static: Int32,
+        len_n_static: Int32,
         *,
         loc=None,
         ip=None,
     ) -> "VarlenManager":
-        return VarlenManager(params, len_m_static=len_m_static, len_k_static=len_k_static)
+        return VarlenManager(
+            params,
+            len_m_static=len_m_static,
+            len_k_static=len_k_static,
+            len_n_static=len_n_static,
+        )
 
     def len_m(self, batch_idx: Int32) -> Int32:
         if const_expr(self.varlen_m):
@@ -88,10 +104,38 @@ class VarlenManager:
         else:
             return self._len_k_static
 
+    def len_n(self) -> Int32:
+        # N is never variable-length (no varlen_n), so this is always the
+        # static problem N (from mB) the kernel passed at construction.
+        return self._len_n_static
+
+    def tile_m_offset(self, batch_idx: Int32) -> Int32:
+        """This sequence's first row in a per-M-tile buffer (cu_tiles_m prefix)."""
+        return self.params.cu_tiles_m[batch_idx]
+
+    def len_m_tiles(self, batch_idx: Int32) -> Int32:
+        """Number of M tiles this sequence owns (from the cu_tiles_m prefix)."""
+        return self.params.cu_tiles_m[batch_idx + 1] - self.params.cu_tiles_m[batch_idx]
+
     def offset_batch_A(self, mA_mkl: cute.Tensor, batch_idx: Int32) -> cute.Tensor:
         params = self.params
         if const_expr(self.varlen_m):
-            mA_mk = cute.domain_offset((params.cu_seqlens_m[batch_idx], None), mA_mkl)
+            offset = params.cu_seqlens_m[batch_idx]
+            ragged_rank = const_expr(cute.rank(mA_mkl))
+            if const_expr(ragged_rank == 2):  # Didn't create ragged tensor (gather_A)
+                mA_mk = cute.domain_offset((offset, None), mA_mkl)
+            else:
+                # Ragged-for-TMA (zero-fill rows past the sequence end): loads
+                # must use the 2-extra-dim wraparound form (ptr_shift lands the
+                # descriptor base outside mapped memory, store-only).
+                length = params.cu_seqlens_m[batch_idx + 1] - offset
+                mA_mk = copy_utils.offset_ragged_tensor(
+                    mA_mkl,
+                    offset,
+                    length,
+                    ragged_dim=0,
+                    ptr_shift=False,
+                )
         elif const_expr(self.varlen_k):
             offset = params.cu_seqlens_k[batch_idx]
             ragged_rank = const_expr(cute.rank(mA_mkl))
@@ -123,7 +167,7 @@ class VarlenManager:
         return mAIdx_mk
 
     def offset_batch_SFA(self, mSFA_mkl: cute.Tensor, batch_idx: Int32) -> cute.Tensor:
-        """Offset SFA by padded per-expert offset (dQaccum-style).
+        """Offset SFA to this batch's tile-aligned region of the padded SF buffer.
 
         The padded offset, in tile units (128 source-M or source-K per tile),
         is simply `cu_seqlens[b] // 128 + b`. (Algebraically identical to
@@ -136,22 +180,28 @@ class VarlenManager:
         tile = 128
         if const_expr(self.varlen_m):
             offset_tile = params.cu_seqlens_m[batch_idx] // tile + batch_idx
-            return cute.domain_offset(((0, offset_tile), None), mSFA_mkl)
+            return cute.domain_offset(((None, offset_tile), None), mSFA_mkl)
         elif const_expr(self.varlen_k):
             offset_tile = params.cu_seqlens_k[batch_idx] // tile + batch_idx
-            return cute.domain_offset((None, (0, offset_tile)), mSFA_mkl)
+            return cute.domain_offset((None, (None, offset_tile)), mSFA_mkl)
         else:
             return mSFA_mkl[None, None, batch_idx]
 
-    def offset_batch_SFB(self, mSFB_nkl: cute.Tensor, batch_idx: Int32) -> cute.Tensor:
-        """Offset SFB by padded per-expert K offset (varlen_k only)."""
+    def offset_batch_SFB(self, mSFB_chunks: cute.Tensor, batch_idx: Int32) -> cute.Tensor:
+        """Slice the (chunk, RK, RN, L) SFB chunk view to this batch.
+
+        For varlen_k (L == 1) the batch offset is on the atom-k mode, with the
+        same tile-aligned padded-layout arithmetic as offset_batch_SFA.
+        (varlen_k blockscaled is mxfp8-only, where one SF atom covers
+        4 sf-k blocks x sf_vec_size 32 = 128 K elements.)
+        """
         params = self.params
         tile = 128
         if const_expr(self.varlen_k):
-            offset_tile = params.cu_seqlens_k[batch_idx] // tile + batch_idx
-            return cute.domain_offset((None, (0, offset_tile)), mSFB_nkl)
+            offset_atom_k = params.cu_seqlens_k[batch_idx] // tile + batch_idx
+            return cute.domain_offset((None, offset_atom_k, None), mSFB_chunks[None, None, None, 0])
         else:
-            return mSFB_nkl[None, None, batch_idx]
+            return mSFB_chunks[None, None, None, batch_idx]
 
     def offset_batch_B(self, mB_nkl: cute.Tensor, batch_idx: Int32) -> cute.Tensor:
         params = self.params
@@ -201,6 +251,7 @@ class VarlenManager:
             self.params,
             self._len_m_static,
             self._len_k_static,
+            self._len_n_static,
             self._last_batch_idx,
             self._is_group_changed,
         ]:
@@ -216,6 +267,7 @@ class VarlenManager:
                 self.params,
                 self._len_m_static,
                 self._len_k_static,
+                self._len_n_static,
                 self._last_batch_idx,
                 self._is_group_changed,
             ],
