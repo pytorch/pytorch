@@ -745,14 +745,8 @@ REGISTER_BINARY_ALPHA_OP(add_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(add_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool, bool);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long, long);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float, float);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, float, half);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short, short);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, float, bfloat);
@@ -775,7 +769,7 @@ REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, float2, half2);
 
 // lerp with tensor weight: lerp(s, e, w) = s + w * (e - s)
 // Computed at opmath precision, matching the CPU/CUDA reference, which casts
@@ -791,4 +785,4 @@ REGISTER_OPMATH_TERNARY_OP(lerp, float, float);
 REGISTER_OPMATH_TERNARY_OP(lerp, half, half);
 REGISTER_OPMATH_TERNARY_OP(lerp, bfloat, bfloat);
 REGISTER_OPMATH_TERNARY_OP(lerp, float2, float2);
-REGISTER_OPMATH_TERNARY_OP(lerp, long, long);
+REGISTER_OPMATH_TERNARY_OP(lerp, half2, half2);
