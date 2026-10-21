@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
+    _omit_skipped_tests,
     _TestParametrizer,
     clear_tracked_input,
     compose_parametrize_fns,
@@ -1332,6 +1333,8 @@ def instantiate_device_type_tests(
                 # classmethod descriptors.
                 nontest = generic_test_class.__dict__[name]
                 setattr(device_type_test_class, name, nontest)
+
+        _omit_skipped_tests(device_type_test_class)
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
