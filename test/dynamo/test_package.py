@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -22,7 +24,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-from torch._dynamo.exc import PackageError, Unsupported
+from torch._dynamo.exc import PackageError, SkipFrame, Unsupported, UserError
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -30,14 +32,16 @@ from torch._dynamo.package import (
     CompilePackage,
     DiskDynamoStore,
     DynamoCache,
+    load_guards_state,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.precompile_package import default_guard_filter_fn
+from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
@@ -56,6 +60,28 @@ def import_from_path(module_name, file_path):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def hooked_forward(x, w):
+    y = x.sin() * w
+    torch._dynamo.graph_break()
+    return y.cos().sum()
+
+
+# Inlineable (GraphModule) saved tensors hooks whose pack is lossy, so packing a
+# saved tensor twice changes the gradients.
+def doubling_pack(x):
+    return x * 2
+
+
+def identity_unpack(x):
+    return x
+
+
+INLINEABLE_HOOKS = (
+    torch.fx.symbolic_trace(doubling_pack),
+    torch.fx.symbolic_trace(identity_unpack),
+)
 
 
 def compute_loss_helper(x):
@@ -210,6 +236,19 @@ def _package_op(x):
     return x + 1
 
 
+@torch._dynamo.disable
+def _opaque(y):
+    return y + 0
+
+
+def _dispatch(y, opaque_layers):
+    # Traces whole for opaque_layers=0. For more, the graph break inside the loop
+    # is one Dynamo cannot resume from, so it gives up on the code object.
+    for _ in range(opaque_layers):
+        y = _opaque(y)
+    return y.sin()
+
+
 @dataclasses.dataclass
 class _GraphBreakingDataclass:
     x: torch.Tensor
@@ -223,6 +262,49 @@ class _GraphBreakingDataclass:
 PKG_DYN_ROWS = torch.randn(4, 3)
 torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
 
+# namedtuple builds __new__ with exec into a namespace no module owns.
+PkgRecord = collections.namedtuple("PkgRecord", ("value", "weight"))
+
+PKG_LOG_SCOPE = {"log": []}
+exec("def scale(self, x):\n    log.append(1)\n    return x * 3\n", PKG_LOG_SCOPE)
+
+
+class PkgLogger:
+    scale = PKG_LOG_SCOPE["scale"]
+
+
+PKG_LOGGER = PkgLogger()
+
+PKG_FACTOR_SCOPE = {"factor": 3}
+exec("def scale(self, x):\n    return x * factor\n", PKG_FACTOR_SCOPE)
+
+
+class PkgScaler:
+    scale = PKG_FACTOR_SCOPE["scale"]
+
+
+PKG_SCALER = PkgScaler()
+
+# scale reaches helper through the namespace itself, so helper's source is rooted
+# at the unnamed scope key that stands for it.
+PKG_CHAIN_SCOPE = {"factor": 3}
+exec(
+    "def helper(x):\n    return x * factor\n"
+    "helpers = [helper]\n"
+    "def scale(self, x):\n    return helpers[0](x)\n",
+    PKG_CHAIN_SCOPE,
+)
+
+
+class PkgChainScaler:
+    scale = PKG_CHAIN_SCOPE["scale"]
+
+
+PKG_HANDLER_SCOPE = {"factor": 3}
+exec("def scale(x):\n    return x * factor\n", PKG_HANDLER_SCOPE)
+PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
+PKG_HANDLER_SET = {PKG_HANDLER_SCOPE["scale"]}
+
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -234,6 +316,28 @@ class TestPackage(torch._inductor.test_case.TestCase):
         path = os.path.join(cache_dir(), f"package_{self.id()}")
         os.makedirs(path, exist_ok=True)
         return path
+
+    def count_backend_runs(self, fn, backends):
+        """Wrap the backends install() put in fn's module; the list grows by one
+        per run, so a served variant is told apart from an eager run."""
+        module = sys.modules[fn.__module__]
+        runs = []
+        for backend_id in backends:
+            installed = getattr(module, backend_id)
+
+            @torch._dynamo.disable
+            def run(*args, _installed=installed):
+                runs.append(1)
+                return _installed(*args)
+
+            def restore(backend_id=backend_id, run=run, installed=installed):
+                # uninstall() may already have removed the name; leave it gone.
+                if vars(module).get(backend_id) is run:
+                    setattr(module, backend_id, installed)
+
+            self.addCleanup(restore)
+            setattr(module, backend_id, run)
+        return runs
 
     def setUp(self):
         super().setUp()
@@ -408,6 +512,169 @@ print(eval(f"bbmod.{name}.{path}") is code)
             )(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(x))
+
+    def _reload_eager_package(self, fn, package, backends):
+        ctx = DiskDynamoStore()
+        for backend_id, backend in backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        torch._dynamo.reset()
+        return ctx.load_package(fn, self.path())
+
+    def test_refuse_callback_runs_a_miss_of_an_eager_fallback_frame_eagerly(self):
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
+        x = torch.randn(3)
+        package = CompilePackage(_dispatch)
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(_dispatch)
+        compiled_fn(x, 0)
+        compiled_fn(x, 1)
+        entry = package._codes[_dispatch.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+        # A reloaded package caches no backends, so keep the captured ones.
+        eager = dict(package.cached_backends)
+        package, backends = self._reload_eager_package(_dispatch, package, eager)
+
+        # A plain install() (DynamoCache's) takes no hold for the flag: a miss
+        # still reaches the callback.
+        compiled_fn = torch._dynamo.optimize(package=package)(_dispatch)
+        package.install(backends)
+        with (
+            torch.compiler.set_stance("fail_on_recompile"),
+            self.assertRaisesRegex(RuntimeError, "Detected recompile"),
+        ):
+            compiled_fn(x, 1)
+        package.uninstall()
+
+        # An installed precompile artifact's callback serves the variant and runs
+        # the miss eagerly; without the frame in eager_codes it refuses.
+        for eager_codes in ([_dispatch.__code__], []):
+            torch._dynamo.reset()
+            package, backends = self._reload_eager_package(_dispatch, package, eager)
+            context = torch._dynamo.optimize(package=package)
+            context.callback = _RefuseRecompileCallback(context.callback, eager_codes)
+            compiled_fn = context(_dispatch)
+            package.install(backends)
+            runs = self.count_backend_runs(_dispatch, backends)
+            self.assertEqual(compiled_fn(x, 0), x.sin())
+            self.assertEqual(len(runs), 1)
+            if eager_codes:
+                # The eager miss warns, once per frame.
+                torch._logging._internal.warning_once.cache_clear()
+                with self.assertLogs("torch._dynamo.eval_frame", "WARNING") as logs:
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                    self.assertEqual(compiled_fn(x, 1), x.sin())
+                self.assertEqual(len(logs.output), 1, logs.output)
+                self.assertIn("no captured variant of _dispatch", logs.output[0])
+                self.assertEqual(compiled_fn(x, 0), x.sin())
+                self.assertEqual(len(runs), 2)
+            else:
+                msg = "Detected recompile of a frame whose callable refuses"
+                with self.assertRaisesRegex(_RecompileRefusedError, msg):
+                    compiled_fn(x, 1)
+            package.uninstall()
+
+    def test_a_suppressed_user_error_is_an_eager_fallback(self):
+        def fn(x, branch):
+            if branch:
+                # Tracing this raises a UserError, which Dynamo suppresses and
+                # skips the frame for, as for Unsupported; eager raises TypeError.
+                try:
+                    torch._dynamo.decorators.override_optimization_hint(x, 1)
+                except TypeError:
+                    pass
+            return x.sin()
+
+        package = CompilePackage(fn)
+        # Unsupported is flagged too, so pin that this one is a UserError.
+        flagged = []
+        record = package.record_eager_fallback
+
+        def spy(code):
+            flagged.append(type(sys.exc_info()[1]))
+            record(code)
+
+        compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x, False)
+        with patch.object(package, "record_eager_fallback", spy):
+            self.assertEqual(compiled_fn(x, True), x.sin())
+        self.assertEqual(flagged, [UserError])
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_skip_is_an_eager_fallback(self):
+        compiled = []
+
+        def backend(gm, example_inputs):
+            if compiled:
+                raise SkipFrame("declined")
+            compiled.append(gm)
+            return gm.forward
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        x = torch.randn(3)
+        compiled_fn(x)
+        compiled_fn(x.double())
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(len(entry.guarded_codes), 1)
+
+    def test_a_backend_fallback_error_is_an_eager_fallback(self):
+        # Dynamo turns this into a soft Unsupported for the whole frame.
+        calls = []
+
+        def backend(gm, example_inputs):
+            calls.append(gm)
+            raise DynamicOutputShapeException(torch.ops.aten.nonzero.default)
+
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+        compiled_fn(torch.randn(3))
+        compiled_fn(torch.randn(3))
+        self.assertEqual(len(calls), 1)
+        entry = package._codes[fn.__code__]
+        self.assertTrue(entry.eager_fallback)
+        self.assertEqual(entry.guarded_codes, [])
+
+    def test_a_recompile_limit_hit_or_suppressed_error_is_not_an_eager_fallback(self):
+        def fn(x):
+            return x.sin()
+
+        def failing_backend(gm, example_inputs):
+            if example_inputs[0].dtype == torch.float64:
+                raise RuntimeError("backend failed")
+            return gm.forward
+
+        x = torch.randn(3)
+        # The limit sets RUN_ONLY and stays a coverage gap. A non-soft error
+        # suppress_errors swallows skips the frame too, but is left unflagged so
+        # the failure stays a gap rather than a silent eager fallback.
+        for backend, config_patch in (
+            ("eager", torch._dynamo.config.patch(recompile_limit=1)),
+            (failing_backend, torch._dynamo.config.patch(suppress_errors=True)),
+        ):
+            torch._dynamo.reset()
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend, package=package)(fn)
+            with config_patch:
+                compiled_fn(x)
+                self.assertEqual(compiled_fn(x.double()), x.double().sin())
+            entry = package._codes[fn.__code__]
+            self.assertEqual(len(entry.guarded_codes), 1)
+            self.assertFalse(entry.eager_fallback)
 
     def test_module_function_guard_saves_unfiltered_and_reports_a_miss(self):
         # No guard_filter_fn: the CLOSURE_MATCH on _package_op is still saved,
@@ -657,6 +924,55 @@ print(eval(f"bbmod.{name}.{path}") is code)
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), mod(x))
 
+    def _hooked_grads(self, fn, under_hooks):
+        x = torch.linspace(0.1, 1.0, 4, requires_grad=True)
+        w = torch.linspace(1.0, 2.0, 4, requires_grad=True)
+        if under_hooks:
+            with torch.autograd.graph.saved_tensors_hooks(*INLINEABLE_HOOKS):
+                fn(x, w).backward()
+        else:
+            fn(x, w).backward()
+        return x.grad, w.grad
+
+    def _save_and_load_hooked_forward(self, guard_filter_fn=None):
+        ctx = DiskDynamoStore()
+        package = CompilePackage(hooked_forward)
+        compiled_fn = torch._dynamo.optimize(
+            "inductor", package=package, guard_filter_fn=guard_filter_fn
+        )(hooked_forward)
+        expected = self._hooked_grads(compiled_fn, under_hooks=True)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        # Load outside any hooks context, the way setup code does.
+        package, backends = ctx.load_package(hooked_forward, self.path())
+        compiled_fn = torch._dynamo.optimize(
+            package=package, guard_filter_fn=guard_filter_fn
+        )(hooked_forward)
+        package.install(backends)
+        return compiled_fn, expected
+
+    def test_loaded_graphs_do_not_rerun_inlined_saved_tensors_hooks(self):
+        compiled_fn, expected = self._save_and_load_hooked_forward()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
+        self.assertEqual(grads, expected)
+
+    @staticmethod
+    def _drop_hooks_guard(guards):
+        # Without its hooks guard, one loaded graph serves calls with and
+        # without the hooks.
+        return [g.guard_type != "AUTOGRAD_SAVED_TENSORS_HOOKS" for g in guards]
+
+    def test_a_first_call_outside_the_hooks_still_disables_them_later(self):
+        compiled_fn, expected = self._save_and_load_hooked_forward(
+            self._drop_hooks_guard
+        )
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self._hooked_grads(compiled_fn, under_hooks=False)
+            grads = self._hooked_grads(compiled_fn, under_hooks=True)
+        self.assertEqual(grads, expected)
+
     def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
         # install() roots the guards at sys.modules[...].__dict__, and a package
         # keeps every guard, so the serialized scope holds the global as a
@@ -773,6 +1089,266 @@ print(eval(f"bbmod.{name}.{path}") is code)
         self.assertEqual(installed - set(scope), set())
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(expected, compiled_fn(*args))
+
+    def _save_record_package(self, ctx):
+        # Inlining PkgRecord.__new__ roots guards at the ___unnamed_scope_<id>_c<n>
+        # key Dynamo mints for its globals. The key embeds an id() from the
+        # compiling process, so a loading process has no binding for it and every
+        # call misses on a KeyError unless install() seeds it.
+        def fn(x):
+            record = PkgRecord(x.sin(), 2)
+            return record.value * record.weight
+
+        return self._save_unnamed_scope_package(ctx, fn)
+
+    def _save_unnamed_scope_package(self, ctx, fn, *args):
+        package = CompilePackage(fn)
+        torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(fn)(*(args or (torch.randn(4),)))
+        names = {
+            name
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name in load_guards_state(
+                guarded.guards_state
+            ).output_graph.global_scope
+            if name.startswith(UNNAMED_SCOPE_PREFIX)
+        }
+        self.assertTrue(names)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+        return fn, names
+
+    def _recorded_unnamed_scope_sources(self, package):
+        return {
+            name: source
+            for entry in package.cache_entry().codes
+            for guarded in entry.guarded_codes
+            for name, source in load_guards_state(
+                guarded.guards_state
+            ).output_graph.unnamed_scope_sources.items()
+        }
+
+    def _install_unnamed_scope_package(self, ctx, fn, names):
+        # Drop the keys the save bound, as a fresh process would not have them.
+        torch._dynamo.reset()
+        scope = fn.__globals__
+        for name in names:
+            scope.pop(name, None)
+        self.addCleanup(lambda: [scope.pop(name, None) for name in names])
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.addCleanup(package.uninstall)
+        return package, backends, compiled_fn
+
+    def test_install_seeds_unnamed_scope_globals(self):
+        ctx = DiskDynamoStore()
+        fn, names = self._save_record_package(ctx)
+        package, backends, compiled_fn = self._install_unnamed_scope_package(
+            ctx, fn, names
+        )
+        scope = fn.__globals__
+        for name in names:
+            self.assertIs(scope[name], PkgRecord.__new__.__globals__)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        package.uninstall()
+        self.assertFalse(names & scope.keys())
+
+        # A binding someone else wrote is neither replaced nor removed.
+        foreign = {name: {} for name in names}
+        scope.update(foreign)
+        package.install(backends)
+        package.uninstall()
+        for name in names:
+            self.assertIs(scope.pop(name), foreign[name])
+
+    def test_install_keeps_unnamed_scope_globals_of_a_live_compile(self):
+        # The live compile bound the key behind a CleanupHook keyed on its
+        # generated code. install() keeps that binding, and the hook firing
+        # afterwards must not delete it from under the installed guards.
+        ctx = DiskDynamoStore()
+        # Hold the code objects already registered, so none is collected and its
+        # id reused by a code object of the compile below.
+        held = [ref() for ref in list(CleanupManager.instance.refs.values())]
+        before = set(CleanupManager.instance.refs)
+        fn, names = self._save_record_package(ctx)
+        self.addCleanup(lambda: [fn.__globals__.pop(name, None) for name in names])
+        # Pin the live compile's code objects so its hooks fire after install().
+        pinned = [
+            ref()
+            for idx, ref in list(CleanupManager.instance.refs.items())
+            if idx not in before
+        ]
+        pinned_ids = {id(p) for p in pinned if p is not None}
+        self.assertTrue(pinned_ids)
+
+        torch._dynamo.reset()
+        live = {name: fn.__globals__[name] for name in names}
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        self.addCleanup(package.uninstall)
+        del pinned
+        gc.collect()
+
+        self.assertFalse(pinned_ids & set(CleanupManager.instance.refs))
+        for name in names:
+            self.assertIs(fn.__globals__[name], live[name])
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), fn(x))
+        # Taken over from the hook, so nothing would drop it if uninstall() didn't.
+        package.uninstall()
+        self.assertFalse(names & fn.__globals__.keys())
+        del held
+
+    def test_install_binds_unnamed_scope_globals_to_the_live_namespace(self):
+        # The bytecode replays log.append through the key, so binding the
+        # artifact's copy of the namespace would append to the copy.
+        def fn(x):
+            return PKG_LOGGER.scale(x.sin())
+
+        # Trace against an empty list, and leave it empty for a rerun.
+        log = PKG_LOG_SCOPE["log"]
+        log.clear()
+        self.addCleanup(log.clear)
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_LOG_SCOPE)
+        # The guards want the list as it was while tracing; the save appended.
+        log.clear()
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+        self.assertEqual(log, [1])
+
+    def test_installed_unnamed_scope_guards_check_the_live_namespace(self):
+        # EQUALS_MATCH on factor must fail once the namespace changes; checking
+        # the artifact's frozen copy would keep serving x * 3.
+        def fn(x):
+            return PKG_SCALER.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        _, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+        PKG_FACTOR_SCOPE["factor"] = 5
+        self.addCleanup(PKG_FACTOR_SCOPE.__setitem__, "factor", 3)
+        self.assertEqual(compiled_fn(x), x.sin() * 5)
+
+    @parametrize("handlers", ["emptied", "rebound"])
+    def test_install_leaves_unbound_an_unnamed_scope_whose_source_raises(
+        self, handlers
+    ):
+        # The namespace's source is G['PKG_HANDLERS'][0].__globals__. Against an
+        # emptied or rebound list it raises IndexError or TypeError, and
+        # install() must skip the key rather than fail partway through, leaving
+        # a call that misses.
+        def fn(x):
+            return PKG_HANDLERS[0](x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        stale = [] if handlers == "emptied" else None
+        with patch.object(sys.modules[fn.__module__], "PKG_HANDLERS", stale):
+            package, _, compiled_fn = self._install_unnamed_scope_package(
+                ctx, fn, names
+            )
+        self.assertEqual(self._recorded_unnamed_scope_sources(package).keys(), names)
+        self.assertFalse(names & fn.__globals__.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(torch.randn(4))
+
+    def test_install_binds_an_unnamed_scope_reached_through_a_set(self):
+        # The namespace's source goes through Dynamo's ___set_getitem helper,
+        # which a bare eval of the source's name does not have.
+        def fn(x):
+            for handler in PKG_HANDLER_SET:
+                return handler(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        sources = self._recorded_unnamed_scope_sources(package)
+        self.assertIn("___set_getitem", "".join(s.name for s in sources.values()))
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+
+    def test_install_binds_an_unnamed_scope_reached_through_builtins(self):
+        # The namespace's source is rooted at the builtins dict key, which a
+        # fresh process does not have either, so install() binds that first.
+        builtins.pkg_builtin_scale = PKG_HANDLER_SCOPE["scale"]
+        self.addCleanup(delattr, builtins, "pkg_builtin_scale")
+
+        def fn(x):
+            return pkg_builtin_scale(x.sin())  # noqa: F821
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(ctx, fn)
+        builtins_keys = {
+            name for name in fn.__globals__ if name.startswith("__builtins_dict__")
+        }
+        self.assertTrue(builtins_keys)
+        package, _, compiled_fn = self._install_unnamed_scope_package(
+            ctx, fn, names | builtins_keys
+        )
+        sources = self._recorded_unnamed_scope_sources(package)
+        self.assertIn("__builtins_dict__", "".join(s.name for s in sources.values()))
+        for name in names:
+            self.assertIs(fn.__globals__[name], PKG_HANDLER_SCOPE)
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), x.sin() * 3)
+
+    def test_install_leaves_unbound_an_unnamed_scope_reached_through_a_local(self):
+        # The namespace is found through the frame's argument, which install()
+        # does not have, so the key stays unbound and the call misses.
+        def fn(scaler, x):
+            return scaler.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(
+            ctx, fn, PKG_SCALER, torch.randn(4)
+        )
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(self._recorded_unnamed_scope_sources(package))
+        self.assertFalse(names & fn.__globals__.keys())
+        x = torch.randn(4)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(PKG_SCALER, x)
+        self.assertEqual(compiled_fn(PKG_SCALER, x), x.sin() * 3)
+
+    def test_install_records_no_source_rooted_at_an_unnamed_scope_key(self):
+        # scale is reached through the frame's argument and helper through
+        # G[<key>]['helpers'][0]. Recording the latter would bind the key through
+        # itself, so neither is recorded and the key stays unbound.
+        def fn(scaler, x):
+            return scaler.scale(x.sin())
+
+        ctx = DiskDynamoStore()
+        fn, names = self._save_unnamed_scope_package(
+            ctx, fn, PkgChainScaler(), torch.randn(4)
+        )
+        package, _, compiled_fn = self._install_unnamed_scope_package(ctx, fn, names)
+        self.assertFalse(self._recorded_unnamed_scope_sources(package))
+        self.assertFalse(names & fn.__globals__.keys())
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                compiled_fn(PkgChainScaler(), torch.randn(4))
 
     def test_uninstall_keeps_a_global_it_did_not_bind(self):
         # An aot_compile load seeds the __import_* aliases its kept guards are
@@ -1328,6 +1904,52 @@ class TestPackageAccelerator(torch._inductor.test_case.TestCase):
             compiled_fn = torch._dynamo.optimize(package=package)(fn)
             package.install(backends)
             self.assertEqual(expected, compiled_fn(*args))
+
+    def test_install_survives_a_cold_bundled_autotune_cache(self, device):
+        # AutotuneCacheBundler keeps one bundle per compile context, left open
+        # on a remote-cache miss, and install() post-compiles both of the
+        # frame's variants in one.
+        if device != "cpu" and not has_triton():
+            raise unittest.SkipTest("Requires Triton")
+        from torch._inductor.runtime.autotune_cache import (
+            _AutotuneCacheBundlerImpl as Bundler,
+        )
+        from torch._inductor.utils import fresh_cache
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        args = [
+            torch.randn(4, device=device, dtype=dtype)
+            for dtype in (torch.float32, torch.float64)
+        ]
+        cold = unittest.mock.Mock()
+        cold.get.return_value = None
+        ctx = DiskDynamoStore()
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(bundled_autotune_remote_cache=True),
+            patch(
+                "torch._inductor.runtime.autotune_cache.create_cache",
+                return_value=cold,
+            ),
+            # Without Triton the bundler has no backend hash and fails before
+            # it reaches the one-bundle check.
+            patch.object(Bundler, "_get_backend_hash", return_value="backend"),
+        ):
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
+            for x in args:
+                compiled_fn(x)
+            self.assertEqual(len(package.cached_backends), 2)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+            package, backends = ctx.load_package(fn, self.path())
+            compiled_fn = torch._dynamo.optimize(package=package)(fn)
+            package.install(backends)
+            with torch.compiler.set_stance("fail_on_recompile"):
+                for x in args:
+                    self.assertEqual(compiled_fn(x), fn(x))
 
     @parametrize("backend", ("eager", "inductor"))
     def test_graph_break_bomb(self, device, backend):
