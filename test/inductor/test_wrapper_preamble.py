@@ -205,12 +205,21 @@ class TestWrapperPreamble(TestCase):
     @requires_cuda_and_triton
     def test_module_level_kernels_keep_async_compile_wait(self):
         # Nothing but the wait names async_compile, and the wait is what compiles the
-        # kernels when the module runs on its own.
+        # kernels when the module runs on its own. Partitioned, the root defines no
+        # kernel: partition_0 reports the name.
         x = torch.randn(64, 128, device="cuda")
-        _, code = _code_for(_softmax, x)
-        self.assertNotIn("async_compile.triton(", code)
-        self.assertIn("async_compile = AsyncCompile()", code)
-        self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
+        for name, fn, cfg in (
+            ("_softmax", _softmax, {}),
+            ("_cond_softmax", _cond_softmax, {}),
+            ("partition", _softmax, _PARTITIONED),
+        ):
+            with self.subTest(name):
+                _, code = _code_for(fn, x, **cfg)
+                if cfg:
+                    self.assertIn("def partition_0(", code)
+                self.assertNotIn("async_compile.triton(", code)
+                self.assertIn("async_compile = AsyncCompile()", code)
+                self.assertIn("async_compile.wait(globals())\ndel async_compile", code)
 
     @requires_cuda_and_triton
     def test_a_name_used_only_in_a_nested_subgraph_is_kept(self):
