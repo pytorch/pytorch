@@ -6931,9 +6931,9 @@ if HAS_CUDA_AND_TRITON:
                 y2 = x2 + 1
                 return y1, y2
 
-            log, logs = logs_to_string("torch._inductor.codecache", "output_code")
+            log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
             cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
-            with config.patch(cfg), logs():
+            with config.patch(cfg), ctx():
                 compiled_foo = torch.compile(foo)
                 x = torch.randn((20, 20), device="cuda")
                 eager_out = foo(x)
@@ -6951,7 +6951,7 @@ if HAS_CUDA_AND_TRITON:
             prefix = "Auto-tuning code written to "
             paths = [
                 line.removeprefix(prefix)
-                for line in log.getvalue().splitlines()
+                for line in log_stream.getvalue().splitlines()
                 if line.startswith(prefix)
             ]
             self.assertEqual(len(paths), 1 if autotune_at_compile_time else 0, paths)
