@@ -549,6 +549,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::MTIA_COUNTERS:
       return device_type_privateuse1_or(c10::DeviceType::MTIA);
     case libkineto::ActivityType::XPU_SCOPE_PROFILER:
+    case libkineto::ActivityType::XPU_SYNC:
       return c10::DeviceType::XPU;
     case libkineto::ActivityType::HPU_OP:
       return c10::DeviceType::HPU;
@@ -558,7 +559,6 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_RUNTIME:
     case libkineto::ActivityType::XPU_RUNTIME:
     case libkineto::ActivityType::XPU_DRIVER:
-    case libkineto::ActivityType::XPU_SYNC:
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::MTIA_RUNTIME:
