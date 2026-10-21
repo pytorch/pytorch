@@ -834,9 +834,11 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
     closure) gets a ``_<kernel_name>`` suffix, as does every import after the first
     def, which a user kernel's closure emits (``from triton.language import exp as
     op``). The imports above it are the common kernel header, the same in every
-    kernel. A name is renamed only where it refers to the global, so a parameter or
-    local that shares it keeps its name: autotune configs and launches pass parameters
-    by name.
+    kernel, and a repeat of one of them after the first def keeps its name: a
+    template that defines ``@triton.jit`` helpers above ``def_kernel`` gets the header
+    again where ``def_kernel`` is. A name is renamed only where it refers to the
+    global, so a parameter or local that shares it keeps its name: autotune configs
+    and launches pass parameters by name.
     """
     defs = re.findall(r"^def (\w+)\(", src, re.MULTILINE)
     assigns = re.search(r"^\w+\s*(:[^=\n]*)?=", src, re.MULTILINE)
@@ -848,6 +850,7 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
     tree = ast.parse(src)
     renames: dict[str, str] = {}
     aliases: list[ast.alias] = []
+    header: OrderedSet[str] = OrderedSet()
     seen_def = False
     for stmt in tree.body:
         if isinstance(stmt, ast.FunctionDef):
@@ -856,12 +859,16 @@ def _rename_kernel_module_globals(src: str, kernel_name: str, subs_name: str) ->
         elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
             targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
             renames.update((t.id, "") for t in targets if isinstance(t, ast.Name))
-        elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and seen_def:
-            # `import a.b` binds `a`, which cannot be renamed in place; the closure
-            # only emits aliased imports (`from a import b as c`, `import a.b as c`).
-            bound = [a for a in stmt.names if a.asname or "." not in a.name]
-            aliases += bound
-            renames.update((a.asname or a.name, "") for a in bound)
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            if not seen_def:
+                header.add(ast.unparse(stmt))
+            elif ast.unparse(stmt) not in header:
+                # `import a.b` binds `a`, which cannot be renamed in place; the
+                # closure only emits aliased imports (`from a import b as c`,
+                # `import a.b as c`).
+                bound = [a for a in stmt.names if a.asname or "." not in a.name]
+                aliases += bound
+                renames.update((a.asname or a.name, "") for a in bound)
     for name in renames:
         renames[name] = kernel_name if name == subs_name else f"{name}_{kernel_name}"
     # ast column offsets are in UTF-8 bytes, so edit the lines as bytes.
