@@ -7,8 +7,6 @@ assignments on nodes, including stream utilities, event management, and codegen.
 
 from __future__ import annotations
 
-import functools
-import inspect
 import re
 import unittest
 from types import SimpleNamespace
@@ -41,8 +39,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import HardwareClassification, TEST_WITH_ROCM
-from torch.utils._triton import has_triton
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TEST_WITH_ROCM,
+    xfailIfNoAcceleratorTriton,
+)
 
 
 def _extract_wrapper_body(code):
@@ -115,25 +116,6 @@ def _extract_wrapper_body(code):
 
 def _count_generated_stream_contexts(code):
     return len(re.findall(r"(?m)^\s*with (?:default_stream|stream\d+):", code))
-
-
-def xfailIfNoAcceleratorTriton(test_func):
-    if inspect.isclass(test_func):
-        for name in list(vars(test_func)):
-            method = getattr(test_func, name)
-            if name.startswith("test") and callable(method):
-                setattr(test_func, name, xfailIfNoAcceleratorTriton(method))
-        return test_func
-
-    @functools.wraps(test_func)
-    def wrapper(*args, **kwargs):
-        if not has_triton():
-            import pytest
-
-            pytest.xfail("Triton not available")
-        return test_func(*args, **kwargs)
-
-    return wrapper
 
 
 class TestStreamUtils(InductorTestCase):
