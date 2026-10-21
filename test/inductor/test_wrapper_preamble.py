@@ -209,7 +209,8 @@ class TestWrapperPreamble(TestCase):
         def fn(x):
             return torch.cond(x.sum() > 0, lambda t: t @ t, lambda t: t.cos(), (x,))
 
-        self._check_mm_only_in_a_subgraph(fn, torch.randn(16, 16))
+        # Positive, so the predicate takes the branch that calls mm.
+        self._check_mm_only_in_a_subgraph(fn, torch.rand(16, 16))
 
     @requires_cuda_and_triton
     def test_a_name_used_only_in_a_graph_partition_is_kept(self):
