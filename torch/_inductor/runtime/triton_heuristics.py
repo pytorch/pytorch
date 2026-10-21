@@ -625,6 +625,16 @@ class CachingAutotuner(KernelInterface):
 
     # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
     fallback: Callable[[], CachingAutotuner] | None = None
+    # The state set after __init__ that falling back keeps, rather than taking the
+    # unpinned instance's: the held lock, and the launch a lazy precompile from run()
+    # is part of.
+    _kept_on_fallback = (
+        "lock",
+        "_reload_kernel",
+        "compile_id",
+        "is_backward",
+        "_debug_call",
+    )
 
     def __init__(
         self,
@@ -911,10 +921,7 @@ class CachingAutotuner(KernelInterface):
         # The pinned config fit the GPU it was tuned on; this one may be smaller, which
         # Triton reports when it loads the binary.
         log.info("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
-        # Live state, which the unpinned instance holds fresh: the held lock, and the
-        # launch a lazy precompile from run() is part of.
-        keep = ("lock", "_reload_kernel", "compile_id", "is_backward", "_debug_call")
-        state = {k: v for k, v in vars(self).items() if k in keep}
+        state = {k: v for k, v in vars(self).items() if k in self._kept_on_fallback}
         self.release_benchmark_artifacts()
         # Become the unpinned kernel in place, since the module-level name binds self.
         # CachingAutotuner keeps all of its state in __dict__ (no __slots__), and the
@@ -3886,7 +3893,8 @@ def _cached_autotune(
     optimize_mem = inductor_meta.pop("optimize_mem", True)
 
     if "restore_value" in triton_meta:
-        # A new list: a pinned kernel's inductor_meta shares this one with its fallback.
+        # A new list, since a pinned kernel's inductor_meta shares this one with its
+        # fallback. Defensive: only user kernels, never pinned, have restore_value.
         mutated_arg_names = [*mutated_arg_names, *triton_meta.pop("restore_value")]
 
     reset_to_zero_arg_names: list[str] = []
