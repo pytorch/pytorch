@@ -3807,6 +3807,7 @@ def cached_autotune(
     custom_kernel=False,
     caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
     debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
+    pinnable: bool = True,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -3817,7 +3818,7 @@ def cached_autotune(
     (see ``_KernelConfigs`` in codegen/wrapper.py), is built as a FIXED kernel with that
     config. It falls back to ``configs`` only if the config does not fit this GPU (see
     ``_PINNED_CONFIG_ERRORS``); any other error in an entry, such as a misspelled key, is
-    raised.
+    raised. A kernel built with ``pinnable=False`` ignores the table.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     compiled = compiled_kernels_for_load.get()
@@ -3846,10 +3847,12 @@ def cached_autotune(
     def decorator(fn):
         # The config compile-time autotuning chose, which the kernel launches with instead
         # of tuning again: KERNEL_CONFIGS in the python wrapper module that defines it.
+        # Read from the module rather than the decorator, so that the kernel source, which
+        # the compile caches key on, is the same pinned or not, and a hand edit to the
+        # table takes effect without touching any kernel.
         table = getattr(fn.fn, "__globals__", {}).get(KERNEL_CONFIGS_NAME)
-        pinned = table.get(name) if isinstance(table, dict) else None
-        # A user kernel keeps its own autotuning, even if a hand edit names it.
-        if pinned is None or heuristic_type == HeuristicType.USER_AUTOTUNE:
+        pinned = table.get(name) if isinstance(table, dict) and pinnable else None
+        if pinned is None:
             return unpinned()(fn)
         config = config_from_dict(pinned)
         meta = {k: v for k, v in inductor_meta.items() if k not in _RETUNING_META}
@@ -3863,10 +3866,15 @@ def cached_autotune(
             **shared,
         )(fn)
 
-        def fallback():
+        def fallback(**extra):
             # Copies, since _cached_autotune pops from them and a failed build is retried.
-            metas = {"triton_meta": {**triton_meta}, "inductor_meta": {**inductor_meta}}
-            return unpinned(**metas)(fn)
+            meta = {**inductor_meta, **extra}
+            tuner = unpinned(triton_meta={**triton_meta}, inductor_meta=meta)(fn)
+            # A cached winner that is the config that did not fit, as tuned on another GPU.
+            same = [*map(config_to_dict, tuner.configs)] == [config_to_dict(config)]
+            if same and not extra:
+                return fallback(force_disable_caches=True)
+            return tuner
 
         kernel.fallback = fallback
         return kernel
@@ -5387,6 +5395,8 @@ def template(
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
+        # Its config carries compile options, such as ctas_per_cga, a table row does not.
+        pinnable=False,
     )
 
 
@@ -5475,6 +5485,8 @@ def user_autotune(
         filename=filename,
         inductor_meta=inductor_meta,
         custom_kernel=custom_kernel,
+        # A user kernel keeps its own autotuning, even if a hand edit names it.
+        pinnable=False,
     )
 
 
