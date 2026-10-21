@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import glob
+import os
+import tempfile
 import typing
 import unittest
 import unittest.mock
@@ -20,9 +23,12 @@ from torchgen.dest.native_functions import (
     validate_cpu_dll_cuda_kernels,
 )
 from torchgen.gen import (
+    gen_source_files,
+    get_grouped_native_functions,
     get_native_function_declarations,
     get_native_function_schema_registrations,
     LineLoader,
+    parse_native_yaml_struct,
     static_dispatch,
 )
 from torchgen.model import (
@@ -32,11 +38,12 @@ from torchgen.model import (
     FunctionSchema,
     Location,
     NativeFunction,
+    NativeFunctionsGroup,
     OperatorName,
 )
 from torchgen.native_function_generation import add_generated_native_functions
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import Target
+from torchgen.utils import FileManager, Target
 
 
 class TestGenPyi(unittest.TestCase):
@@ -568,6 +575,82 @@ class TestNativeDeclDllExportMacro(unittest.TestCase):
                 AssertionError, "kernel_removed_from_native_functions_yaml"
             ):
                 validate_cpu_dll_cuda_kernels(backend_indices)
+
+
+class TestRegisterMetaHeaders(unittest.TestCase):
+    TEMPLATES = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "aten/src/ATen/templates",
+    )
+
+    def _register_meta(self, native_yaml: str) -> str:
+        parsed = parse_native_yaml_struct(
+            yaml.load(native_yaml, Loader=LineLoader),
+            set(),
+            path="test",
+            skip_native_fns_gen=True,
+        )
+        # No op in the yaml has a Meta kernel, so parsing left no Meta index.
+        parsed.backend_indices[DispatchKey.Meta] = BackendIndex(
+            dispatch_key=DispatchKey.Meta,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={},
+        )
+        grouped = get_grouped_native_functions(parsed.native_functions)
+        with tempfile.TemporaryDirectory() as d:
+            fm = FileManager(install_dir=d, template_dir=self.TEMPLATES, dry_run=False)
+            gen_source_files(
+                native_functions=parsed.native_functions,
+                grouped_native_functions=grouped,
+                structured_native_functions=[
+                    g for g in grouped if isinstance(g, NativeFunctionsGroup)
+                ],
+                view_groups=[],
+                selector=SelectiveBuilder.get_nop_selector(),
+                static_dispatch_idx=[],
+                backend_indices=parsed.backend_indices,
+                aoti_fm=fm,
+                core_fm=fm,
+                cpu_vec_fm=fm,
+                cpu_fm=fm,
+                device_fms={},
+                dispatch_keys=[DispatchKey.Meta],
+                functions_keys={DispatchKey.Meta},
+                rocm=False,
+                force_schema_registration=False,
+                per_operator_headers=True,
+                skip_dispatcher_op_registration=False,
+                update_aoti_c_shim=False,
+                aoti_backends=set(),
+                extend_aoti_c_shim=False,
+            )
+            shards = sorted(glob.glob(os.path.join(d, "RegisterMeta_*.cpp")))
+            return "\n".join(open(s).read() for s in shards)
+
+    def test_generated_inplace_meta_kernel_includes_dispatch_header(self) -> None:
+        # RegisterMeta defines at::meta:: wrappers for unstructured inplace ops,
+        # which are only exported if they see their TORCH_API declaration.
+        register_meta = self._register_meta(
+            """
+- func: foo(Tensor self) -> Tensor
+  dispatch:
+    CPU: foo
+- func: foo_(Tensor(a!) self) -> Tensor(a!)
+  dispatch:
+    CPU: foo_
+- func: foo.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: foo_out
+- func: baz(Tensor self) -> Tensor
+  dispatch:
+    CPU: baz
+"""
+        )
+        self.assertIn("at::Tensor & foo_(at::Tensor & self)", register_meta)
+        self.assertIn("#include <ATen/ops/foo_meta_dispatch.h>", register_meta)
+        self.assertNotIn("#include <ATen/ops/baz_meta_dispatch.h>", register_meta)
 
 
 class TestGenNativeFunctionDeclaration(unittest.TestCase):

@@ -59,6 +59,7 @@ from torchgen.model import (
     DispatchKey,
     FRAGMENT_NAMESPACES,
     FunctionSchema,
+    gets_generated_inplace_meta_kernel,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
     is_ufunc_dispatch_key,
@@ -2407,6 +2408,10 @@ def gen_source_files(
                         DispatchKey.Meta,
                         DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
+                        is_registered = True
+                    # The generated Meta kernels of unstructured inplace ops need
+                    # their TORCH_API declaration from <op>_meta_dispatch.h.
+                    elif gets_generated_inplace_meta_kernel(g, backend_index):
                         is_registered = True
                     if not is_registered:
                         continue
