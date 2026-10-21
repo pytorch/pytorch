@@ -5670,10 +5670,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertEqual(source, restored)
 
 
-@torch._dynamo.config.patch({"strict_precompile": True})
 class TestGuardSerializationAccelerator(TestGuardSerializationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @torch._dynamo.config.patch({"strict_precompile": True})
     def test_unused_stream(self, device):
         def foo(inputs):
             return inputs.x + 1
