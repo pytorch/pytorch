@@ -230,9 +230,10 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(config_to_dict(launcher.config), pinned)
 
     @requires_cuda_and_triton
+    @parametrize("threads", [None, 1])
     @parametrize("cache_hit", [False, True])
     @config.patch(coordinate_descent_tuning=True, fx_graph_cache=True)
-    def test_inductor_keeps_the_pool_kernel_in_process(self, cache_hit):
+    def test_inductor_keeps_the_pool_kernel_in_process(self, cache_hit, threads):
         # compiled_kernels_for_load binds the pool-built kernel ahead of the
         # KERNEL_CONFIGS lookup, so inductor's own load does not pin, from the FX graph
         # cache too.
@@ -248,8 +249,10 @@ class TestKernelConfigs(TestCase):
             if not in_block:
                 launched.append(kernel.heuristic_type)
 
+        # With one compile thread the def binds a serial-compile thunk, not a pool future.
+        patches = {} if threads is None else {"compile_threads": threads}
         with _spy_launches(record):
-            _, code = _code_for(fn, x)
+            _, code = _code_for(fn, x, **patches)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], int(cache_hit))
         self.assertIn("KERNEL_CONFIGS = {", code)
         self.assertIn(HeuristicType.REDUCTION, launched)
@@ -575,6 +578,24 @@ class TestKernelConfigs(TestCase):
             # A cached property is recomputed by the unpinned kernel, so it is dropped.
             dropped = after_init - set(CachingAutotuner._kept_on_fallback) - cached
             self.assertEqual(dropped, {"fallback"}, name)
+
+    @requires_cuda_and_triton
+    def test_the_fallback_can_be_built_again(self):
+        # Building the unpinned kernel pops from its metas, so a retry after a failed
+        # build would otherwise tune an in-place kernel without cloning what it mutates.
+        def fn(x):
+            x.add_(1)
+            return x.sum()
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x.clone())
+        ns = _load_from_file(code)
+        (name,) = _kernels(code)
+        kernel = ns[name]
+        mutated = kernel.mutated_arg_names
+        self.assertTrue(mutated)
+        for _ in range(2):
+            self.assertEqual(kernel.fallback().mutated_arg_names, mutated)
 
     @requires_cuda_and_triton
     def test_an_unrelated_error_in_a_pinned_kernel_does_not_fall_back(self):
