@@ -142,6 +142,32 @@ bool is_supported_device(Device device) {
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
+// Shell dtypes have no defined value conversion. Rejecting casts on the host
+// keeps every backend consistent with tracing; on CUDA they would otherwise
+// device-assert in the dynamic-cast kernel.
+void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
+  if (dst == src || !(isShellType(dst) || isShellType(src))) {
+    return;
+  }
+  if (dst == ScalarType::Float4_e2m1fn_x2 ||
+      src == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Casting from ", src, " to ", dst, " is not supported. "
+        "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+        "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+        "the nibbles (low 4 bits are the first element, high 4 bits the "
+        "second); to encode, pack fp4 codes into torch.uint8 and "
+        ".view(torch.float4_e2m1fn_x2).");
+  }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Casting from ", src, " to ", dst, " is not supported: ",
+      isShellType(src) ? src : dst,
+      " is a shell dtype with no defined conversions. Use .view() to "
+      "reinterpret the bytes as a same-size integer dtype instead.");
+}
+
 } // namespace
 
 namespace at::native {
@@ -205,6 +231,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if (self.is_same(src)) {
     return self;
   }
+
+  // Checked for every device, including meta and out-of-tree backends, so
+  // eager and FakeTensor tracing reject the same casts.
+  check_shell_dtype_cast(src.scalar_type(), self.scalar_type());
 
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {

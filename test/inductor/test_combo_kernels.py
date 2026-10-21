@@ -27,8 +27,14 @@ from torch._inductor.codegen.triton_combo_kernel import (
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.scheduler import _is_loop_carried_compile_error, Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
+from torch._inductor.utils import (
+    clear_caches,
+    fresh_cache,
+    run_and_get_code,
+    run_and_get_kernels,
+)
 from torch._inductor.virtualized import V
+from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
@@ -497,6 +503,36 @@ class ComboKernelPartitionLoggingTests(TestCase):
         self.assertEqual(len(large_pointwise_logs), 2)
 
 
+def _kernel_groups(fn, *inps):
+    """Returns (category, sorted sub-kernel r0_numels) for each kernel fn compiles to."""
+    # multi_kernel raises the persistent rnumel limit 16x, which would change which
+    # reductions the tests expect to be persistent.
+    with torch._inductor.config.patch("triton.multi_kernel", 0):
+        out_compiled, kernels = run_and_get_kernels(torch.compile(fn), *inps)
+    torch.testing.assert_close(out_compiled, fn(*inps), atol=1e-4, rtol=1e-4)
+    return sorted(
+        (
+            get_kernel_category_by_source_code(kernel),
+            sorted(map(int, re.findall(r"r0_numel = (\d+)", kernel))),
+        )
+        for kernel in kernels
+    )
+
+
+def _compile_persistent_and_looped_reductions():
+    def fn(a, b, c):
+        return a.sum(-1), b.sum(-1), c.sum(-1)
+
+    # Contiguous rows get ReductionHint.INNER on any GPU, so rnumel <= 1024 is
+    # persistent and no rnumel <= 8192 is split.
+    return _kernel_groups(
+        fn,
+        torch.randn(1024, 512, device=GPU_TYPE),  # persistent
+        torch.randn(1024, 2048, device=GPU_TYPE),  # looped
+        torch.randn(4096, 768, device=GPU_TYPE),  # persistent
+    )
+
+
 @instantiate_parametrized_tests
 class ComboKernelTests(TestCase):
     check_model_gpu = check_model_gpu
@@ -830,6 +866,8 @@ class ComboKernelTests(TestCase):
         FileCheck().check("triton_heuristics.persistent_reduction").run(code[0])
 
     @requires_gpu_and_triton
+    @unittest.skipIf(torch._inductor.config.cpp_wrapper, "needs mix order reduction")
+    @torch._inductor.config.patch("triton.mix_order_reduction", True)
     def test_fuse_mix_order_reductions_combo_kernels(self):
         def fn(x, y, z):
             # FusedMixOrderReductions produces row_sum (buf0)
@@ -1045,13 +1083,52 @@ class ComboKernelTests(TestCase):
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
         torch.testing.assert_close(out_eager, out_compiled, atol=1e-4, rtol=1e-4)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
             FileCheck().check("XBLOCK_0 : tl.constexpr").check(
                 "XBLOCK_1 : tl.constexpr, R0_BLOCK_1 : tl.constexpr"
             ).run(code[0])
         else:
-            FileCheck().check_not("XBLOCK_0 : tl.constexpr").run(code[0])
+            # The persistent and looped reductions cannot share XBLOCK in one combo.
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    def test_persistent_and_looped_reductions_are_separated(self):
+        kernels = _compile_persistent_and_looped_reductions()
+        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+            # Each sub-kernel gets its own XBLOCK, so both kinds can share a combo.
+            self.assertListEqual(kernels, [("reduction", [512, 768, 2048])])
+        else:
+            # Sub-kernels share one XBLOCK, which cannot suit both kinds.
+            self.assertListEqual(
+                kernels, [("persistent_reduction", [512, 768]), ("reduction", [2048])]
+            )
+
+    @requires_gpu_and_triton
+    def test_very_large_short_reduction_runs_standalone(self):
+        def fn(a, b, c):
+            return a.sum(-1), b.sum(-1), c.sum(-1)
+
+        inps = (
+            # numel * rnumel just above LARGE_NUMELS, in short persistent rows
+            torch.randn(int(LARGE_NUMELS) // 128 + 1, 128, device=GPU_TYPE),
+            torch.randn(1024, 768, device=GPU_TYPE),
+            torch.randn(2048, 512, device=GPU_TYPE),
+        )
+        self.assertListEqual(
+            _kernel_groups(fn, *inps),
+            [("persistent_reduction", [128]), ("persistent_reduction", [512, 768])],
+        )
+        # With benchmarking the benchmark decides. Accepting every combo makes the
+        # kernels show the partition rather than the timing.
+        with (
+            torch._inductor.config.patch(benchmark_combo_kernel=True),
+            patch.object(Scheduler, "speedup_by_combo_kernel", return_value=True),
+            fresh_cache(),
+        ):
+            self.assertListEqual(
+                _kernel_groups(fn, *inps), [("persistent_reduction", [128, 512, 768])]
+            )
 
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_red(self):
@@ -1757,6 +1834,15 @@ class ComboKernelBenchmarkTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
+
+    @requires_gpu_and_triton
+    def test_persistent_and_looped_reductions_benchmark(self):
+        # Benchmarking, not the partitioner, decides whether to combine them. It always
+        # accepts combos of kernels this small.
+        self.assertListEqual(
+            _compile_persistent_and_looped_reductions(),
+            [("reduction", [512, 768, 2048])],
+        )
 
     @requires_gpu_and_triton
     def test_mutated_benchmark(self):
@@ -3557,7 +3643,11 @@ class ComboKernelMetadataTests(TestCase):
             return torch.relu(a), torch.sigmoid(b)
 
         inps = [torch.rand(1024, device=GPU_TYPE) for _ in range(2)]
-        code = self._combo_code(fn, inps)
+        from torch._inductor.scheduler import Scheduler
+
+        with patch.object(Scheduler, "speedup_by_combo_kernel", return_value=True):
+            code = self._combo_code(fn, inps)
+
         self.assertRegex(code, r"num_gb = \d*\.\d+")
         self.assertIn(f"device='{GPU_TYPE}'", code)
         self.assertNotIn(f"device={GPU_TYPE}", code)
@@ -4385,7 +4475,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         )
         self.assertEqual(finalized_end, 8)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_schedule_first_compiles_across_kahn_layers(self):
         from torch._inductor.scheduler import ForeachKernelSchedulerNode, Scheduler
 
@@ -4441,7 +4531,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertEqual(observed_combo_layers, [{0, 1}])
         FileCheck().check("'num_kernels': 2").run(code[0])
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("gate_enabled", [True, False])
     def test_peak_memory_reorder_order(self, gate_enabled):
         from torch._inductor import memory
@@ -4712,7 +4802,7 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         self.assertIsNone(run(100))
 
     @skipIfRocm  # https://github.com/pytorch/pytorch/issues/182444
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_combo_kernel_peak_memory_wide_resnet(self):
         """A tight peak-memory threshold must measurably reduce the
         runtime CUDA peak memory of the compiled forward pass compared
@@ -4725,9 +4815,9 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
         def compile_and_measure_peak(**cfg):
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.synchronize()
+            torch.accelerator.empty_cache()
+            torch.accelerator.reset_peak_memory_stats()
             with (
                 fresh_cache(),
                 torch._inductor.config.patch(
@@ -4737,13 +4827,13 @@ class ComboKernelPeakMemoryTests(InductorTestCase):
                 compiled = torch.compile(model)
                 with torch.no_grad():
                     compiled(x)
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
-                torch.cuda.reset_peak_memory_stats()
+                torch.accelerator.synchronize()
+                torch.accelerator.empty_cache()
+                torch.accelerator.reset_peak_memory_stats()
                 with torch.no_grad():
                     compiled(x)
-                torch.cuda.synchronize()
-            return torch.cuda.max_memory_allocated()
+                torch.accelerator.synchronize()
+            return torch.accelerator.max_memory_allocated()
 
         # Permissive gate: schedule-first combos can co-allocate freely.
         peak_permissive = compile_and_measure_peak(
