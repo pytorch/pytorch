@@ -9089,8 +9089,6 @@ class TritonScheduling(SIMDScheduling):
         metadata_comment = f"# kernel path: {kernel_path}"
         origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         metadata_comment += "\n" + origins + "\n" + detailed_origins
-        from ..select_algorithm import TritonTemplateKernel
-
         wrapper.emit_triton_kernel_definition(
             kernel_name,
             subs_name,
@@ -9098,7 +9096,9 @@ class TritonScheduling(SIMDScheduling):
             current_device.type,
             metadata=metadata_comment,
             # A template is built with its one config already.
-            pin_config=not isinstance(kernel, TritonTemplateKernel),
+            pin_config=not isinstance(
+                kernel, torch._inductor.select_algorithm.TritonTemplateKernel
+            ),
         )
 
     def define_kernel(self, src_code, node_schedule, kernel):
