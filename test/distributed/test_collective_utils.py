@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import unittest
 from unittest import mock
 
 import torch
@@ -22,7 +21,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
-    TEST_ACCELERATOR,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
