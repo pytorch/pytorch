@@ -317,6 +317,7 @@ inline bool isEventSync(CUpti_ActivitySynchronizationType type) {
 inline int32_t streamIdForTrace(uint32_t streamId) {
   // CUPTI uses all bits set when no stream applies. Preserve the legacy trace
   // representation where that sentinel appears as -1 instead of 4294967295.
+  // NOLINTNEXTLINE(readability-redundant-casting)
   if (streamId == static_cast<uint32_t>(CUPTI_SYNCHRONIZATION_INVALID_VALUE)) {
     return -1;
   }
