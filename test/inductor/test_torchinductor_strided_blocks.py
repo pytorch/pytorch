@@ -46,15 +46,6 @@ from torch.testing._internal.inductor_utils import (
 )
 
 
-class _TritonDeviceMixin:
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = cls.get_primary_device()
-        if not HAS_TRITON:
-            raise unittest.SkipTest(f"triton is required for {device}")
-
-
 try:
     from . import test_torchinductor
 except ImportError:
@@ -1613,7 +1604,7 @@ class CommonTemplate:
 @unittest.skipIf(not HAS_TRITON, "requires triton GPU backend")
 @requires_block_ptr
 @config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTest(_TritonDeviceMixin, BlockDescriptorTestBase):
+class TritonBlockPointerTest(BlockDescriptorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
 
@@ -1638,7 +1629,7 @@ class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
     # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
-class TritonTensorDescriptorTest(_TritonDeviceMixin, BlockDescriptorTestBase):
+class TritonTensorDescriptorTest(BlockDescriptorTestBase):
     hw_classification = HardwareClassification.CUDA
 
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
@@ -1778,7 +1769,7 @@ class TritonTensorDescriptorTest(_TritonDeviceMixin, BlockDescriptorTestBase):
 
 
 @unittest.skipIf(not HAS_TRITON, "requires triton")
-class TestTilingExtra(_TritonDeviceMixin, InductorTestCase):
+class TestTilingExtra(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -2337,7 +2328,7 @@ class TestTilingExtra(_TritonDeviceMixin, InductorTestCase):
         "assume_aligned_inputs": True,
     }
 )
-class TritonHostSideTMATest(_TritonDeviceMixin, BlockDescriptorTestBase):
+class TritonHostSideTMATest(BlockDescriptorTestBase):
     """Run the full pointwise/reduction suite with host-side TMA.
     Block pointer count is skipped because host-side TMA creates
     descriptors in the launcher, not the kernel."""
@@ -2476,7 +2467,7 @@ class HostTMAHelperTest(InductorTestCase):
     or torch.version.hip,
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
 )
-class TritonHostSideTMAConfigTest(_TritonDeviceMixin, InductorTestCase):
+class TritonHostSideTMAConfigTest(InductorTestCase):
     hw_classification = HardwareClassification.CUDA
 
     @config.patch(
@@ -2528,7 +2519,6 @@ test_torchinductor.instantiate_device_type_tests_from_templates(
 instantiate_device_type_tests(
     TestTilingExtra,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 
