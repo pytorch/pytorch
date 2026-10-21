@@ -129,10 +129,17 @@ class NoTritonConfigsError(RuntimeError):
     pass
 
 
-# What _make_launcher treats as a config not fitting the GPU, and what it raises once
+# No compiled config could be loaded, even with pipelining disabled. Not a
+# NoTritonConfigsError, which benchmark fusion takes to mean the fusion is invalid.
+class NoTritonLaunchersError(RuntimeError):
+    pass
+
+
+# What _make_launcher treats as a config not fitting the GPU, and what is raised once
 # no config is left: the failures a pinned kernel falls back to tuning on.
 _PINNED_CONFIG_ERRORS = (
     NoTritonConfigsError,
+    NoTritonLaunchersError,
     OutOfResources,
     PTXASError,
     torch.cuda.OutOfMemoryError,
@@ -903,13 +910,16 @@ class CachingAutotuner(KernelInterface):
         # The pinned config fit the GPU it was tuned on; this one may be smaller, which
         # Triton reports when it loads the binary.
         log.warning("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
+        # Live state, which the unpinned instance holds fresh: the held lock, and the
+        # launch a lazy precompile from run() is part of.
+        keep = ("lock", "_reload_kernel", "compile_id", "is_backward", "_debug_call")
+        state = {k: v for k, v in vars(self).items() if k in keep}
         self.release_benchmark_artifacts()
         # Become the unpinned kernel in place, since the module-level name binds self.
         # CachingAutotuner keeps all of its state in __dict__ (no __slots__), and the
         # unpinned instance is never compiled or run, so nothing else refers to it.
-        keep = ("lock", "_reload_kernel", "compile_id", "is_backward")
-        state = {k: v for k, v in vars(self).items() if k in keep}
-        self.__dict__ = {**vars(self.fallback()), **state}
+        # Attributes only self has (set after construction) are kept as well.
+        self.__dict__ = {**vars(self), **vars(self.fallback()), **state}
         self._plugins = get_caching_autotuner_plugins(self)
 
     def _precompile_worker(self):
@@ -1193,7 +1203,7 @@ class CachingAutotuner(KernelInterface):
                         log.debug("Retrying with num_stages=1 after: %s", exc)
                         self.launchers = [self.compile_by_disabling_pipelining(config)]
                         return
-                    raise NoTritonConfigsError(
+                    raise NoTritonLaunchersError(
                         f"No valid triton configs. {type(exc).__name__}: {exc}"
                     )
             self.launchers = launchers
