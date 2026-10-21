@@ -262,7 +262,8 @@ inline ZeModulePtr _createModule(
   ze_module_handle_t rawModule = nullptr;
   ze_result_t error_no = ze().zeModuleCreate(
       context, device, &moduleDescription, &rawModule, &buildLog);
-  ZeModulePtr module(rawModule);
+  // The spec leaves *phModule undefined on failure, so adopt it only on success.
+  ZeModulePtr module(error_no == ZE_RESULT_SUCCESS ? rawModule : nullptr);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     // Retrieve the build log on a best-effort basis; failures here must not
