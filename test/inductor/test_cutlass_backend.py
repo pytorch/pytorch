@@ -71,9 +71,12 @@ from torch._inductor.codegen.cutlass.utils import (
 )
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
-from torch._inductor.select_algorithm import NoValidChoicesError
+from torch._inductor.select_algorithm import (
+    create_benchmark_cache_key,
+    NoValidChoicesError,
+)
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fp32_matmul_precision_key, fresh_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
@@ -1502,19 +1505,24 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a_sparse, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+            # The benchmark policy in the key depends on max_autotune, so build
+            # it while the autotuning config is still patched in.
+            cache_key = create_benchmark_cache_key(
+                f"[('cuda', 'torch.float16', {m}, {k // 2}, {k // 2}, 1, 0), "
+                f"('cuda', 'torch.int16', {m}, {k // 16}, {k // 16}, 1, 0), "
+                f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]",
+                "cuda",
+                benchmark_with_cudagraphs=False,
+            )
 
         cache = torch._inductor.codecache.LocalCache().lookup(
             "sparse_semi_structured_mm"
         )
         if cache is None:
             raise AssertionError("cache is None")
-        high = cache[
-            f"[('cuda', 'torch.float16', {m}, {k // 2}, {k // 2}, 1, 0), "
-            f"('cuda', 'torch.int16', {m}, {k // 16}, {k // 16}, 1, 0), "
-            f"('cuda', 'torch.float16', {k}, {n}, {n}, 1, 0)]"
-        ]["high"]
+        timings = cache[cache_key][fp32_matmul_precision_key()]
         cutlass_kernels_count = 0
-        for kernel, duration in high.items():
+        for kernel, duration in timings.items():
             if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
         if cutlass_kernels_count <= 0:

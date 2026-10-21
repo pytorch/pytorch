@@ -50,7 +50,7 @@ jobs:
 
           # Load primary distributed module labels from the skill's label manifest.
           # module: performance is a secondary tag, not a primary module classifier.
-          LABELS_FILE=".claude/skills/distributed-triage/distributed-labels.json"
+          LABELS_FILE=".agents/skills/distributed-triage/distributed-labels.json"
           mapfile -t MODULE_LABELS < <(
             jq -r '.labels[].name
                    | select(startswith("module: "))

@@ -7,10 +7,13 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same, skipIfNotPy312
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class EnumTests(torch._dynamo.test_case.TestCase):
     """Tests for enum support in torch.compile."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_enum_as_dict_key(self):
         class MyEnum(enum.Enum):
@@ -281,6 +284,22 @@ class EnumTests(torch._dynamo.test_case.TestCase):
             RED = 1
             GREEN = 2
             BLUE = 3
+
+        def fn(x):
+            return x + len(Color)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_enum_len_with_member_named_name(self):
+        """Test len() on Enum class that has a member called `name`."""
+
+        class Color(enum.Enum):
+            name = 1
+            GREEN = 2
 
         def fn(x):
             return x + len(Color)
