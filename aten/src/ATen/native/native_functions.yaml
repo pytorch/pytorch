@@ -5947,8 +5947,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, XPU: std_mean
-    MPS: std_mean_mps
+    CPU, CUDA, MPS, XPU: std_mean
   autogen: std_mean.correction_out
   tags: reduction
 
@@ -6489,8 +6488,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA, XPU: var_mean
-    MPS: var_mean_mps
+    CPU, CUDA, MPS, XPU: var_mean
   autogen: var_mean.correction_out
   tags: reduction
 
@@ -11798,8 +11796,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: mse_loss_out
-    MPS: mse_loss_out_mps
+    CPU, CUDA, MPS, XPU: mse_loss_out
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -15397,7 +15394,7 @@
 
 - func: special_airy_ai.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA, XPU: special_airy_ai_out
+    CPU, CUDA, MPS, XPU: special_airy_ai_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

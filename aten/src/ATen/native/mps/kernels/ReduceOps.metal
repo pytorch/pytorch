@@ -169,7 +169,7 @@ struct SumOp {
       uint tptg) {
     return c10::metal::threadgroup_sum(shared, v, tid, tptg);
   }
-  static inline TO finalize(acc_t v, float param) {
+  static inline TO finalize(acc_t v, float param, device TO*, uint) {
     return static_cast<TO>(finalize_val<FINAL>(v, param));
   }
 };
@@ -197,7 +197,7 @@ struct ProdOp {
       uint tptg) {
     return c10::metal::threadgroup_prod(shared, v, tid, tptg);
   }
-  static inline TO finalize(acc_t v, float) {
+  static inline TO finalize(acc_t v, float, device TO*, uint) {
     return static_cast<TO>(v);
   }
 };
@@ -263,7 +263,7 @@ struct ValueOp {
       uint tptg) {
     return OpFn<acc_t>::threadgroup_reduce(shared, v, tid, tptg);
   }
-  static inline TO finalize(acc_t v, float) {
+  static inline TO finalize(acc_t v, float, device TO*, uint) {
     return v;
   }
 };
@@ -317,13 +317,16 @@ struct WelfordOp {
   template <
       typename T = TO,
       ::metal::enable_if_t<::metal::is_same_v<T, float3>, bool> = true>
-  static inline T finalize(acc_t v, float) {
+  static inline T finalize(acc_t v, float, device TO*, uint) {
     return v;
   }
   template <
       typename T = TO,
       ::metal::enable_if_t<!::metal::is_same_v<T, float3>, bool> = true>
-  static inline T finalize(acc_t v, float correction) {
+  static inline T finalize(acc_t v, float correction, device TO* mean, uint i) {
+    if (mean) {
+      mean[i] = static_cast<T>(v.x);
+    }
     const float divisor = v.z > correction ? v.z - correction : 0.0f;
     const float var = v.y / divisor;
     return static_cast<T>(TAKE_SQRT ? ::precise::sqrt(var) : var);
@@ -347,6 +350,7 @@ kernel void reduction_generic(
     device const TI* input [[buffer(0)]],
     device TO* output [[buffer(1)]],
     constant NormParams<>& params [[buffer(2)]],
+    device TO* mean [[buffer(5)]],
     uint tid [[thread_position_in_threadgroup]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]]) {
@@ -435,7 +439,8 @@ kernel void reduction_generic(
     // params.p > 0 means "divide the accumulator by p before casting"
     // (used by mean to keep the division in opmath_t precision so the
     // fp32 accumulation isn't lost when TO is fp16/bf16/half2).
-    output[output_offset] = OP::finalize(output_val, params.p);
+    output[output_offset] =
+        OP::finalize(output_val, params.p, mean, output_offset);
   }
 }
 
@@ -464,6 +469,7 @@ kernel void reduction_outer(
     constant float& param [[buffer(3)]], // >0 divides accumulator before cast
     // [dim_stride, inner_stride, outer_stride, unused]
     constant uint4& strides [[buffer(4)]],
+    device TO* mean [[buffer(5)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = typename OP::acc_t;
@@ -523,7 +529,7 @@ kernel void reduction_outer(
   if (tid_tg.y == 0) {
     const uint out_idx =
         (num_segs > 1 ? tg_pos.y : tg_pos.z) * inner_size + col;
-    output[out_idx] = OP::finalize(shmem[0][tid_tg.x], param);
+    output[out_idx] = OP::finalize(shmem[0][tid_tg.x], param, mean, out_idx);
   }
 }
 
@@ -542,6 +548,7 @@ kernel void reduction_narrow(
     // [dim_size, inner_size, num_segs, unused]
     constant uint4& sizes [[buffer(2)]],
     constant float& param [[buffer(3)]],
+    device TO* mean [[buffer(5)]],
     uint3 tid_tg [[thread_position_in_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
   using TA = typename OP::acc_t;
@@ -587,7 +594,7 @@ kernel void reduction_narrow(
     }
     const uint out_idx = (num_segs > 1) ? (tg_pos.y * inner_size + tid)
                                         : (tg_pos.z * inner_size + tid);
-    output[out_idx] = OP::finalize(s, param);
+    output[out_idx] = OP::finalize(s, param, mean, out_idx);
   }
 }
 
@@ -601,6 +608,7 @@ kernel void reduction_innermost(
     device TO* output [[buffer(1)]],
     constant uint2& sizes [[buffer(2)]], // [M, N]
     constant float& param [[buffer(3)]], // >0 divides accumulator before cast
+    device TO* mean [[buffer(5)]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
@@ -643,7 +651,7 @@ kernel void reduction_innermost(
   val = OP::simd_reduce(val);
 
   if (simd_lane_id == 0) {
-    output[row] = OP::finalize(val, param);
+    output[row] = OP::finalize(val, param, mean, row);
   }
 }
 
@@ -750,6 +758,7 @@ kernel void reduction_innermost_chunk(
     device TO* output [[buffer(1)]],
     constant uint4& sizes [[buffer(2)]], // [rows, row_len, lanes, segs]
     constant float& param [[buffer(3)]],
+    device TO* mean [[buffer(5)]],
     uint tptg [[threads_per_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint simd_lane_id [[thread_index_in_simdgroup]],
@@ -809,7 +818,7 @@ kernel void reduction_innermost_chunk(
     val = OP::combine(val, chunk_shuffle_down(val, static_cast<ushort>(off)));
   }
   if (row_lane == 0) {
-    output[out_idx] = OP::finalize(val, param);
+    output[out_idx] = OP::finalize(val, param, mean, out_idx);
   }
 }
 
@@ -862,7 +871,7 @@ kernel void reduction_flat(
   threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
   val = OP::threadgroup_reduce(shared, val, tid, tptg);
   if (tid == 0) {
-    output[tgid] = OP::finalize(val, 0);
+    output[tgid] = OP::finalize(val, 0, nullptr, 0);
   }
 }
 
@@ -935,7 +944,7 @@ kernel void reduction_flat_strided(
   threadgroup TA shared[MAX_THREADGROUP_SIZE / 32];
   val = OP::threadgroup_reduce(shared, val, tid, tptg);
   if (tid == 0) {
-    output[tgid] = OP::finalize(val, 0);
+    output[tgid] = OP::finalize(val, 0, nullptr, 0);
   }
 }
 
