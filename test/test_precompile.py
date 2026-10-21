@@ -10560,8 +10560,27 @@ class TestExportPython(TestCase):
         def run2(inp):
             return inp + 1
 
-        with self.assertRaisesRegex(PrecompileError, "clobber.py defines no forward"):
+        with self.assertRaisesRegex(PrecompileError, "clobber.py defines no") as cm:
             run2(x)
+        self.assertIn("hand-edit", str(cm.exception))
+
+        # Source this call just captured is precompile's own output, not a hand-edit.
+        from torch.compiler._export_python import ExportedPythonArtifact
+
+        fresh = self._tmp_path("fresh.py")
+
+        @torch.compiler.export_python(path=fresh, backend="eager")
+        def run3(inp):
+            return inp + 1
+
+        def save_no_forward(self, args):
+            return "x = 1\n"
+
+        cls = ExportedPythonArtifact
+        stub = mock.patch.object(cls, "_precompile_and_save", save_no_forward)
+        with stub, self.assertRaisesRegex(PrecompileError, "defines no forward") as cm:
+            run3(x)
+        self.assertNotIn("hand-edit", str(cm.exception))
 
     def test_kwargs_bound_positionally(self, device):
         path = self._tmp_path("kw.py")
@@ -10789,8 +10808,8 @@ class TestExportPython(TestCase):
             run2(x)
 
     def test_artifact_raising_at_module_scope_is_a_distinct_error(self, device):
-        # The third arm of _load's taxonomy: not a syntax/structure problem and not a
-        # failed import, but source that blows up while being exec'd.
+        # The catch-all arm of _load: not a syntax/structure problem and not a failed
+        # import, but source that blows up while being exec'd.
         path = self._tmp_path("raises.py")
         x = make_tensor((4,), device=device, dtype=torch.float32)
 
@@ -10801,20 +10820,26 @@ class TestExportPython(TestCase):
         self.assertEqual(run(x), x + 1)
         with open(path, encoding="utf-8") as f:
             code = f.read()
-        # A KeyError raised by the file is not mistaken for a missing forward().
-        for raised in ("RuntimeError('boom')", "KeyError('boom')"):
-            with self.subTest(raised):
+        # A KeyError raised by the file is not mistaken for a missing forward(), and a
+        # SyntaxError from another file it runs is not reported as the artifact's own.
+        cases = [
+            ("raise RuntimeError('boom')", "boom"),
+            ("raise KeyError('boom')", "boom"),
+            ("exec(compile('x = (', 'other.py', 'exec'))", "other.py"),
+        ]
+        for stmt, needle in cases:
+            with self.subTest(stmt):
                 with open(path, "w", encoding="utf-8") as f:
-                    f.write(f"raise {raised}\n" + code)
+                    f.write(f"{stmt}\n" + code)
 
                 @torch.compiler.export_python(path=path, backend="eager")
                 def loaded(inp):
                     return inp + 1
 
-                with self.assertRaisesRegex(
-                    PrecompileError, "unexpected error occurred .*boom"
-                ):
+                with self.assertRaisesRegex(PrecompileError, "unexpected error") as cm:
                     loaded(x)
+                self.assertIn(needle, str(cm.exception))
+                self.assertNotIn("does not parse", str(cm.exception))
 
     def test_nested_submodule_training_state_is_guarded(self, device):
         # named_modules() walks the whole tree, but every other test model is a leaf,
@@ -11980,6 +12005,7 @@ class TestExportPython(TestCase):
 
         x = make_tensor((256, 256), device=device, dtype=torch.float32)
         y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        import torch._inductor.config as ind_config
         from torch._inductor.async_compile import AsyncCompile
         from torch._inductor.cpu_vec_isa import pick_vec_isa
         from torch.compiler._export_python import _CPU_ISA_TAG
@@ -11992,6 +12018,8 @@ class TestExportPython(TestCase):
         width, name = isa.bit_width(), str(isa)
         self.assertEqual(stamp, f"{_CPU_ISA_TAG}{(width, name)!r}")
         self.assertEqual(torch.compiler.export_python(path=path)(fn)(x, y), expected)
+        if not width:
+            self.skipTest("needs a host with a vector ISA")
 
         def load_with_stamp(captured):
             with open(path, "w", encoding="utf-8") as f:
@@ -12001,12 +12029,24 @@ class TestExportPython(TestCase):
         # Only the width is baked into the strides, so a host whose ISA adds features
         # at the same width (AVX-512 -> AVX-512 VNNI) runs the artifact.
         self.assertEqual(load_with_stamp((width, "")), expected)
+        # A scalar capture (cpp.simdlen=0, ATEN_CPU_CAPABILITY=default) bakes no stride.
+        scalar_path = self._tmp_path("isa_scalar.py")
+        with ind_config.patch({"cpp.simdlen": 0}):
+            torch.compiler.export_python(path=scalar_path)(fn)(x, y)
+        with open(scalar_path, encoding="utf-8") as f:
+            self.assertIn(f"{_CPU_ISA_TAG}(0, 'INVALID_VEC_ISA')", f.read())
+        scalar = torch.compiler.export_python(path=scalar_path)(fn)
+        self.assertEqual(scalar(x, y), expected)
         # The refusal must come before the kernel is compiled under the wrong ISA.
         compiled = AssertionError("compiled the C++ kernel")
         with mock.patch.object(AsyncCompile, "cpp_pybinding", side_effect=compiled):
-            for captured in ((width * 2 or 128, name), (width, f"{name} amx_tile")):
+            for captured in ((width * 2, name), (width, f"{name} amx_tile")):
                 with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
                     load_with_stamp(captured)
+            # The reverse is not safe: a vector capture loaded where no ISA is picked.
+            with ind_config.patch({"cpp.simdlen": 0}):
+                with self.assertRaisesRegex(PrecompileError, "CPU vector ISA"):
+                    load_with_stamp((width, name))
 
     def test_a_cpu_isa_change_after_load_is_not_refused(self, device):
         # The kernel's ISA is fixed when it compiles at load, so a later simdlen change
