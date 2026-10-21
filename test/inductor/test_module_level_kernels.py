@@ -204,6 +204,43 @@ import triton.language.math
 """
         self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
 
+    def test_a_template_repeating_the_header_keeps_it(self):
+        # triton_mm_grouped defines @triton.jit helpers above def_kernel, which emits
+        # the header again; renaming the repeat broke the helpers' decorators.
+        src = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def helper(x):
+    return tl.abs(x)
+
+import triton
+import triton.language as tl
+from triton.language import exp as op
+
+@triton.jit
+def k(a):
+    return helper(op(a))
+"""
+        expected = """\
+import triton
+import triton.language as tl
+
+@triton.jit
+def helper_k_0(x):
+    return tl.abs(x)
+
+import triton
+import triton.language as tl
+from triton.language import exp as op_k_0
+
+@triton.jit
+def k_0(a):
+    return helper_k_0(op_k_0(a))
+"""
+        self.assertEqual(_rename_kernel_module_globals(src, "k_0", "k"), expected)
+
 
 class TestModuleLevelKernels(TestCase):
     @requires_cuda_and_triton
