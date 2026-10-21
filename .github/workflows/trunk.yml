@@ -251,14 +251,12 @@ jobs:
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python-version: 3.12.7
-      # TODO: re-add { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-26" } once
-      # the macos-m2-26 fleet grows from 8 to 28 runners (pytorch-gha-infra#1558),
-      # see https://github.com/pytorch/test-infra/issues/8964
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-26" },
           { config: "openreg", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
         ]}
     secrets: inherit
