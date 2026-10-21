@@ -37,6 +37,9 @@ static_assert(
 static_assert(
     offsetof(pti_view_record_memory_fill, _view_kind) == 0,
     "base record must be first member");
+static_assert(
+    offsetof(pti_view_record_memory_copy_p2p, _view_kind) == 0,
+    "base record must be first member");
 
 // Mock XpuptiActivityApi that delivers hand-crafted PTI records
 // through the virtual processActivities without needing PTI runtime.
@@ -650,6 +653,44 @@ TEST_F(XpuptiActivityHandlersTest, MemcpyAndMemsetRecordsAreFlowDestinations) {
   EXPECT_EQ(memset_activity.flowId(), kMemsetCorrelationId);
   EXPECT_EQ(memset_activity.flowType(), kLinkAsyncCpuGpu);
   EXPECT_FALSE(memset_activity.flowStart());
+}
+
+TEST_F(XpuptiActivityHandlersTest, PeerToPeerMemcpyIsGpuMemcpy) {
+  constexpr uint32_t kCorrelationId = 53;
+
+  KN::pti_view_record_memcpy_p2p_t p2p_record{};
+  p2p_record._view_kind._view_kind = PTI_VIEW_DEVICE_GPU_MEM_COPY_P2P;
+  p2p_record._name = "zeCommandListAppendMemoryCopy(D2D - P2P)";
+  p2p_record._start_timestamp = 200;
+  p2p_record._end_timestamp = 240;
+  p2p_record._thread_id = 7;
+  p2p_record._correlation_id = kCorrelationId;
+  p2p_record._sycl_queue_id = 3;
+  p2p_record._mem_op_id = 5;
+  p2p_record._bytes = 4096;
+  p2p_record._memcpy_type = PTI_VIEW_MEMCPY_TYPE_D2D;
+  p2p_record._mem_src = PTI_VIEW_MEMORY_TYPE_DEVICE;
+  p2p_record._mem_dst = PTI_VIEW_MEMORY_TYPE_DEVICE;
+
+  mockApi_.records.push_back(&p2p_record._view_kind);
+
+  auto traceBuffer = processAndGetTrace();
+  ASSERT_EQ(traceBuffer->activities.size(), 1);
+
+  auto& activity = *traceBuffer->activities[0];
+  EXPECT_EQ(activity.type(), ActivityType::GPU_MEMCPY);
+  EXPECT_EQ(activity.name(), "Memcpy D2D (Device -> Device)");
+  EXPECT_EQ(activity.resourceId(), 3);
+  EXPECT_EQ(activity.flowId(), kCorrelationId);
+  EXPECT_FALSE(activity.flowStart());
+  EXPECT_EQ(
+      activity.getMetadataValue(XpuMetadataFields::kBytes),
+      std::optional<uint64_t>{4096});
+  EXPECT_EQ(
+      activity.getMetadataValue(XpuMetadataFields::kFromDevice),
+      std::optional<int64_t>{activity.deviceId()});
+  EXPECT_TRUE(
+      activity.getMetadataValue(XpuMetadataFields::kToDevice).has_value());
 }
 
 // --- Mixed dispatch test ---
