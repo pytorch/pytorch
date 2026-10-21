@@ -108,12 +108,6 @@ class XpuScopeProfilerTest(TestCase):
             self.check_metrics(count_x_metrics)
             self.check_metrics(count_c_metrics)
 
-    def required_env_setting(self):
-        zet_enable_metrics = os.environ.get("ZET_ENABLE_METRICS", "unset")
-        if Verbose:
-            print(f"ZET_ENABLE_METRICS={zet_enable_metrics}")
-        return zet_enable_metrics == "1"
-
     def required_paranoid_setting(self, paranoid_path):
         try:
             paranoid_content = Path(paranoid_path).read_text().strip()
@@ -137,9 +131,6 @@ class XpuScopeProfilerTest(TestCase):
 
     @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_scope_profiler(self):
-        if not self.required_env_setting():
-            self.skipTest("ZET_ENABLE_METRICS not set")
-
         if not self.required_paranoid_settings():
             self.skipTest("paranoid settings missing")
 
@@ -148,15 +139,26 @@ class XpuScopeProfilerTest(TestCase):
         # Hardware metrics are requested through the fine-grained activity dict:
         # {ProfilerActivity.XPU: [<metric names>]} enables the XPUPTI scope
         # profiler and forwards the metric names to it.
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                {torch.profiler.ProfilerActivity.XPU: self.metrics_names},
-            ],
-        ) as p:
-            r1 = torch.matmul(a, b)
-            r2 = torch.add(r1, 1.0)
-            result = torch.abs(r2)
+        try:
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    {torch.profiler.ProfilerActivity.XPU: self.metrics_names},
+                ],
+            ) as p:
+                r1 = torch.matmul(a, b)
+                r2 = torch.add(r1, 1.0)
+                result = torch.abs(r2)
+        except RuntimeError as e:
+            # Runtime metrics enabling unsupported: ZET_ENABLE_METRICS=1 needed.
+            if os.environ.get("ZET_ENABLE_METRICS") != "1" and (
+                "PTI_ERROR_DRIVER" in str(e)
+                or "PTI_ERROR_METRICS_RUNTIME_ENABLE_UNSUPPORTED" in str(e)
+            ):
+                self.skipTest(
+                    "runtime metrics enabling unsupported; set ZET_ENABLE_METRICS=1"
+                )
+            raise
 
         self.assertTrue(result.numel() > 0)
 
