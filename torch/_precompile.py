@@ -1712,7 +1712,6 @@ def _capture(
     interning/order established here for params then buffers is the calling
     convention the runtime model must reproduce (invariant 2).
     """
-
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
