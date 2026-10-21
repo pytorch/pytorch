@@ -2540,7 +2540,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # cannot trace into.  Constant-fold it for VTs backed by a real
         # Python object so that copy.deepcopy can trace through.  Skip the fold
         # for an OrderedDict whose instance __dict__ the rebuilt copy would drop;
-        # it then falls through to the graph break below.
+        # it then falls through to the graph break below.  (An OrderedDict
+        # reduction can never be built anyway -- its state tuple ends with an
+        # odict_iterator -- so this plug mainly gives that path a precise
+        # graph break instead of the generic SourcelessBuilder error.)
         if (
             name == "__reduce_ex__"
             and len(args) == 1

@@ -34,6 +34,7 @@ import weakref
 from collections.abc import Callable, Generator, MutableMapping
 from types import CellType, SimpleNamespace
 from typing import Any, cast, NoReturn, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 import torch.nn
@@ -226,6 +227,22 @@ def _walk_vts(value: Any) -> list[VariableTracker]:
     out: list[VariableTracker] = []
     VariableTracker.visit(out.append, value)
     return out
+
+
+def _is_attributed_ordered_dict(
+    var: VariableTracker,
+) -> "TypeIs[variables.OrderedDictVariable]":
+    """True for a fresh OrderedDict VT whose instance attributes are modeled.
+
+    Single source of truth for the places that must agree on which VTs the
+    composite ``ordered_dict_instance_attr_mutation`` replay path handles: the
+    shell pass in ``codegen_save_tempvars``, that handler's matcher, its
+    exclusion from the ``const_dict_or_set_mutation`` handler, and the counter
+    recompute in ``prune_dead_object_new``.
+    """
+    return istype(var, variables.OrderedDictVariable) and isinstance(
+        var.mutation_type, ValueAndAttributeMutationNew
+    )
 
 
 class SideEffects:
@@ -756,6 +773,16 @@ class SideEffects:
             return mutation_kind is mutation_kinds
         return mutation_kind in mutation_kinds
 
+    def has_attributed_ordered_dicts(self) -> bool:
+        """O(1) check: is any OrderedDict carrying modeled instance attributes?
+
+        Used by the string-format fast path to skip a deep walk of the format
+        arguments when the decline can never trigger. Kept in sync with
+        ``track_ordered_dict_attr_mutation_new`` and
+        ``prune_dead_object_new``.
+        """
+        return self._num_attributed_ordered_dicts > 0
+
     def is_modified(self, item: VariableTracker) -> bool:
         if item.is_immutable():
             return False
@@ -1240,7 +1267,7 @@ class SideEffects:
         self._num_attributed_ordered_dicts = sum(
             1
             for var in self.id_to_variable.values()
-            if isinstance(var.mutation_type, ValueAndAttributeMutationNew)
+            if _is_attributed_ordered_dict(var)
         )
         self._num_new_objects_with_init_args = sum(
             1 for var in self.id_to_variable.values() if var.__dict__.get("init_args")
@@ -1285,13 +1312,11 @@ class SideEffects:
         # attribute stores are replayed afterwards, in codegen_update_mutated.
         ordered_dict_shell_ids: set[int] = set()
         for var in modified_vars:
-            if not (
-                isinstance(var.mutation_type, AttributeMutationNew)
-                # OrderedDict subclasses are UserDefinedObjectVariables with
-                # their own object reconstruction path. istype also avoids
-                # realizing lazy VTs via VariableTrackerMeta.__instancecheck__.
-                and istype(var, variables.OrderedDictVariable)
-            ):
+            # OrderedDict subclasses are UserDefinedObjectVariables with their
+            # own object reconstruction path; istype (inside the shared
+            # predicate) also avoids realizing lazy VTs via
+            # VariableTrackerMeta.__instancecheck__.
+            if not _is_attributed_ordered_dict(var):
                 continue
             var.reconstruct_empty(cg)
             cg.add_cache(var)
@@ -1787,8 +1812,7 @@ def _codegen_deque_mutation(ctx: SideEffectReplayContext) -> None:
 
 @register_side_effect_replay_handler(
     name="ordered_dict_instance_attr_mutation",
-    matcher=lambda ctx: istype(ctx.var, variables.OrderedDictVariable)
-    and isinstance(ctx.var.mutation_type, AttributeMutationNew),
+    matcher=lambda ctx: _is_attributed_ordered_dict(ctx.var),
     priority=75,
 )
 def _codegen_ordered_dict_instance_attr_mutation(
@@ -1823,13 +1847,10 @@ def _codegen_ordered_dict_instance_attr_mutation(
         ),
     )
     # An OrderedDict built in this frame with modeled instance attributes is
-    # replayed over both axes by ordered_dict_instance_attr_mutation. Keep this
-    # predicate identical to that handler's matcher (istype): the two sides must
-    # agree on exactly which VTs are handled there.
-    and not (
-        istype(ctx.var, variables.OrderedDictVariable)
-        and isinstance(ctx.var.mutation_type, AttributeMutationNew)
-    )
+    # replayed over both axes by ordered_dict_instance_attr_mutation. This uses
+    # the same shared predicate as that handler's matcher so the two sides
+    # cannot drift apart.
+    and not _is_attributed_ordered_dict(ctx.var)
     # A UserDefined dict/set (is-a ConstDictVariable/SetVariable under MI) has
     # both a content and an attribute compartment; it is replayed by the
     # composite attribute handler instead.

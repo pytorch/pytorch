@@ -348,6 +348,14 @@ class ConstantVariable(VariableTracker):
                 [self, *args],
                 kwargs,
             )
+        elif name == "format_map" and istype(self.value, str):
+            # format_map folds in the generic str-method branch below instead of
+            # going through BuiltinVariable(str.format), so it needs the same
+            # attributed-OrderedDict decline: the mapping's as_python_constant()
+            # rebuild drops the instance __dict__.
+            from .misc import StringFormatVariable
+
+            StringFormatVariable.check_attributed_format(tx, args, {})
         elif name == "join" and istype(self.value, str):
             if kwargs or len(args) != 1:
                 raise_args_mismatch(

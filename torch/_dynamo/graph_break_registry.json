@@ -2255,6 +2255,16 @@
       ]
     }
   ],
+  "GB9364": [
+    {
+      "Gb_type": "dir() on OrderedDict with unmodeled __dict__",
+      "Context": "dir({self.debug_repr()})",
+      "Explanation": "Dynamo does not model the instance __dict__ of this OrderedDict, so it cannot tell which attribute names dir() reports.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0137": [
     {
       "Gb_type": "Unsupported attribute for slice() object",

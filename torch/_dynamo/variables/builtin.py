@@ -2554,6 +2554,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
+        if istype(arg, variables.OrderedDictVariable):
+            # as_python_constant() rebuilds the container without its instance
+            # __dict__, so the fold below would report the wrong names. istype
+            # (not isinstance) also avoids realizing lazy VTs.
+            return arg.dir_impl(tx)
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
