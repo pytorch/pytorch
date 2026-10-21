@@ -8,11 +8,11 @@ import unittest
 from unittest import mock
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-from torch._inductor.runtime import triton_heuristics
 from torch._inductor.runtime.autotune_cache import (
     _comment_stripped_hash,
     AutotuneCacheBundler,
@@ -139,18 +139,26 @@ class TestKernelConfigs(TestCase):
     @parametrize(
         "case",
         [
-            ("persistent_reduction", _softmax, (64, 128)),
-            ("reduction", lambda x: x.sum(-1), (64, 3000)),
-            ("pointwise", lambda x: (x.sin() * 2).relu(), (4096,)),
-            ("bucketize", _bucketize, (4096,)),
-            ("subgraph", _cond_softmax, (64, 128)),
-            ("split_scan", lambda x: x.abs().cumsum(0), (2**20,)),
-            ("foreach", _foreach, (64, 128)),
-            ("mix_order_reduction", _mix_order, (8192, 8192)),
+            # (name, fn, input shape, text the kind of kernel leaves in the code, config)
+            ("persistent_reduction", _softmax, (64, 128), "persistent_reduction("),
+            ("reduction", lambda x: x.sum(-1), (64, 3000), "heuristics.reduction("),
+            ("pointwise", lambda x: (x.sin() * 2).relu(), (4096,), "pointwise("),
+            ("bucketize", _bucketize, (4096,), "bucketize_binary_search"),
+            ("subgraph", _cond_softmax, (64, 128), "def true_graph_0("),
+            ("split_scan", lambda x: x.abs().cumsum(0), (2**20,), "split_scan("),
+            ("foreach", _foreach, (64, 128), "foreach("),
+            (
+                "mix_order_reduction",
+                _mix_order,
+                (4096, 1536),
+                "RSPLIT_SIZE",
+                {"triton.mix_order_reduction": True},
+            ),
             (
                 "cooperative_reduction",
                 lambda x: x.sum(-1),
                 (8, 2**16),
+                "cooperative_reduction(",
                 {"triton.force_cooperative_reductions": True},
             ),
         ],
@@ -158,10 +166,11 @@ class TestKernelConfigs(TestCase):
     )
     @config.patch(coordinate_descent_tuning=True, max_autotune_pointwise=True)
     def test_kernels_launch_with_their_compile_time_config(self, case):
-        _, fn, shape, *cfg = case
+        _, fn, shape, marker, *cfg = case
         x = torch.randn(shape, device=GPU_TYPE)
         with _configs_tuned_at_compile_time() as tuned:
             _, code = _code_for(fn, x, **(cfg[0] if cfg else {}))
+        self.assertIn(marker, code)
         kernels = _kernels(code)
         self.assertTrue(kernels)
         with _no_runtime_tuning():
@@ -219,30 +228,44 @@ class TestKernelConfigs(TestCase):
         self.assertNotIn(HeuristicType.FIXED, launched)
 
     @requires_gpu_and_triton
-    @config.patch(fx_graph_cache=False)
     def test_bundled_autotune_cache_key_ignores_the_winners(self):
-        # AutotuneCacheBundler keys on the wrapper code, which must not change with
-        # which config each kernel's tuning picked.
-        keys = []
+        # AutotuneCacheBundler keys on the wrapper code, both when the graph is compiled
+        # and on an FX graph cache hit. The key must not change with the config each
+        # kernel's tuning picked, which the table records.
+        keys, xblock = [], [1]
         begin = AutotuneCacheBundler.begin_compile.__func__
+        block = PythonWrapperCodegen.generate_and_run_autotune_block
 
         def begin_spy(cls, inductor_meta, *, code=None, code_hash=None):
             keys.append(_comment_stripped_hash(code))
             return begin(cls, inductor_meta, code=code, code_hash=code_hash)
 
+        def another_winner(self, *args, **kwargs):
+            result = block(self, *args, **kwargs)
+            for name, cfg in self.kernel_configs.items():
+                self.kernel_configs[name] = {**cfg, "XBLOCK": xblock[0]}
+            return result
+
+        fn = lambda x: x.sum(-1)  # noqa: E731
         x = torch.randn(64, 3000, device=GPU_TYPE)
-        for xblock in (1, 2):
-            to_dict = lambda cfg: {**config_to_dict(cfg), "XBLOCK": xblock}  # noqa: E731
-            with (
-                mock.patch.object(
-                    AutotuneCacheBundler, "begin_compile", classmethod(begin_spy)
-                ),
-                mock.patch.object(triton_heuristics, "config_to_dict", to_dict),
-            ):
-                _, code = _code_for(lambda x: x.sum(-1), x)
-            self.assertIn(f"'XBLOCK': {xblock}", code)
-        self.assertEqual(len(keys), 2)
-        self.assertEqual(keys[0], keys[1])
+        with (
+            mock.patch.object(
+                AutotuneCacheBundler, "begin_compile", classmethod(begin_spy)
+            ),
+            mock.patch.object(
+                PythonWrapperCodegen, "generate_and_run_autotune_block", another_winner
+            ),
+        ):
+            for xblock[0] in (1, 2):
+                _, code = _code_for(fn, x, fx_graph_cache=False)
+                self.assertIn(f"'XBLOCK': {xblock[0]}", code)
+            _code_for(fn, x)
+            counters.clear()
+            _, code = _code_for(fn, x)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertIn("KERNEL_CONFIGS = {\n    'triton_", code)
+        self.assertEqual(len(keys), 4)
+        self.assertEqual(len(set(keys)), 1)
 
     @requires_gpu_and_triton
     @config.patch(coordinate_descent_tuning=True)
@@ -328,8 +351,12 @@ class TestKernelConfigs(TestCase):
         cfg = {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
         result, code = _code_for(lambda a, b: (a @ b).relu(), a, b, **cfg)
         (template,) = {k for k in _kernels(code) if k.startswith("triton_tem_")}
+        before_def = code.split(f"def {template}(")[0]
+        decorator = before_def.rsplit("@triton_heuristics.", 1)[1]
+        self.assertNotIn("pinned_config", decorator)
         ns = _load_from_file(code)
         self.assertNotIn(template, ns.get("KERNEL_CONFIGS", {}))
+        self.assertEqual(ns[template].heuristic_type, HeuristicType.TEMPLATE)
         self.assertEqual(ns["call"]([a, b])[0], result)
 
     @requires_gpu_and_triton
