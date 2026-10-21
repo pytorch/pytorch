@@ -1273,6 +1273,24 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    def test_global_callback_session_closed_at_exit(self):
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            profile_all_threads=True
+        )
+        allocation_size = 512 * 241
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            profile_memory=True,
+            experimental_config=experimental_config,
+        ) as prof:
+            # What the atexit hook does at interpreter shutdown.
+            torch.autograd._close_global_callback_session()
+            torch.empty(allocation_size, dtype=torch.uint8)
+
+        self.assertFalse(any(e.name == "aten::empty" for e in prof.events()))
+        memory_sizes = {e.cpu_memory_usage for e in prof.events()}
+        self.assertNotIn(allocation_size, memory_sizes)
+
     def test_memory_profiler_all_threads_left_running_at_exit(self):
         # c10 still points at the profiler's memory reporter during static
         # destruction.

@@ -376,8 +376,8 @@ class GlobalCallbackSession {
   std::condition_variable cv_; // guarded by mutex_
 };
 
-// We use a leaky singleton because callbacks and memory reports on other
-// threads can still use the session while static destructors run at exit.
+// We use a leaky singleton because every global callback and memory report
+// checks it first, including ones that arrive after it's closed at exit.
 GlobalCallbackSession& global_callback_session = *new GlobalCallbackSession();
 
 class GlobalMemoryReportingInfo final : public c10::MemoryReportingInfoBase {
@@ -933,6 +933,12 @@ void enableProfiler(
     state_info_ptr->scopes = scopes;
     profilerStateInfo() = std::move(state_info_ptr);
   }
+}
+
+void closeGlobalCallbackSession() {
+  c10::setGlobalMemoryReportingInfo(nullptr);
+  // Ignore a drain timeout here, since we're exiting and won't free the state.
+  (void)global_callback_session.drain();
 }
 
 bool isProfilerEnabledInMainThread() {
