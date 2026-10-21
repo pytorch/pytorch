@@ -922,11 +922,13 @@ class CachingAutotuner(KernelInterface):
         # Triton reports when it loads the binary.
         log.info("%s: pinned config failed, tuning: %s", self.fn.__name__, e)
         state = {k: v for k, v in vars(self).items() if k in self._kept_on_fallback}
+        # Built first, so that a build that raises leaves this kernel as it was.
+        unpinned = vars(self.fallback())
         self.release_benchmark_artifacts()
         # Become the unpinned kernel in place, since the module-level name binds self.
         # CachingAutotuner keeps all of its state in __dict__ (no __slots__), and the
         # unpinned instance is never compiled or run, so nothing else refers to it.
-        self.__dict__ = {**vars(self.fallback()), **state}
+        self.__dict__ = {**unpinned, **state}
         self._plugins = get_caching_autotuner_plugins(self)
 
     def _precompile_worker(self):
@@ -3860,7 +3862,13 @@ def cached_autotune(
             inductor_meta=meta,
             **shared,
         )(fn)
-        kernel.fallback = lambda: unpinned()(fn)
+
+        def fallback():
+            # Copies, since _cached_autotune pops from them and a failed build is retried.
+            metas = {"triton_meta": {**triton_meta}, "inductor_meta": {**inductor_meta}}
+            return unpinned(**metas)(fn)
+
+        kernel.fallback = fallback
         return kernel
 
     return decorator
