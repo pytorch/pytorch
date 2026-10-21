@@ -25,8 +25,6 @@ namespace KINETO_NAMESPACE {
 using namespace libkineto;
 
 namespace {
-thread_local std::unordered_map<int, std::vector<int64_t>> correlationToGrid;
-thread_local std::unordered_map<int, std::vector<int64_t>> correlationToBlock;
 thread_local std::unordered_map<int, size_t> correlationToSize;
 
 inline std::vector<int64_t> rocprofKernelGrid(
@@ -105,6 +103,8 @@ inline const std::string GpuActivity::name() const {
     return demangle(
         raw().kernelName.length() > 0 ? raw().kernelName : std::string(name));
   } else if (type_ == ActivityType::GPU_MEMSET) {
+    if (raw().internalApi == RocLogger::RuntimeInternalMemset)
+      return "Memset (Device)";
     return fmt::format(
         "Memset ({})", getGpuActivityKindString(raw().domain, raw().op));
   } else if (type_ == ActivityType::GPU_MEMCPY) {
@@ -113,7 +113,7 @@ inline const std::string GpuActivity::name() const {
     getMemcpySrcDstString(raw().op, src, dst);
     return fmt::format(
         "Memcpy {} ({} -> {})",
-        getGpuActivityKindString(raw().domain, raw().op),
+        getGpuActivityKindString(memcpyKindDomain(), raw().op),
         src,
         dst);
   } else {
@@ -154,12 +154,33 @@ inline void GpuActivity::visitTypedMetadata(
       RocmMetadataFields::kHsaQueue, static_cast<uint64_t>(gpuActivity.queue));
   visitor.visit(
       RocmMetadataFields::kCorrelation, static_cast<uint64_t>(gpuActivity.id));
+
+  // A dispatch the runtime issued to implement a HIP memset or memcpy API
+  // call.  Report it like the API the user called (CUPTI parity), with the
+  // transfer size that API was given, rather than like a kernel.
+  if (gpuActivity.internalApi != RocLogger::RuntimeInternalNone) {
+    if (gpuActivity.internalApi == RocLogger::RuntimeInternalMemcpy) {
+      visitor.visit(
+          RocmMetadataFields::kKind,
+          std::string{
+              getGpuActivityKindString(memcpyKindDomain(), gpuActivity.op)});
+    }
+    visitor.visit(
+        RocmMetadataFields::kBytes,
+        static_cast<uint64_t>(gpuActivity.internalBytes));
+    addBandwidthTypedMetadata(
+        visitor,
+        gpuActivity.internalBytes,
+        gpuActivity.end - gpuActivity.begin);
+    return;
+  }
+
   visitor.visit(
       RocmMetadataFields::kKind,
       std::string{
           getGpuActivityKindString(gpuActivity.domain, gpuActivity.op)});
 
-  // if memcpy or memset, add size
+  // if memcpy, add size
   auto sizeIt = correlationToSize.find(gpuActivity.id);
   if (sizeIt != correlationToSize.end()) {
     visitor.visit(
@@ -169,13 +190,20 @@ inline void GpuActivity::visitTypedMetadata(
     return;
   }
 
-  // if compute kernel, add grid and block
-  auto gridIt = correlationToGrid.find(gpuActivity.id);
-  auto blockIt = correlationToBlock.find(gpuActivity.id);
-  if (gridIt != correlationToGrid.end() &&
-      blockIt != correlationToBlock.end()) {
-    visitor.visit(RocmMetadataFields::kGrid, gridIt->second);
-    visitor.visit(RocmMetadataFields::kBlock, blockIt->second);
+  // if compute kernel, add grid and block from the dispatch record
+  if (type_ == ActivityType::CONCURRENT_KERNEL) {
+    visitor.visit(
+        RocmMetadataFields::kGrid,
+        std::vector<int64_t>{
+            static_cast<int64_t>(gpuActivity.gridX),
+            static_cast<int64_t>(gpuActivity.gridY),
+            static_cast<int64_t>(gpuActivity.gridZ)});
+    visitor.visit(
+        RocmMetadataFields::kBlock,
+        std::vector<int64_t>{
+            static_cast<int64_t>(gpuActivity.workgroupX),
+            static_cast<int64_t>(gpuActivity.workgroupY),
+            static_cast<int64_t>(gpuActivity.workgroupZ)});
   }
 }
 
@@ -218,14 +246,14 @@ inline void RuntimeActivity<rocprofKernelRow>::visitTypedMetadata(
   }
 
   // cache grid and block so we can pass it into async activity (GPU track)
-  correlationToGrid[raw().id] = rocprofKernelGrid(raw());
-  correlationToBlock[raw().id] = rocprofKernelBlock(raw());
+  auto grid = rocprofKernelGrid(raw());
+  auto block = rocprofKernelBlock(raw());
 
   visitor.visit(RocmMetadataFields::kCid, static_cast<uint64_t>(raw().cid));
   visitor.visit(
       RocmMetadataFields::kCorrelation, static_cast<uint64_t>(raw().id));
-  visitor.visit(RocmMetadataFields::kGrid, correlationToGrid[raw().id]);
-  visitor.visit(RocmMetadataFields::kBlock, correlationToBlock[raw().id]);
+  visitor.visit(RocmMetadataFields::kGrid, grid);
+  visitor.visit(RocmMetadataFields::kBlock, block);
   visitor.visit(
       RocmMetadataFields::kSharedMemory,
       static_cast<uint64_t>(raw().groupSegmentSize));
