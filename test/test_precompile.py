@@ -10574,7 +10574,7 @@ class TestExportPython(TestCase):
             return inp + 1
 
         def save_no_forward(self, args):
-            return "x = 1\n"
+            return "x = 1\n", False
 
         cls = ExportedPythonArtifact
         stub = mock.patch.object(cls, "_precompile_and_save", save_no_forward)
