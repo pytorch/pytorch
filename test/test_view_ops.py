@@ -24,7 +24,6 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     complex_types,
     floating_and_complex_types_and,
-    integral_types_and,
 )
 from torch.testing._internal.common_utils import (
     gradcheck,
@@ -136,7 +135,6 @@ class TestViewOps(TestCase):
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @skipLazy
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
-    @dtypesIfMPS(*integral_types_and(torch.cfloat, torch.float, torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
         dtypes = {value: key for (key, value) in numpy_to_torch_dtype_dict.items()}
         if device.startswith("mps"):
@@ -377,7 +375,6 @@ class TestViewOps(TestCase):
 
     @skipLazy
     @dtypes(*complex_types(), torch.complex32)
-    @dtypesIfMPS(torch.cfloat, torch.chalf)
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
             # `torch.bcomplex32` doesn't have randn yet
@@ -436,7 +433,6 @@ class TestViewOps(TestCase):
 
     @skipLazy
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_hsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_hsplit = torch.hsplit(t, 2)
@@ -447,7 +443,6 @@ class TestViewOps(TestCase):
 
     @skipLazy
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_vsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_vsplit = torch.vsplit(t, 2)
@@ -458,7 +453,6 @@ class TestViewOps(TestCase):
 
     @skipLazy
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_dsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_dsplit = torch.dsplit(t, 2)
@@ -478,7 +472,6 @@ class TestViewOps(TestCase):
 
     @skipLazy
     @dtypes(*complex_types())
-    @dtypesIfMPS(torch.cfloat)
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
@@ -510,7 +503,6 @@ class TestViewOps(TestCase):
 
     @skipLazy
     @dtypes(*complex_types())
-    @dtypesIfMPS(torch.cfloat)
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
         t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
@@ -1004,6 +996,16 @@ class TestViewOps(TestCase):
         self.assertEqual(t[2, 2], 0)
 
     @skipLazy
+    @dtypes(torch.half, torch.float, torch.long, torch.bool)
+    def test_resize_view_preserves_storage(self, device, dtype):
+        base = make_tensor((20,), device=device, dtype=dtype)
+        expected = base.clone()
+        view = base[5:15]
+        view.resize_(30)
+        self.assertEqual(view[:10], expected[5:15])
+        self.assertEqual(base, expected)
+
+    @skipLazy
     def test_chunk_view(self, device):
         t = torch.zeros(3, 3, device=device)
         l = torch.chunk(t, 3)
@@ -1105,6 +1107,9 @@ class TestViewOps(TestCase):
             self.assertEqual(result, expected)
             self.assertTrue(result.is_contiguous())
 
+            # The movedim/flatten reference below requires a non-negative dim.
+            gather_dim = gather_dim % x.dim()
+
             # Check that whether result is a view matches the movedim reference implementation
             # Reference: chunks = torch.unflatten(x, 0, [group_size, -1])
             #            ref = torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
@@ -1137,6 +1142,9 @@ class TestViewOps(TestCase):
         test_config((4, 8, 6, 10), group_size=4, gather_dim=2)  # 4D, gather_dim=2
         test_config((4, 8, 6, 10), group_size=4, gather_dim=3)  # 4D, gather_dim=3
         test_config((8, 4, 6), group_size=8, gather_dim=1)  # group_size=8
+        test_config((4, 16), group_size=4, gather_dim=-1)  # negative dim, view case
+        test_config((4, 2, 8), group_size=4, gather_dim=-1)  # negative dim, cat case
+        test_config((4, 8, 16), group_size=4, gather_dim=-3)  # negative dim, no-op case
 
 
 class TestOldViewOps(TestCase):

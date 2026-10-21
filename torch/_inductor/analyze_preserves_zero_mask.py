@@ -49,10 +49,28 @@ class PreservesZeros(SymPyOps, DefaultHandler):
             raise AssertionError("prologue should only have a single store")
         self.store_preserves_zeros = value.is_constant() and value.expr == 0
 
-    def indirect_indexing(self, *args: Any, **kwargs: Any) -> sympy.Expr:
+    def indirect_indexing(self, *args: object, **kwargs: object) -> sympy.Expr:
         return construct_symbol(next(self.count), torch.int32)
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def to_dtype(
+        self,
+        value: TypedExpr,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types: bool = True,
+    ) -> TypedExpr:
+        result = SymPyOps.to_dtype(value, dtype, src_dtype, use_compute_types)
+        if result is not NotImplemented:
+            return result
+        # SymPyOps keeps a rounding cast to float16 or bfloat16 unfolded. Rounding
+        # leaves a zero exact; anything else becomes unknown.
+        if value.is_constant() and value.expr == 0:
+            return TypedExpr(value.expr, dtype)
+        return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
+
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         from torch._inductor.codegen.common import OpDecompositions
 
         if hasattr(OpDecompositions, name):
@@ -112,10 +130,12 @@ class RecordLowPrecisionOps(DefaultHandler):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
+    def indirect_indexing(*args: object, **kwargs: object) -> sympy.Expr:
         return sympy.S.Zero
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         out_dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
         out = DTypeContainer(out_dtype, is_scalar=(name == "constant"))
         if name == "constant":

@@ -425,7 +425,10 @@ void foreach_tensor_copy_list_kernel_cuda_(
             [&self](const auto& t) -> bool {
               return t.dtype() == self[0].dtype();
             }) &&
-        _check_tensors_share_sizes_and_strides({self, src}))) {
+        _check_tensors_share_sizes_and_strides({self, src}) &&
+        // The fused kernel doesn't instantiate barebones unsigned types.
+        !isBarebonesUnsignedType(self[0].scalar_type()) &&
+        !isBarebonesUnsignedType(src[0].scalar_type()))) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }

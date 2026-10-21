@@ -1419,22 +1419,20 @@ class TestBasicGEMM(TestCase):
     @parametrize("m", [128])
     @parametrize("k", [512, 1024])
     @parametrize("n", [512, 1024])
-    def test__int4_mm(self, device, m, k, n):
-        q_group = 32
+    @parametrize("q_group", [32, 64, 128])
+    @parametrize("act_dtype", [torch.bfloat16, torch.float16])
+    @parametrize("scale_dtype_fp32", [True, False])
+    def test__int4_mm(self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32):
         inner_k_tiles = 2
-
         torch.manual_seed(1)
-        a_bf16 = torch.rand((m, k), dtype=torch.float32, device=device)
-        b_bf16 = torch.rand((k, n), dtype=torch.float32, device=device)
+        a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_fp32 = torch.rand((k, n), dtype=torch.float32, device=device)
 
         def convert_weight_to_int4pack(b):
-            # b_uint8 [n, k //2]
             b_uint8, scales, zeros = self._group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
-            # b_int4pack [k//8, n]
             b_int4pack = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
-
             return b_int4pack, scales, zeros
 
         def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
@@ -1442,18 +1440,18 @@ class TestBasicGEMM(TestCase):
                 a, b_int4pack, q_group, qscale, qzeros
             )
 
-        b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
+        b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_fp32)
 
-        for dtype in [torch.bfloat16, torch.float16]:
-            a = a_bf16.to(dtype=dtype)
-            b = b_bf16.to(dtype=dtype)
-            b_scales = b_scales.to(dtype=dtype)
-            ref = torch.mm(a, b)
+        a = a_fp32.to(dtype=act_dtype)
+        b = b_fp32.to(dtype=act_dtype)
+        scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
+        scales = b_scales.to(dtype=scale_dtype)
+        ref = torch.mm(a, b)
 
-            res = weight_int4pack_mm(a, b_int4pack, b_scales, zeros_int8)
+        res = weight_int4pack_mm(a, b_int4pack, scales, zeros_int8)
 
-            mean_err = ((res - ref).abs() / ref).mean()
-            self.assertTrue(mean_err < 0.05)
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
     def test_mm_with_offset(self, device):
         from torch._dynamo.testing import rand_strided
@@ -1697,6 +1695,46 @@ def forward(self, x_1, w_1):
 
             self.assertEqual(out.dtype, output_dtype)
             torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.1})
+    @dtypes(torch.bfloat16, torch.half)
+    def test_addmm_reduced_float_non_inplace_precision(self, device, dtype):
+        M, K, N = 10, 25, 15
+        mat1 = torch.randn(M, K, device=device, dtype=torch.float32).to(dtype)
+        mat2 = torch.randn(K, N, device=device, dtype=torch.float32).to(dtype)
+        bias = torch.randn(M, N, device=device, dtype=torch.float32).to(dtype)
+
+        for alpha, beta in [(0.5, 2.0), (2.0, 0.5), (0.3, 0.7)]:
+            result = torch.addmm(bias, mat1, mat2, alpha=alpha, beta=beta)
+            expected = alpha * (mat1.float().cpu().numpy() @ mat2.float().cpu().numpy())
+            expected += beta * bias.float().cpu().numpy()
+            expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(result, expected)
+
+            out = torch.empty(M, N, device=device, dtype=dtype)
+            torch.addmm(bias, mat1, mat2, alpha=alpha, beta=beta, out=out)
+            self.assertEqual(out, expected)
+
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
+    @dtypes(torch.bfloat16, torch.half)
+    def test_baddbmm_reduced_float_non_inplace_precision(self, device, dtype):
+        B, M, K, N = 3, 10, 25, 15
+        batch1 = torch.randn(B, M, K, device=device, dtype=torch.float32).to(dtype)
+        batch2 = torch.randn(B, K, N, device=device, dtype=torch.float32).to(dtype)
+        input_t = torch.randn(B, M, N, device=device, dtype=torch.float32).to(dtype)
+
+        for alpha, beta in [(0.5, 2.0), (2.0, 0.5), (0.3, 0.7)]:
+            result = torch.baddbmm(input_t, batch1, batch2, alpha=alpha, beta=beta)
+            expected = alpha * (
+                batch1.float().cpu().numpy() @ batch2.float().cpu().numpy()
+            )
+            expected += beta * input_t.float().cpu().numpy()
+            expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(result, expected)
+
+            out = torch.empty(B, M, N, device=device, dtype=dtype)
+            torch.baddbmm(input_t, batch1, batch2, alpha=alpha, beta=beta, out=out)
+            self.assertEqual(out, expected)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)

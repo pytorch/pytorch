@@ -2,6 +2,7 @@
 
 #include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
+#include <sstream>
 #include <vector>
 
 using torch::headeronly::HeaderOnlyArrayRef;
@@ -84,4 +85,12 @@ TEST(TestHeaderOnlyArrayRef, TestEqualityOperators) {
   EXPECT_FALSE(diff_vec == arr);
   EXPECT_TRUE(arr != diff_vec);
   EXPECT_TRUE(diff_vec != arr);
+}
+
+TEST(TestHeaderOnlyArrayRef, TestStreamOperator) {
+  std::vector<int> vec = {1, 2, 3};
+  std::stringstream ss;
+  ss << HeaderOnlyArrayRef<int>() << HeaderOnlyArrayRef<int>(5)
+     << HeaderOnlyArrayRef<int>(vec);
+  EXPECT_EQ(ss.str(), "[][5][1, 2, 3]");
 }

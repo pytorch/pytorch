@@ -60,7 +60,7 @@ if HAS_GPU:
     import triton
     import triton.language as tl
 
-    from torch.testing._internal.triton_utils import add_kernel_2d_autotuned
+    from torch.testing._internal.triton_utils import add_kernel, add_kernel_2d_autotuned
 
 test_config = {
     "compile_threads": 1,
@@ -249,6 +249,23 @@ class FxirTestCase(InductorTestCase):
             gm, torch.ops.aten.randint.low_out
         ) + self._count_ops(gm, torch.ops.aten.addbmm.default)
         self.assertEqual(num_fallback, 2)
+
+    def test_fallback_symbolic_kwarg(self):
+        def foo(x, repeats, y):
+            out = torch.repeat_interleave(x, repeats, dim=0, output_size=y.shape[0])
+            return out + y
+
+        args = (
+            torch.randn(4, 8, device=self.device),
+            torch.tensor([1, 2, 3, 4], device=self.device),
+            torch.randn(10, 8, device=self.device),
+        )
+        (gm,) = self._compile_and_check(foo, args, compile_kwargs={"dynamic": True})
+
+        (fallback,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.repeat_interleave.Tensor
+        )
+        self.assertIsInstance(fallback.kwargs["output_size"], torch.fx.Node)
 
     def test_cat_inputs(self):
         """
@@ -917,7 +934,7 @@ class AOTFxirTestCase(InductorTestCase):
     device = GPU_TYPE
 
     def check(
-        self, model, inp, dynamic_shapes=None, strict=False
+        self, model, inp, dynamic_shapes=None, strict=False, check_fn=same
     ) -> torch.fx.GraphModule:
         with torch.no_grad():
             ep = torch.export.export(
@@ -928,7 +945,7 @@ class AOTFxirTestCase(InductorTestCase):
             )
             # Flatten args for fx_wrapper gm
             flat_args, _ = pytree.tree_flatten(inp)
-            self.assertTrue(same(model(*inp), gm(*flat_args)))
+            self.assertTrue(check_fn(model(*inp), gm(*flat_args)))
 
             for node in gm.graph.nodes:
                 if (
@@ -946,6 +963,57 @@ class AOTFxirTestCase(InductorTestCase):
 
         inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
         self.check(M(), inp)
+
+    @requires_gpu()
+    @parametrize(
+        "input_dtype,dtype",
+        (
+            (torch.uint8, torch.float8_e4m3fn),
+            (torch.float16, torch.bfloat16),
+            (torch.uint8, torch.uint8),
+        ),
+    )
+    @parametrize("offset", (0, 16))
+    def test_reinterpret_dtype_view(self, input_dtype, dtype, offset):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.view(dtype)[offset : offset + 32].reshape(2, 16)
+
+        # Citrine C3: create inputs directly on the test device.
+        x = torch.arange(64, dtype=input_dtype, device=self.device)
+        model = M()
+        gm = self.check(
+            model, (x,), check_fn=lambda ref, res: same(ref.float(), res.float())
+        )
+        result = gm(x)
+        expected = model(x)
+
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result.device, x.device)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result.stride(), expected.stride())
+        self.assertEqual(result.storage_offset(), expected.storage_offset())
+        self.assertEqual(result.view(torch.uint8), expected.view(torch.uint8))
+        self.assertEqual(
+            result.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+        )
+        (output,) = gm.graph.find_nodes(op="output")
+        self.assertEqual(output.args[0].meta["val"].dtype, dtype)
+
+    @requires_gpu()
+    @parametrize("offset", (0, 16))
+    def test_reinterpret_dtype_view_extern_kernel(self, offset):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                view = x.view(torch.bfloat16)[offset : offset + 32].reshape(2, 16)
+                return torch.mm(view, y)
+
+        x = torch.arange(64, dtype=torch.float16, device=self.device)
+        y = torch.ones(16, 16, dtype=torch.bfloat16, device=self.device)
+        gm = self.check(M(), (x, y))
+
+        (mm,) = gm.graph.find_nodes(op="call_function", target=torch.ops.aten.mm.out)
+        self.assertEqual(mm.args[0].meta["val"].dtype, torch.bfloat16)
 
     @requires_gpu()
     def test_aoti_fx_parallel_compile_reloads_triton_kernel(self):
@@ -1035,6 +1103,23 @@ class AOTFxirTestCase(InductorTestCase):
             inp,
             dynamic_shapes=({0: Dim.DYNAMIC}, {0: Dim.DYNAMIC}),
         )
+
+    def test_custom_triton_view_arg(self):
+        # The mm output's halves reach the kernel as reinterpret_tensor(...) views.
+        n = 8
+
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                t = torch.mm(x, w).view(-1)
+                output = torch.zeros(n, device=x.device)
+                add_kernel[(1,)](t[:n], t[n:], output, n, BLOCK_SIZE=n)
+                return output
+
+        inp = (
+            torch.randn(2 * n, 4, device=self.device),
+            torch.randn(4, 1, device=self.device),
+        )
+        self.check(Model().to(device=self.device), inp, strict=True)
 
     def test_custom_triton_autotune_dynamic(self):
         class Model(torch.nn.Module):

@@ -3,12 +3,13 @@
 #include <ATen/native/GridSamplerUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -39,6 +40,64 @@ using at::native::detail::GridSamplerPadding;
 
 namespace {
 
+  // compute_coordinates with the reflection parity taken by fmod: an int fold count
+  // is undefined past INT_MAX. The bounds and the clipping are compute_coordinates'.
+  template <typename scalar_t>
+  static inline scalar_t compute_coordinates_sized(scalar_t coord, int64_t size,
+                                                   GridSamplerPadding padding_mode,
+                                                   bool align_corners) {
+    if (padding_mode == GridSamplerPadding::Border) {
+      coord = clip_coordinates(coord, size);
+    } else if (padding_mode == GridSamplerPadding::Reflection) {
+      // the bounds reflect_coordinates halves, formed without doubling the extent
+      const scalar_t low =
+          align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+      const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+      if (span == 0) {
+        coord = 0;
+      } else {
+        const scalar_t in = std::fabs(coord - low);
+        const scalar_t extra = std::fmod(in, span);
+        const bool odd =
+            std::fmod(std::floor(in / span), static_cast<scalar_t>(2)) != 0;
+        coord = odd ? span - extra + low : extra + low;
+      }
+      coord = clip_coordinates(coord, size);
+    }
+    return coord;
+  }
+
+  // The four cubic taps one axis contributes at `coord`: the Keys coefficients of its fractional
+  // part, the index each tap reads, and, when `coeffs_grad` is given, the coefficient derivatives.
+  // The taps sit around the unclipped index. A tap the padding drops takes a negative index,
+  // contributes a zero value and keeps its coefficient, as get_value_bounded does in 4-D.
+  template <typename scalar_t, typename index_t>
+  static inline void resolve_cubic_taps(
+      scalar_t coord,
+      index_t size,
+      GridSamplerPadding padding_mode,
+      bool align_corners,
+      scalar_t coeffs[4],
+      scalar_t* coeffs_grad,
+      index_t indices[4]) {
+    const scalar_t base = std::floor(coord);
+    get_cubic_upsample_coefficients<scalar_t>(coeffs, coord - base);
+    if (coeffs_grad != nullptr) {
+      get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
+    }
+    const scalar_t index_limit =
+        static_cast<scalar_t>(std::numeric_limits<index_t>::max());
+    for (const auto i : c10::irange(4)) {
+      const scalar_t tap =
+          compute_coordinates_sized(base - 1 + i, size, padding_mode, align_corners);
+      // a tap that is not finite, or past the index type, fails before the cast
+      const index_t index = (tap >= 0 && tap < index_limit)
+          ? static_cast<index_t>(tap)
+          : static_cast<index_t>(-1);
+      indices[i] = index < size ? index : static_cast<index_t>(-1);
+    }
+  }
+
   template<typename scalar_t>
   Tensor grid_sampler_3d_cpu_impl(const Tensor& input, const Tensor& grid,
                                   GridSamplerInterpolation interpolation_mode,
@@ -46,9 +105,9 @@ namespace {
                                   bool align_corners) {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
+    using opmath_t = at::opmath_type<scalar_t>;
     check_grid_sampler_common(input, grid);
-    check_grid_sampler_3d(
-      input, grid, static_cast<int64_t>(interpolation_mode));
+    check_grid_sampler_3d(input, grid);
 
     int64_t N = input.size(0);
     int64_t C = input.size(1);
@@ -90,15 +149,14 @@ namespace {
             for (const auto w : c10::irange(out_W)) {
               // get the corresponding input x, y, z coordinates from grid
               const scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
-              scalar_t ix = *grid_ptr_NDHW;
-              scalar_t iy = grid_ptr_NDHW[grid_sCoor];
-              scalar_t iz = grid_ptr_NDHW[2 * grid_sCoor];
-
-              ix = grid_sampler_compute_source_index(ix, inp_W, padding_mode, align_corners);
-              iy = grid_sampler_compute_source_index(iy, inp_H, padding_mode, align_corners);
-              iz = grid_sampler_compute_source_index(iz, inp_D, padding_mode, align_corners);
+              scalar_t x = *grid_ptr_NDHW;
+              scalar_t y = grid_ptr_NDHW[grid_sCoor];
+              scalar_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+                scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+                scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+                scalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
                 // get corner pixel values from (x, y, z)
                 // for 4d, we used north-east-south-west
                 // for 5d, we add top-bottom
@@ -179,6 +237,9 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+                scalar_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
+                scalar_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
+                scalar_t iz = grid_sampler_compute_source_index(z, inp_D, padding_mode, align_corners);
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
@@ -192,6 +253,55 @@ namespace {
                   } else {
                     *out_ptr_NCDHW = static_cast<scalar_t>(0);
                   }
+                }
+              } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+                // The taps sit around the unclipped index, at the raw x, y, z, and are placed in
+                // the accumulate type: the coefficients and the reflection arithmetic need more
+                // precision than a half carries.
+                opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
+                int64_t x_taps[4], y_taps[4], z_taps[4];
+                resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(x), inp_W, align_corners),
+                                   inp_W, padding_mode, align_corners, x_coeffs, static_cast<opmath_t*>(nullptr), x_taps);
+                resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(y), inp_H, align_corners),
+                                   inp_H, padding_mode, align_corners, y_coeffs, static_cast<opmath_t*>(nullptr), y_taps);
+                resolve_cubic_taps(grid_sampler_unnormalize(static_cast<opmath_t>(z), inp_D, align_corners),
+                                   inp_D, padding_mode, align_corners, z_coeffs, static_cast<opmath_t*>(nullptr), z_taps);
+
+                // Only zero padding drops a tap, near the rim. With none dropped, all 64 are read
+                // without a per-tap test, for the vectoriser; the OR of the indices is negative
+                // when one is dropped.
+                const bool every_tap_reads =
+                    (x_taps[0] | x_taps[1] | x_taps[2] | x_taps[3] |
+                     y_taps[0] | y_taps[1] | y_taps[2] | y_taps[3] |
+                     z_taps[0] | z_taps[1] | z_taps[2] | z_taps[3]) >= 0;
+
+                scalar_t *out_ptr_NCDHW = out_ptr + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
+                for (int64_t c = 0; c < C; ++c, out_ptr_NCDHW += out_sC, inp_ptr_NC += inp_sC) {
+                  opmath_t value = static_cast<opmath_t>(0);
+                  for (const auto k : c10::irange(4)) {
+                    for (const auto j : c10::irange(4)) {
+                      const opmath_t weight_zy = z_coeffs[k] * y_coeffs[j];
+                      if (every_tap_reads) {
+                        const scalar_t *row = inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH;
+                        for (const auto i : c10::irange(4)) {
+                          value += static_cast<opmath_t>(row[x_taps[i] * inp_sW]) * weight_zy * x_coeffs[i];
+                        }
+                      } else {
+                        const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
+                        const scalar_t *row = plane_reads
+                            ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
+                            : inp_ptr_NC;
+                        for (const auto i : c10::irange(4)) {
+                          const opmath_t sample = plane_reads && x_taps[i] >= 0
+                              ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                              : static_cast<opmath_t>(0);
+                          value += sample * weight_zy * x_coeffs[i];
+                        }
+                      }
+                    }
+                  }
+                  *out_ptr_NCDHW = static_cast<scalar_t>(value);
                 }
               }
             }
@@ -211,9 +321,9 @@ namespace {
                                     bool align_corners, std::array<bool,2> output_mask) {
     // See NOTE [ grid_sampler Native Functions ].
     // Add checks here in case this is called instead of grid_sampler.
+    using opmath_t = at::opmath_type<scalar_t>;
     check_grid_sampler_common(input, grid);
-    check_grid_sampler_3d(
-      input, grid, static_cast<int64_t>(interpolation_mode));
+    check_grid_sampler_3d(input, grid);
 
     auto input_requires_grad = output_mask[0];
     Tensor grad_input = ([&]() {
@@ -289,17 +399,16 @@ namespace {
             for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NDHW += gGrid_sW /* grad_grid is contiguous */ ) {
               // get the corresponding input x, y, z coordinates from grid
               const scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
-              scalar_t ix = *grid_ptr_NDHW;
-              scalar_t iy = grid_ptr_NDHW[grid_sCoor];
-              scalar_t iz = grid_ptr_NDHW[2 * grid_sCoor];
-
-              // multipliers for gradients on ix, iy, and iz
-              scalar_t gix_mult, giy_mult, giz_mult;
-              ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
-              iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
-              iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, &giz_mult);
+              scalar_t x = *grid_ptr_NDHW;
+              scalar_t y = grid_ptr_NDHW[grid_sCoor];
+              scalar_t z = grid_ptr_NDHW[2 * grid_sCoor];
 
               if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+                // multipliers for gradients on ix, iy, and iz
+                scalar_t gix_mult, giy_mult, giz_mult;
+                scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+                scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+                scalar_t iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
                 // get corner pixel values from (x, y, z)
                 // for 4d, we used north-east-south-west
                 // for 5d, we add top-bottom
@@ -420,6 +529,11 @@ namespace {
                 gGrid_ptr_NDHW[1] = giy_mult * giy;
                 gGrid_ptr_NDHW[2] = giz_mult * giz;
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+                // multipliers for gradients on ix, iy, and iz
+                scalar_t gix_mult, giy_mult, giz_mult;
+                scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+                scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+                scalar_t iz = grid_sampler_compute_source_index_set_grad(z, inp_D, padding_mode, align_corners, &giz_mult);
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
@@ -434,6 +548,60 @@ namespace {
                                 gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW);
                   }
                 }
+              } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
+                // The taps sit around the unclipped index; the grid multipliers are the
+                // unnormalize ones.
+                opmath_t x_coeffs[4], y_coeffs[4], z_coeffs[4];
+                opmath_t x_coeffs_grad[4], y_coeffs_grad[4], z_coeffs_grad[4];
+                int64_t x_taps[4], y_taps[4], z_taps[4];
+                opmath_t x_mult, y_mult, z_mult;
+                resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(x), inp_W, align_corners, &x_mult),
+                                   inp_W, padding_mode, align_corners, x_coeffs, x_coeffs_grad, x_taps);
+                resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(y), inp_H, align_corners, &y_mult),
+                                   inp_H, padding_mode, align_corners, y_coeffs, y_coeffs_grad, y_taps);
+                resolve_cubic_taps(grid_sampler_unnormalize_set_grad(static_cast<opmath_t>(z), inp_D, align_corners, &z_mult),
+                                   inp_D, padding_mode, align_corners, z_coeffs, z_coeffs_grad, z_taps);
+
+                opmath_t gix = static_cast<opmath_t>(0);
+                opmath_t giy = static_cast<opmath_t>(0);
+                opmath_t giz = static_cast<opmath_t>(0);
+
+                const scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
+                // an offset, not a pointer: grad_input is undefined when it is not asked for
+                int64_t gInp_offset_NC = n * gInp_sN;
+                for (int64_t c = 0; c < C;
+                     ++c, gOut_ptr_NCDHW += gOut_sC, gInp_offset_NC += gInp_sC, inp_ptr_NC += inp_sC) {
+                  const opmath_t gOut = *gOut_ptr_NCDHW;
+                  for (const auto k : c10::irange(4)) {
+                    for (const auto j : c10::irange(4)) {
+                      const bool plane_reads = z_taps[k] >= 0 && y_taps[j] >= 0;
+                      const scalar_t *row = plane_reads
+                          ? inp_ptr_NC + z_taps[k] * inp_sD + y_taps[j] * inp_sH
+                          : inp_ptr_NC;
+                      const int64_t grad_row = plane_reads
+                          ? gInp_offset_NC + z_taps[k] * gInp_sD + y_taps[j] * gInp_sH
+                          : gInp_offset_NC;
+                      for (const auto i : c10::irange(4)) {
+                        const bool reads = plane_reads && x_taps[i] >= 0;
+                        if (input_requires_grad && reads) {
+                          gInp_ptr[grad_row + x_taps[i] * gInp_sW] += static_cast<scalar_t>(
+                              gOut * x_coeffs[i] * y_coeffs[j] * z_coeffs[k]);
+                        }
+                        const opmath_t value = reads
+                            ? static_cast<opmath_t>(row[x_taps[i] * inp_sW])
+                            : static_cast<opmath_t>(0);
+                        gix -= value * x_coeffs_grad[i] * y_coeffs[j] * z_coeffs[k] * gOut;
+                        giy -= value * x_coeffs[i] * y_coeffs_grad[j] * z_coeffs[k] * gOut;
+                        giz -= value * x_coeffs[i] * y_coeffs[j] * z_coeffs_grad[k] * gOut;
+                      }
+                    }
+                  }
+                }
+                // assuming grad_grid is contiguous
+                gGrid_ptr_NDHW[0] = static_cast<scalar_t>(x_mult * gix);
+                gGrid_ptr_NDHW[1] = static_cast<scalar_t>(y_mult * giy);
+                gGrid_ptr_NDHW[2] = static_cast<scalar_t>(z_mult * giz);
               }
             }
           }
@@ -964,7 +1132,7 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
   check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d(input, grid);
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler3d_cpu", [&] {
     return grid_sampler_3d_cpu_impl<scalar_t>(
@@ -1025,7 +1193,7 @@ grid_sampler_3d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
                              std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output);
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler_3d_backward_cpu", [&] {
     return grid_sampler_3d_backward_cpu_impl<scalar_t>(
