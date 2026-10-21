@@ -275,8 +275,7 @@ Tensor QLinearOnednnXPU::q_linear_prepack_onednn(
 //     be a multiple of 32 and divide K
 //   - `out_dtype`: the output dtype, one of float32/bfloat16/float16;
 //     defaults to float32
-//   - `bias`: an optional bias fused into the matmul, broadcastable to
-//     [M, N]
+//   - `bias`: an optional bias of size [N], dtype must match `out_dtype`
 Tensor QLinearOnednnXPU::q_linear_w4a8_int(
     Tensor mat_a,
     Tensor mat_b,
@@ -390,6 +389,21 @@ Tensor QLinearOnednnXPU::q_linear_w4a8_int(
       "qlinear_w4a8_int xpu: output dtype must be one of float32, bfloat16, "
       "or float16, but got ",
       dst_dtype);
+
+  TORCH_CHECK(
+      !bias.has_value() || bias->numel() == N,
+      __func__,
+      " : expect bias to have size ",
+      N,
+      " but got ",
+      bias->numel());
+  TORCH_CHECK(
+      !bias.has_value() || bias->scalar_type() == dst_dtype,
+      __func__,
+      " : expect bias dtype to match out_dtype (",
+      dst_dtype,
+      "), but got ",
+      bias->scalar_type());
 
   Tensor qout = at::empty({M, N}, mat_a.options().dtype(dst_dtype));
 
