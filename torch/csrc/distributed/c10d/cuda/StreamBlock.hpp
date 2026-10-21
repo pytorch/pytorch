@@ -15,7 +15,7 @@ enum StreamBlockStatus : int32_t {
 };
 
 /*
-StreamBlock implements a baton that will block a the active CUDA stream
+StreamBlock implements a baton that will block the active CUDA stream
 until aborted by the main process.
 */
 class TORCH_API StreamBlock {

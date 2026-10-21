@@ -26,18 +26,20 @@ class TensorType:
                 return torch.add(x, y)
     """
 
-    __args__: Sequence[DVar | int | _DynType]
-
     def __init__(self, dim: Sequence[Any]) -> None:
         self.__origin__ = TensorType
         self.__args__ = dim
 
+    @property
+    def dims(self) -> Sequence[DVar | int | _DynType]:
+        return self.__args__
+
     def __repr__(self) -> str:
-        return f"TensorType[{self.__args__}]"
+        return f"TensorType[{self.dims}]"
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, self.__class__):
-            return list(self.__args__) == list(other.__args__)
+            return list(self.dims) == list(other.dims)
         else:
             return False
 
@@ -89,9 +91,8 @@ def is_consistent(t1: object, t2: object) -> bool:
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and all(
-            is_consistent(elem1, elem2)
-            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+        return len(t1.dims) == len(t2.dims) and all(
+            is_consistent(elem1, elem2) for elem1, elem2 in zip(t1.dims, t2.dims)
         )
     else:
         return False
@@ -116,9 +117,8 @@ def is_more_precise(t1: object, t2: object) -> bool:
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and all(
-            is_more_precise(elem1, elem2)
-            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+        return len(t1.dims) == len(t2.dims) and all(
+            is_more_precise(elem1, elem2) for elem1, elem2 in zip(t1.dims, t2.dims)
         )
 
     else:

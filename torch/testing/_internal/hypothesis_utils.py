@@ -242,7 +242,7 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
     if enforced_zp is not None:
         zp = enforced_zp
     # Permute to model quantization along an axis
-    axis = int(np.random.randint(0, X.ndim, 1))
+    axis = int(np.random.randint(0, X.ndim))
     permute_axes = np.arange(X.ndim)
     permute_axes[0] = axis
     permute_axes[axis] = 0
@@ -275,7 +275,7 @@ Args:
              Could be either a single strategy (used for all) or a list of
              three strategies for X, w, b.
 Generates:
-    (X, W, b, g): Tensors of type `float32` of the following drawen shapes:
+    (X, W, b, g): Tensors of type `float32` of the following drawn shapes:
         X: (`batch_size, input_channels, H, W`)
         W: (`output_channels, input_channels_per_group) + kernel_shape
         b: `(output_channels,)`

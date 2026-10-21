@@ -405,7 +405,6 @@ class _DDPSink(Function):
                 reducer._delay_all_reduce
             )
             ddp_weakref._static_graph_delay_allreduce_enqueued = True
-
         return (None, *grad_outputs)
 
 
@@ -691,11 +690,17 @@ class DistributedDataParallel(Module, Joinable):
                       CPU modules, it must be ``None``, and the module itself
                       dictates the output location. (default: ``device_ids[0]``
                       for single-device modules)
-        broadcast_buffers (bool): Flag that enables syncing (broadcasting)
+        broadcast_buffers (bool or None): Flag that enables syncing (broadcasting)
                           buffers of the module at beginning of the ``forward``
-                          function. (default: ``True``)
+                          function. (default: ``None``)
+
+                          .. deprecated:: 2.13
+                              Use ``forward_sync_buffers`` instead.
         init_sync (bool): Whether to sync during initialization to verify param
                           shapes and broadcast parameters and buffers.
+                          Note: the deprecated ``broadcast_buffers=False``
+                          excludes buffers from this init sync. The replacement
+                          ``forward_sync_buffers`` does not affect init sync.
                           WARNING: if this is set to False the user is required
                           to ensure themselves that the weights are the same on
                           all ranks.
@@ -776,14 +781,30 @@ class DistributedDataParallel(Module, Joinable):
         batched_grad_copy (bool): When set to ``True``, individual per-parameter
                     gradient-to-bucket copy and division operations are deferred
                     and flushed as a single ``_foreach_copy_`` plus one flat
-                    ``div_`` when a bucket becomes ready. This reduces per-parameter
-                    kernel launches down to 2 kernels per bucket, which can improve
-                    throughput for models with many small parameters. The
-                    optimization is most effective with
+                    ``div_`` when a bucket becomes ready. The symmetric copy of
+                    the reduced bucket back into each parameter's ``.grad`` (used
+                    when ``gradient_as_bucket_view=False``) is likewise batched
+                    into a single ``_foreach_copy_`` per bucket. This reduces
+                    per-parameter kernel launches to a small constant per bucket,
+                    which can improve throughput for models with many small
+                    parameters. The optimization is most effective with
                     ``optimizer.zero_grad(set_to_none=True)`` (the default), where
                     ``gradient_as_bucket_view`` alone cannot avoid copies because
                     the bucket view alias is destroyed every iteration.
                     (default: ``False``)
+        lazy_bucket_allocation (bool): When set to ``True``, DDP allocates dense
+                    gradient buckets as their gradients become ready during
+                    backward and releases reducer-owned bucket storage after
+                    backward finishes. This reduces bucket and activation memory
+                    overlap. (default: ``False``)
+        forward_sync_buffers (bool or None): Flag that enables syncing
+                    (broadcasting) buffers of the module at runtime, including
+                    at the beginning of ``forward`` and after uneven-input
+                    joins. Does not affect initialization sync (see
+                    ``init_sync``); buffers are always synced at init
+                    regardless of this flag. Replaces the deprecated
+                    ``broadcast_buffers`` argument. When ``None``, defaults
+                    to ``True``. (default: ``None``)
 
 
     Attributes:
@@ -805,7 +826,7 @@ class DistributedDataParallel(Module, Joinable):
         device_ids=None,
         output_device=None,
         dim=0,
-        broadcast_buffers=True,
+        broadcast_buffers=None,
         init_sync=True,
         process_group=None,
         bucket_cap_mb=None,
@@ -820,6 +841,8 @@ class DistributedDataParallel(Module, Joinable):
         skip_all_reduce_unused_params=False,
         bucket_cap_mb_list: list[int] | None = None,
         batched_grad_copy=False,
+        forward_sync_buffers: bool | None = None,
+        lazy_bucket_allocation=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -943,12 +966,45 @@ class DistributedDataParallel(Module, Joinable):
         self.dim = dim
         self.module = module
         self.device = next(iter(self._module_parameters)).device
-        self.broadcast_buffers = broadcast_buffers
+        if broadcast_buffers is not None:
+            if forward_sync_buffers is not None:
+                warnings.warn(
+                    "Both `broadcast_buffers` and `forward_sync_buffers` were "
+                    "specified. `broadcast_buffers` is deprecated and its value "
+                    "is ignored when `forward_sync_buffers` is provided.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+            else:
+                warnings.warn(
+                    "`broadcast_buffers` is deprecated. Use `forward_sync_buffers` "
+                    "instead. IMPORTANT: unlike `broadcast_buffers=False`, "
+                    "`forward_sync_buffers=False` still syncs buffers at "
+                    "init. If you rely on buffers NOT being synced at "
+                    "init (e.g. rank-local buffers), keep using "
+                    "`broadcast_buffers=False` until `init_sync_buffers` "
+                    "is available.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+        if forward_sync_buffers is not None:
+            self.forward_sync_buffers = forward_sync_buffers
+            init_sync_buffers = True
+        else:
+            effective_broadcast = (
+                broadcast_buffers if broadcast_buffers is not None else True
+            )
+            self.forward_sync_buffers = effective_broadcast
+            init_sync_buffers = effective_broadcast
         self.find_unused_parameters = find_unused_parameters
+        # Unlike the existing synchronization flags, this is a property because
+        # updates must be validated and forwarded to the C++ reducer.
+        self._require_manual_backward_finalization = False
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
         self.batched_grad_copy = batched_grad_copy
+        self.lazy_bucket_allocation = lazy_bucket_allocation
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
             logger.warning("Received mixed precision config %s", self.mixed_precision)
@@ -1025,7 +1081,7 @@ class DistributedDataParallel(Module, Joinable):
                 broadcast_bucket_size=self.broadcast_bucket_size,
                 src=0,
                 params_and_buffers_to_ignore=self.parameters_to_ignore,
-                broadcast_buffers=self.broadcast_buffers,
+                broadcast_buffers=init_sync_buffers,
             )
 
         # In debug mode, build a mapping of parameter index -> parameter.
@@ -1110,6 +1166,14 @@ class DistributedDataParallel(Module, Joinable):
         # Whether or not DDPSink performs a clone.
         self._ddp_sink_clone = True
 
+    @property
+    def broadcast_buffers(self) -> bool:
+        return self.forward_sync_buffers
+
+    @broadcast_buffers.setter
+    def broadcast_buffers(self, value: bool) -> None:
+        self.forward_sync_buffers = value
+
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
 
@@ -1147,10 +1211,11 @@ class DistributedDataParallel(Module, Joinable):
     def _delayed_all_reduce_hook(self, grad):
         world_size = dist.get_world_size(self.process_group)
 
-        self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
-        _ = dist.all_reduce(
-            self._delay_grad_buffer, group=self.process_group, async_op=True
-        )
+        delay_grad_buffer = self._delay_grad_buffer
+        if delay_grad_buffer is None:
+            raise AssertionError("Delayed gradient buffer is not initialized")
+        delay_grad_buffer.div_(world_size)
+        _ = dist.all_reduce(delay_grad_buffer, group=self.process_group, async_op=True)
         return grad
 
     def _register_delay_all_reduce_hook(
@@ -1404,6 +1469,7 @@ class DistributedDataParallel(Module, Joinable):
             self._use_python_reducer,
             bucket_size_limits_for_rebuilding,
             self.batched_grad_copy,
+            self.lazy_bucket_allocation,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1422,7 +1488,7 @@ class DistributedDataParallel(Module, Joinable):
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
-            self.broadcast_buffers,
+            self.forward_sync_buffers,
             has_sync_bn,
             static_graph,
         )
@@ -1430,12 +1496,29 @@ class DistributedDataParallel(Module, Joinable):
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self.module)
 
-    def __getstate__(self):
-        self._check_default_group()
+    # The process group and the C++ reducer and logger, which do not pickle.
+    _unpicklable_attrs = ("process_group", "reducer", "logger")
+
+    def _picklable_state(self):
         attrs = copy.copy(self.__dict__)
-        del attrs["process_group"]
-        del attrs["reducer"]
-        del attrs["logger"]
+        # A DDP that delays every parameter's all-reduce never builds a reducer
+        # or logger.
+        for name in self._unpicklable_attrs:
+            attrs.pop(name, None)
+        return attrs
+
+    def __getstate__(self):
+        # __setstate__ would build the reducer this DDP never had. Checked first
+        # so a sub-group DDP is refused for this cause, not for its group.
+        if self._delay_all_reduce_all_params:
+            raise RuntimeError(
+                "DDP Pickling/Unpickling is not supported when the all-reduce of "
+                "every parameter is delayed"
+            )
+        self._check_default_group()
+        attrs = self._picklable_state()
+        # broadcast_buffers is a property; include it for backward compat.
+        attrs["broadcast_buffers"] = self.forward_sync_buffers
         return attrs
 
     def __setstate__(self, state):
@@ -1444,6 +1527,13 @@ class DistributedDataParallel(Module, Joinable):
         super().__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
+        self.__dict__.setdefault("_require_manual_backward_finalization", False)
+        self.__dict__.setdefault("batched_grad_copy", False)
+        self.__dict__.setdefault("lazy_bucket_allocation", False)
+        # broadcast_buffers is now a property; pop it so it doesn't shadow.
+        # Old pickles may only have broadcast_buffers; use it to seed forward_sync_buffers.
+        old_broadcast = self.__dict__.pop("broadcast_buffers", True)
+        self.__dict__.setdefault("forward_sync_buffers", old_broadcast)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
@@ -1454,6 +1544,11 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             self.static_graph,
         )
+
+        # Restore manual mode in the newly rebuilt C++ reducer.
+        if self._require_manual_backward_finalization:
+            self.require_manual_backward_finalization = True
+
         if self.static_graph:
             self.reducer._set_static_graph()
             if self.logger is None:
@@ -1513,7 +1608,7 @@ class DistributedDataParallel(Module, Joinable):
         Assign self.module.named_buffers to self.modules_buffers.
 
         Assigns module buffers to self.modules_buffers which are then used to
-        broadcast across ranks when broadcast_buffers=True. Note that this
+        broadcast across ranks when forward_sync_buffers=True. Note that this
         must be called every time buffers need to be synced because buffers can
         be reassigned by user module,
         see https://github.com/pytorch/pytorch/issues/63916.
@@ -1883,7 +1978,7 @@ class DistributedDataParallel(Module, Joinable):
             authoritative_rank = self._find_common_rank(self._distributed_rank, False)
             self._sync_module_buffers(authoritative_rank)
 
-    # When running in join model, agrees upon a common rank and broadcast model
+    # When running in join mode, agrees upon a common rank and broadcast model
     # parameters to all other ranks.
     def _sync_final_model(self, is_last_joiner):
         # Agree upon the process that will be the authoritative model copy.
@@ -1898,7 +1993,7 @@ class DistributedDataParallel(Module, Joinable):
             broadcast_bucket_size=self.broadcast_bucket_size,
             src=self._authoritative_rank,
             params_and_buffers_to_ignore=self.parameters_to_ignore,
-            broadcast_buffers=self.broadcast_buffers,
+            broadcast_buffers=self.forward_sync_buffers,
         )
 
     # Schedule comm ops to match those scheduled in the reducer's backward
@@ -2324,7 +2419,7 @@ class DistributedDataParallel(Module, Joinable):
     def will_sync_module_buffers(self):
         return (
             self.require_forward_param_sync
-            and self.broadcast_buffers
+            and self.forward_sync_buffers
             and len(self.modules_buffers) > 0
         )
 
@@ -2557,6 +2652,94 @@ class DistributedDataParallel(Module, Joinable):
                 "`_set_static_graph`.",
                 stacklevel=2,
             )
+
+    @property
+    def require_manual_backward_finalization(self) -> bool:
+        r"""Whether the caller must manually finalize backward.
+
+        When ``True``, the reducer will not automatically finalize the
+        backward pass after all gradient buckets are ready. Instead, the caller
+        must invoke :meth:`finalize_backward` after all buckets are ready to
+        wait for in-flight gradient synchronization and perform write-back.
+
+        This allows later sparse work to overlap an in-flight gradient
+        all-reduce, or ``optimizer.step()`` to overlap remaining sparse
+        communication when the all-reduce finishes first.
+
+        Must be set before forward or after backward finalization. For each
+        synchronized backward, the caller must invoke :meth:`finalize_backward`
+        exactly once.
+        """
+        return self._require_manual_backward_finalization
+
+    def _check_manual_backward_finalization_supported(self) -> None:
+        if self._delay_all_reduce_all_params:
+            raise RuntimeError(
+                "Manual backward finalization is not supported when all DDP "
+                "parameters use delay_all_reduce_named_params."
+            )
+        if self._use_python_reducer:
+            raise RuntimeError(
+                "Manual backward finalization is not supported with the Python reducer."
+            )
+
+    @require_manual_backward_finalization.setter
+    def require_manual_backward_finalization(self, required: bool) -> None:
+        if required:
+            self._check_manual_backward_finalization_supported()
+        if self._delay_all_reduce_all_params:
+            # This configuration has no C++ reducer, and manual finalization
+            # cannot have been enabled because the check above rejects it.
+            return
+        self.reducer._set_manual_finalization_required(required)
+        self._require_manual_backward_finalization = required
+
+    @property
+    def should_finalize_after_backward(self) -> bool:
+        r"""Whether manual finalization must run after backward returns.
+
+        Query this after forward for the upcoming backward pass. When ``True``,
+        call :meth:`finalize_backward` only after backward returns. When
+        ``False``, it may instead be called from a backward hook after all DDP
+        buckets are ready.
+
+        This is ``True`` while DDP is rebuilding buckets and when DDP native
+        mixed precision requires end-of-backward stream synchronization. It is
+        ``False`` when manual finalization is disabled. In manual mode, the
+        caller is responsible for honoring this ordering requirement.
+        """
+        if not self._require_manual_backward_finalization:
+            return False
+        return (
+            self.mixed_precision is not None
+            or self.reducer._should_finalize_after_backward()
+        )
+
+    def finalize_backward(self) -> None:
+        r"""Finalize a backward pass that requires manual finalization.
+
+        When :attr:`should_finalize_after_backward` is ``True``, call this after
+        backward returns. Otherwise, call it after all DDP buckets are ready,
+        either from a backward hook or after backward returns. This waits for
+        all in-flight gradient all-reduces to complete and writes the reduced
+        gradients back into parameter ``.grad`` fields.
+
+        Finalization runs on the caller's current device stream, and DDP's
+        communication-end timing reflects this caller-selected point.
+
+        Defer this method to let later sparse work overlap an in-flight
+        gradient all-reduce, or call it from a backward hook to run
+        ``optimizer.step()`` while remaining sparse communication is in flight.
+
+        Raises:
+            RuntimeError: If :attr:`require_manual_backward_finalization` is
+                ``False``, if called before all gradient buckets are ready, if
+                no gradient reduction requires finalization, or if called
+                during ``no_sync()`` or with an unsupported DDP reducer
+                configuration.
+        """
+        self._check_manual_backward_finalization_supported()
+        self.reducer._finalize_backward_manual()
 
     def _remove_autograd_hooks(self):
         """Remove autograd hooks registered by the reducer on the model parameters."""

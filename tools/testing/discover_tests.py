@@ -74,7 +74,6 @@ TESTS = discover_tests(
     blocklisted_patterns=[
         "ao",
         "custom_backend",
-        "custom_operator",
         "fx",  # executed by test_fx.py
         "jit",  # executed by test_jit.py
         "mobile",
@@ -85,6 +84,7 @@ TESTS = discover_tests(
         "cpp_extensions/open_registration_extension/torch_openreg/tests",  # executed by test_openreg.py
     ],
     blocklisted_tests=[
+        "custom_operator/test_custom_ops",
         "test_bundled_images",
         "test_cpp_extensions_aot",
         "test_determination",

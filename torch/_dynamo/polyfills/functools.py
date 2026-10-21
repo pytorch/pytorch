@@ -4,19 +4,46 @@ Python polyfills for functools
 
 import functools
 from collections.abc import Callable, Iterable
-from typing import TypeVar
+from functools import _initial_missing  # type: ignore[attr-defined]
+from typing import Any, TypeVar
 
 from ..decorators import substitute_in_graph
 
 
-__all__ = ["reduce"]
+__all__ = ["cmp_to_key", "reduce"]
 
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 
 
-_initial_missing = object()
+class _KeyWrapper:
+    def __init__(self, mycmp: Callable[[Any, Any], int], obj: Any) -> None:
+        self.mycmp = mycmp
+        self.obj = obj
+
+    def __lt__(self, other: "_KeyWrapper") -> bool:
+        return self.mycmp(self.obj, other.obj) < 0
+
+    def __gt__(self, other: "_KeyWrapper") -> bool:
+        return self.mycmp(self.obj, other.obj) > 0
+
+    def __eq__(self, other: object) -> bool:
+        return self.mycmp(self.obj, other.obj) == 0  # type: ignore[attr-defined]
+
+    def __le__(self, other: "_KeyWrapper") -> bool:
+        return self.mycmp(self.obj, other.obj) <= 0
+
+    def __ge__(self, other: "_KeyWrapper") -> bool:
+        return self.mycmp(self.obj, other.obj) >= 0
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+# Reference: https://docs.python.org/3/library/functools.html#functools.cmp_to_key
+@substitute_in_graph(functools.cmp_to_key, skip_signature_check=True)
+def cmp_to_key(mycmp: Callable[[Any, Any], int]) -> Callable[[Any], _KeyWrapper]:
+    return functools.partial(_KeyWrapper, mycmp)
 
 
 # Reference: https://docs.python.org/3/library/functools.html#functools.reduce

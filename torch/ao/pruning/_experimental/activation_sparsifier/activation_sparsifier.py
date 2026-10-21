@@ -427,7 +427,7 @@ class ActivationSparsifier:
         r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
 
         Args:
-        * state_dict - the dictionary that to which the current sparsifier needs to be restored to
+        * state_dict - the dictionary to which the current sparsifier needs to be restored to
         """
         state = state_dict["state"]
         data_groups, defaults = state_dict["data_groups"], state_dict["defaults"]

@@ -114,7 +114,7 @@ class ThroughputBenchmark:
         Store a single input to a module into the benchmark memory and keep it there.
 
         During the benchmark execution every thread is going to pick up a
-        random input from the all the inputs ever supplied to the benchmark via
+        random input from all the inputs ever supplied to the benchmark via
         this function.
         """
         self._benchmark.add_input(*args, **kwargs)
@@ -132,7 +132,7 @@ class ThroughputBenchmark:
             num_warmup_iters (int): Warmup iters are used to make sure we run a module
                 a few times before actually measuring things. This way we avoid cold
                 caches and any other similar problems. This is the number of warmup
-                iterations for each of the thread in separate
+                iterations for each of the threads separately
 
             num_iters (int): Number of iterations the benchmark should run with.
                 This number is separate from the warmup iterations. Also the number is

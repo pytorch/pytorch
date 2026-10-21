@@ -200,7 +200,6 @@ def create_debug_info_from_selected_models(
         asset = model_info["asset"]
         hash = model_info["md5_hash"]
 
-        # pyrefly: ignore [missing-attribute]
         asset_info = model_dict["asset_info"].setdefault(asset, {})
 
         # pyrefly: ignore [missing-attribute]
@@ -478,7 +477,7 @@ def fill_output(output: dict[str, object], options: Namespace) -> None:
     # to True, since it indicates that this operator list came from something
     # other than a traced operator list.
     include_all_non_op_selectives = False
-    for op_name, op_info in operators.items():
+    for op_info in operators.values():
         include_all_non_op_selectives = (
             include_all_non_op_selectives or op_info.include_all_overloads
         )

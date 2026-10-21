@@ -85,7 +85,7 @@ static c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
         auto& rec = get_record();
         rec.end();
         // Note: this future is returned to the user to ensure that a call to
-        // wait() ensures that profiling callbacks have ran. To ensure that this
+        // wait() ensures that profiling callbacks have run. To ensure that this
         // is transparent, we must make this future propagate the value of the
         // RPC future. Use value() here instead of constValue() to ensure we
         // propagate errors.
@@ -145,9 +145,9 @@ TORCH_LIBRARY(profiler, m) {
   torch::jit::registerOperator(torch::jit::Operator(
       "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
       [](jit::Stack& stack) {
-        // Pop inputs, which should be a future and a tensor
-        auto fut = jit::pop(stack).toFuture();
-        auto tensor = jit::pop(stack).toTensor();
+        auto [tensor, fut] =
+            jit::pop<at::Tensor, c10::intrusive_ptr<c10::ivalue::Future>>(
+                stack);
         auto profiledFut = _call_end_callbacks_on_fut_legacy(tensor, fut);
         // return future that completes when profiling callbacks have run.
         jit::push(stack, std::move(profiledFut));

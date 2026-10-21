@@ -11,13 +11,17 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
+import glob
 import importlib
+import importlib.util
 import os
+import platform
 import threading
 import traceback
 import warnings
 from collections.abc import Callable
-from functools import lru_cache
+from enum import auto, Enum
+from functools import cache, lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
@@ -29,13 +33,15 @@ from . import _device_limits, gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
+    export_dot,
+    export_graph_data,
     graph,
     graph_pool_handle,
     is_current_stream_capturing,
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
 try:
@@ -55,6 +61,7 @@ _HAS_PYNVML = False
 _HAS_AMDSMI = False
 _PYNVML_ERR = None
 _AMDSMI_ERR = None
+
 try:
     from torch import version as _version
 
@@ -77,22 +84,52 @@ try:
             # This creates an ODR violation if the copy of libamd_smi.so from lib
             # is also loaded (via `ld` linking, `LD_LIBRARY_PATH` or `rpath`).
             #
-            # In order to avoid the violation we hook CDLL and try using the
-            # already loaded version of amdsmi, or any version in the processes
-            # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
-            # of the .so.
+            # In order to avoid the violation we hook CDLL and redirect
+            # unversioned requests to the already loaded version of amdsmi, or
+            # any version in the process rpath/LD_LIBRARY_PATH, so that we only
+            # load a single copy of the .so. Versioned paths are not redirected
+            # because current wrappers use them to select a matching library ABI.
             class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
                     paths = ["libamd_smi.so"]
                     if rocm_home := os.getenv("ROCM_HOME", os.getenv("ROCM_PATH")):
                         paths = [os.path.join(rocm_home, "lib/libamd_smi.so")] + paths
+                    # TheRock ROCm wheels install the amdsmi python package in
+                    # site-packages/amdsmi and ship the native library under the
+                    # _rocm_sdk_core wheel (site-packages/_rocm_sdk_core/lib)
+                    # rather than on the loader path or under $ROCM_HOME. The
+                    # file there is a versioned soname (e.g. libamd_smi.so.26),
+                    # so amdsmi's bare CDLL("libamd_smi.so") can't find it. Locate
+                    # the package and append the concrete versioned files as a
+                    # last-resort fallback so the hook can redirect to them.
+                    if platform.system() == "Linux":
+                        paths = paths + self._rocm_sdk_core_amdsmi_paths()
                     self.paths: list[str] = paths
+
+                @staticmethod
+                def _rocm_sdk_core_amdsmi_paths() -> list[str]:
+                    try:
+                        spec = importlib.util.find_spec("_rocm_sdk_core")
+                    except (ImportError, ValueError):
+                        return []
+                    if spec is None or not spec.submodule_search_locations:
+                        return []
+                    found: list[str] = []
+                    for location in spec.submodule_search_locations:
+                        found += glob.glob(
+                            os.path.join(location, "lib", "libamd_smi.so*")
+                        )
+                    return sorted(found)
 
                 def hooked_CDLL(
                     self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
-                    if name and Path(name).name == "libamd_smi.so":
+                    requested = None if name is None else os.fspath(name)
+                    if (
+                        requested is not None
+                        and Path(requested).name == "libamd_smi.so"
+                    ):
                         for path in self.paths:
                             try:
                                 return self.original_CDLL(path, *args, **kwargs)
@@ -113,6 +150,23 @@ try:
             except ModuleNotFoundError as err:
                 _AMDSMI_ERR = err
                 raise
+            except (KeyError, OSError) as err:
+                # The amdsmi python package is installed but its native library
+                # could not be discovered or loaded. For example, some ROCm
+                # wheels lay it out so find_smi_library() raises KeyError.
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so could not be loaded"
+                ) from err
+            except AttributeError as err:
+                # ctypes reports a wrapper/library ABI mismatch as an
+                # AttributeError when a symbol expected by the wrapper is absent.
+                if "undefined symbol:" not in str(err):
+                    raise
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so is ABI-incompatible"
+                ) from err
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -194,7 +248,7 @@ def is_bf16_supported(including_emulation: bool = True):
     if torch.version.hip:
         return True
 
-    # If CUDA is not available, than it does not support bf16 either
+    # If CUDA is not available, then it does not support bf16 either
     if not is_available():
         return False
 
@@ -311,38 +365,82 @@ DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
     89: _CompatInterval(start=89),
     90: _CompatInterval(start=90),
     100: _CompatInterval(start=100, exclude={101}),
-    101: _CompatSet({101, 110}),
+    101: _CompatSet({101, 110}),  # 101 was renamed to 110
     103: _CompatInterval(start=103),
-    110: _CompatInterval(start=110),
+    110: _CompatSet({101, 110}),  # 101 was renamed to 110
     120: _CompatInterval(start=120),
     121: _CompatInterval(start=121),
 }
 
+# CUDA 13.2 allows SBSA binaries to run on Jetson devices.
+# This dict can be combined with DEVICE_REQUIREMENT once
+# the minimum supported CUDA version is 13.2.
+DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
+    int, _CompatSet | _CompatInterval
+] = DEVICE_REQUIREMENT | {
+    70: _CompatInterval(start=70),
+    80: _CompatInterval(start=80),
+    86: _CompatInterval(start=86),
+}
 
-# TORCH_CUDA_ARCH_LIST for PyTorch releases
-PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
-    "12.6": {50, 60, 70, 80, 86, 90},
-    "12.8": {70, 80, 86, 90, 100, 120},
-    "13.0": {75, 80, 86, 90, 100, 110, 120},
+# TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
+# Kept in sync with .ci/wheel/linux/build_env_setup.py by the validator in
+# .github/scripts/generate_binary_build_matrix.py.
+PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
+    "12.6": {
+        "x86_64": {50, 60, 70, 75, 80, 86, 90},
+        "aarch64": {80, 90},
+    },
+    "13.0": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.2": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
 }
 
 
+def _device_requirement(code_cc):
+    if torch.version.cuda is None:
+        return None
+    requirement = (
+        DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION
+        if tuple(int(x) for x in torch.version.cuda.split(".")) >= (13, 2)
+        else DEVICE_REQUIREMENT
+    )
+    return requirement.get(code_cc, None)
+
+
+def _host_arch_key() -> str:
+    machine = platform.machine().lower()
+    return "aarch64" if machine == "aarch64" else "x86_64"
+
+
 def _code_compatible_with_device(device_cc: int, code_cc: int):
-    if code_cc not in DEVICE_REQUIREMENT:
+    compatible_devices = _device_requirement(code_cc)
+    if compatible_devices is None:
         warnings.warn(
             f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
             + " Please create an issue on Github if this is a valid compute capability.",
             stacklevel=2,
         )
         return device_cc in _CompatInterval(start=code_cc)
-    return device_cc in DEVICE_REQUIREMENT[code_cc]
+    return device_cc in compatible_devices
 
 
 def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
     name = get_device_name(device_index)
 
+    arch = _host_arch_key()
     compatible_releases: list[str] = []
-    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+    for cuda, by_arch in PYTORCH_RELEASES_CODE_CC.items():
+        build_ccs = by_arch.get(arch, set())
         if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
             compatible_releases.append(cuda)
 
@@ -350,15 +448,32 @@ def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int
         f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
         "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
     ] + [
-        f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
+        f"- {cc // 10}.{cc % 10} which supports hardware CC {_device_requirement(cc)}"
         for cc in code_ccs
     ]
 
     if len(compatible_releases) > 0:
-        releases_str = ", ".join(compatible_releases)
+        version = torch.__version__
+        base_version = version.split("+")[0]
+        is_nightly = "dev" in base_version
+        index_root = (
+            "https://download.pytorch.org/whl/nightly"
+            if is_nightly
+            else "https://download.pytorch.org/whl"
+        )
         lines.append(
-            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
-            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+            f"Your installed torch=={version} does not include kernels for this GPU. "
+            "Reinstall the same version against a CUDA build that does, e.g.:"
+        )
+        for cuda in compatible_releases:
+            cu_tag = "cu" + cuda.replace(".", "")
+            lines.append(
+                f"  For CUDA {cuda} use pip install torch=={base_version} --index-url {index_root}/{cu_tag}"
+            )
+    else:
+        lines.append(
+            f"No published PyTorch CUDA builds for release {torch.__version__} support this GPU. "
+            "Visit https://pytorch.org/get-started/locally/ to find a compatible release."
         )
 
     warnings.warn("\n".join(lines), stacklevel=2)
@@ -415,9 +530,18 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
+    # Do not invoke user callbacks while holding _initialization_lock;
+    # they may call back into _lazy_call. The is_initializing check
+    # mirrors _lazy_init: while it drains _queued_calls this thread
+    # already holds the lock, so run reentrant callbacks immediately.
+    if is_initialized() or hasattr(_tls, "is_initializing"):
+        callable()
+        return
+
+    run_now = False
     with _initialization_lock:
         if is_initialized():
-            callable()
+            run_now = True
         else:
             # TODO(torch_deploy): this accesses linecache, which attempts to read the
             # file system to get traceback info. Patch linecache or do something
@@ -430,6 +554,9 @@ def _lazy_call(callable, **kwargs):
             else:
                 # Don't store the actual traceback to avoid memory cycle
                 _queued_calls.append((callable, traceback.format_stack()))
+
+    if run_now:
+        callable()
 
 
 _lazy_call(_check_capability)
@@ -647,6 +774,71 @@ def set_device(device: Device) -> None:
     device = _get_device_index(device)
     if device >= 0:
         torch._C._cuda_setDevice(device)
+        _check_stray_context(device)
+
+
+def _primary_context_devices() -> list[int]:
+    r"""Return every CUDA device that currently holds a primary context.
+
+    The query is read-only: it does not create a CUDA context on any device.
+
+    This is the primitive behind detecting a common distributed-training
+    footgun: a process creates a CUDA primary context on the default device (0)
+    *before* it pins its own device with :func:`set_device` -- for example an op,
+    or a pinned-memory (``pin_memory=True``) allocation, that runs before
+    ``set_device(local_rank)``. On a rank whose device is not 0 this strands a
+    primary context (hundreds of MB) on the shared device 0. Callers decide which
+    device(s) they legitimately own and treat the rest as stray, e.g.::
+
+        stray = [d for d in _primary_context_devices() if d != local_rank]
+
+    Avoid deriving the owned device from :func:`current_device`, which would
+    trigger lazy initialization and create the very context you are looking for;
+    use the device you already pinned (the ``set_device``/``local_rank`` value).
+
+    Returns:
+        list[int]: indices of devices holding a primary context (empty if none).
+    """
+    return [d for d in range(device_count()) if torch._C._cuda_hasPrimaryContext(d)]
+
+
+class _StrayContextCheckType(Enum):
+    DISABLED = auto()
+    WARN = auto()
+    ERROR = auto()
+
+
+@cache
+def _get_stray_context_mode() -> _StrayContextCheckType:
+    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
+    if mode == "warn":
+        return _StrayContextCheckType.WARN
+    if mode == "error":
+        return _StrayContextCheckType.ERROR
+    return _StrayContextCheckType.DISABLED
+
+
+def _check_stray_context(expected: int) -> None:
+    # Diagnostic, off unless TORCH_CUDA_CHECK_STRAY_CONTEXT is "warn" or "error".
+    # Invoked from set_device so it runs once when a process pins its device, not
+    # on the hot device-guard path. The check is creator-agnostic (it inspects
+    # end state), so it catches stray contexts from any source.
+    mode = _get_stray_context_mode()
+    if mode == _StrayContextCheckType.DISABLED:
+        return
+    stray = [d for d in _primary_context_devices() if d != expected]
+    if not stray:
+        return
+    msg = (
+        f"set_device({expected}) found an existing CUDA primary context on "
+        f"device(s) {stray}. Something created a CUDA context before this process "
+        "pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
+        f"before set_device). On a rank whose device is not among {stray}, each "
+        "stray context wastes hundreds of MB on that shared device."
+    )
+    if mode == _StrayContextCheckType.ERROR:
+        raise RuntimeError(msg)
+    warnings.warn(msg, stacklevel=3)
 
 
 def get_device_name(device: Device = None) -> str:
@@ -1138,7 +1330,7 @@ def device_count() -> int:
 
 def get_arch_list() -> list[str]:
     r"""Return list CUDA architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._cuda_getArchFlags()
     if arch_flags is None:
@@ -1255,9 +1447,32 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 
 
 def current_blas_handle():
-    r"""Return cublasHandle_t pointer to current cuBLAS handle"""
+    r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
+
+    On CUDA, the handle uses the BLAS library's default workspace unless ATen
+    workspace caching is explicitly enabled. When caching is disabled, internal
+    ATen operations may temporarily bind their own workspace to this handle, but
+    restore the default workspace before releasing it. On ROCm they use
+    separate handles, and this function returns a different handle for each
+    stream, because a rocBLAS workspace must not be shared by two streams at
+    once. Each is bound when it is created to a buffer from a caching-allocator
+    pool reserved for these buffers, at least as large as the workspace rocBLAS would allocate, which
+    rocBLAS never grows. A workspace bound with
+    ``rocblas_set_workspace`` stays bound, even after the thread exits and the
+    handle passes to another thread, so unbind it before freeing the buffer.
+    While the current stream is capturing, ROCm returns a capture handle
+    instead, bound to a workspace from the capture's memory pool: call this
+    function inside the capture rather than reusing a handle obtained before
+    it, and do not use the capture handle after the capture ends.
+    """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
+
+
+def current_solver_handle():
+    r"""Return cusolverDnHandle_t pointer to current cuSOLVER handle"""
+    _lazy_init()
+    return torch._C._cuda_getCurrentSolverHandle()
 
 
 def set_sync_debug_mode(debug_mode: int | str) -> None:
@@ -1417,14 +1632,15 @@ def _get_amdsmi_temperature(device: Device = None) -> int:
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
+    # AMD SMI reports socket power in watts; power_draw() is documented in mW.
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return socket_power * 1000
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return socket_power * 1000
         else:
             return 0
 
@@ -1622,6 +1838,7 @@ def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
 
 # pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
+from .memory import _use_uvm
 from .random import *  # noqa: F403
 
 
@@ -1933,7 +2150,7 @@ def _compile_kernel(
         return getattr(result, mangled_name)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse, tunable
+from . import amp, graph_annotations, jiterator, nvtx, profiler, sparse, tunable
 
 
 _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
@@ -1978,6 +2195,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "execute_on_streams",
     "Stream",
     "StreamContext",
     "GreenContext",
@@ -1991,6 +2209,7 @@ __all__ = [
     "cudaStatus",
     "cudart",
     "current_blas_handle",
+    "current_solver_handle",
     "current_device",
     "current_stream",
     "default_generators",
@@ -2000,6 +2219,8 @@ __all__ = [
     "device_memory_used",
     "device_of",
     "empty_cache",
+    "export_dot",
+    "export_graph_data",
     "get_allocator_backend",
     "CUDAPluggableAllocator",
     "change_current_allocator",
@@ -2014,6 +2235,7 @@ __all__ = [
     "get_stream_from_external",
     "get_sync_debug_mode",
     "graph",
+    "graph_annotations",
     "graph_pool_handle",
     "graphs",
     "has_half",
@@ -2047,6 +2269,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
     "temperature",
     "power_draw",

@@ -86,7 +86,7 @@ def _fa3_import_module(module_path: str) -> None:
 
 
 def _fa3_register_kernels() -> Library:
-    lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
+    lib = Library("aten", "IMPL", "CUDA")
     lib.impl(
         "_flash_attention_forward.quantized", _fa3_flash_attention_forward_impl, "CUDA"
     )

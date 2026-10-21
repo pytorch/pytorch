@@ -8,6 +8,7 @@
 #include <c10/core/InferenceMode.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
@@ -39,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -203,18 +205,6 @@ struct C10_API AutogradMetaFactoryRegisterer{
 
 } // namespace impl
 
-struct C10_API NamedTensorMetaInterface {
-  virtual ~NamedTensorMetaInterface() = default;
-  virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {
-    TORCH_INTERNAL_ASSERT(
-        false, "Not implemented: NamedTensorMetaInterface::clone");
-  }
-  virtual int64_t slow_dim() const {
-    TORCH_INTERNAL_ASSERT(
-        false, "Not implemented: NamedTensorMetaInterface::slow_dim");
-  }
-};
-
 // For ease of copy pasting
 #if 0
 is_contiguous
@@ -235,34 +225,104 @@ struct C10_API BackendMeta : intrusive_ptr_target {
       const intrusive_ptr<BackendMeta>& ptr) const {
     return ptr;
   }
+  // Clone this metadata for a FakeTensor. Defaults to nullptr (dropped) so
+  // existing backends are unaffected; a backend opts in by overriding this and
+  // should strip data that is only valid on a real tensor.
+  virtual intrusive_ptr<BackendMeta> clone_for_fake(
+      const intrusive_ptr<BackendMeta>& ptr [[maybe_unused]]) const {
+    return nullptr;
+  }
+};
+
+// same as Python's FakeTensorMode
+// storing shape env and converter from Python, we'll use these later
+// to implement sym ints, real tensor conversion, etc
+// this doesn't have caching because we're not implementing it
+// no in_kernel_invocation_manager since that's handled by dispatch keys in C++
+struct C10_API FakeTensorMode {
+  std::shared_ptr<c10::SafePyObject> shape_env_;
+  std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // Owns a Python weakref to this mode's Python wrapper (CppFakeTensorMode),
+  // not the wrapper itself. See
+  // Note [C++ FakeTensorMode Python wrapper lifetime] in
+  // torch/csrc/FakeTensorMode.cpp.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
+
+  // when false, disallow a fake tensor from having a 'meta' device
+  bool allow_meta_ = true;
+
+  // When true, real tensor inputs to an op are converted to fakes instead of
+  // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
+  // thread-local override used by dynamo's nonstrict_trace, takes precedence,
+  // so read this through PyInterpreterVTable::allow_non_fake_inputs().
+  bool allow_non_fake_inputs_ = false;
+
+  FakeTensorMode(
+      std::shared_ptr<c10::SafePyObject> shape_env,
+      std::shared_ptr<c10::SafePyObject> converter,
+      bool allow_meta = true)
+      : shape_env_(std::move(shape_env)),
+        fake_tensor_converter_(std::move(converter)),
+        allow_meta_(allow_meta) {}
+
+  // record the real constant a fake tensor was created from; the constant is
+  // stored on the fake's ExtraMeta so it dies with the tensor
+  // setting to nullptr to clear it
+  void set_constant(
+      c10::TensorImpl* fake_impl,
+      c10::intrusive_ptr<c10::TensorImpl> constant);
+  void clear_constant(c10::TensorImpl* fake_impl) noexcept;
+
+  // return the real constant a fake tensor was created from, or nullptr
+  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
+      c10::TensorImpl* fake_impl) const;
+  // drop constant tracking for fake tensors aliasing this mutated storage
+  void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+  // drop non-CPU constants, keeping cheap CPU ones for constant folding
+  void clear_non_cpu_constants();
+
+ private:
+  // key = constant storage, values = all fake tensors that share this storage
+  // (aliases)
+  struct ConstantAliases {
+    c10::weak_intrusive_ptr<c10::StorageImpl> storage;
+    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> tensors;
+  };
+  std::unordered_map<c10::StorageImpl*, ConstantAliases>
+      constant_storage_mapping_;
 };
 
 struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
-  std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
+  std::optional<c10::Device> fake_device_ = std::nullopt;
+  std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // The real tensor this fake shadows, when propagate_real_tensors is on.
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
+  // The real constant this fake was created from (via
+  // FakeTensorMode::set_constant), or null.
+  c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
+  // See TensorImpl::symbolic_wrapped_number.
+  c10::SymNode symbolic_wrapped_number_ = nullptr;
 
   ExtraMeta() = default;
-  ~ExtraMeta() = default;
+  ~ExtraMeta();
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
       symbolic_shape_meta_ =
           std::make_unique<c10::SymbolicShapeMeta>(*other.symbolic_shape_meta_);
     }
-    if (other.named_tensor_meta_) {
-      named_tensor_meta_ = other.named_tensor_meta_->clone();
-    }
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
-    if (other.custom_data_ptr_error_msg_) {
-      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
-    }
-    if (other.custom_storage_error_msg_) {
-      custom_storage_error_msg_ = other.custom_storage_error_msg_;
-    }
+    custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    fake_device_ = other.fake_device_;
+    fake_tensor_mode_ = other.fake_tensor_mode_;
+    real_tensor_ = other.real_tensor_;
+    symbolic_wrapped_number_ = other.symbolic_wrapped_number_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -270,12 +330,10 @@ struct C10_API ExtraMeta {
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
       std::optional<std::string> custom_data_ptr_error_msg = std::nullopt,
       std::optional<std::string> custom_storage_access_error_msg = std::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
-        named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(std::move(backend_meta)),
         custom_data_ptr_error_msg_(std::move(custom_data_ptr_error_msg)),
         custom_storage_error_msg_(std::move(custom_storage_access_error_msg)) {}
@@ -1131,6 +1189,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return device_opt_.has_value() && device_opt_->type() == kMeta;
   }
 
+  bool is_fake() const {
+    return key_set_.has(DispatchKey::Fake);
+  }
+
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -1372,6 +1434,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * The SymInt, SymFloat or SymBool node a wrapped number stands for, or null.
+   * The wrapped number's value is a placeholder; Python also keeps the
+   * symbolic number as the `_wrapped_number` attribute.
+   */
+  c10::SymNodeImpl* symbolic_wrapped_number() const {
+    return extra_meta_ ? extra_meta_->symbolic_wrapped_number_.get() : nullptr;
+  }
+
+  bool is_symbolic_wrapped_number() const {
+    return symbolic_wrapped_number() != nullptr;
+  }
+
+  void set_symbolic_wrapped_number(c10::SymNode node) {
+    TORCH_INTERNAL_ASSERT(is_wrapped_number_);
+    get_extra_meta().symbolic_wrapped_number_ = std::move(node);
+  }
+
+  /**
    * Returns true if Tensor supports as_strided and as_strided_backward.
    * This is used in autograd to perform inplace update on view Tensors.
    * See Note [View + Inplace update for base tensor] and
@@ -1427,6 +1507,65 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool is_conj() const {
     constexpr auto conjugate_ks = DispatchKeySet(DispatchKey::Conjugate);
     return key_set_.has_all(conjugate_ks);
+  }
+
+  /**
+   * Transmute this meta tensor into a fake tensor
+   * The underlying device_opt_ stays as Meta for dispatch routing
+   * and fake device is stored in ExtraMeta and returned by device()
+   * via the device_policy_ mechanism
+   * also converting backend key from Meta to Fake and adding Fake key
+   * to DispatchKeySet
+   */
+
+  // Caller guarantees fake_device is normalized.
+  void set_fake_device(c10::Device fake_device);
+
+  // the fake device recorded for this tensor, or nullopt if none
+  std::optional<c10::Device> fake_device() const {
+    if (!extra_meta_) {
+      return std::nullopt;
+    }
+    return extra_meta_->fake_device_;
+  }
+
+  void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
+    auto& extra_meta = get_extra_meta();
+    // python validates allow_meta against the mode that owns the tensor, which
+    // is only known here: set_fake_device may run before the mode is attached
+    // (and outside its scope), so its ambient-TLS check can pass vacuously.
+    if (mode && extra_meta.fake_device_.has_value() &&
+        extra_meta.fake_device_->type() == c10::DeviceType::Meta) {
+      TORCH_CHECK(
+          mode->allow_meta_,
+          "device.type must not be 'meta' when allow_meta is False");
+    }
+    extra_meta.fake_tensor_mode_ = std::move(mode);
+  }
+
+  std::shared_ptr<FakeTensorMode> fake_tensor_mode() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->fake_tensor_mode_;
+  }
+
+  // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
+  void set_real_tensor(c10::intrusive_ptr<c10::TensorImpl> real) {
+    get_extra_meta().real_tensor_ = std::move(real);
+  }
+
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->real_tensor_;
+  }
+
+  // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
+  // Used as the identity key for FakeTensorMode constant tracking.
+  ExtraMeta* maybe_get_extra_meta() const {
+    return extra_meta_.get();
   }
 
   /**
@@ -1965,31 +2104,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   c10::AutogradMetaInterface* autograd_meta() const;
 
-  /**
-   * Set the pointer to named tensor metadata.
-   */
-  void set_named_tensor_meta(
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
-    TORCH_WARN_ONCE(
-        "Named tensors and all their associated APIs are an experimental feature ",
-        "and subject to change. Please do not use them for anything important ",
-        "until they are released as stable.");
-#ifdef DEBUG
-    if (named_tensor_meta) {
-      TORCH_INTERNAL_ASSERT(named_tensor_meta->slow_dim() == dim());
-    }
-#endif
-    if (named_tensor_meta) {
-      get_extra_meta().named_tensor_meta_ = std::move(named_tensor_meta);
-      key_set_ = key_set_.add(DispatchKey::Named);
-    } else {
-      if (extra_meta_) {
-        extra_meta_->named_tensor_meta_ = nullptr;
-      }
-      key_set_ = key_set_.remove(DispatchKey::Named);
-    }
-  }
-
   void set_python_dispatch(bool k) {
     if (k) {
       key_set_ = key_set_.add(c10::python_ks);
@@ -2000,30 +2114,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_python_dispatch() const {
     return key_set_.has_all(c10::python_ks);
-  }
-
-  /**
-   * Return the pointer to named tensor metadata.
-   */
-  const c10::NamedTensorMetaInterface* named_tensor_meta() const {
-    if (!extra_meta_) {
-      return nullptr;
-    }
-    return extra_meta_->named_tensor_meta_.get();
-  }
-
-  c10::NamedTensorMetaInterface* named_tensor_meta() {
-    if (!extra_meta_) {
-      return nullptr;
-    }
-    return extra_meta_->named_tensor_meta_.get();
-  }
-
-  bool has_named_tensor_meta() const {
-    if (!extra_meta_) {
-      return false;
-    }
-    return extra_meta_->named_tensor_meta_ != nullptr;
   }
 
   // NOTE [ TensorImpl Shallow-Copying ]
@@ -2431,6 +2521,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "If you are seeing this error, that means empty_tensor_restride was "
         "called before setting correct numel");
 #endif
+    // Set when the branch writes canonical row-major strides, so the trailing
+    // refresh can skip recomputing contiguity (see _refresh_contiguous).
+    bool assume_contiguous = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it
@@ -2449,6 +2542,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           }
           TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
+        // Sparse tensors are never reported contiguous (compute_contiguous()
+        // returns false for them), so only claim contiguity otherwise.
+        assume_contiguous = !is_sparse();
         break;
       }
       case MemoryFormat::ChannelsLast: {
@@ -2473,8 +2569,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
-    // exclusive see #24090
-    refresh_contiguous();
+    // exclusive see #24090. has_symbolic_sizes_strides_ returned early above,
+    // so dispatch straight to the non-symbolic path with the contiguity hint.
+    _refresh_contiguous(assume_contiguous);
   }
 
   bool is_strides_like(at::MemoryFormat memory_format) const {
@@ -2531,7 +2628,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <
       typename T,
-      typename = typename std::enable_if_t<std::is_integral_v<T>>>
+      typename = typename std::enable_if_t< // NOLINT(modernize-use-constraints)
+          std::is_integral_v<T>>>
   bool SetDimsTemplate(ArrayRef<T> src) {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
@@ -2732,7 +2830,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_ || compute_non_overlapping_and_dense();
   }
 
-  void _refresh_contiguous() {
+  // assume_contiguous: the caller just wrote canonical row-major strides, so
+  // both (row-major) contiguity and non-overlapping-and-dense are already known
+  // true, independent of rank. Passing true skips the redundant O(dim) rescans
+  // in compute_contiguous()/compute_non_overlapping_and_dense() while still
+  // running the rank-dependent channels-last disambiguation below, so the
+  // single switch stays the source of truth.
+  void _refresh_contiguous(bool assume_contiguous = false) {
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
     // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
@@ -2740,24 +2844,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // this point)
     switch (dim()) {
       case 4: {
-        _set_is_contiguous(compute_contiguous());
+        _set_is_contiguous(assume_contiguous || compute_contiguous());
         _set_is_channels_last_contiguous(compute_channels_last_contiguous_2d());
         _set_is_channels_last_3d_contiguous(false);
         _set_is_channels_last(compute_strides_like_channels_last_2d());
         _set_is_channels_last_3d(false);
         _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_dim4());
+            assume_contiguous || compute_is_non_overlapping_and_dense_dim4());
         break;
       }
       case 5: {
-        _set_is_contiguous(compute_contiguous());
+        _set_is_contiguous(assume_contiguous || compute_contiguous());
         _set_is_channels_last_contiguous(compute_channels_last_contiguous_2d());
         _set_is_channels_last_3d_contiguous(
             compute_channels_last_contiguous_3d_dim5());
         _set_is_channels_last(compute_channels_last_2d_dim5());
         _set_is_channels_last_3d(compute_channels_last_3d_dim5());
         _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_dim5());
+            assume_contiguous || compute_is_non_overlapping_and_dense_dim5());
         break;
       }
       default:
@@ -2766,13 +2870,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // mean the tensor is strided like channels_last: for strides on channel
         // dimension could suggest desired memory_layout, but it doesn't affect
         // memory storage
-        _set_is_contiguous(compute_contiguous());
+        _set_is_contiguous(assume_contiguous || compute_contiguous());
         _set_is_channels_last_contiguous(false);
         _set_is_channels_last_3d_contiguous(false);
         _set_is_channels_last(false);
         _set_is_channels_last_3d(false);
         _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_anydim());
+            assume_contiguous || compute_is_non_overlapping_and_dense_anydim());
         break;
     }
   }
@@ -2951,64 +3055,38 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // (which do not have a device.)
   std::optional<c10::Device> device_opt_;
 
-  // default member initializers for bit-fields only available with -std=c++2a
-  // or -std=gnu++2a
-  inline void init_bitfields() {
-    is_contiguous_ = true;
-    is_channels_last_ = false;
-    is_channels_last_contiguous_ = false;
-    is_channels_last_3d_ = false;
-    is_channels_last_3d_contiguous_ = false;
-    is_non_overlapping_and_dense_ = true;
-    is_wrapped_number_ = false;
-    allow_tensor_metadata_change_ = true;
-    reserved_ = false;
-    sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
-    custom_sizes_strides_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
-    python_custom_sizes_strides_ =
-        static_cast<uint8_t>(SizesStridesPolicy::Default);
-    python_custom_device_ = false;
-    python_custom_layout_ = false;
-    custom_device_ = false;
-    custom_layout_ = false;
-    device_policy_ = false;
-    layout_policy_ = false;
-    storage_access_should_throw_ = false;
-    has_symbolic_sizes_strides_ = false;
-  }
-
   // Tensor is contiguous
-  bool is_contiguous_ : 1;
+  bool is_contiguous_ : 1 = true;
 
   // Tensor is a subclass that does not permit storage access.
-  bool storage_access_should_throw_ : 1;
+  bool storage_access_should_throw_ : 1 = false;
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
   // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
-  bool is_channels_last_ : 1;
+  bool is_channels_last_ : 1 = false;
 
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
-  bool is_channels_last_contiguous_ : 1;
+  bool is_channels_last_contiguous_ : 1 = false;
 
   // Tensor is stored in the channels last 3d memory format, when dimensions
   // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (<
   // N-strides) (If size of any dimension is equal to 1, this dimension strides
   // value is not taken into account).
-  bool is_channels_last_3d_ : 1;
+  bool is_channels_last_3d_ : 1 = false;
 
   // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
   // contiguous memory block.
-  bool is_channels_last_3d_contiguous_ : 1;
+  bool is_channels_last_3d_contiguous_ : 1 = false;
 
   // Dense tensor is the tensor that store values in a contiguous block of
   // memory. Non-overlapping tensor is the tensor in which elements occupy
   // individual non-repetitive memory.
-  bool is_non_overlapping_and_dense_ : 1;
+  bool is_non_overlapping_and_dense_ : 1 = true;
 
-  bool is_wrapped_number_ : 1;
+  bool is_wrapped_number_ : 1 = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]
   //
@@ -3025,53 +3103,53 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // NOTE: For a full list of tensor metadata fields, please see
   // `copy_tensor_metadata()` in TensorImpl and its subclasses to find
   // which fields are copied by value.
-  bool allow_tensor_metadata_change_ : 1;
+  bool allow_tensor_metadata_change_ : 1 = true;
 
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
-  bool reserved_ : 1;
+  bool reserved_ : 1 = false;
 
   // Call _custom() virtual methods for
   // strides()/is_contiguous()/sizes()/dim()/numel()
   // This is a combination of sizes_strides_custom_dispatch_
   // and has_symbolic_sizes_strides_
-  uint8_t sizes_strides_policy_ : 2;
+  uint8_t sizes_strides_policy_ : 2 =
+      static_cast<uint8_t>(SizesStridesPolicy::Default);
 
   // Whether or not sizes_and_strides_ contains a symbolic value.
-  bool has_symbolic_sizes_strides_ : 1;
+  bool has_symbolic_sizes_strides_ : 1 = false;
 
   // Call _custom() virtual method for
   // strides()/is_contiguous()/sizes()/dim()/numel()
-  uint8_t custom_sizes_strides_ : 2;
+  uint8_t custom_sizes_strides_ : 2 =
+      static_cast<uint8_t>(SizesStridesPolicy::Default);
 
   // Combo of custom_ and python_custom_
-  bool device_policy_ : 1;
-  bool layout_policy_ : 1;
+  bool device_policy_ : 1 = false;
+  bool layout_policy_ : 1 = false;
 
   // Call _custom() virtual method for device()
-  bool custom_device_ : 1;
+  bool custom_device_ : 1 = false;
 
   // Call _custom() virtual method for layout()
-  bool custom_layout_ : 1;
+  bool custom_layout_ : 1 = false;
 
   // Call into Python for
   // strides()/is_contiguous()/sizes()/dim()/numel()
-  uint8_t python_custom_sizes_strides_ : 2;
+  uint8_t python_custom_sizes_strides_ : 2 =
+      static_cast<uint8_t>(SizesStridesPolicy::Default);
 
   // Call into Python for device()
-  bool python_custom_device_ : 1;
+  bool python_custom_device_ : 1 = false;
 
   // Call into Python for layout()
-  bool python_custom_layout_ : 1;
+  bool python_custom_layout_ : 1 = false;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
   // not anymore!)
-  //
-  // INVARIANT: extra_meta_->named_tensor_meta_ != nullptr  <==>
-  // key_set_.has(DispatchKey::Named)
   DispatchKeySet key_set_;
 
  private:
@@ -3132,7 +3210,6 @@ struct TargetTraits<
 //    weak refcount
 //    storage pointer
 //    autograd metadata pointer
-//    named tensor metadata pointer
 //    version counter pointer
 //    PyObjectSlot
 //    SizesAndStrides size/pointer
@@ -3269,7 +3346,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
     are_equal<sizeof(extra_meta_),         4,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),    4,  FieldNameEnum::pyobj_slot_>();
     is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
@@ -3294,7 +3371,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
     is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();

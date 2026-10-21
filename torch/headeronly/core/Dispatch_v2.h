@@ -72,6 +72,38 @@
 #define AT_ALL_TYPES_AND_COMPLEX \
   AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_COMPLEX_TYPES)
 
+#define AT_ALL_SCALAR_TYPES_WITH_COMPLEX                                       \
+  torch::headeronly::ScalarType::Byte, torch::headeronly::ScalarType::Char,    \
+      torch::headeronly::ScalarType::Short,                                    \
+      torch::headeronly::ScalarType::Int, torch::headeronly::ScalarType::Long, \
+      torch::headeronly::ScalarType::Half,                                     \
+      torch::headeronly::ScalarType::Float,                                    \
+      torch::headeronly::ScalarType::Double,                                   \
+      torch::headeronly::ScalarType::ComplexHalf,                              \
+      torch::headeronly::ScalarType::BComplex32,                               \
+      torch::headeronly::ScalarType::ComplexFloat,                             \
+      torch::headeronly::ScalarType::ComplexDouble,                            \
+      torch::headeronly::ScalarType::Bool,                                     \
+      torch::headeronly::ScalarType::BFloat16,                                 \
+      torch::headeronly::ScalarType::Float8_e5m2,                              \
+      torch::headeronly::ScalarType::Float8_e4m3fn,                            \
+      torch::headeronly::ScalarType::Float8_e5m2fnuz,                          \
+      torch::headeronly::ScalarType::Float8_e4m3fnuz,                          \
+      torch::headeronly::ScalarType::Float8_e8m0fnu
+
+// Calls BODY(T, ScalarTypeToCPPTypeT<T>) for each ScalarType T in the variadic
+// list. Additional type lists can be appended after a comma. No trailing comma.
+// Example:
+//   AT_FORALL_SCALAR_TYPES_V2(
+//     AT_WRAP(BODY),
+//     AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX),
+//     ...)
+#define AT_FORALL_V2_CASE(enum_type, BODY) \
+  BODY(torch::headeronly::impl::ScalarTypeToCPPTypeT<enum_type>, enum_type)
+#define AT_FORALL_SCALAR_TYPES_V2(BODY, ...)             \
+  AT_EXPAND(AT_CONCAT(THO_AP, AT_NUM_ARGS(__VA_ARGS__))( \
+      AT_FORALL_V2_CASE, BODY, __VA_ARGS__))
+
 // Helper macros
 
 // THO_AP_VAR_TMPL is same as AT_AP_VAR but with a custom

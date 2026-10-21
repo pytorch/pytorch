@@ -83,7 +83,7 @@ def substitute_solution_one_type(mapping: dict[object, object], t: object) -> An
 
     elif isinstance(t, TensorType):
         new_type = []
-        for typ in t.__args__:
+        for typ in t.dims:
             if typ in mapping:
                 new_type.append(mapping[typ])
             else:

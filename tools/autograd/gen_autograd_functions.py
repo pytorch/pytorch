@@ -661,7 +661,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             uses_cpp_saved_variable_cls = True
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
-            ptr = "shared_from_this()" if is_output else ""
+            ptr = "getptr()" if is_output else ""
             unpack.append(f"auto {name} = {name}_.unpack({ptr});")
             getter_definitions.append(
                 GETTER_DEFINITION_SAVEDVAR.substitute(
@@ -703,7 +703,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
-            ptr = "shared_from_this()" if is_output else "nullptr"
+            ptr = "getptr()" if is_output else "nullptr"
             unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
             asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
@@ -869,7 +869,6 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:
-                # pyrefly: ignore [bad-index, index-error]
                 getter_def, body = MISC_GETTER_DEFS[type]
                 getter_definitions.append(
                     getter_def.substitute(op=info.op, name=name, body=body)
@@ -1040,7 +1039,6 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     unpack_ivalues = []
     for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
         typ = typ.removesuffix("&")
-        # pyrefly: ignore [bad-argument-type]
         unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
 
     schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]

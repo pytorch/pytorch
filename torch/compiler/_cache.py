@@ -50,6 +50,11 @@ class CacheArtifact(ABC):
         pass
 
     @staticmethod
+    def populate_first() -> bool:
+        """Whether populate_caches must populate this artifact before others."""
+        return False
+
+    @staticmethod
     def type() -> str:
         """
         Returns the type of the artifact. Must be unique across all CacheArtifact classes.
@@ -171,6 +176,23 @@ def _deserialize_single_cache(
 CacheArtifactsResult = dict[str, list[CacheArtifact]]
 
 
+@dataclasses.dataclass(frozen=True)
+class CacheArtifactRecorder:
+    """
+    Shared entry point for cache implementations to record artifacts.
+    """
+
+    artifact_type: str
+    key: str
+
+    def record(self, content: Any) -> None:
+        CacheArtifactManager.record_artifact(self.artifact_type, self.key, content)
+
+    def record_if_present(self, content: Any | None) -> None:
+        if content is not None:
+            self.record(content)
+
+
 class CacheArtifactManager:
     """
     Lightweight manager class for collecting and processing cache artifacts for
@@ -178,7 +200,7 @@ class CacheArtifactManager:
 
     Intended Lifecycle:
     - Execute code via torch.compile, this will call
-        CacheArtifactManager.record_artifact on each cache artifact
+        CacheArtifactRecorder.record on each cache artifact
     - Call CacheArtifactManager.serialize to convert all the cache artifacts
         to portable format
     - Call CacheArtifactManager.deserialize to hot load the cache artifacts on
@@ -190,7 +212,7 @@ class CacheArtifactManager:
 
     # Protected by the compile_lock
     _new_cache_artifacts: CacheArtifactsResult = defaultdict(list)
-    # Keep a separate seen artifacts list to make avoid unnecessary duplicates
+    # Keep a separate seen artifacts list to avoid unnecessary duplicates
     # This list will not be cleared between serialize() calls
     _seen_artifacts: OrderedSet[CacheArtifact] = OrderedSet()
     # When serialize() is called, artifacts are transferred from _cache_artifacts to
@@ -263,7 +285,7 @@ class CacheArtifactManager:
             cls._cache_info.add(artifact)
 
         if cls._cache_info.empty():
-            # If there are not artifacts, dont just return bytes with
+            # If there are no artifacts, don't just return bytes with
             # version.
             return None
 
@@ -301,7 +323,11 @@ class CacheArtifactManager:
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
         info = CacheInfo()
-        for artifact in chain(*artifacts.values()):
+        ordered = sorted(
+            chain(*artifacts.values()),
+            key=lambda artifact: not artifact.populate_first(),
+        )
+        for artifact in ordered:
             log.debug("writing: %s", artifact)
             info.add(artifact)
             artifact.populate_cache()
@@ -322,4 +348,7 @@ class CacheArtifactManager:
         from torch._inductor.codecache import InductorCacheArtifact  # noqa: F401
         from torch._inductor.runtime.autotune_cache import (  # noqa: F401
             AutotuneCacheArtifact,
+        )
+        from torch.compiler._runtime_cache import (  # noqa: F401
+            TritonRuntimeCacheArtifact,
         )

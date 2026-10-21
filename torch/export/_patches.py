@@ -7,6 +7,22 @@ from torch._decomp.decompositions import _rnn_helper, gather_params, gru_cell, l
 from torch._higher_order_ops.while_loop import while_loop
 
 
+def _clone_tensors_that_alias(tensors):
+    # Flattened RNN weights can share storage. while_loop rejects aliased
+    # closure inputs, and these weights are read-only inside the loop.
+    cloned_tensors = []
+    seen_tensors = []
+    for tensor in tensors:
+        if tensor is not None and any(
+            torch._C._overlaps(tensor, seen_tensor) for seen_tensor in seen_tensors
+        ):
+            tensor = tensor.clone()
+        cloned_tensors.append(tensor)
+        if tensor is not None:
+            seen_tensors.append(tensor)
+    return tuple(cloned_tensors)
+
+
 def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     """
     1 layer fn for while loop LSTM
@@ -34,6 +50,9 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
 
     precomputed_input = torch.nn.functional.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    hh_weight, hh_bias, hr_weight = _clone_tensors_that_alias(
+        (hh_weight, hh_bias, hr_weight)
+    )
 
     # while loop rewrite
     step_output = torch.empty(
@@ -49,8 +68,8 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     def body_fn(idx, out, hx, cx):
         # Extract the integer value from idx and constrain it for data-dependent indexing
         i = idx.item()
-        torch._check_is_size(i)
-        torch._check_is_size(i, max=precomputed_input.size(0) - 1)
+        torch._check(i >= 0)
+        torch._check(i <= precomputed_input.size(0) - 1)
         hx, cx = lstm_cell(
             precomputed_input[i], hx, cx, hh_weight, hh_bias, hr_weight, chunk_dim=2
         )
@@ -66,8 +85,7 @@ def one_layer_while_loop_lstm(inp, hidden, params, has_biases, reverse=False):
     if reverse:
         out = out.flip(0)
 
-    # Use squeeze(1) to match original implementation
-    return out, (final_hx.squeeze(1), final_cx.squeeze(1))
+    return out, (final_hx.squeeze(0), final_cx.squeeze(0))
 
 
 def lstm_while_loop_impl(
@@ -143,6 +161,7 @@ def one_layer_while_loop_gru(inp, hidden, params, has_biases, reverse=False):
 
     precomputed_input = torch.nn.functional.linear(inp, ih_weight, ih_bias)
     precomputed_input = precomputed_input.flip(0) if reverse else precomputed_input
+    hh_weight, hh_bias = _clone_tensors_that_alias((hh_weight, hh_bias))
     cur_hidden = hidden.unsqueeze(0)
 
     # while loop rewrite
@@ -159,10 +178,10 @@ def one_layer_while_loop_gru(inp, hidden, params, has_biases, reverse=False):
     def body_fn(idx, out, cur_hidden):
         # Extract the integer value from idx and constrain it for data-dependent indexing
         i = idx.item()
-        torch._check_is_size(i)
-        torch._check_is_size(i, max=precomputed_input.size(0) - 1)
+        torch._check(i >= 0)
+        torch._check(i <= precomputed_input.size(0) - 1)
         cur_hidden = gru_cell(
-            precomputed_input[i], cur_hidden, ih_weight, ih_bias, hh_weight, hh_bias
+            precomputed_input[i], cur_hidden, None, None, hh_weight, hh_bias
         )
         out = out.clone()
         out[i] = cur_hidden.squeeze(0)

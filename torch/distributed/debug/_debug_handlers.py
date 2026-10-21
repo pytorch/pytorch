@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from tabulate import tabulate
@@ -27,6 +28,9 @@ from torch.distributed.flight_recorder.components.types import (
 
 if TYPE_CHECKING:
     from torch.distributed.debug._frontend import FrontendServer, HTTPRequestHandler
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -259,12 +263,20 @@ class PySpyHandler(DebugHandler):
 
 
 class FlightRecorderHandler(DebugHandler):
+    # Each hooked backend records into its own FlightRecorder instance, so the
+    # generic fr_trace_json / fr_dump_file control plane handlers take the
+    # backend to read. "gloo" is the instance ProcessGroupGloo records into and
+    # what those handlers default to, so /fr_trace keeps showing what it always
+    # did; ?backend=<name> selects another one.
+    default_backend: str = "gloo"
+
     def routes(self) -> list[Route]:
         return [
             Route("/fr_trace", self._handle_fr_trace),
             Route("/fr_trace_json", self._handle_fr_trace_json),
             Route("/fr_trace_nccl", self._handle_fr_trace_nccl),
             Route("/fr_trace_nccl_json", self._handle_fr_trace_nccl_json),
+            Route("/fr_dump_file", self._handle_fr_dump_file),
         ]
 
     def nav_links(self) -> list[NavLink]:
@@ -273,7 +285,12 @@ class FlightRecorderHandler(DebugHandler):
             NavLink("/fr_trace_json", "(JSON)"),
             NavLink("/fr_trace_nccl", "FlightRecorder NCCL"),
             NavLink("/fr_trace_nccl_json", "(JSON)"),
+            NavLink("/fr_dump_file", "FlightRecorder Dump"),
         ]
+
+    def _backend(self, req: HTTPRequestHandler) -> str:
+        backend = req.get_query_arg("backend", self.default_backend)
+        return str(backend)
 
     def templates(self) -> dict[str, str]:
         return {"fr_trace.html": FR_TRACE_TEMPLATE}
@@ -324,14 +341,32 @@ class FlightRecorderHandler(DebugHandler):
         )
 
     def _handle_fr_trace(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("fr_trace_json", timeout=self.fetch_timeout)
+        backend = self._backend(req)
+        addrs, resps = fetch_all(
+            "fr_trace_json", f"backend={backend}", timeout=self.fetch_timeout
+        )
         return self._render_tables(req.frontend, addrs, list(resps))
 
     def _handle_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("fr_trace_json", timeout=self.fetch_timeout)
+        backend = self._backend(req)
+        addrs, resps = fetch_all(
+            "fr_trace_json", f"backend={backend}", timeout=self.fetch_timeout
+        )
         return req.frontend.render_template(
             "json_resp.html",
-            title="FlightRecorder",
+            title=f"FlightRecorder {backend}",
+            addrs=addrs,
+            resps=resps,
+        )
+
+    def _handle_fr_dump_file(self, req: HTTPRequestHandler) -> bytes:
+        backend = self._backend(req)
+        addrs, resps = fetch_all(
+            "fr_dump_file", f"backend={backend}", timeout=self.fetch_timeout
+        )
+        return req.frontend.render_template(
+            "raw_resp.html",
+            title=f"FlightRecorder Dump {backend}",
             addrs=addrs,
             resps=resps,
         )
@@ -575,6 +610,253 @@ class TorchCommsFlightRecorderHandler(DebugHandler):
         return "torchcomms_fr_trace"
 
 
+HEALTH_CHECK_TEMPLATE = """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}TorchComms Health Check{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <h2>Health Status</h2>
+    {% if fetch_summary %}<pre>{{ fetch_summary }}</pre>{% endif %}
+    {% for i, (addr, resp) in enumerate(zip(addrs, resps)) %}
+        <h3>Rank {{ i }}: {{ addr }}</h3>
+        {% if resp.status_code != 200 %}
+            <p>Failed to fetch: status={{ resp.status_code }}</p>
+            <pre>{{ resp.text }}</pre>
+        {% else %}
+            <pre>{{ resp.text }}</pre>
+        {% endif %}
+    {% endfor %}
+    {% if dump_triggered %}
+        <h2>Flight Recorder Dump (triggered by unhealthy rank)</h2>
+        {% for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)) %}
+            <h3>Rank {{ i }}: {{ addr }}</h3>
+            {% if resp.status_code != 200 %}
+                <p>Failed to dump: status={{ resp.status_code }}</p>
+                <pre>{{ resp.text }}</pre>
+            {% else %}
+                <pre>{{ resp.text }}</pre>
+            {% endif %}
+        {% endfor %}
+    {% endif %}
+{% endblock %}
+    """
+
+
+class TorchCommsHealthCheckHandler(DebugHandler):
+    """Health check that detects watchdog timeouts and triggers FR dumps."""
+
+    def routes(self) -> list[Route]:
+        return [Route("/torchcomms_health_check", self._handle)]
+
+    def nav_links(self) -> list[NavLink]:
+        return [NavLink("/torchcomms_health_check", "TorchComms Health")]
+
+    def templates(self) -> dict[str, str]:
+        return {"torchcomms_health_check.html": HEALTH_CHECK_TEMPLATE}
+
+    @staticmethod
+    def _any_unhealthy(resps: list[Response]) -> bool:
+        """Return True if any rank explicitly reports itself as unhealthy.
+
+        Only responses with a 200 status code are inspected.  Non-200
+        responses (connection errors, timeouts, etc.) are intentionally
+        ignored so that a single unreachable rank does not trigger an
+        expensive Flight Recorder dump across the entire job.  A dump is
+        only triggered when a rank is reachable *and* positively reports
+        ``{"healthy": false}``.
+        """
+        for resp in resps:
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except Exception:
+                    logger.exception(
+                        "failed to parse health check response as JSON; "
+                        "treating rank as healthy"
+                    )
+                    continue
+                if not data.get("healthy", True):
+                    return True
+        return False
+
+    def _handle(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("torchcomms_health_check", timeout=self.fetch_timeout)
+        dump_triggered = False
+        dump_addrs: list[str] = []
+        dump_resps: list[Response] = []
+        if self._any_unhealthy(resps):
+            dump_addrs, dump_resps = fetch_all(
+                "torchcomms_fr_dump_file", timeout=self.fetch_timeout
+            )
+            dump_triggered = True
+        return req.frontend.render_template(
+            "torchcomms_health_check.html",
+            fetch_summary=format_fetch_summary(addrs, resps),
+            addrs=addrs,
+            resps=resps,
+            dump_triggered=dump_triggered,
+            dump_addrs=dump_addrs,
+            dump_resps=dump_resps,
+        )
+
+    def dump(self) -> str | None:
+        addrs, resps = fetch_all("torchcomms_health_check", timeout=self.fetch_timeout)
+        parts: list[str] = []
+        summary = format_fetch_summary(addrs, resps)
+        if summary:
+            parts.append(summary)
+            parts.append("")
+        for i, (addr, resp) in enumerate(zip(addrs, resps)):
+            parts.append(f"=== Rank {i}: {addr} ===")
+            parts.append(
+                resp.text if resp.status_code == 200 else f"Error: {resp.status_code}"
+            )
+        if self._any_unhealthy(resps):
+            parts.append("")
+            parts.append("=== Unhealthy rank detected, triggering FR dump ===")
+            dump_addrs, dump_resps = fetch_all(
+                "torchcomms_fr_dump_file", timeout=self.fetch_timeout
+            )
+            for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)):
+                parts.append(f"--- Rank {i}: {addr} ---")
+                parts.append(
+                    resp.text
+                    if resp.status_code == 200
+                    else f"Error: {resp.status_code}"
+                )
+        return "\n".join(parts)
+
+    def dump_filename(self) -> str:
+        return "torchcomms_health_check"
+
+
+C10D_HEALTH_CHECK_TEMPLATE = """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}c10d Health Check{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <h2>Health Status</h2>
+    {% if fetch_summary %}<pre>{{ fetch_summary }}</pre>{% endif %}
+    {% for i, (addr, resp) in enumerate(zip(addrs, resps)) %}
+        <h3>Rank {{ i }}: {{ addr }}</h3>
+        {% if resp.status_code != 200 %}
+            <p>Failed to fetch: status={{ resp.status_code }}</p>
+            <pre>{{ resp.text }}</pre>
+        {% else %}
+            <pre>{{ resp.text }}</pre>
+        {% endif %}
+    {% endfor %}
+    {% if dump_results %}
+        <h2>Flight Recorder Dump (triggered by unhealthy rank)</h2>
+        {% for backend, dump_addrs, dump_resps in dump_results %}
+            <h3>Backend {{ backend }}</h3>
+            {% for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)) %}
+                <h4>Rank {{ i }}: {{ addr }}</h4>
+                {% if resp.status_code != 200 %}
+                    <p>Failed to dump: status={{ resp.status_code }}</p>
+                    <pre>{{ resp.text }}</pre>
+                {% else %}
+                    <pre>{{ resp.text }}</pre>
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+    {% endif %}
+{% endblock %}
+    """
+
+
+class C10dHealthCheckHandler(DebugHandler):
+    """c10d health check that triggers backend-specific Flight Recorder dumps."""
+
+    def routes(self) -> list[Route]:
+        return [Route("/c10d_health_check", self._handle)]
+
+    def nav_links(self) -> list[NavLink]:
+        return [NavLink("/c10d_health_check", "c10d Health")]
+
+    def templates(self) -> dict[str, str]:
+        return {"c10d_health_check.html": C10D_HEALTH_CHECK_TEMPLATE}
+
+    @staticmethod
+    def _unhealthy_backends(resps: list[Response]) -> list[str]:
+        backends: set[str] = set()
+        for resp in resps:
+            if resp.status_code != 200:
+                continue
+            try:
+                data = resp.json()
+            except Exception:
+                logger.exception(
+                    "failed to parse c10d health check response as JSON; "
+                    "treating rank as healthy"
+                )
+                continue
+            if data.get("healthy", True):
+                continue
+            reported = data.get("unhealthy_backends", [])
+            if not isinstance(reported, list):
+                logger.error("invalid unhealthy_backends value: %r", reported)
+                continue
+            backends.update(
+                backend for backend in reported if isinstance(backend, str) and backend
+            )
+        return sorted(backends)
+
+    def _fetch_dumps(
+        self, backends: list[str]
+    ) -> list[tuple[str, list[str], list[Response]]]:
+        results = []
+        for backend in backends:
+            addrs, resps = fetch_all(
+                "fr_dump_file", f"backend={backend}", timeout=self.fetch_timeout
+            )
+            results.append((backend, addrs, list(resps)))
+        return results
+
+    def _handle(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("c10d_health_check", timeout=self.fetch_timeout)
+        dump_results = self._fetch_dumps(self._unhealthy_backends(resps))
+        return req.frontend.render_template(
+            "c10d_health_check.html",
+            fetch_summary=format_fetch_summary(addrs, resps),
+            addrs=addrs,
+            resps=resps,
+            dump_results=dump_results,
+        )
+
+    def dump(self) -> str | None:
+        addrs, resps = fetch_all("c10d_health_check", timeout=self.fetch_timeout)
+        parts: list[str] = []
+        summary = format_fetch_summary(addrs, resps)
+        if summary:
+            parts.append(summary)
+            parts.append("")
+        for i, (addr, resp) in enumerate(zip(addrs, resps)):
+            parts.append(f"=== Rank {i}: {addr} ===")
+            parts.append(
+                resp.text if resp.status_code == 200 else f"Error: {resp.status_code}"
+            )
+        dump_results = self._fetch_dumps(self._unhealthy_backends(resps))
+        if dump_results:
+            parts.append("")
+            parts.append("=== Unhealthy rank detected, triggering FR dump ===")
+            for backend, dump_addrs, dump_resps in dump_results:
+                parts.append(f"--- Backend: {backend} ---")
+                for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)):
+                    parts.append(f"Rank {i}: {addr}")
+                    parts.append(
+                        resp.text
+                        if resp.status_code == 200
+                        else f"Error: {resp.status_code}"
+                    )
+        return "\n".join(parts)
+
+    def dump_filename(self) -> str:
+        return "c10d_health_check"
+
+
 def default_handlers() -> list[DebugHandler]:
     return [
         IndexHandler(),
@@ -582,6 +864,8 @@ def default_handlers() -> list[DebugHandler]:
         PySpyHandler(),
         FlightRecorderHandler(),
         TorchCommsFlightRecorderHandler(),
+        TorchCommsHealthCheckHandler(),
+        C10dHealthCheckHandler(),
         ProfilerHandler(),
         WaitCountersHandler(),
         TCPStoreHandler(),

@@ -15,7 +15,7 @@ retry () {
 # installed via requirements-ci.txt
 pip_install \
   transformers==4.36.2 \
-  onnxruntime==1.23.1
+  onnxruntime==1.28.0
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
@@ -26,9 +26,8 @@ as_jenkins echo 'import transformers; transformers.GPTJForCausalLM.from_pretrain
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 # Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
 # so echo the command to a file and run the file instead
-conda_run python "${IMPORT_SCRIPT_FILENAME}"
+env_run python "${IMPORT_SCRIPT_FILENAME}"
 
 # Cleaning up
-conda_run pip uninstall -y torch
-conda_run pip cache purge
+env_run pip uninstall -y torch
 rm "${IMPORT_SCRIPT_FILENAME}" || true

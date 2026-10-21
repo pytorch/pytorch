@@ -85,7 +85,7 @@ class AutoHeuristic:
         self.augment_context = augment_context
         self.metadata = AHMetadata(
             get_gpu_shared_memory(),
-            torch.cuda.get_device_capability(),
+            torch.cuda.get_device_capability() if torch.cuda.is_available() else (0, 0),
             self.choices,
             self.name,
         )
@@ -166,8 +166,10 @@ class AutoHeuristic:
         # we store the collected data per GPU model and learn a heuristic per GPU model
 
         # TODO(AlnisM): just using the device name for now, but the same GPU model can have different names
-        device_name = torch.cuda.get_device_name().replace(" ", "_")
-        return device_name
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name().replace(" ", "_")
+            return device_name
+        return "non_cuda_device"
 
     def get_default_log_path(self) -> str:
         device_name = self.get_device_identifier()

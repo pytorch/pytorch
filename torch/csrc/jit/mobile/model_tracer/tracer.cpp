@@ -148,7 +148,7 @@ int main(int argc, char* argv[]) {
         << "\nPlease consider opening an issue at https://github.com/pytorch/pytorch/issues "
         << "with the detailed error message." << '\n';
 
-    throw ex;
+    throw;
   }
 
   if (tracer_result.traced_operators.size() <=
@@ -157,7 +157,7 @@ int main(int argc, char* argv[]) {
         << c10::str(
                "Error traced_operators size: ",
                tracer_result.traced_operators.size(),
-               ". Expected the traced operator list to be bigger then the default size ",
+               ". Expected the traced operator list to be bigger than the default size ",
                torch::jit::mobile::always_included_traced_ops.size(),
                ". Please report a bug in PyTorch.")
         << '\n';
@@ -165,8 +165,7 @@ int main(int argc, char* argv[]) {
 
   // If the op exist in both traced_ops and root_ops, leave it in root_ops only
   for (const auto& root_op : tracer_result.root_ops) {
-    if (tracer_result.traced_operators.find(root_op) !=
-        tracer_result.traced_operators.end()) {
+    if (tracer_result.traced_operators.contains(root_op)) {
       tracer_result.traced_operators.erase(root_op);
     }
   }

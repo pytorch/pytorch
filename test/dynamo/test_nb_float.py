@@ -2,16 +2,17 @@
 """Tests for nb_float_impl: unified __float__ / float() protocol in Dynamo."""
 
 import torch
-import torch._dynamo.testing
+from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     make_dynamo_test,
-    run_tests,
     skipIfCrossRef,
-    TestCase,
 )
 
 
 class NbFloatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- float / int / bool (ConstantVariable) ---
 
     @make_dynamo_test
@@ -171,7 +172,7 @@ class NbFloatTests(TestCase):
     def test_float_returning_non_float_raises(self):
         class Bad:
             def __float__(self):
-                return "not a float"  # noqa: PLE0305
+                return "not a float"
 
         obj = Bad()
 
@@ -183,6 +184,23 @@ class NbFloatTests(TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertIn("__float__ returned non-float", result)
+
+    def test_float_returning_int_raises(self):
+        # A numeric-but-wrong-type return (int is not float) must still raise.
+        class Bad:
+            def __float__(self):
+                return 3
+
+        obj = Bad()
+
+        def fn(x):
+            try:
+                return float(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertIn("__float__ returned non-float (type int)", result)
 
     def test_float_raising_exception_propagates(self):
         class RaisingFloat:
@@ -305,6 +323,25 @@ class NbFloatTests(TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(5))
         self.assertEqual(result, 5.0)
+
+    # --- Blocked slot: __float__ = None ---
+
+    def test_user_defined_float_none_raises(self):
+        class NoFloat:
+            __float__ = None
+
+        obj = NoFloat()
+
+        def fn(x):
+            try:
+                return float(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        eager_result = fn(torch.tensor(0))
+        self.assertIn("NoneType", result)
+        self.assertEqual(result, eager_result)
 
     # --- SymNodeVariable ---
 

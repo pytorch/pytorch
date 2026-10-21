@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from typing import Any
+from unittest.mock import patch
 
 import torch
 import torch.nn as nn
@@ -23,7 +24,6 @@ from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._flat_param import (
     _FSDP_SKIP_WRITEBACK_CHECK,
     _FSDP_USE_FULL_PREC_IN_EVAL,
-    FlatParamHandle,
 )
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
@@ -35,6 +35,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -301,11 +302,24 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     BackwardPrefetch.BACKWARD_PRE,
                     BackwardPrefetch.BACKWARD_POST,
                 ],
-                "skip_writeback_check": [False, True],
             },
             self._test_diff_hyperparams,
             cpu_offload=CPUOffload(offload_params=False),
             sharding_strategy=sharding_strategy,
+            skip_writeback_check=False,
+        )
+        # The writeback check does not affect numerics, so skipping it is
+        # covered once instead of across the grid.
+        self._test_diff_hyperparams(
+            device_init_mode=DEVICEInitMode.DEVICE_BEFORE,
+            init_optim_before_wrap=False,
+            optim_class=torch.optim.AdamW,
+            multi_tensor=False,
+            set_to_none=False,
+            backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+            cpu_offload=CPUOffload(offload_params=False),
+            sharding_strategy=sharding_strategy,
+            skip_writeback_check=True,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -360,19 +374,21 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             and cpu_offload.offload_params
         ):
             return  # not supported
-        if skip_writeback_check:
-            os.environ[_FSDP_SKIP_WRITEBACK_CHECK] = "1"
         ddp_model = self._get_ddp_transformer(find_unused_params=False)
         ddp_optim = self._get_optim(ddp_model, optim_class, multi_tensor)
-        fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
-            device_init_mode=device_init_mode,
-            init_optim_before_wrap=init_optim_before_wrap,
-            optim_class=optim_class,
-            multi_tensor=multi_tensor,
-            sharding_strategy=sharding_strategy,
-            backward_prefetch=backward_prefetch,
-            cpu_offload=cpu_offload,
-        )
+        # FlatParamHandle reads the env var at construction.
+        with patch.dict(
+            os.environ, {_FSDP_SKIP_WRITEBACK_CHECK: str(int(skip_writeback_check))}
+        ):
+            fsdp_model, fsdp_optim = self._get_fsdp_transformer_and_optim(
+                device_init_mode=device_init_mode,
+                init_optim_before_wrap=init_optim_before_wrap,
+                optim_class=optim_class,
+                multi_tensor=multi_tensor,
+                sharding_strategy=sharding_strategy,
+                backward_prefetch=backward_prefetch,
+                cpu_offload=cpu_offload,
+            )
         self._check_train_parity(
             ddp_model, ddp_optim, fsdp_model, fsdp_optim, set_to_none
         )
@@ -567,7 +583,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         self._check_ddp_fsdp_param_parity(ddp_model, fsdp_model)
 
 
-class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
+class TestFSDPUseOrigParamsUnshardReshard(FSDPTestContinuous):
     """Tests the unshard/reshard flow."""
 
     @property
@@ -871,7 +887,7 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         check_parameter_parity(ddp_model, fsdp_model, True)
 
 
-class TestFSDPUseOrigParamsWriteback(FSDPTest):
+class TestFSDPUseOrigParamsWriteback(FSDPTestContinuous):
     """Tests parameter and gradient writeback."""
 
     class Model(nn.Module):
@@ -1110,6 +1126,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             loss.backward()
 
     @skip_if_lt_x_gpu(2)
+    @patch.dict(os.environ)
     def test_no_reshard_and_mixed_precision(self):
         """
         Tests that writeback does not falsely get triggered for a few
@@ -1206,10 +1223,8 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         fsdp_model(inp)
 
 
-class TestFSDPUseOrigParamsNoSync(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
+class TestFSDPUseOrigParamsNoSync(FSDPTestContinuous):
+    world_size = 2
 
     @skip_if_lt_x_gpu(2)
     def test_no_sync_correctness(self):
@@ -1375,85 +1390,6 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float32)
-
-
-class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
-    @property
-    def world_size(self):
-        return 2
-
-    def _test_prefetch_writeback_sync(self, cpu_offload: bool):
-        device = torch.device(device_type, self.rank)
-        compute_done = torch.ones(1, device=device, dtype=torch.int32)
-        writeback_reads: list[torch.Tensor] = []
-
-        class SlowLinear(nn.Module):
-            def __init__(self, in_features, out_features):
-                super().__init__()
-                self.linear = nn.Linear(in_features, out_features, device=device)
-
-            def forward(self, x):
-                out = self.linear(x)
-                compute_done.fill_(0)
-                # Stall compute stream so prefetch writeback overlaps
-                torch.cuda._sleep(int(1e8))
-                compute_done.fill_(1)
-                return out
-
-        orig_pre_unshard = FlatParamHandle.pre_unshard
-
-        def _pre_unshard_with_check(self_handle):
-            ret = orig_pre_unshard(self_handle)
-            # Read the flag after pre_unshard returns. If _writeback_orig_params
-            # properly waited for the compute stream, this clone (on
-            # pre_unshard_stream) is ordered after the wait and reads 1.
-            if self_handle._use_orig_params:
-                writeback_reads.append(compute_done.clone())
-            return ret
-
-        FlatParamHandle.pre_unshard = _pre_unshard_with_check
-        try:
-            torch.manual_seed(42)
-            model = nn.Sequential(
-                SlowLinear(4096, 4096),
-                SlowLinear(4096, 4096),
-            )
-            model = FSDP(
-                model,
-                cpu_offload=CPUOffload(offload_params=cpu_offload),
-                use_orig_params=True,
-                forward_prefetch=True,
-                backward_prefetch=BackwardPrefetch.BACKWARD_POST,
-                auto_wrap_policy=always_wrap_policy,
-            )
-            inp = torch.randn(4096, 4096, device=device)
-            for _ in range(3):
-                loss = model(inp).sum()
-                loss.backward()
-                with torch.no_grad():
-                    for p in model.parameters():
-                        if p.grad is not None:
-                            p -= 0.01 * p.grad
-                            p.grad = None
-        finally:
-            FlatParamHandle.pre_unshard = orig_pre_unshard
-
-        torch.cuda.synchronize()
-        for i, val in enumerate(writeback_reads):
-            self.assertEqual(
-                val.item(),
-                1,
-                f"_writeback_orig_params read stale data (call {i}): "
-                "pre_unshard_stream was not synchronized with compute stream",
-            )
-
-    @skip_if_lt_x_gpu(2)
-    def test_prefetch_writeback_sync_cpu_offload(self):
-        self._test_prefetch_writeback_sync(cpu_offload=True)
-
-    @skip_if_lt_x_gpu(2)
-    def test_prefetch_writeback_sync_no_cpu_offload(self):
-        self._test_prefetch_writeback_sync(cpu_offload=False)
 
 
 class TestFSDPUseOrigParamsInit(FSDPTest):

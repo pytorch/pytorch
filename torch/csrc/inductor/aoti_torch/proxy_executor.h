@@ -3,6 +3,8 @@
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Export.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <string>
+#include <unordered_map>
 
 namespace torch::aot_inductor {
 
@@ -32,6 +34,16 @@ class ProxyExecutor {
       int64_t* flatten_int_args,
       int num_tensors,
       AtenTensorHandle* flatten_tensor_args) = 0;
+
+  // Returns a snapshot of the torchbind custom-class constants the executor
+  // holds (name -> IValue). The IValue payload carries an
+  // intrusive_ptr<CustomClassHolder> shared with the live executor, so
+  // downcasting and mutating the underlying object affects subsequent
+  // run() invocations. Default returns empty for executors that do not
+  // track torchbind constants. OSSProxyExecutor overrides.
+  virtual std::unordered_map<std::string, c10::IValue> get_custom_objs() const {
+    return {};
+  }
 };
 
 } // namespace torch::aot_inductor

@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/TensorGeometry.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/flat_hash_map.h>
@@ -32,52 +33,53 @@ struct TORCH_API PyCompilerInterface {
 
   // Invokes py_compiler.bind_function
   virtual std::string bind_function(
-      PyObject* py_compiler,
-      const std::string& fn_name,
+      PyObject* /*py_compiler*/,
+      const std::string& /*fn_name*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      functional_apply_t fn,
+      functional_apply_t /*fn*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<at::TypePtr> packed_args_schema,
-      bool is_custom_function = false,
-      bool is_traceable = true) const {
+      std::vector<at::TypePtr> /*packed_args_schema*/,
+      bool /*is_custom_function*/ = false,
+      bool /*is_traceable*/ = true) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
   // Invokes py_compiler.method_name(fn_name, inputs, packed_args,
   // output_metadata)
   virtual variable_list call_function(
-      PyObject* py_compiler,
-      const char* method_name,
-      const std::string& fn_name,
-      const variable_list& inputs,
-      const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) const {
+      PyObject* /*py_compiler*/,
+      const char* /*method_name*/,
+      const std::string& /*fn_name*/,
+      const variable_list& /*inputs*/,
+      const ivalue_list& /*packed_args*/,
+      const c10::IValue& /*output_metadata*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
-      PyObject* py_compiler,
-      const variable_list& inputs,
-      const at::TensorGeometry& base,
-      const at::TensorGeometry& view) const {
+      PyObject* /*py_compiler*/,
+      const variable_list& /*inputs*/,
+      const at::TensorGeometry& /*base*/,
+      const at::TensorGeometry& /*view*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
-      PyObject* py_compiler,
-      const std::vector<bool>& needs_input_grad,
-      const at::Tensor& result,
-      const variable_list& res,
-      const at::Tensor& grad_slice) const {
+      PyObject* /*py_compiler*/,
+      const std::vector<bool>& /*needs_input_grad*/,
+      const at::Tensor& /*result*/,
+      const variable_list& /*res*/,
+      const at::Tensor& /*grad_slice*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
-      PyObject* py_compiler,
-      std::optional<size_t> hook_id,
-      size_t hook_input_id) const {
+      PyObject* /*py_compiler*/,
+      std::optional<size_t> /*hook_id*/,
+      size_t /*hook_input_id*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
-  virtual void call_accumulate_grad(
+  virtual at::Tensor call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
+      const at::Tensor& variable_grad,
       const at::Tensor& grad,
       bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
@@ -155,7 +157,7 @@ struct CacheKey {
 };
 
 struct NodeCall {
-  NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
+  NodeCall(uint32_t id_, c10::intrusive_ptr<Node> node_)
       : id(id_), node(std::move(node_)) {}
 
   void mark_output(int input_nr, int output_idx) {
@@ -163,7 +165,7 @@ struct NodeCall {
   }
 
   uint32_t id;
-  std::shared_ptr<Node> node;
+  c10::intrusive_ptr<Node> node;
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<std::pair<int, int>> cpp_tensor_pre_hooks;
   std::vector<int> pre_hooks;
@@ -174,10 +176,10 @@ struct NodeCall {
 };
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
-  NodeCall& lookup(const std::shared_ptr<Node>& function) {
-    auto it = find(function.get());
-    if (it == end()) {
-      it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+  NodeCall& lookup(const c10::intrusive_ptr<Node>& function) {
+    auto [it, inserted] = try_emplace(function.get(), _next_id, function);
+    if (inserted) {
+      ++_next_id;
       nodes.emplace_back(function.get());
     }
     return it->second;
@@ -254,7 +256,9 @@ struct TensorArgs {
     return lookup(tensor, true);
   }
 
-  TensorArg& add(const SavedVariable& sv, const std::shared_ptr<Node>& node) {
+  TensorArg& add(
+      const SavedVariable& sv,
+      const c10::intrusive_ptr<Node>& node) {
     // no unpack hooks in this codepath
     at::Tensor tensor = sv.unpack(node);
     TensorArg& arg = add(tensor);
@@ -459,12 +463,8 @@ class CompiledNodeArgs {
   void collect(const ska::flat_hash_map<std::string, V>& m) {
     collect_size(m.size());
 
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (const auto& k : keys) {
       collect(k);
@@ -552,7 +552,7 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
-  void collect(const std::shared_ptr<Node>& t) {
+  void collect(const c10::intrusive_ptr<Node>& t) {
     // Note: this is only capturing the ID of the node not everything
     // contained inside it.  This is used for tracking connections between
     // nodes and the actual details of the node itself must be handled by
@@ -962,12 +962,8 @@ class SwapSavedVariables {
 
   template <typename V>
   void before(ska::flat_hash_map<std::string, V>& m) {
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (auto& k : keys) {
       before(m.at(k));
@@ -1058,7 +1054,7 @@ class SwapSavedVariables {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   TraceState& state;
   // This is a borrowed reference, we do not increment ownership, or lower it,
-  // it's lifecycle is entirely longer than this objects.
+  // its lifecycle is entirely longer than this object's.
   PyObject* py_compiler;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const NodeCall& curr_node_call;
@@ -1155,7 +1151,7 @@ struct IValuePacker {
       // Unfortunately, we don't know how to handle this type yet.
       // To get this new type to work with Compiled Autograd, please
       // either change it to be an IValue-constructible type, or
-      // define how to pack and unpack an object of this time into an IValue
+      // define how to pack and unpack an object of this type into an IValue
       // by creating a specialization of IValuePacker for this type.
       // See NOTE: [Compiled Autograd and backward functions] for context.
       TORCH_CHECK_NOT_IMPLEMENTED(
@@ -1335,11 +1331,11 @@ struct IValuePacker<TypeAndSize> {
     return tuple;
   }
   static TypeAndSize unpack(const at::IValue& t) {
-    auto tuple =
+    auto [sym_sizes, options] =
         t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
     TypeAndSize result;
-    result.sym_sizes = std::get<0>(tuple);
-    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    result.sym_sizes = std::move(sym_sizes);
+    result.options = unpack_TensorOptions(options);
     return result;
   }
   static at::TypePtr packed_type() {

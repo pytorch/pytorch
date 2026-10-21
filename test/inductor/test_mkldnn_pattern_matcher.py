@@ -14,6 +14,7 @@ from torch._inductor.utils import (
     is_mkldnn_fp16_supported,
     run_and_get_code,
 )
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn import functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -25,9 +26,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
+    requires_mkl,
     skipIfXpu,
     TEST_ACL,
-    TEST_MKL,
     xfailIfACL,
 )
 from torch.testing._internal.inductor_utils import (
@@ -151,13 +152,8 @@ class TestPatternMatcherBase(TestCase):
         atol=1e-5,
         rtol=1.3e-6,
         check_autocast=torch.float32,
-        check_quantization=False,
-        is_qat=False,
         dtype=None,
-        is_dynamic=False,
-        quantizer=None,
         compile_options={},  # noqa: B006
-        quantization_with_autocast=False,
     ):
         if not hasattr(self, "device"):
             has_xpu = any(
@@ -189,34 +185,17 @@ class TestPatternMatcherBase(TestCase):
                     f"Expected check_autocast to be torch.float32, got {check_autocast}"
                 )
             maybe_autocast = contextlib.nullcontext()
-        if check_quantization:
-            raise NotImplementedError("not supported, please migrate to torchao")
-            """
-            if quantization_with_autocast:
-                with maybe_autocast:
-                    convert_model = _generate_qdq_quantized_model(
-                        mod, inputs, is_qat, is_dynamic, quantizer
-                    )
-            else:
-                convert_model = _generate_qdq_quantized_model(
-                    mod, inputs, is_qat, is_dynamic, quantizer
+        with torch.no_grad(), maybe_autocast:
+            clone_inputs = self._clone_inputs(inputs)
+            expected = mod(*inputs)
+            actual = torch.compile(mod, **compile_options)(*clone_inputs)
+            if self.precision != 0:
+                torch.testing.assert_close(
+                    actual, expected, atol=self.precision, rtol=self.precision
                 )
-            with torch.no_grad(), maybe_autocast:
-                _ = torch.compile(convert_model)(*inputs)
-                matcher_check_fn()
-            """
-        else:
-            with torch.no_grad(), maybe_autocast:
-                clone_inputs = self._clone_inputs(inputs)
-                expected = mod(*inputs)
-                actual = torch.compile(mod, **compile_options)(*clone_inputs)
-                if self.precision != 0:
-                    torch.testing.assert_close(
-                        actual, expected, atol=self.precision, rtol=self.precision
-                    )
-                else:
-                    torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-                matcher_check_fn()
+            else:
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            matcher_check_fn()
 
     def _test_code_common(
         self,
@@ -226,18 +205,11 @@ class TestPatternMatcherBase(TestCase):
         exclude_ops,
         atol=1e-5,
         rtol=1.3e-6,
-        check_quantization=False,
         check_dynamic=None,
         num_include_ops=None,
-        quantizer=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
-            if check_quantization:
-                raise NotImplementedError("not supported, please migrate to torchao")
-                """
-                mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
-                """
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -248,6 +220,7 @@ class TestPatternMatcherBase(TestCase):
                 line
                 for line in source_code.splitlines()
                 if not any(assert_key in line for assert_key in assert_keywords)
+                and not line.strip().startswith("assert_tensor_metadata(")
             ]
             source_code = "\n".join(filtered_lines)
 
@@ -266,9 +239,7 @@ class TestPatternMatcherBase(TestCase):
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
                 _check_has_dynamic_shape(self, source_code)
-            if not check_quantization:
-                # Skip due to reduce range setting for Quantization on preCI system.
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
@@ -459,6 +430,99 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
     def test_conv_transpose3d_unary(self, device):
         self.device = device
         self._test_conv_transpose_unary_base(dim=5)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfXpu(
+        msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+    )
+    def test_conv_transpose_pointwise_regular_weight_shape(self, device):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(3, 8, 3, 3))
+                self.bias = torch.nn.Parameter(torch.randn(8))
+
+            def forward(self, x):
+                y = torch.ops.mkldnn._convolution_transpose_pointwise.default(
+                    x,
+                    self.weight,
+                    self.bias,
+                    [1, 1],
+                    [1, 1],
+                    [2, 2],
+                    [1, 1],
+                    1,
+                    "none",
+                    [],
+                    "",
+                )
+                return torch.div(torch.clamp_max(torch.clamp_min(y + 3, 0), 6), 6)
+
+        torch.manual_seed(9150)
+        model = M().eval().to(device=device)
+        x = torch.randn(4, 3, 16, 16, device=device)
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out.shape, torch.Size([4, 8, 32, 32]))
+        self.assertEqual(compiled_out.shape, eager_out.shape)
+        torch.testing.assert_close(compiled_out, eager_out)
+
+    @skipIfNoONEDNN
+    @skipIfXpu(
+        msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
+    )
+    def test_conv_transpose_pointwise_fake_meta_shapes(self, device):
+        def check_case(groups, x_shape, weight_shape):
+            padding = [1, 1]
+            output_padding = [1, 1]
+            stride = [2, 2]
+            dilation = [1, 1]
+            x = torch.randn(*x_shape)
+            weight = torch.randn(*weight_shape)
+            bias = torch.randn(weight_shape[1] * groups)
+            expected_shape = torch.Size([x_shape[0], weight_shape[1] * groups, 32, 32])
+            expected_stride = (
+                expected_shape[1] * expected_shape[2] * expected_shape[3],
+                expected_shape[2] * expected_shape[3],
+                expected_shape[3],
+                1,
+            )
+            packed_weight = (
+                torch.ops.mkldnn._reorder_convolution_transpose_weight.default(
+                    weight,
+                    padding,
+                    output_padding,
+                    stride,
+                    dilation,
+                    groups,
+                    list(x_shape),
+                )
+            )
+
+            for weight_arg in (weight, packed_weight):
+                with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+                    out = torch.ops.mkldnn._convolution_transpose_pointwise.default(
+                        mode.from_tensor(x),
+                        mode.from_tensor(weight_arg),
+                        mode.from_tensor(bias),
+                        padding,
+                        output_padding,
+                        stride,
+                        dilation,
+                        groups,
+                        "none",
+                        [],
+                        "",
+                    )
+                self.assertEqual(out.shape, expected_shape)
+                self.assertEqual(out.stride(), expected_stride)
+
+        check_case(groups=1, x_shape=(4, 3, 16, 16), weight_shape=(3, 8, 3, 3))
+        check_case(groups=2, x_shape=(4, 4, 16, 16), weight_shape=(4, 3, 3, 3))
 
     def _test_conv_binary_base(self, dim=4):
         if dim != 4 and dim != 5:
@@ -750,13 +814,14 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
                 mod,
                 (x, w, s),
                 matcher_check_fn,
-                check_quantization=False,
                 atol=0.001,
                 rtol=0.07,
             )
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
+    # Note: tests containing the pattern *qconv2d* were removed in PR #169151 (PT2E migration to torchao).
+    # See issue #168635 and its sub-issues.
     @reduced_f32_on_and_off()
     def test_linear_unary(self, device="cpu"):
         self.device = device
@@ -824,7 +889,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     @reduced_f32_on_and_off()
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_fp32(self, device="cpu"):
         self.device = device
 
@@ -848,7 +913,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     def test_linear_input_non_contiguous_3D_wo_bias(self, device="cpu"):
         self.device = device
 
@@ -968,6 +1033,44 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
             # 1 kernel for "to_lowp", 2 kernels for unary ops
             self.assertEqual(metrics.generated_kernel_count, 3)
+
+    @skipIfXpu
+    def test_linear_add_bias_float_constant(self, device="cpu"):
+        # Regression test: is_linear_add_bias should not crash when
+        # add_node.args[1] is a Python float (e.g., from `1.0 + linear_output`).
+        # See https://github.com/pytorch/pytorch/pull/183514
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adaLN_modulation = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.Linear(64, 64, bias=True),
+                )
+
+            def forward(self, c):
+                return 1.0 + self.adaLN_modulation(c)
+
+        dtypes = []
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            mod = M().eval()
+            v = torch.randn(2, 64)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                )
+                # The float constant should NOT be folded as bias
+                self.assertEqual(
+                    counters["inductor"]["mkldnn_linear_bias_matcher_count"], 0
+                )
+
+            self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
 
     @reduced_f32_on_and_off()
     def test_linear_binary(self, device="cpu"):
@@ -1467,6 +1570,81 @@ class TestPatternMatcher(TestPatternMatcherBase):
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.to_dense() + 1
+
+        x = torch.randn(4, 4).to_mkldnn()
+        mod = Model().eval()
+        expected = mod(x)
+        actual = torch.compile(mod, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_float8_dtype(self):
+        def fn(x):
+            return x.to_dense(torch.float8_e4m3fn)
+
+        x = torch.randn(4, 4).to_mkldnn()
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual.dtype, torch.float8_e4m3fn)
+        self.assertEqual(actual.float(), expected.float())
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_input_backward(self):
+        def fn(x):
+            return (x.to_dense() + 1).sum()
+
+        eager_base = torch.randn(4, 4, requires_grad=True)
+        compiled_base = eager_base.detach().clone().requires_grad_()
+
+        expected = fn(eager_base.to_mkldnn())
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(
+            compiled_base.to_mkldnn()
+        )
+        self.assertEqual(actual, expected)
+
+        expected.backward()
+        actual.backward()
+        self.assertEqual(compiled_base.grad, eager_base.grad)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_mkldnn_to_dense_after_detach(self):
+        def fn(x):
+            return x.to_mkldnn().detach().to_dense() + 1
+
+        x = torch.randn(4, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @config.patch({"cpp_wrapper": True})
+    def test_mkldnn_to_dense_cpp_wrapper(self):
+        def fn(x):
+            return x.to_mkldnn().detach().to_dense() + 1
+
+        x = torch.randn(4, 4)
+        expected = fn(x)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(x)
+
+        self.assertEqual(actual.layout, torch.strided)
+        self.assertEqual(actual, expected)
+
     def test_reproduce_113440_issue_1(self):
         class Mod(torch.nn.Module):
             def __init__(
@@ -1504,7 +1682,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     1
                 ),
             )
-            example_inputs[0].get_device()
             m = Mod(
                 lambda x, y: x.add_(y),
             ).eval()
@@ -1562,7 +1739,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
-    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @requires_mkl
     @xfailIfACL
     def test_reproduce_121253_issue_addmm_fusion_check(self):
         class Mod(torch.nn.Module):

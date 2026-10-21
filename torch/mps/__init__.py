@@ -151,13 +151,18 @@ def compile_shader(source: str):
     """
     from pathlib import Path
 
+    from torch._utils_internal import get_file_path
     from torch.utils._cpp_embed_headers import _embed_headers
 
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")
+    # Resolve the header directory the same way cpp_extension does. Deriving it
+    # from `__file__` breaks under an editable install, where the package is
+    # redirected to the source checkout while the headers are staged next to
+    # the installed distribution.
     source = _embed_headers(
         [l + "\n" for l in source.split("\n")],
-        [Path(__file__).parent.parent / "include"],
+        [Path(get_file_path("torch")) / "include"],
         set(),
     )
     return torch._C._mps_compileShader(source)
@@ -199,8 +204,41 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+def _host_alias_storage(storage: "torch.UntypedStorage") -> "torch.UntypedStorage":
+    r"""Returns a CPU :class:`torch.UntypedStorage` that aliases the
+    host-visible contents of the MTLBuffer backing ``storage``.
+
+    The returned storage shares memory with ``storage``: writes through the
+    CPU alias land directly in the MPS-allocated MTLBuffer, avoiding a
+    CPU->MPS staging copy. This is intended for advanced interop with bulk
+    loaders (e.g. safetensors) that already know how to write into CPU
+    memory.
+
+    The alias storage retains a reference to the source MPS storage, so the
+    host pointer remains valid for the alias's lifetime even if the original
+    tensor is freed.
+
+    Raises an exception if ``storage`` is not backed by a shared-storage
+    ``id<MTLBuffer>`` allocated by the MPS allocator.
+
+    .. warning::
+        Use with caution. This bypasses the cache-coherence guarantees that
+        the higher-level PyTorch APIs (:meth:`torch.Tensor.cpu`,
+        :meth:`torch.Tensor.to`, ``copy_``) provide for you, and makes the
+        caller responsible for ordering CPU and GPU accesses to the same
+        memory. You should **always** call :func:`torch.mps.synchronize`
+        both **before** issuing host reads/writes through the alias (to
+        drain any in-flight GPU work that may still be touching the
+        buffer) and **after** (before launching GPU work that depends on
+        the host writes). Failure to do so can produce stale reads,
+        torn writes, or data corruption.
+    """
+    return torch._C._mps_host_alias_storage(storage)
+
+
 from . import profiler
 from .event import Event
+from .streams import current_stream, default_stream, set_stream, Stream, stream
 
 
 __all__ = [
@@ -217,6 +255,11 @@ __all__ = [
     "current_allocated_memory",
     "driver_allocated_memory",
     "Event",
+    "Stream",
+    "stream",
+    "current_stream",
+    "set_stream",
+    "default_stream",
     "profiler",
     "recommended_max_memory",
     "is_available",

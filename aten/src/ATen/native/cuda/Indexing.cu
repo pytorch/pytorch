@@ -11,6 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
@@ -23,8 +24,10 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_assert_async.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/empty_quantized.h>
@@ -33,12 +36,12 @@
 #include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/scatter_reduce_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #endif
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
-#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
@@ -71,7 +74,6 @@ __global__ void indexing_backward_kernel_many_indices(
   int smem_offset = threadIdx.y * C10_WARP_SIZE;
 
   int laneIdx = threadIdx.x % C10_WARP_SIZE;
-  int64_t grad_row = 0;
 
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z) {
     // Init duplicates every time we compute a new set of entries:
@@ -515,11 +517,17 @@ public:
 static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
-public:
+ public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
-#if (defined(__gfx942__) || defined(__gfx950__))
-    opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+#if defined(USE_ROCM)
+    // TODO: this check is too coarse, revisit, we should only be checking for
+    //       the availability of the builtins required by the implementation, at
+    //       most.
+    if(__builtin_amdgcn_processor_is("gfx942") ||
+       __builtin_amdgcn_processor_is("gfx950"))
+      return opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
 #else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
 #endif
@@ -552,8 +560,9 @@ static ReduceMaximum reduce_maximum;
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size, bool check_range=true) {
 //we don't need to check range in backward - if there were out of bounds indices forward should already have errored out
   if (index.numel() != 0 && check_range) {
-    at::_assert_async(index.max() < dim_size);
-    at::_assert_async(index.min() >= -dim_size);
+    auto [index_min, index_max] = at::aminmax(index);
+    at::_assert_async(index_max < dim_size);
+    at::_assert_async(index_min >= -dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -632,7 +641,7 @@ makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   }
   auto [linearIndex, nElemBefore, strideBefore, nElemAfter, dims_before, dims_indexed] =
     computeLinearIndex(self, indices, check_range);
-  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm,
+  return std::make_tuple(std::move(linearIndex), std::move(self), nElemBefore, strideBefore, nElemAfter, std::move(inversePerm),
                          dims_before, dims_indexed);
 }
 namespace {
@@ -707,7 +716,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
 #ifdef USE_ROCM
@@ -752,6 +761,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
           kFloat8_e4m3fnuz,
           kFloat8_e5m2fnuz,
           kComplexHalf,
+          kBComplex32,
           kHalf,
           kBool,
           kBFloat16);
@@ -782,6 +792,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -813,6 +824,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
               kFloat8_e4m3fnuz,
               kFloat8_e5m2fnuz,
               kComplexHalf,
+              kBComplex32,
               kHalf,
               kBool,
               kBFloat16);
@@ -843,6 +855,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kFloat8_e4m3fnuz,
             kFloat8_e5m2fnuz,
             kComplexHalf,
+            kBComplex32,
             kHalf,
             kBool,
             kBFloat16);
@@ -907,7 +920,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+           std::clamp<int>(nElemBefore, 1, at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
       AT_DISPATCH_QINT_TYPES(
@@ -980,8 +993,8 @@ static size_t getSliceSize(const Tensor & dst,
   }
 
   TORCH_CHECK(dstSliceSize == srcSliceSize,
-             "Source/destination tensor have different slice sizes (%ld vs %ld)",
-             dstSliceSize, srcSliceSize);
+             "Source/destination tensor have different slice sizes (",
+             dstSliceSize, " vs ", srcSliceSize, ")");
 
   if (mismatch) {
     TORCH_WARN_ONCE(
@@ -1016,10 +1029,9 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   // this is a good choice (small number of chosen indices), since
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
-    // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
+    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -1047,18 +1059,8 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexFuncSmallIndex kernel is a better choice to reduce memory
 // accesses.
-//
-// When VecSize > 1, each thread processes VecSize consecutive elements,
-// amortizing the divmod and index lookup cost.  Boundary cases (where
-// VecSize elements would cross a slice boundary) are handled inline so
-// the dispatch site does not need to check sliceSize alignment or stride.
-// When VecSize == 1 (default), this is the original scalar kernel.
-//
-// Uses IntDivider for fast integer divmod (multiply+shift instead of
-// hardware division).  For uint32_t this is a significant win on
-// non-power-of-2 innerSize; for power-of-2 it matches compiler shifts.
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
-          bool IndexIsMajor, int VecSize = 1, typename func_t>
+          bool IndexIsMajor, typename func_t>
 __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     cuda::detail::TensorInfo<const T, IndexType> src,
                                     cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
@@ -1069,86 +1071,36 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int64_t dstAddDimSize,
                                     int64_t dstNumel,
                                     const func_t& op,
-                                    T alpha,
-                                    cuda::detail::IntDivider<IndexType> innerSizeDivider) {
-  // Helper to process a single element at linearIndex.
-  auto processElement = [&](IndexType linearIndex) {
-    auto dm = innerSizeDivider.divmod(linearIndex);
+                                    T alpha) {
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalSize;
+       linearIndex += gridDim.x * blockDim.x) {
     IndexType srcIndex, elementInSlice;
-    if constexpr (IndexIsMajor) {
-      srcIndex = dm.div;
-      elementInSlice = dm.mod;
-    } else {
-      elementInSlice = dm.div;
-      srcIndex = dm.mod;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
     }
 
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
+    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
-        cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+      cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
     dstOffset += dstIndex * dst.strides[dstAddDim];
 
     IndexType srcOffset =
-        cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
+      cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
     T val = src.data[srcOffset] * alpha;
     op(dst.data, dstOffset, dstNumel, &val);
-  };
-
-  if constexpr (VecSize > 1) {
-    // Round up to include tail elements in the vectorized loop.
-    const IndexType totalVecs = at::ceil_div(totalSize, (IndexType)VecSize);
-    for (IndexType vecIdx = blockIdx.x * blockDim.x + threadIdx.x;
-         vecIdx < totalVecs;
-         vecIdx += gridDim.x * blockDim.x) {
-      IndexType baseLinear = vecIdx * VecSize;
-      auto dm = innerSizeDivider.divmod(baseLinear);
-      IndexType srcIndex = dm.div;
-      IndexType elementBase = dm.mod;
-
-      if (elementBase + VecSize <= innerSize && baseLinear + VecSize <= totalSize) {
-        // Fast path: all VecSize elements are in the same slice and within bounds.
-        // Hoist index lookup outside the unrolled loop.
-        IndexType dstIndex =
-            indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-        CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
-
-        #pragma unroll
-        for (int v = 0; v < VecSize; ++v) {
-          IndexType elementInSlice = elementBase + v;
-          IndexType dstOffset =
-              cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
-          dstOffset += dstIndex * dst.strides[dstAddDim];
-
-          IndexType srcOffset =
-              cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
-          srcOffset += srcIndex * src.strides[srcAddDim];
-
-          T val = src.data[srcOffset] * alpha;
-          op(dst.data, dstOffset, dstNumel, &val);
-        }
-      } else {
-        // Slow path: elements cross a slice boundary or are in the tail.
-        #pragma unroll
-        for (int v = 0; v < VecSize; ++v) {
-          IndexType li = baseLinear + v;
-          if (li < totalSize) {
-            processElement(li);
-          }
-        }
-      }
-    }
-  } else {
-    // Scalar path: one element per thread.
-    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-         linearIndex < totalSize;
-         linearIndex += gridDim.x * blockDim.x) {
-      processElement(linearIndex);
-    }
   }
 }
 
@@ -1203,7 +1155,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   if (globalContext().deterministicAlgorithms()){
     torch::List<std::optional<Tensor>> indices;
     indices.reserve(dim + 1);
-    for (const auto i: c10::irange(dim)) {
+    for ([[maybe_unused]] const auto i : c10::irange(dim)) {
       indices.emplace_back();
     }
     indices.emplace_back(index.to(at::kLong));
@@ -1230,6 +1182,35 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+  // Fast path: index_add_(0, idx, src) with alpha == 1 is equivalent to
+  // self.scatter_add_(0, idx.view({n, 1, ...}).expand_as(src), src). Delegate
+  // so scatter_add's own TMA/vectorized eligibility check + dispatch is the
+  // single source of truth (see PR #182675). Pattern from
+  // pytorch/pytorch#180430.
+  // Gated on CUDA >= 12.8: pre-12.8 builds compile out the TMA branch in
+  // scatter_add and fall back to its vectorized atomicAdd path, which
+  // regresses skewed/high-contention workloads vs indexFunc{Small,Large}Index
+  // (warp-per-entry scheduling concentrates atomic contention on hot rows).
+  // Older builds therefore stay on the existing indexFunc dispatch.
+  // index_add supports {complex64, complex128, ComplexHalf, Bool} that
+  // scatter_add does not, so exclude those and let them use indexFunc.
+  // The dtype check is ordered FIRST so short-circuit evaluation skips
+  // alpha.equal(1) for complex `self`, where alpha may itself be a
+  // complex Scalar and the equality comparison would be ill-defined.
+  const auto stype = self_.scalar_type();
+  const bool dtype_supported_by_scatter_add =
+      !c10::isComplexType(stype) && stype != at::kBool;
+  if (dtype_supported_by_scatter_add && dim == 0 &&
+      alpha.equal(1) && numIndex > 0 &&
+      index.dim() <= 1 && indContig) {
+    std::vector<int64_t> idx_shape(source_.dim(), 1);
+    idx_shape[0] = static_cast<int64_t>(numIndex);
+    self_.scatter_add_(0, index.view(idx_shape).expand_as(source_), source_);
+    return;
+  }
+#endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
@@ -1240,19 +1221,13 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
-  {                                                                          \
-    const TYPE innerSizeVal =                                                \
-        static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);            \
-    cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
-    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
-                        SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
-      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
-        selfInfo, sourceInfo, indexInfo,                                     \
-        selfAddDim, sourceAddDim, sourceTotalSize,                          \
-        innerSizeVal, selfAddDimSize, selfNumel,                            \
-        reduce_add, alpha_value, innerSizeDivider);                         \
-  }                                                                          \
+  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
+                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
+      selfInfo, sourceInfo, indexInfo,                                      \
+      selfAddDim, sourceAddDim, sourceTotalSize,                            \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
+      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
@@ -1411,6 +1386,32 @@ void index_reduce_func_cuda_impl(
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  // Fast path: index_reduce_(0, idx, src, amin/amax) is equivalent to
+  // scatter_reduce_(0, idx.view({n, 1, ...}).expand_as(src), src). Reuse the
+  // scatter path so eligibility and architecture-specific dispatch remain in one place.
+  // For include_self=False, the identity initialization above has already
+  // replaced the indexed rows, so the delegated reduction includes that state.
+  const auto stype = self_.scalar_type();
+  const bool dtype_supported_by_scatter_reduce =
+      stype == at::kHalf || stype == at::kBFloat16;
+  const bool minmax_reduce =
+      reduce == ReductionType::MAX || reduce == ReductionType::MIN;
+  const bool contiguous_dim0_rows = self_.is_contiguous() && source_.is_contiguous();
+  const int device_major = at::cuda::getCurrentDeviceProperties()->major;
+  const bool row_size_supported = sliceSize * self_.element_size() >= 16 &&
+      (sliceSize * self_.element_size()) % 16 == 0;
+  if (dtype_supported_by_scatter_reduce && minmax_reduce && contiguous_dim0_rows &&
+      row_size_supported && device_major >= 8 && dim == 0 && numIndex > 0 && index.dim() == 1 &&
+      indContig && source_.dim() > 0 &&
+      source_.size(0) == static_cast<int64_t>(numIndex)) {
+    self_.scatter_reduce_(
+        0, index.view({static_cast<int64_t>(numIndex), 1}).expand_as(source_), source_,
+        reduce == ReductionType::MAX ? "amax" : "amin", /*include_self=*/true);
+    return;
+  }
+#endif
+
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
     <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
@@ -1421,19 +1422,13 @@ void index_reduce_func_cuda_impl(
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)                         \
-  {                                                                                       \
-    const TYPE innerSizeVal =                                                             \
-        static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);                         \
-    cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
-    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
-                        SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
-                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
-      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
-        selfInfo, sourceInfo, indexInfo,                                                   \
-        selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
-        innerSizeVal, selfReduceDimSize, selfNumel,                                       \
-        reduce_func, alpha_value, innerSizeDivider);                                      \
-  }                                                                                       \
+  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                   \
+                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>                        \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                    \
+      selfInfo, sourceInfo, indexInfo,                                                   \
+      selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
+      selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
@@ -1760,6 +1755,7 @@ Tensor& index_select_out_cuda(
         AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
         AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
+        kBComplex32,
         kHalf,
         kBool,
         kBFloat16);
@@ -1786,8 +1782,8 @@ Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor
 namespace {
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
+      kBool, kHalf, kBFloat16, kComplexHalf, kBComplex32, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
             iter, [value_] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
@@ -1831,7 +1827,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kBool,
     "masked_fill only supports boolean masks, but got dtype ", mask.scalar_type());
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
@@ -1852,7 +1847,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .build();
 
   masked_fill_kernel(iter, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 
@@ -1926,12 +1920,12 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
 
     const auto dim_indices = indices[dim].contiguous();
     const auto idx_nneg_index = at::arange(index_len, nneg_index.options());
-    const auto idx_dim_indices = at::arange(nnz, dim_indices.options());
+    auto idx_dim_indices = at::arange(nnz, dim_indices.options());
 
     Tensor sorted_dim_indices, argsort_dim_indices;
     std::tie(sorted_dim_indices, argsort_dim_indices) = [&]() -> std::tuple<Tensor, Tensor> {
       if (dim == 0 && self.is_coalesced()) {
-        return std::make_tuple(dim_indices, idx_dim_indices);
+        return std::make_tuple(dim_indices, std::move(idx_dim_indices));
       }
       else {
         return dim_indices.sort();
@@ -1941,8 +1935,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
     Tensor intrsc_counts_nneg_index;
     Tensor intrsc_first_match_nneg_index;
     std::tie(intrsc_counts_nneg_index, intrsc_first_match_nneg_index) = [&]() -> std::tuple<Tensor, Tensor> {
-      auto intrsc_counts_nneg_index = at::zeros_like(nneg_index);
-      auto intrsc_first_match_nneg_index = at::zeros_like(nneg_index);
+      auto intrsc_counts_nneg_index = at::empty_like(nneg_index);
+      auto intrsc_first_match_nneg_index = at::empty_like(nneg_index);
 
       auto iter = TensorIteratorConfig()
         .add_output(intrsc_first_match_nneg_index)
@@ -1976,7 +1970,9 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           );
       });
 
-      return std::make_tuple(intrsc_counts_nneg_index, intrsc_first_match_nneg_index);
+      return std::make_tuple(
+          std::move(intrsc_counts_nneg_index),
+          std::move(intrsc_first_match_nneg_index));
     }();
 
     // Unavoidable sync since the shape of the result is not known in advance
@@ -2029,7 +2025,8 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
           );
       });
 
-      return std::make_tuple(selected_dim_indices, res_dim_indices);
+      return std::make_tuple(
+          std::move(selected_dim_indices), std::move(res_dim_indices));
     }();
 
     return make_output(selected_dim_indices, res_dim_indices);

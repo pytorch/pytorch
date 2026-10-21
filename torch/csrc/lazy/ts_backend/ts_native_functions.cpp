@@ -54,7 +54,7 @@ std::optional<torch::lazy::BackendDevice> GetLtcDevice(
 // This should be safe to do, because every operator in the LT is functional.
 at::Tensor LazyNativeFunctions::clone(
     const at::Tensor& self,
-    std::optional<at::MemoryFormat> memory_format) {
+    std::optional<at::MemoryFormat> /*memory_format*/) {
   auto self_lt = torch::lazy::TryGetLtcTensor(self);
   return torch::lazy::CreateAtenFromLtcTensor(
       self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
@@ -63,7 +63,7 @@ at::Tensor LazyNativeFunctions::clone(
 at::Tensor LazyNativeFunctions::_copy_from(
     const at::Tensor& self,
     const at::Tensor& dst,
-    bool non_blocking) {
+    bool /*non_blocking*/) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   auto dst_tensor = torch::lazy::TryGetLtcTensor(dst);
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
@@ -535,21 +535,6 @@ at::Tensor LazyNativeFunctions::slice_backward_symint(
           std::move(start),
           std::move(end),
           std::move(step));
-}
-
-// reuse the composite kernel from core, that way we don't need to provide a
-// backwards formula for native_group_norm
-std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
-    const at::Tensor& input,
-    const std::optional<at::Tensor>& weight,
-    const std::optional<at::Tensor>& bias,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
-    int64_t group,
-    double eps) {
-  return at::native::math_group_norm(
-      input, weight, bias, N, C, HxW, group, eps);
 }
 
 } // namespace torch::lazy

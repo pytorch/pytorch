@@ -442,7 +442,7 @@ def _load_packed_weight(
             setattr(self, attr_name, state_dict[attr_name])
             attrs_to_pop.append(attr_name)
 
-    # pop the packed param attributesn
+    # pop the packed param attributes
     for attr_name in attrs_to_pop:
         state_dict.pop(attr_name)
 
@@ -489,6 +489,7 @@ def fold_weight(
     # remove folded nodes and replace the prepacking node with getattr
     folded_graph = Graph()
     env: dict[Any, Any] = {}
+    folded_node_copies: list[Node] = []
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -522,12 +523,17 @@ def fold_weight(
                 ]
                 del original_weights_lookup[str(lookup_counter)]
                 lookup_counter += 1
-        elif prepack_node is not None:
-            # remove the fold node
-            continue
         else:
             # copy other nodes
             env[node.name] = folded_graph.node_copy(node, load_arg)
+            if prepack_node is not None:
+                folded_node_copies.append(env[node.name])
+
+    # Preserve folded producers with external users, and remove only the
+    # producer chain made dead by replacing its prepack node.
+    for node in reversed(folded_node_copies):
+        if len(node.users) == 0:
+            folded_graph.erase_node(node)
 
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
@@ -1326,7 +1332,7 @@ def special_pattern_replacement(model: GraphModule):
         if is_call_function:
             # pass scale/zer_point arguments from quantize_per_tensor to the default node operator
             # insert an op after the zero_point node so that the scale/zero_point
-            # nodes are is available
+            # nodes are available
             qop = get_quantized_operator(ref_node.target)
             args = list(ref_node.args)
             kwargs = dict(ref_node.kwargs)

@@ -132,9 +132,10 @@ class CompilationCallbackHandler:
             yield
         finally:
             with self.__pending_callbacks_counter_lock:
-                assert self.__pending_callbacks_counter > 0, (
-                    "Pending callbacks counter cannot become negative."
-                )
+                if self.__pending_callbacks_counter <= 0:
+                    raise AssertionError(
+                        "Pending callbacks counter cannot become negative."
+                    )
                 if self.__pending_callbacks_counter == 1:
                     self.run_end_callbacks(args)
                 self.__pending_callbacks_counter -= 1
@@ -145,7 +146,10 @@ class CompilationCallbackHandler:
         """
         self.start_callbacks.clear()
         self.end_callbacks.clear()
-        assert self.__pending_callbacks_counter == 0
+        if self.__pending_callbacks_counter != 0:
+            raise AssertionError(
+                f"Cannot clear callbacks while {self.__pending_callbacks_counter} are pending"
+            )
 
 
 callback_handler = CompilationCallbackHandler()

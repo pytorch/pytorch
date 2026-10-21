@@ -66,9 +66,9 @@ Tensor qnnpack_hardsigmoid(Tensor input) {
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_hardsigmoid_nc_q8(
     hardsigmoid_op,
     input_contig.size(0), // batch size
-    (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input data
+    reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()), // input data
     num_elems, // input stride
-    (uint8_t*)qy.data_ptr<c10::quint8>(), // output data
+    reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()), // output data
     num_elems); // output stride
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK Hardsigmoid operator");

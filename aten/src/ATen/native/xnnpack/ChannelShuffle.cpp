@@ -53,8 +53,7 @@ Tensor channel_shuffle(
         input_padded_contig_nhwc.size(Layout::Activation4D::width),
       },
       input_padded_contig_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast,
-      input_padded_contig_nhwc.opt_names());
+      MemoryFormat::ChannelsLast);
 
   int64_t channels_per_group =
       input_padded_contig_nhwc.size(Layout::Activation4D::channels) / groups;
@@ -90,7 +89,7 @@ Tensor channel_shuffle(
 
   const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
       channel_shuffle_op,                                           // operator
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
+      input_padded_contig_nhwc.const_data_ptr<float>(),                   // input
       output_padded_contig_nhwc.data_ptr<float>());                 // output
 
   TORCH_CHECK(

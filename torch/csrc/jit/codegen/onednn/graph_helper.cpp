@@ -241,7 +241,7 @@ Operator LlgaGraphHelper::createOperator(Node* node) {
             dnnl::graph::op::attr::rounding_type, std::string(rounding_type))
         .setAttr(dnnl::graph::op::attr::data_format, std::string("NCX"));
   } else if (nodeKind == Symbol::fromQualString("aten::avg_pool2d")) {
-    // TODO: do we need add checks for all Constants?
+    // TODO: do we need to add checks for all Constants?
     REQUIRE(node->namedInput("kernel_size")->node()->kind() == prim::Constant);
     auto rounding_type =
         toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
@@ -343,7 +343,7 @@ static void mayAddListConstructIntoConcatPartition(
     Node* n,
     OpPartitionMap& opToOwningPartition) {
   // Since prim::ListConstruct is not visible to the LLGA,
-  // it will not be in any partition returned from partfuseritioning results.
+  // it will not be in any partition returned from partitioning results.
   // We need rewrite opToOwningPartition to make the prim::ListConstruct to be
   // 'virtually' in the same partition with the aten::cat, so that
   // prim::ListConstruct can be fused into the fusion group by graph fuser.

@@ -385,7 +385,7 @@ __global__ void add_padding_3(
 
 template <typename T>
 void add_padding_kernelLauncher(
-    T* input, // [batch_size x None]
+    const T* input, // [batch_size x None]
     T* output, // [batch_size x max(input.nested_size(1)) x inner_size]
     T padding_value,
     const int* offsets,
@@ -437,7 +437,7 @@ void add_padding_kernelLauncher(
 }
 
 template void add_padding_kernelLauncher<double>(
-    double* input,
+    const double* input,
     double* output,
     double padding_value,
     const int* offsets,
@@ -448,7 +448,7 @@ template void add_padding_kernelLauncher<double>(
     const int output_batch_size);
 
 template void add_padding_kernelLauncher<float>(
-    float* input,
+    const float* input,
     float* output,
     float padding_value,
     const int* offsets,
@@ -459,7 +459,7 @@ template void add_padding_kernelLauncher<float>(
     const int output_batch_size);
 
 template void add_padding_kernelLauncher<c10::Half>(
-    c10::Half* input,
+    const c10::Half* input,
     c10::Half* output,
     c10::Half padding_value,
     const int* offsets,

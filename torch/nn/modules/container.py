@@ -46,7 +46,7 @@ def _addindent(s_, numSpaces):
 
 @deprecated(
     "`nn.Container` is deprecated. "
-    "All of it's functionality is now implemented in `nn.Module`. Subclass that instead.",
+    "All of its functionality is now implemented in `nn.Module`. Subclass that instead.",
     category=FutureWarning,
 )
 class Container(Module):
@@ -129,6 +129,12 @@ class Sequential(Module):
             raise IndexError(f"index {idx} is out of range")
         idx %= size
         return next(islice(iterator, idx, None))
+
+    @overload
+    def __getitem__(self, idx: slice) -> Sequential: ...
+
+    @overload
+    def __getitem__(self, idx: int) -> Module: ...
 
     @_copy_to_script_wrapper
     def __getitem__(self, idx: slice | int) -> Sequential | Module:

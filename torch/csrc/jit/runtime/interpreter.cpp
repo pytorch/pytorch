@@ -62,7 +62,7 @@ using CodeImpl = interpreter::CodeImpl;
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
-// *  Computes whether a input to a node is the last use, so we can issue MOVE
+// *  Computes whether an input to a node is the last use, so we can issue MOVE
 //    rather than LOAD instructions.
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -771,9 +771,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 forked_fn.get_executor().getPlanFor(stack).code, taskLauncher_);
             InterpreterContinuation continuation(
                 forked_interpreter,
-                Stack(stack.end() - inst.N, stack.end()),
+                pop(stack, static_cast<size_t>(inst.N)),
                 getDistAutogradContextId());
-            drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
           }
@@ -793,7 +792,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
               out_type = TupleType::create(out_types);
             }
-            auto args = std::vector<IValue>(stack.end() - inst.N, stack.end());
+            auto args = pop(stack, static_cast<size_t>(inst.N));
             auto aw = c10::make_intrusive<c10::ivalue::Await>(out_type);
             aw->setArgs(std::move(args));
             aw->setFn(
@@ -814,7 +813,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   }
                   return c10::ivalue::Tuple::create(jit::last(s, n_out));
                 });
-            drop(stack, inst.N);
             push(stack, std::move(aw));
           }
             INST_NEXT;
@@ -928,6 +926,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // save the original exception's message when creating a new JITException
       throw JITException(ss.str(), python_class_name, e.what());
     } else if (not_implemented_error) {
+      // Rethrows with the *original* exception's backtrace and caller, which
+      // is the whole point: TORCH_CHECK_NOT_IMPLEMENTED would stamp this
+      // interpreter frame over the location the user needs to see.
+      // @allow-raw-throw: carries the original backtrace and caller
       throw c10::NotImplementedError(
           ss.str(),
           not_implemented_error->backtrace(),
@@ -936,7 +938,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (get_cpp_stacktraces_enabled()) {
         ss << e.what() << '\n';
       }
-      throw std::runtime_error(ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
 
@@ -967,7 +969,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // interpreter. But this way we hold onto graph/node and Function and
   // we can create module hierarchy string for each event in autograd
   // profiler at the end, when consolidating events.
-  // At the moment overhead does not seem exhorbitantly large.
+  // At the moment overhead does not seem exorbitantly large.
   // Another option would be return vector of (string, InlinedCallstackPtrs)
   // string would contain function name and typename of self
   // Format of the returned vector of strings:

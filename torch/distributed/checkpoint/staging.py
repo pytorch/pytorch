@@ -154,11 +154,6 @@ class DefaultStager(AsyncStager):
         staged_dict = future.result()
         stager.close()
 
-        # Context manager pattern (recommended)
-        stager = DefaultStager(config)
-        with stager:
-        result = stager.stage(state_dict)
-
     Performance Considerations:
         - Async staging provides best performance when model computation
           can overlap with staging operations
@@ -204,7 +199,7 @@ class DefaultStager(AsyncStager):
         **kwargs: Any,
     ) -> STATE_DICT_TYPE | Future[STATE_DICT_TYPE]:
         """
-        This function is responsible for staging staging the state_dict.
+        This function is responsible for staging the state_dict.
         See class docstring for more details on staging.
         If use_async_staging is True, it will return a Future object that will be
         fulfilled when staging is complete.
@@ -245,10 +240,6 @@ class DefaultStager(AsyncStager):
             self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
         else:
             state_dict = self._state_dict_stager.stage(state_dict, non_blocking=False)
-
-        # release reference cycle to prevent memory leaks in async_save
-        # created by _deepcopy_dispatch that capture self
-        self._state_dict_stager.close()
 
         return state_dict
 
@@ -302,7 +293,7 @@ class BlockingAsyncStager(AsyncStager):
 
         Args:
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             type_check: Whether to perform a type check during cpu_offload. Defaults to False.
 

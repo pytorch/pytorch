@@ -12,11 +12,62 @@
     :toctree: generated
     :nosignatures:
 
-    rename_privateuse1_backend
-    generate_methods_for_privateuse1_backend
     get_cpp_backtrace
     set_module
     swap_tensors
+```
+
+## Submodules
+
+```{toctree}
+:caption: torch.utils submodules
+:maxdepth: 1
+
+torch.utils.benchmark <utils/benchmark>
+torch.utils.checkpoint <utils/checkpoint>
+torch.utils.cpp_extension <utils/cpp_extension>
+torch.utils.data <utils/data>
+torch.utils.deterministic <utils/deterministic>
+torch.utils.jit <utils/jit>
+torch.utils.dlpack <utils/dlpack>
+torch.utils.mobile_optimizer <utils/mobile_optimizer>
+torch.utils.model_zoo <utils/model_zoo>
+torch.utils.tensorboard <utils/tensorboard>
+torch.utils.module_tracker <utils/module_tracker>
+```
+
+# torch.utils.backend_registration
+```{eval-rst}
+.. currentmodule:: torch.utils.backend_registration
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    generate_methods_for_privateuse1_backend
+    rename_privateuse1_backend
+```
+
+# torch.utils.hooks
+
+```{eval-rst}
+.. currentmodule:: torch.utils.hooks
+```
+
+```{eval-rst}
+.. autofunction:: unserializable_hook
+```
+
+# torch.utils.throughput_benchmark
+
+```{eval-rst}
+.. currentmodule:: torch.utils.throughput_benchmark
+```
+
+```{eval-rst}
+.. autofunction:: format_time
 ```
 
 # torch.utils.collect_env
@@ -57,6 +108,7 @@
     :toctree: generated
     :nosignatures:
 
+    FlopCounterMode
     baddbmm_flop
     bmm_flop
     conv_backward_flop
@@ -84,6 +136,7 @@
     :toctree: generated
     :nosignatures:
 
+    add_dim3
     compute_stats
     extract_arguments
     file_add_header
@@ -92,6 +145,7 @@
     find_closure_group
     find_parentheses_group
     fix_static_global_kernels
+    get_hip_file_path
     hip_header_magic
     hipify
     is_caffe2_gpu_file
@@ -106,7 +160,6 @@
     preprocessor
     processKernelLaunches
     replace_extern_shared
-    replace_math_functions
     str2bool
 ```
 
@@ -153,14 +206,12 @@ for tracking purposes -->
 .. py:module:: torch.utils.data.datapipes.iter.routeddecoder
 .. py:module:: torch.utils.data.datapipes.iter.selecting
 .. py:module:: torch.utils.data.datapipes.iter.sharding
-.. py:module:: torch.utils.data.datapipes.iter.streamreader
 .. py:module:: torch.utils.data.datapipes.iter.utils
 .. py:module:: torch.utils.data.datapipes.map.callable
 .. py:module:: torch.utils.data.datapipes.map.combinatorics
 .. py:module:: torch.utils.data.datapipes.map.combining
 .. py:module:: torch.utils.data.datapipes.map.grouping
 .. py:module:: torch.utils.data.datapipes.map.utils
-.. py:module:: torch.utils.data.datapipes.utils.common
 .. py:module:: torch.utils.data.datapipes.utils.decoder
 .. py:module:: torch.utils.data.datapipes.utils.snapshot
 .. py:module:: torch.utils.data.dataset
@@ -180,5 +231,16 @@ for tracking purposes -->
 .. py:module:: torch.utils.tensorboard.summary
 .. py:module:: torch.utils.tensorboard.writer
 .. py:module:: torch.utils.throughput_benchmark
+.. automodule:: torch.utils.weak
+
+.. currentmodule:: torch.utils.weak
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    TensorWeakRef
+
 .. py:module:: torch.utils.weak
+   :noindex:
 ```

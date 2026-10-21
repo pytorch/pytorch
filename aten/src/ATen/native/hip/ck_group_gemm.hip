@@ -110,8 +110,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     const int mat_a_dim = mat_a.dim();
     const int mat_b_dim = mat_b.dim();
 
-    const char* a_ptr_base = reinterpret_cast<const char*>(mat_a.data_ptr());
-    const char* b_ptr_base = reinterpret_cast<const char*>(mat_b.data_ptr());
+    const char* a_ptr_base = reinterpret_cast<const char*>(mat_a.const_data_ptr());
+    const char* b_ptr_base = reinterpret_cast<const char*>(mat_b.const_data_ptr());
     char* out_ptr_base = reinterpret_cast<char*>(out.data_ptr());
     const size_t a_element_size = mat_a.element_size();
     const size_t b_element_size = mat_b.element_size();
@@ -124,7 +124,10 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
     if (mat_a_dim == 2 && mat_b_dim == 2) {
         // 2D*2D case requires offset tensor
-        auto offs_accessor = offs->accessor<int, 1>();
+        // offs lives on the device (the dispatcher requires it); the group
+        // descriptors are built on the host, so copy it first.
+        const at::Tensor offs_host = offs->to(at::kCPU);
+        auto offs_accessor = offs_host.accessor<int, 1>();
         int num_groups = offs_accessor.size(0);
         const int M = mat_a.size(0); // number of rows in A
         const int N = mat_b.size(1); // number of columns in B
@@ -192,7 +195,10 @@ void launch_grouped_bgemm_ck_impl_dispatch(
         }
     } else if (mat_a_dim == 2 && mat_b_dim == 3) {
         // 2D*3D case requires offset tensor
-        auto offs_accessor = offs->accessor<int, 1>();
+        // offs lives on the device (the dispatcher requires it); the group
+        // descriptors are built on the host, so copy it first.
+        const at::Tensor offs_host = offs->to(at::kCPU);
+        auto offs_accessor = offs_host.accessor<int, 1>();
         int num_groups = offs_accessor.size(0);
 
         // 2d*3d input, output is 2d.
@@ -351,7 +357,10 @@ void launch_grouped_bgemm_ck_impl_dispatch(
         }
     } else if (mat_a_dim == 3 && mat_b_dim == 2) {
         // 3D*2D case requires offset tensor
-        auto offs_accessor = offs->accessor<int, 1>();
+        // offs lives on the device (the dispatcher requires it); the group
+        // descriptors are built on the host, so copy it first.
+        const at::Tensor offs_host = offs->to(at::kCPU);
+        auto offs_accessor = offs_host.accessor<int, 1>();
         int num_groups = offs_accessor.size(0);
         // 3d*2d input, output is 3d.
         // A: [n_groups, m, k], B: [k, total_n] (assuming row-major for both)

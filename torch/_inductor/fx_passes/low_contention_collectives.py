@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import warnings
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -17,7 +16,11 @@ def _get_collective_info(node):
         is_reduce_scatter_tensor,
     )
     from torch._inductor.fx_passes.overlap_scheduling import get_group_name
+    from torch._inductor.utils import get_collective_config
 
+    # symm_mem replacements can't carry a collective config.
+    if get_collective_config(node) is not None:
+        return None
     if is_all_gather_into_tensor(node):
         return True, get_group_name(node)
     if is_reduce_scatter_tensor(node):
@@ -44,10 +47,13 @@ def replace_collectives_with_low_contention(
     if not collectives:
         return
 
+    from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
+    from torch.distributed.distributed_c10d import GroupName
+
     # Some group names can't be resolved at compile time — skip them.
     valid_groups: OrderedSet[str] = OrderedSet()
     for group_name in groups:
-        if _enable_symm_mem(group_name):
+        if is_symm_mem_enabled_for_group(GroupName(group_name)):
             valid_groups.add(group_name)
 
     # Filter to collectives whose groups we can actually resolve
@@ -59,14 +65,16 @@ def replace_collectives_with_low_contention(
 
     from torch._inductor import config
 
-    min_bytes = config.aten_distributed_optimizations.low_contention_min_bytes_per_rank
-
-    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    cfg = config.aten_distributed_optimizations
+    min_bytes = cfg.low_contention_min_bytes_per_rank
+    skip_overlap_check = cfg.low_contention_skip_overlap_check
+    use_ag_ce_multicast = cfg.low_contention_all_gather_ce_multicast
 
     replacements = 0
     skipped_small = 0
     skipped_no_overlap = 0
     skipped_nvlink_contention = 0
+    skipped_out_variant = 0
     for node, is_ag, group_name in collectives:
         coll_type = "AG" if is_ag else "RS"
 
@@ -84,62 +92,131 @@ def replace_collectives_with_low_contention(
                 )
                 continue
 
-        # Skip collectives with no compute to hide behind
-        if not _has_compute_bound_overlap(node, graph, node_positions):
-            skipped_no_overlap += 1
-            log.debug("LC skip %s %s: no compute-bound overlap", coll_type, node.name)
-            continue
+        if not skip_overlap_check:
+            # Skip collectives with no compute to hide behind
+            if not _has_compute_bound_overlap(node, graph):
+                skipped_no_overlap += 1
+                log.debug(
+                    "LC skip %s %s: no compute-bound overlap", coll_type, node.name
+                )
+                continue
 
-        # Skip if other groups' NCCL collectives overlap on NVLink
-        if _has_other_group_collectives(node, group_name, graph, node_positions):
-            skipped_nvlink_contention += 1
-            log.debug(
-                "LC skip %s %s: overlaps other-group collectives (NVLink contention)",
-                coll_type,
-                node.name,
+            # Skip if other groups' NCCL collectives overlap on NVLink
+            if _has_other_group_collectives(node, group_name, graph):
+                skipped_nvlink_contention += 1
+                log.debug(
+                    "LC skip %s %s: overlaps other-group collectives (NVLink contention)",
+                    coll_type,
+                    node.name,
+                )
+                continue
+
+        target = None
+        if is_ag:
+            target = _select_low_contention_all_gather_target(
+                symm_mem,
+                input_node=node.args[0],
+                use_ag_ce_multicast=use_ag_ce_multicast,
             )
-            continue
 
-        _replace_collective(node, graph, symm_mem, is_ag, group_name)
+        if not _replace_collective(
+            node,
+            graph,
+            symm_mem,
+            is_ag,
+            group_name,
+            target=target,
+        ):
+            skipped_out_variant += 1
+            continue
         replacements += 1
 
     log.info(
         "Replaced %d/%d FSDP collectives "
         "(skipped_small=%d, skipped_no_overlap=%d, "
-        "skipped_nvlink_contention=%d, min_bytes=%d)",
+        "skipped_nvlink_contention=%d, skipped_out_variant=%d, "
+        "min_bytes=%d, skip_overlap_check=%s)",
         replacements,
         len(collectives),
         skipped_small,
         skipped_no_overlap,
         skipped_nvlink_contention,
+        skipped_out_variant,
         min_bytes,
+        skip_overlap_check,
     )
 
 
-def _enable_symm_mem(group_name):
-    """Try to enable symmetric memory for a group. Returns True on success."""
-    from torch.distributed._symmetric_memory import (
-        enable_symm_mem_for_group,
-        is_symm_mem_enabled_for_group,
-    )
-
-    if is_symm_mem_enabled_for_group(group_name):
-        return True
+def _has_multicast_support(device_index: int) -> bool:
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)
-            enable_symm_mem_for_group(group_name)
-        return True
-    except (TypeError, RuntimeError, KeyError) as e:
-        log.debug("LC: cannot enable symm_mem for group %s: %s", group_name, e)  # noqa: G200
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+
+        acc = torch.accelerator.current_accelerator(True)
+        if acc is None:
+            return False
+        return bool(
+            _SymmetricMemory.has_multicast_support(
+                getattr(DeviceType, acc.type.upper()), device_index
+            )
+        )
+    except Exception:
         return False
 
 
-def _replace_collective(node, graph, symm_mem, is_ag, group_name):
+def _select_low_contention_all_gather_target(
+    symm_mem,
+    input_node,
+    use_ag_ce_multicast=False,
+):
+    if not use_ag_ce_multicast:
+        return symm_mem._low_contention_all_gather.default
+
+    device_index = None
+    input_val = input_node.meta.get("val")
+    acc = torch.accelerator.current_accelerator()
+    if (
+        isinstance(input_val, torch.Tensor)
+        and acc is not None
+        and input_val.device.type == acc.type
+    ):
+        device_index = input_val.device.index
+    if device_index is None:
+        device_index = torch.accelerator.current_device_index()
+
+    if _has_multicast_support(device_index):
+        return symm_mem._low_contention_all_gather_ce_multicast.default
+    log.info(
+        "low_contention_all_gather_ce_multicast requested but multicast is not "
+        "supported on device %d; falling through.",
+        device_index,
+    )
+
+    return symm_mem._low_contention_all_gather.default
+
+
+def _replace_collective(
+    node,
+    graph,
+    symm_mem,
+    is_ag,
+    group_name,
+    target=None,
+) -> bool:
     input_node = node.args[0]
     if is_ag:
-        target = symm_mem._low_contention_all_gather.default
-        args = (input_node, group_name)
+        if target is None:
+            return False
+        if node.target is torch.ops._c10d_functional.all_gather_into_tensor_out.default:
+            out = node.kwargs["out"]
+            if target is symm_mem._low_contention_all_gather_ce_multicast.default:
+                target = symm_mem._low_contention_all_gather_ce_multicast_out.default
+            else:
+                # The existing low-contention all-gather has no out variant.
+                return False
+            args = (input_node, group_name, out)
+        else:
+            args = (input_node, group_name)
     else:
         reduce_op = node.args[1]
         target = symm_mem._low_contention_reduce_scatter.default
@@ -150,6 +227,7 @@ def _replace_collective(node, graph, symm_mem, is_ag, group_name):
     new_node.meta.update(node.meta)
     node.replace_all_uses_with(new_node)
     graph.erase_node(node)
+    return True
 
 
 def _get_per_rank_bytes(node, is_ag):
@@ -167,38 +245,62 @@ def _get_per_rank_bytes(node, is_ag):
     return total_bytes // group_size
 
 
-def _has_compute_bound_overlap(start_node, graph, node_positions):
-    """Check if compute-bound ops exist between collective start and wait."""
+def _is_compute_or_contains_compute(node, graph_module):
+    """Check if a node is compute, including inside control_deps subgraphs."""
     from torch._inductor.fx_passes.overlap_scheduling import is_compute_node
 
+    if is_compute_node(node):
+        return True
+    from torch._inductor.fx_passes.control_dependencies import ControlDeps
+
+    if node.op == "call_function" and isinstance(node.target, ControlDeps):
+        subgraph_node = node.args[1] if len(node.args) > 1 else None
+        if isinstance(subgraph_node, torch.fx.Node) and subgraph_node.op == "get_attr":
+            if not isinstance(subgraph_node.target, str):
+                raise AssertionError(
+                    f"expected str get_attr target, got {type(subgraph_node.target)}"
+                )
+            subgraph = getattr(graph_module, subgraph_node.target, None)
+            if isinstance(subgraph, torch.fx.GraphModule):
+                for n in subgraph.graph.nodes:
+                    if is_compute_node(n):
+                        return True
+    return False
+
+
+def _has_compute_bound_overlap(start_node, graph):
+    """Check if compute-bound ops exist between collective start and wait."""
     wait_node = _find_wait_for_collective(start_node)
     if wait_node is None:
         return False
 
-    start_pos = node_positions[start_node]
-    wait_pos = node_positions[wait_node]
-
+    graph_module = graph.owning_module
+    in_range = False
     for node in graph.nodes:
-        pos = node_positions[node]
-        if pos <= start_pos or pos >= wait_pos:
+        if node is start_node:
+            in_range = True
             continue
-        if is_compute_node(node):
+        if node is wait_node:
+            break
+        if in_range and _is_compute_or_contains_compute(node, graph_module):
             return True
     return False
 
 
-def _has_other_group_collectives(start_node, group_name, graph, node_positions):
+def _has_other_group_collectives(start_node, group_name, graph):
     """Check if other groups' collectives overlap, competing for NVLink."""
     wait_node = _find_wait_for_collective(start_node)
     if wait_node is None:
         return False
 
-    start_pos = node_positions[start_node]
-    wait_pos = node_positions[wait_node]
-
+    in_range = False
     for node in graph.nodes:
-        pos = node_positions[node]
-        if pos <= start_pos or pos >= wait_pos:
+        if node is start_node:
+            in_range = True
+            continue
+        if node is wait_node:
+            break
+        if not in_range:
             continue
         info = _get_collective_info(node)
         if info is not None:

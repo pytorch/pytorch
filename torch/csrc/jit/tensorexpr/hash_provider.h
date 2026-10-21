@@ -14,10 +14,8 @@ struct TORCH_API SimplifierHashType {
   explicit SimplifierHashType(size_t s) : _h(s) {}
 
   bool operator==(const SimplifierHashType& other) const;
-  bool operator!=(const SimplifierHashType& other) const;
   bool operator<(const SimplifierHashType& other) const;
   bool operator==(const size_t other) const;
-  bool operator!=(const size_t other) const;
 
   size_t _h{0};
 };
@@ -126,7 +124,7 @@ class TORCH_API HashProvider : public IRVisitor {
     std::stringstream ss;
     IRPrinter printer(ss);
     e->accept(&printer);
-    SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
+    SimplifierHashType hash = SimplifierHashType(te_hash(std::move(ss).str()));
     putHash(e, hash);
 
     return hash;
@@ -142,7 +140,7 @@ class TORCH_API HashProvider : public IRVisitor {
     std::stringstream ss;
     IRPrinter printer(ss);
     s->accept(&printer);
-    SimplifierHashType hash = SimplifierHashType(te_hash(ss.str()));
+    SimplifierHashType hash = SimplifierHashType(te_hash(std::move(ss).str()));
     putHash(s, hash);
 
     return hash;
@@ -184,17 +182,13 @@ class TORCH_API HashProvider : public IRVisitor {
 
   void putHash(const ExprPtr& e, SimplifierHashType h) {
     auto res = exprToHash_.emplace(e, h);
-    if (res.second == false) {
-      // This is always a logic bug since we should check the cache first.
-      throw std::runtime_error("hash collision");
-    }
+    // This is always a logic bug since we should check the cache first.
+    TORCH_CHECK(res.second, "hash collision");
   }
   void putHash(const StmtPtr& s, SimplifierHashType h) {
     auto res = stmtToHash_.emplace(s, h);
-    if (res.second == false) {
-      // This is always a logic bug since we should check the cache first.
-      throw std::runtime_error("hash collision");
-    }
+    // This is always a logic bug since we should check the cache first.
+    TORCH_CHECK(res.second, "hash collision");
   }
 
   std::unordered_map<ExprPtr, SimplifierHashType> exprToHash_;

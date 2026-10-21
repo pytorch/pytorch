@@ -6,7 +6,7 @@ from typing import Protocol
 
 from torch._vendor.packaging.version import Version
 
-from .registry import _OpFn
+from .registry import _OpCondFn, _OpImplFn
 
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,8 @@ class DSLModuleProtocol(Protocol):
         lib_symbol: str,
         op_symbol: str,
         dispatch_key: str,
-        impl: _OpFn,
+        cond: _OpCondFn | None,
+        impl: _OpImplFn,
         *,
         allow_multiple_override: bool = False,
         unconditional_override: bool = False,

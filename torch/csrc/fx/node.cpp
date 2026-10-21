@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <algorithm>
 
 namespace {
@@ -206,8 +205,8 @@ struct NodeBase {
 
 static PyObject* NodeBase_new(
     PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwds) {
+    PyObject* /*args*/,
+    PyObject* /*kwds*/) {
   PyObject* self = type->tp_alloc(type, 0);
   if (!self)
     return nullptr;
@@ -216,7 +215,10 @@ static PyObject* NodeBase_new(
   return self;
 }
 
-static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
+static int NodeBase_init_fn(
+    NodeBase* self,
+    PyObject* args,
+    PyObject* /*kwds*/) {
   PyObject* graph = nullptr;
   PyObject* name = nullptr;
   PyObject* op = nullptr;
@@ -360,7 +362,7 @@ static PyObject* NodeBase__update_args_kwargs(
 
 static PyObject* NodeBase__remove_from_list(
     PyObject* self,
-    PyObject* _ignored) {
+    PyObject* /*_ignored*/) {
   reinterpret_cast<NodeBase*>(self)->remove_from_list();
   Py_RETURN_NONE;
 }
@@ -524,7 +526,7 @@ static int NodeBase_set_sort_key(
     void* /*closure*/) {
   NodeBase* node = reinterpret_cast<NodeBase*>(self);
   if (!PyTuple_Check(value)) {
-    PyErr_SetString(PyExc_TypeError, "_sort_key must be an tuple of ints");
+    PyErr_SetString(PyExc_TypeError, "_sort_key must be a tuple of ints");
     return -1;
   }
   Py_ssize_t size = PyTuple_GET_SIZE(value);
@@ -645,8 +647,8 @@ struct NodeIter {
 
 static PyObject* NodeIter_new(
     PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwds) {
+    PyObject* /*args*/,
+    PyObject* /*kwds*/) {
   PyObject* self = type->tp_alloc(type, 0);
   if (!self)
     return nullptr;
@@ -692,8 +694,7 @@ static PyObject* NodeIter_iternext_helper(NodeIter* self) {
   }
   while (self->_cur != self->_root) {
     if (!self->_cur->_erased) {
-      Py_INCREF(self->_cur);
-      return (PyObject*)self->_cur;
+      return Py_NewRef(self->_cur);
     }
     if constexpr (reversed) {
       NodeBase* prev = (NodeBase*)Py_NewRef(self->_cur->_prev);
@@ -789,7 +790,7 @@ bool NodeIter_init(PyObject* module) {
 ////////////////////////////////
 
 static PyObject* py_map_aggregate(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (nargs != 2) {
@@ -808,7 +809,7 @@ static PyObject* py_map_aggregate(
 }
 
 static PyObject* py_map_arg(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (nargs != 2) {

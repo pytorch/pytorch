@@ -1,12 +1,19 @@
 from collections.abc import Callable
 from typing import Any
 
+from torch.utils._ordered_set import OrderedSet
+
 from .effects import EffectHolder
 from .fake_impl import FakeImplHolder
 from .utils import RegistrationHandle
 
 
-__all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]
+__all__ = [
+    "SimpleLibraryRegistry",
+    "SimpleOperatorEntry",
+    "singleton",
+    "SymmMemArgsHolder",
+]
 
 
 class SimpleLibraryRegistry:
@@ -34,6 +41,9 @@ class SimpleLibraryRegistry:
             self._data[qualname] = res = SimpleOperatorEntry(qualname)
         return res
 
+    def get(self, qualname: str) -> "SimpleOperatorEntry | None":
+        return self._data.get(qualname, None)
+
 
 singleton: SimpleLibraryRegistry = SimpleLibraryRegistry()
 
@@ -53,6 +63,7 @@ class SimpleOperatorEntry:
         )
 
         self.effect: EffectHolder = EffectHolder(qualname)
+        self.symm_mem_args: SymmMemArgsHolder = SymmMemArgsHolder(qualname)
 
     # For compatibility reasons. We can delete this soon.
     @property
@@ -81,6 +92,51 @@ class GenericTorchDispatchRuleHolder:
 
     def find(self, torch_dispatch_class: type) -> Callable[..., Any] | None:
         return self._data.get(torch_dispatch_class, None)
+
+
+class SymmMemArgsHolder:
+    """Tracks which arguments of an operator require symmetric memory allocation.
+
+    Used by Inductor during lowering to automatically realize tensors as
+    symmetric memory buffers.
+    """
+
+    def __init__(self, qualname: str) -> None:
+        self._symm_mem_args: OrderedSet[str] | None = None
+        self.qualname: str = qualname
+
+    def register(self, arg_names: list[str]) -> RegistrationHandle:
+        if not arg_names:
+            raise ValueError(
+                f"Cannot register empty arg_names list for {self.qualname}"
+            )
+
+        if self._symm_mem_args is not None:
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Overwriting symm_mem arg registration for %s. Old: %s, New: %s",
+                self.qualname,
+                self._symm_mem_args,
+                arg_names,
+            )
+
+        self._symm_mem_args = OrderedSet(arg_names)
+
+        def deregister() -> None:
+            self._symm_mem_args = None
+
+        return RegistrationHandle(deregister)
+
+    def get(self) -> OrderedSet[str] | None:
+        return self._symm_mem_args
+
+    def is_registered(self) -> bool:
+        return self._symm_mem_args is not None
+
+    def is_symm_mem_arg(self, arg_name: str) -> bool:
+        return self._symm_mem_args is not None and arg_name in self._symm_mem_args
 
 
 def find_torch_dispatch_rule(

@@ -79,11 +79,12 @@ std::unordered_set<std::string> RegisterPrePackParams(
         while (m.hasattr(attr_name)) {
           attr_name = attr_name_base + "_" + std::to_string(uid++);
         }
-        // Now register attribute for this packed param but dont set it to any
-        // value. No value because we dont know what the value is at this point.
-        // Only when we run on-device ptq workflow, e.g. run quantize_forward
-        // method, is when the linear_prepack op will be executed and at that
-        // point we will have the actual value for this attribute.
+        // Now register attribute for this packed param but don't set it to any
+        // value. No value because we don't know what the value is at this
+        // point. Only when we run on-device ptq workflow, e.g. run
+        // quantize_forward method, is when the linear_prepack op will be
+        // executed and at that point we will have the actual value for this
+        // attribute.
         m.register_attribute(attr_name, n->output(0)->type(), IValue());
         // In order to add the output of linear_prepack, we now have to do
         // setAttr Thus when quantize_forward is actually called the attribute
@@ -105,7 +106,7 @@ std::unordered_set<std::string> RegisterPrePackParams(
         Value* packed_param_attr =
             graph->insertGetAttr(graph->inputs()[0], attr_name)
                 ->setType(n->output(0)->type());
-        // We must replace this specific usage and we cannot doe
+        // We must replace this specific usage and we cannot do
         // replaceAllUsesWith This is because we first had to insert SetAttr
         // node. This also takes as input packed_param_value, similar to the
         // actual op. But only the use of the actual op must be replaced by

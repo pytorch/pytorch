@@ -96,7 +96,10 @@ void i1_kernel_cuda(TensorIteratorBase& iter) {
   #else
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i1_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_i1(a);
+        using opmath_t = at::opmath_type<scalar_t>;
+        // implicit conversion of a to opmath_t will happen here,
+        //   but as far as TI is concerned, it's still a no-dynamic-cast kernel because lambda input is scalar_t
+        return calc_i1<opmath_t>(a);
       });
     });
   #endif // AT_USE_JITERATOR()
@@ -114,7 +117,8 @@ void i1e_kernel_cuda(TensorIteratorBase& iter) {
   #else
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i1e_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_i1e(a);
+        using opmath_t = at::opmath_type<scalar_t>;
+        return calc_i1e<opmath_t>(a);
       });
     });
   #endif

@@ -103,10 +103,11 @@ index 365c954dbe7..c5fcf7a09cf 100644
         """Test that we can get the current version from version.txt."""
         version = get_current_version()
         self.assertIsInstance(version, tuple)
-        self.assertEqual(len(version), 2)
+        self.assertEqual(len(version), 3)
         # We can't check torch.__version__ here so this is the best we can do :(
         self.assertIsInstance(version[0], int)
         self.assertIsInstance(version[1], int)
+        self.assertIsInstance(version[2], int)
 
     def test_check_file_with_simulated_content(self):
         """Test checking a file with simulated content and git diffs."""
@@ -149,10 +150,10 @@ AOTI_TORCH_EXPORT int function_without_version();
                 mock_result.stdout = simulated_diff
                 mock_run.return_value = mock_result
 
-                # Mock version to be 2.10
+                # Mock version to be 2.10.0
                 with patch(
                     "tools.linter.adapters.stable_shim_version_linter.get_current_version",
-                    return_value=(2, 10),
+                    return_value=(2, 10, 0),
                 ):
                     lint_messages = check_file(temp_file)
 

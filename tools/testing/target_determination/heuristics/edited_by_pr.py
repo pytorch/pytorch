@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -29,7 +28,6 @@ ADDITIONAL_MAPPINGS = {
 
 class EditedByPR(HeuristicInterface):
     def __init__(self, **kwargs: dict[str, Any]) -> None:
-        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
@@ -40,18 +38,13 @@ class EditedByPR(HeuristicInterface):
 
 
 def _get_modified_tests() -> set[str]:
-    try:
-        changed_files = query_changed_files()
-        should_run = python_test_file_to_test_name(set(changed_files))
-        for test_file, regexes in ADDITIONAL_MAPPINGS.items():
-            if any(
-                re.search(regex, changed_file) is not None
-                for regex in regexes
-                for changed_file in changed_files
-            ):
-                should_run.add(test_file)
-        return should_run
-    except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
-        # If unable to get changed files from git, quit without doing any sorting
-    return set()
+    changed_files = query_changed_files()
+    should_run = python_test_file_to_test_name(set(changed_files))
+    for test_file, regexes in ADDITIONAL_MAPPINGS.items():
+        if any(
+            re.search(regex, changed_file) is not None
+            for regex in regexes
+            for changed_file in changed_files
+        ):
+            should_run.add(test_file)
+    return should_run

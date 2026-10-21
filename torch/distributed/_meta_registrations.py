@@ -50,6 +50,6 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
-lib_impl = torch.library.Library("c10d", "IMPL")  # noqa: TOR901
+lib_impl = torch.library.Library("c10d", "IMPL")
 for op, meta_func in _META_FUNCTIONS.items():
     lib_impl.impl(op, meta_func, "Meta")

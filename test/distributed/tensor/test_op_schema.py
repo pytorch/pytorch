@@ -114,6 +114,22 @@ class TestOpSchema(TestCase):
                 else:
                     self.assertEqual(lhs, rhs)
 
+    def test_no_dtensor_spec_leak_in_comparison_key(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/181761.
+
+        DTensor_OpSchema_recompute_comparison_key_impl used to release() the
+        inner args_to_hash tuple before passing it to PyTuple_Pack on the
+        no-static_kwargkey path, leaking one ref to every DTensorSpec in
+        args_schema for the lifetime of the process.
+        """
+        import weakref
+
+        dts = DTensorSpec(mesh=None, placements=tuple(), tensor_meta=None)
+        ref = weakref.ref(dts)
+        OpSchema(op=None, args_schema=(dts,), kwargs_schema={})
+        del dts
+        self.assertIsNone(ref(), "DTensorSpec leaked via OpSchema._comparison_key")
+
 
 if __name__ == "__main__":
     run_tests()

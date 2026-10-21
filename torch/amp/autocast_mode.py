@@ -253,7 +253,7 @@ class autocast:
                 "get_amp_supported_dtype",
             ]
             message = f"Tried to use AMP with the `{self.custom_backend_name}` backend, but the backend has not "
-            message += "registered a module or  the module miss some necessary funcs. The backend should register "
+            message += "registered a module or the module misses some necessary funcs. The backend should register "
             message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
             message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 
@@ -303,18 +303,6 @@ class autocast:
                 )
                 warnings.warn(error_message, stacklevel=2)
                 enabled = False
-                # Special case for MPS bfloat16 support on macOS < 14
-                if (
-                    self.device == "mps"
-                    and self.fast_dtype == torch.bfloat16
-                    and not torch.backends.mps.is_macos_or_newer(14, 0)
-                ):
-                    error_message = (
-                        "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
-                        "on macOS versions below 14. Disabling autocast."
-                    )
-                    warnings.warn(error_message, stacklevel=2)
-                    enabled = False
         self._enabled = enabled
 
     def __enter__(self):

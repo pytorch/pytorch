@@ -28,9 +28,11 @@ def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> 
     # keyword at the beginning of code line. However, this can happen in codegen,
     # which will cause the pattern to not match.
 
-    # Note that lookahead (?=\W) is still needed to keep hipification idomponent, for example
-    # we need to skip replacing "getStreamFromExternal" in "getStreamFromExternalMasqueradingAsCUDA"
-    RE_PYTORCH_PREPROCESSOR = re.compile(rf"({PYTORCH_TRIE.export_to_regex()})(?=\W)")
+    # Note that lookahead (?=\W|$) is still needed to keep hipification idempotent, for example
+    # we need to skip replacing "getStreamFromExternal" in "getStreamFromExternalMasqueradingAsCUDA".
+    # End-of-string must also count as a boundary so bare-token inputs like "CUfunction"
+    # (returned by device_codegen.cpp_kernel_type()) get hipified too.
+    RE_PYTORCH_PREPROCESSOR = re.compile(rf"({PYTORCH_TRIE.export_to_regex()})(?=\W|$)")
 
     source_codes = RE_PYTORCH_PREPROCESSOR.sub(c2_repl, source_codes)  # type: ignore[arg-type]
     return source_codes

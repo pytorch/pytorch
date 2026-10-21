@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/Context.h>
-#include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADevice.h>
@@ -13,13 +12,10 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
-#include <c10/util/env.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
 #endif
 
@@ -485,7 +481,7 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
-  return oss.str();
+  return std::move(oss).str();
 }
 
 double CUDAHooks::batchnormMinEpsilonCuDNN() const {
@@ -554,8 +550,14 @@ const std::vector<std::string>& CUDAHooks::getHipblasltPreferredArchs() const {
     "gfx1200", "gfx1201",
 #endif
 #if ROCM_VERSION >= 70000
-    "gfx950"
+    "gfx950",
 #endif
+#if ROCM_VERSION >= 71300
+    "gfx1100", "gfx1101", "gfx1151",
+#endif
+    // TheRock can provide a newer runtime than the ROCm headers used to build
+    // PyTorch, so gfx1250 support cannot depend on the compile-time version.
+    "gfx1250",
   };
   return archs;
 }
@@ -569,9 +571,7 @@ const std::vector<std::string>& CUDAHooks::getHipblasltSupportedArchs() const {
 #if ROCM_VERSION >= 70000
     "gfx950", "gfx1150", "gfx1151",
 #endif
-#if ROCM_VERSION >= 70200
-    "gfx1250"
-#endif
+    "gfx1250",
   };
   return archs;
 }

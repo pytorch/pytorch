@@ -34,9 +34,9 @@
 //
 //   "segment_unmap"  - Physical pages unmapped from an expandable segment via cuMemUnmap.
 //                      Virtual address range retained, physical memory returned to OS.
-//                      Only with expandable segments. Causes "pool_id unknown" for any
-//                      trace events whose addresses fall in the unmapped range, since
-//                      the segment no longer exists at snapshot time.
+//                      For legacy trace events without pool_id, addresses in the
+//                      unmapped range have unknown pool ownership because the segment
+//                      no longer exists at snapshot time.
 //                      Recorded in unmap_block() (CUDACachingAllocator.cpp:3790).
 //
 //   "snapshot"       - A call to torch.cuda.memory._snapshot(). Timestamp marker to
@@ -55,15 +55,18 @@
 //
 //   Block-level views ("Active Memory Timeline", "Allocated Memory (incl. Private Pools)"):
 //     - process_alloc_data matches "alloc" and "free_completed" from device_traces.
-//     - segment_alloc/segment_free/segment_map/segment_unmap are ignored (skipped in switch).
-//     - The segments snapshot is used only to resolve pool_id via find_pool_id().
+//     - segment_alloc/segment_free/segment_map/segment_unmap are skipped in the main
+//       alloc/free switch, but when include_private_inactive=true, segment events for
+//       private pools are captured separately (pool_segment_events) and used to drive
+//       pool envelope sizing based on reserved memory rather than active allocations.
+//     - The segments snapshot is used to resolve pool_id via find_pool_id() for
+//       legacy trace events and to compute initial reserved memory per pool for
+//       envelope sizing.
 //
 //   Segment-level view ("Active Cached Segment Timeline"):
 //     - process_alloc_data is called with plot_segments=true.
-//     - Matches "segment_alloc" and "segment_free" instead of alloc/free.
-//     - segment_map/segment_unmap are NOT matched (they don't appear in the switch).
-//     - Segments from the snapshot that weren't seen in the trace are added as
-//       initially_allocated (Phase 2).
+//     - Replays ordinary segment lifetimes and expandable mapped ranges.
+//     - Reconstructs the retained history's initial state from the final snapshot.
 //
 //   Allocator State History ("Allocator State History"):
 //     - EventSelector lists ALL trace events including segment_map/segment_unmap.
@@ -229,6 +232,20 @@ function format_user_metadata(user_metadata) {
 }
 
 /**
+ * Formats post-facto annotations (from torch.cuda.memory._annotate_memory)
+ * attached to an allocation as a display string. Returns '' if none.
+ *
+ * @param {string[]|null|undefined} annotations
+ * @returns {string}
+ */
+function format_annotations(annotations) {
+  if (!annotations || annotations.length === 0) {
+    return '';
+  }
+  return 'Annotations:\n' + annotations.map(a => `  ${a}`).join('\n');
+}
+
+/**
  * Formats the forward-pass stack trace (captured via torch.autograd) as a
  * display string showing where a tensor was originally created.
  *
@@ -291,6 +308,468 @@ function format_frames(frames) {
   return elideRepeats(frame_strings).join('\n');
 }
 
+class SegmentHistoryError extends Error {}
+
+function process_segment_groups(elements, capacities, events, max_entries, options,
+  history_error, context_for_element, context_for_event) {
+  const by_time = Array.from({length: capacities.length + 1}, () => ({add: [], remove: []}));
+  elements.forEach((e, i) => {
+    by_time[e.start].add.push(i);
+    by_time[e.stop].remove.push(i);
+  });
+  const groups = [];
+  const owners = [];
+  let active = [];
+  function root(g) {
+    while (g.parent !== g) {
+      g.parent = g.parent.parent;
+      g = g.parent;
+    }
+    return g;
+  }
+  function compatible(a, b) {
+    return (a.stream == null || b.stream == null || a.stream === b.stream) &&
+      (a.pool == null || b.pool == null || a.pool === b.pool);
+  }
+  function merge(a, b) {
+    a = root(a);
+    b = root(b);
+    if (a === b) return a;
+    if (a.id > b.id) [a, b] = [b, a];
+    b.parent = a;
+    a.stream ??= b.stream;
+    a.pool ??= b.pool;
+    return a;
+  }
+  function insertion_index(addr) {
+    let lo = 0;
+    let hi = active.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (elements[active[mid]].addr < addr) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+  for (let t = 0; t < capacities.length; ++t) {
+    const removing = new Set(by_time[t].remove);
+    active = active.filter(i => !removing.has(i));
+    const births = t === 0 ? by_time[t].add.map(i => [i]) : [by_time[t].add];
+    // At the left edge, inspect known neighbors before attaching unknown ranges.
+    births.sort((a, b) => {
+      const known = i => Number(elements[i]?.stream != null) + Number(elements[i]?.segment_pool_id != null);
+      return known(b[0]) - known(a[0]);
+    });
+    for (const members of births) {
+      if (members.length === 0) continue;
+      members.sort((a, b) => elements[a].addr < elements[b].addr ? -1 : 1);
+      const first = elements[members[0]];
+      const last = elements[members.at(-1)];
+      let g = {id: groups.length, stream: first.stream == null ? null : String(first.stream),
+        pool: first.segment_pool_id == null ? null : String(first.segment_pool_id),
+        expandable: !!first.is_expandable};
+      g.parent = g;
+      groups.push(g);
+      const index = insertion_index(first.addr);
+      const neighbors = [active[index - 1], active[index]].filter(i => i != null &&
+        elements[i].is_expandable && g.expandable &&
+        (elements[i].addr + BigInt(elements[i].size) === first.addr ||
+          last.addr + BigInt(last.size) === elements[i].addr));
+      const candidates = [...new Set(neighbors.map(i => root(owners[i])))].filter(other => compatible(g, other));
+      // Unknown metadata cannot connect two conflicting known groups, including
+      // constraints from members that have already been unmapped.
+      if (candidates.every(a => candidates.every(b => compatible(a, b)))) {
+        for (const other of candidates) g = merge(g, other);
+      }
+      for (const i of members) owners[i] = g;
+      active.splice(index, 0, ...members);
+    }
+  }
+  const roots = groups.filter(g => root(g) === g);
+  roots.forEach((g, id) => {
+    g.id = id;
+    g.members = [];
+    g.deltas = new Map();
+    g.events = [];
+    g.peak = 0;
+  });
+  elements.forEach((e, i) => {
+    const g = root(owners[i]);
+    g.members.push(i);
+    g.deltas.set(e.start, (g.deltas.get(e.start) ?? 0) + e.size);
+    g.deltas.set(e.stop, (g.deltas.get(e.stop) ?? 0) - e.size);
+  });
+  const updates = Array.from({length: capacities.length}, () => new Map());
+  for (const g of roots) {
+    let size = 0;
+    for (const [t, delta] of [...g.deltas].sort(([a], [b]) => a - b)) {
+      if (t === capacities.length) continue;
+      const before = size;
+      size += delta;
+      g.peak = Math.max(g.peak, size);
+      updates[t].set(g.id, delta);
+      if (t === 0) {
+        for (const i of g.members.filter(i => elements[i].start === 0)) {
+          const e = elements[i];
+          g.events.push({timestep: 0, action: 'segment_snapshot', addr: e.addr, size: e.size,
+            before, after: size, context: context_for_element(e)});
+        }
+      } else {
+        const e = events[t - 1];
+        g.events.push({timestep: t, action: e.action, addr: e.addr, size: e.size,
+          before, after: size, context: context_for_event(e, t)});
+      }
+    }
+    g.stream ??= 'unknown';
+    g.context = g.expandable
+      ? `Inferred expandable address group ${g.id}, stream ${g.stream}, ` +
+        (g.pool == null ? 'pool_id unknown' : `pool_id (${g.pool.split(',').join(', ')})`) +
+        `, Peak mapped capacity: ${formatSize(g.peak)}.\n` +
+        'Grouped by compatible adjacent mappings and surviving lineage; virtual reservation identity is not recorded.\n' +
+        'Select a mapping event to inspect its own creation provenance.'
+      : context_for_element(elements[g.members[0]]);
+  }
+  const included = roots.map(g => options.stream == null || g.stream === String(options.stream));
+  const drawn = new Set(roots.filter(g => included[g.id]).sort((a, b) => b.peak - a.peak || a.id - b.id)
+    .slice(0, max_entries).map(g => g.id));
+  const sizes = Array(roots.length).fill(0);
+  const plots = new Map();
+  const shown_capacities = [];
+  const summarized_mem = {elem: 'summarized', timesteps: [], offsets: [], size: [], color: 0};
+  active = [];
+  let total = 0;
+  let previous_offset = 0;
+  let previous_size = 0;
+  for (let t = 0; t <= capacities.length; ++t) {
+    if (t < capacities.length) {
+      const added = [];
+      for (const [id, delta] of updates[t]) {
+        const before = sizes[id];
+        sizes[id] += delta;
+        if (included[id]) total += delta;
+        if (!drawn.has(id)) continue;
+        if (before === 0 && sizes[id] > 0) added.push(id);
+        if (before > 0 && sizes[id] === 0) {
+          const plot = plots.get(id);
+          plot.timesteps.push(t);
+          plot.offsets.push(plot.offsets.at(-1));
+          plot.size.push(before);
+        }
+      }
+      active = active.filter(id => sizes[id] > 0).concat(added).sort((a, b) =>
+        Number(roots[a].expandable) - Number(roots[b].expandable) || a - b);
+      shown_capacities.push(total);
+    }
+    let offset = 0;
+    for (const id of active) {
+      let plot = plots.get(id);
+      if (!plot) {
+        plot = {elem: id, timesteps: [t], offsets: [offset], size: [sizes[id]],
+          color: id, stream: roots[id].stream};
+        plots.set(id, plot);
+      } else if (t === capacities.length || plot.offsets.at(-1) !== offset || plot.size.at(-1) !== sizes[id]) {
+        plot.timesteps.push(t);
+        plot.offsets.push(plot.offsets.at(-1));
+        plot.size.push(plot.size.at(-1));
+        if (t < capacities.length) {
+          plot.timesteps.push(t);
+          plot.offsets.push(offset);
+          plot.size.push(sizes[id]);
+        }
+      }
+      offset += sizes[id];
+    }
+    if (t > 0) {
+      summarized_mem.timesteps.push(t);
+      summarized_mem.offsets.push(previous_offset);
+      summarized_mem.size.push(previous_size);
+    }
+    summarized_mem.timesteps.push(t);
+    summarized_mem.offsets.push(offset);
+    summarized_mem.size.push(total - offset);
+    previous_offset = offset;
+    previous_size = total - offset;
+  }
+  return {
+    max_size: shown_capacities.reduce((peak, size) => Math.max(peak, size), 0),
+    final_size: shown_capacities.at(-1), history_error,
+    max_at_time: shown_capacities, allocations_over_time: [...plots.values(), summarized_mem],
+    summarized_mem, elements_length: roots.filter(g => included[g.id]).length,
+    grouped_segments: true, has_expandable: true,
+    streams: [...new Set(roots.map(g => g.stream))].sort(),
+    context_for_id: id => roots[id].context,
+    segment_events_for_id: id => roots[id].events,
+    search_context_for_id: id => roots[id].search_context ??= roots[id].context + '\n' +
+      roots[id].members.map(i => formatAddr(elements[i])).join('\n') + '\n' +
+      roots[id].events.map(e => e.context).join('\n'),
+  };
+}
+
+function process_segment_data(snapshot, device, max_entries, segment_options = {}) {
+  const events = (snapshot.device_traces[device] ?? []).filter(e =>
+    ['segment_alloc', 'segment_free', 'segment_map', 'segment_unmap'].includes(e.action));
+  const segments = snapshot.segments.filter(s => s.device === device);
+  const elements = [];
+  let ranges = [];
+  let event_index = null;
+  let history_error;
+
+  function make_range(source, addr, size, start) {
+    if ((typeof addr !== 'bigint' && !Number.isSafeInteger(addr)) ||
+        !Number.isSafeInteger(size) || size <= 0) {
+      throw new SegmentHistoryError('Invalid address or size');
+    }
+    return {begin: BigInt(addr), end: BigInt(addr) + BigInt(size), source, start};
+  }
+
+  const final_ranges = segments.map(s => make_range({
+    action: 'segment_snapshot', addr: s.address, stream: s.stream,
+    segment_pool_id: s.segment_pool_id, is_expandable: s.is_expandable,
+    snapshot_frames: s.frames, version: s.version ?? 0,
+  }, s.address, s.total_size, 0));
+  const changes = [];
+
+  function compatible(a, b) {
+    for (const key of ['stream', 'segment_pool_id', 'is_expandable']) {
+      if (a[key] != null && b[key] != null && String(a[key]) !== String(b[key])) {
+        throw new SegmentHistoryError(`Conflicting ${key}`);
+      }
+    }
+  }
+
+  function add(range) {
+    if (ranges.some(r => r.begin < range.end && range.begin < r.end)) {
+      throw new SegmentHistoryError('Overlapping segment ranges');
+    }
+    ranges.push(range);
+    ranges.sort((a, b) => a.begin < b.begin ? -1 : a.begin > b.begin ? 1 : 0);
+  }
+
+  function remove(range, stop = null) {
+    const covered = ranges.filter(r => r.begin < range.end && range.begin < r.end);
+    if (range.source.is_expandable === false &&
+        (covered.length !== 1 || covered[0].begin !== range.begin || covered[0].end !== range.end)) {
+      throw new SegmentHistoryError('Ordinary segment must be removed whole');
+    }
+    let cursor = range.begin;
+    for (const r of covered) {
+      if (r.begin > cursor) break;
+      compatible(r.source, range.source);
+      for (const key of ['stream', 'segment_pool_id']) {
+        range.source[key] ??= r.source[key];
+      }
+      cursor = r.end < range.end ? r.end : range.end;
+    }
+    if (cursor !== range.end) {
+      throw new SegmentHistoryError('Unmapped range is not fully present');
+    }
+    const remaining = [];
+    for (const r of ranges) {
+      if (r.end <= range.begin || r.begin >= range.end) {
+        remaining.push(r);
+        continue;
+      }
+      const begin = r.begin > range.begin ? r.begin : range.begin;
+      const end = r.end < range.end ? r.end : range.end;
+      if (stop !== null) {
+        // Metadata may be inferred only through this continuous lifetime.
+        for (const key of ['stream', 'segment_pool_id']) {
+          r.source[key] ??= range.source[key];
+        }
+        elements.push({...r.source, addr: begin, size: Number(end - begin),
+          start: r.start, stop, version: r.source.version ?? 0});
+      }
+      if (r.begin < begin) remaining.push({...r, end: begin});
+      if (end < r.end) remaining.push({...r, begin: end});
+    }
+    ranges = remaining;
+  }
+
+  let capacities;
+  try {
+    for (let i = 0; i < events.length; ++i) {
+      event_index = i;
+      const e = events[i];
+      changes.push(make_range({
+        ...e, segment_pool_id: e.pool_id ?? e.segment_pool_id,
+        is_expandable: e.action === 'segment_map' || e.action === 'segment_unmap',
+      }, e.addr, e.size, 0));
+    }
+    event_index = null;
+    for (const r of final_ranges) add(r);
+    // Undo the retained suffix; reconstructed births have no creation stack.
+    for (let i = changes.length - 1; i >= 0; --i) {
+      event_index = i;
+      const r = changes[i];
+      if (r.source.action === 'segment_alloc' || r.source.action === 'segment_map') {
+        remove(r);
+      } else {
+        add({...r, source: {
+          action: 'segment_snapshot', stream: r.source.stream,
+          segment_pool_id: r.source.segment_pool_id,
+          is_expandable: r.source.is_expandable,
+        }});
+      }
+    }
+    capacities = [ranges.reduce((total, r) => total + Number(r.end - r.begin), 0)];
+    for (let i = 0; i < changes.length; ++i) {
+      event_index = i;
+      const r = changes[i];
+      const creating = r.source.action === 'segment_alloc' || r.source.action === 'segment_map';
+      if (creating) add({...r, start: i + 1});
+      else remove(r, i + 1);
+      capacities.push(capacities.at(-1) + (creating ? 1 : -1) * Number(r.end - r.begin));
+    }
+  } catch (error) {
+    if (!(error instanceof SegmentHistoryError)) throw error;
+    history_error = `${event_index === null ? 'Snapshot' : `Segment event ${event_index}`}: ${error.message}`;
+    ranges = final_ranges;
+    elements.length = 0;
+    capacities = [segments.reduce((total, s) => total + s.total_size, 0)];
+  }
+  for (const r of ranges) {
+    elements.push({...r.source, addr: r.begin, size: Number(r.end - r.begin),
+      start: r.start, stop: capacities.length, version: r.source.version ?? 0});
+  }
+
+  function context_for_element(e) {
+    const kind = e.is_expandable ? 'mapped range' : 'cached segment';
+    let text = `Addr: ${formatAddr(e)}, Size: ${formatSize(e.size)} ${kind}`;
+    const when = e.start === 0 ? 'at first observation' : 'after creation';
+    text += `, Cached capacity ${when}: ${formatSize(capacities[e.start])}`;
+    if (e.compile_context != null) text += `, Compile context: ${e.compile_context}`;
+    if (e.stream != null) text += `, stream ${e.stream}`;
+    text += e.segment_pool_id ? `, pool_id (${e.segment_pool_id.join(', ')})` : ', pool_id unknown';
+    if (Number.isFinite(e.time_us)) text += `, timestamp ${new Date(e.time_us / 1000)}`;
+    if (e.start === 0) {
+      text += history_error
+        ? '\nCreation provenance unavailable because recorded history cannot be reconciled.'
+        : '\nCreation event outside the retained history.';
+      if (e.snapshot_frames?.length) text += `\nSnapshot provenance:\n${format_frames(e.snapshot_frames)}`;
+    } else if (e.frames?.length) {
+      text += `\nCreation stack:\n${format_frames(e.frames)}`;
+    } else {
+      text += '\nCreation recorded; stack unavailable.';
+    }
+    for (const metadata of [format_user_metadata(e.user_metadata), format_annotations(e.annotations)]) {
+      if (metadata) text += `\n${metadata}`;
+    }
+    text += format_forward_frames(e.forward_frames);
+    return text;
+  }
+
+  function context_for_event(e, timestep) {
+    if (e.action === 'segment_map' || e.action === 'segment_alloc') {
+      return context_for_element({...e, start: timestep, version: e.version ?? 0,
+        segment_pool_id: e.pool_id ?? e.segment_pool_id,
+        is_expandable: e.action === 'segment_map'});
+    }
+    let text = `${e.action}: Addr: ${formatAddr({...e, version: e.version ?? 0})}, Size: ${formatSize(e.size)}`;
+    if (e.stream != null) text += `, stream ${e.stream}`;
+    const pool = e.pool_id ?? e.segment_pool_id;
+    text += pool ? `, pool_id (${pool.join(', ')})` : ', pool_id unknown';
+    text += e.frames?.length ? `\nRelease stack:\n${format_frames(e.frames)}` : '\nRelease stack unavailable.';
+    return text;
+  }
+
+  if (segment_options.grouped === true && elements.some(e => e.is_expandable)) {
+    return process_segment_groups(elements, capacities, events, max_entries, segment_options,
+      history_error, context_for_element, context_for_event);
+  }
+
+  const streams = [...new Set(elements.map(e => String(e.stream ?? 'unknown')))].sort();
+  const included = elements.map(e => segment_options.stream == null ||
+    String(e.stream ?? 'unknown') === String(segment_options.stream));
+  let shown_capacities = capacities;
+  if (segment_options.stream != null) {
+    const deltas = Array(capacities.length + 1).fill(0);
+    elements.forEach((e, i) => {
+      if (included[i]) {
+        deltas[e.start] += e.size;
+        deltas[e.stop] -= e.size;
+      }
+    });
+    let size = 0;
+    shown_capacities = capacities.map((_, t) => (size += deltas[t]));
+  }
+
+  const drawn = new Set(elements.map((e, i) => [e.size, i])
+    .filter(([, i]) => included[i]).sort(([a], [b]) => b - a)
+    .slice(0, max_entries).map(([, i]) => i));
+  const by_time = Array.from({length: capacities.length + 1}, () => ({add: [], remove: []}));
+  elements.forEach((e, i) => {
+    if (drawn.has(i)) {
+      by_time[e.start].add.push(i);
+      by_time[e.stop].remove.push(i);
+    }
+  });
+  const plots = new Map();
+  let active = [];
+  const summarized_mem = {elem: 'summarized', timesteps: [], offsets: [], size: [], color: 0};
+  let previous_offset = 0;
+  let previous_size = 0;
+  for (let t = 0; t <= capacities.length; ++t) {
+    const removing = new Set(by_time[t].remove);
+    for (const i of removing) {
+      const plot = plots.get(i);
+      plot.timesteps.push(t);
+      plot.offsets.push(plot.offsets.at(-1));
+    }
+    // All pieces of an unmap change at the same x coordinate.
+    active = active.filter(i => !removing.has(i)).concat(by_time[t].add);
+    let offset = 0;
+    for (const i of active) {
+      let plot = plots.get(i);
+      if (!plot) {
+        const color = snapshot.categories.length > 0
+          ? snapshot.categories.indexOf(elements[i].category || 'unknown') : i;
+        plot = {elem: i, timesteps: [t], offsets: [offset], size: elements[i].size, color};
+        plots.set(i, plot);
+      } else if (plot.offsets.at(-1) !== offset) {
+        plot.timesteps.push(t, t);
+        plot.offsets.push(plot.offsets.at(-1), offset);
+      }
+      offset += elements[i].size;
+    }
+    const total = shown_capacities[Math.min(t, capacities.length - 1)];
+    if (t === capacities.length) {
+      offset = previous_offset;
+    }
+    const size = total - offset;
+    if (t > 0) {
+      summarized_mem.timesteps.push(t);
+      summarized_mem.offsets.push(previous_offset);
+      summarized_mem.size.push(previous_size);
+    }
+    summarized_mem.timesteps.push(t);
+    summarized_mem.offsets.push(offset);
+    summarized_mem.size.push(size);
+    previous_offset = offset;
+    previous_size = size;
+  }
+  return {
+    max_size: shown_capacities.reduce((peak, size) => Math.max(peak, size), 0),
+    final_size: shown_capacities.at(-1), history_error,
+    max_at_time: shown_capacities, allocations_over_time: [...plots.values(), summarized_mem],
+    summarized_mem, elements_length: included.filter(Boolean).length,
+    streams, grouped_segments: false, has_expandable: elements.some(e => e.is_expandable),
+    context_for_id: id => context_for_element(elements[id]),
+    segment_events_for_id: id => {
+      const e = elements[id];
+      const creation = e.start === 0 ? e : events[e.start - 1];
+      const result = [{timestep: e.start, action: creation.action, addr: creation.addr, size: creation.size,
+        before: 0, after: e.size,
+        context: e.start === 0 ? context_for_element(e) : context_for_event(creation, e.start)}];
+      if (e.stop < capacities.length) {
+        const event = events[e.stop - 1];
+        result.push({timestep: e.stop, action: event.action, addr: event.addr, size: event.size,
+          before: e.size, after: 0, context: context_for_event(event, e.stop)});
+      }
+      return result;
+    },
+  };
+}
+
 /**
  * Transforms a memory snapshot into a stacked-area timeline suitable for
  * rendering by MemoryPlot. This is the core data-processing function behind
@@ -320,9 +799,13 @@ function format_frames(frames) {
  *
  * 5. PRIVATE POOL ENVELOPES (include_private_inactive=true): Each private pool
  *    (e.g. FSDP's MemPool) gets a single gray "envelope" rectangle whose
- *    height is the pool's high-water mark. Active blocks within the pool are
+ *    height is the pool's reserved memory (from segment_map/segment_unmap
+ *    events and the segment snapshot). Active blocks within the pool are
  *    rendered as colored stripes inside the envelope. The envelope only grows
- *    (never shrinks), representing reserved capacity.
+ *    (never shrinks), representing the pool's actual GPU memory footprint.
+ *    This correctly handles fragmentation: when a large alloc triggers a
+ *    segment_map because existing free blocks aren't contiguous, the envelope
+ *    grows by the reserved amount, not just the active allocation.
  *
  *    Initially-allocated private pool blocks are PRE-LOADED into pool state
  *    so that when their free event appears in the trace, they are correctly
@@ -338,7 +821,7 @@ function format_frames(frames) {
  * @param {Object} snapshot - Memory snapshot from torch.cuda.memory._snapshot().
  * @param {Object[]} snapshot.segments - Current allocator segment state.
  * @param {Object[][]} snapshot.device_traces - Per-device arrays of trace events.
- *   Each event has {action, addr, size, frames, stream, segment_pool_id?, ...}.
+ *   Each event has {action, addr, size, frames, stream, pool_id?, ...}.
  * @param {string[]} snapshot.categories - Category names for color-coding.
  * @param {number} device - Device index into snapshot.device_traces.
  * @param {boolean} plot_segments - If true, plot segment-level (cudaMalloc)
@@ -357,10 +840,8 @@ function format_frames(frames) {
  *   elements_length: number,
  *   context_for_id: function(number): string
  * }}
- *   - max_size: peak total memory observed during the action replay (used for
- *     y-axis scaling). Note: this is only updated inside the action loop, so
- *     the initial state from initially_allocated may not be reflected here
- *     (use max_at_time for the true peak).
+ *   - max_size: peak total memory, including initial and summarized allocations
+ *     (used for y-axis scaling).
  *   - allocations_over_time: array of stacked-area data objects, each with
  *     {elem, timesteps[], offsets[], size, color}.
  *   - max_at_time: total memory at each timestep (for minimap rendering).
@@ -369,7 +850,8 @@ function format_frames(frames) {
  *   - context_for_id: function that returns a human-readable description
  *     string for a given element index (address, size, stack trace, etc.).
  */
-function process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive = false) {
+function process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive = false, segment_options = {}) {
+  if (plot_segments) return process_segment_data(snapshot, device, max_entries, segment_options);
   const elements = [];
   // Contains two types of blocks
   // 1. free without alloc in trace
@@ -408,12 +890,25 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   const [free, free_completed] = plot_segments
     ? ['segment_free', 'segment_free']
     : ['free', 'free_completed'];
+  // pool_segment_events tracks segment_map/segment_unmap events for private
+  // pools, recording their position relative to the actions list. This lets
+  // the Phase 3 replay grow pool envelopes based on actual reserved memory
+  // (segments) rather than just active allocations.
+  const pool_segment_events = [];
   for (const e of snapshot.device_traces[device]) {
     switch (e.action) {
       case alloc:
-        elements.push(e);
+        elements.push({...e, annotations: [...(e.annotations ?? [])]});
         addr_to_alloc[e.addr] = elements.length - 1;
         actions.push(elements.length - 1);
+        break;
+      case 'annotate':
+        // Post-facto annotation (torch.cuda.memory._annotate_memory):
+        // attach to the live element for this address, if we saw its alloc.
+        if (!plot_segments && e.addr in addr_to_alloc) {
+          const elem = elements[addr_to_alloc[e.addr]];
+          (elem.annotations ??= []).push(e.user_metadata);
+        }
         break;
       case free:
       case free_completed:
@@ -425,13 +920,26 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           // Unmatched free: alloc happened before recording (or was evicted
           // from the ring buffer). Create a new element from the free event;
           // its stack trace will show the free site, not the alloc site.
-          elements.push(e);
+          elements.push({...e, annotations: [...(e.annotations ?? [])]});
           initially_allocated.push(elements.length - 1);
           actions.push(elements.length - 1);
         }
         break;
       default:
         break;
+    }
+    if (include_private_inactive &&
+        (e.action === 'segment_alloc' || e.action === 'segment_free' ||
+         e.action === 'segment_map' || e.action === 'segment_unmap')) {
+      const pid = e.pool_id ?? e.segment_pool_id ?? find_pool_id(e.addr);
+      if (isPrivatePoolId(pid)) {
+        const is_add = e.action === 'segment_alloc' || e.action === 'segment_map';
+        pool_segment_events.push({
+          position: actions.length,
+          delta: is_add ? e.size : -e.size,
+          pool_key: format_pool_key(pid, e.stream ?? 0),
+        });
+      }
     }
   }
 
@@ -474,10 +982,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
 
-  // Resolve pool IDs for trace elements by looking up which segment they fall in
+  // Resolve pool IDs from trace events, with address lookup for legacy snapshots.
   for (const elem of elements) {
     if (!elem.segment_pool_id) {
-      elem.segment_pool_id = find_pool_id(elem.addr);
+      elem.segment_pool_id = elem.pool_id ?? find_pool_id(elem.addr);
     }
   }
 
@@ -503,7 +1011,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   const summarized_mem = {
     elem: 'summarized',
     timesteps: [],
-    offsets: [total_mem],
+    offsets: [],
     size: [],
     color: 0,
   };
@@ -511,17 +1019,21 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
   // Record the current memory state and advance time by n steps
   function advance(n) {
+    const total = total_mem + total_summarized_mem;
+    max_size = Math.max(max_size, total);
     summarized_mem.timesteps.push(timestep);
     summarized_mem.offsets.push(total_mem);
     summarized_mem.size.push(total_summarized_mem);
     timestep += n;
     for (let i = 0; i < n; i++) {
-      max_at_time.push(total_mem + total_summarized_mem);
+      max_at_time.push(total);
     }
   }
 
-  // Only render the largest max_entries elements individually;
-  // everything else goes into the summarized band
+  // Only render the largest max_entries elements individually (across all
+  // pools). Pools with larger allocations naturally get more of the budget.
+  // Remaining pool elements go into per-pool summarized stripes; remaining
+  // non-pool elements go into the global summarized band.
   const sizes = elements
     .map((x, i) => [x.size, i])
     .sort(([x, _xi], [y, _yi]) => y - x);
@@ -560,17 +1072,22 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   const pools = {};
   const pool_active_elems = {};
 
+  function format_pool_key(pid, stream) {
+    return `${pid[0]},${pid[1]},s${stream}`;
+  }
+
   function get_pool_key(elem_idx) {
     const pid = elements[elem_idx].segment_pool_id;
     if (!isPrivatePoolId(pid)) return null;
-    const stream = elements[elem_idx].stream;
-    return `${pid[0]},${pid[1]},s${stream}`;
+    return format_pool_key(pid, elements[elem_idx].stream);
   }
 
   function get_or_create_pool(pool_key) {
     if (!(pool_key in pools)) {
       pools[pool_key] = {
-        max: 0, active: 0, envelope_data: null,
+        max: 0, active: 0, reserved: 0,
+        drawn_active: 0, summarized_active: 0,
+        envelope_data: null, summarized_data: null,
         block_stack: [],  // [{elem, size, inner_offset, stripe_data}]
       };
     }
@@ -591,6 +1108,38 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       s.offsets.push(s.offsets.at(-1));
       s.timesteps.push(timestep + 3);
       s.offsets.push(s.offsets.at(-1) + delta);
+    }
+    if (pool.summarized_data) {
+      const sd = pool.summarized_data;
+      sd.timesteps.push(timestep);
+      sd.offsets.push(sd.offsets.at(-1));
+      sd.size.push(sd.size.at(-1));
+      sd.timesteps.push(timestep + 3);
+      sd.offsets.push(sd.offsets.at(-1) + delta);
+      sd.size.push(sd.size.at(-1));
+    }
+  }
+
+  // Update or create the per-pool summarized stripe. Sits on top of drawn
+  // stripes (offset = envelope base + drawn_active), size = summarized_active.
+  function update_pool_summary(pool, ts) {
+    if (!pool.envelope_data) return;
+    const base = pool.envelope_data.offsets.at(-1) + pool.drawn_active;
+    if (pool.summarized_data === null) {
+      pool.summarized_data = {
+        elem: 'summarized',
+        timesteps: [ts],
+        offsets: [base],
+        size: [pool.summarized_active],
+        color: 0,
+        opacity: 0.3,
+      };
+      data.push(pool.summarized_data);
+    } else {
+      const sd = pool.summarized_data;
+      sd.timesteps.push(ts);
+      sd.offsets.push(base);
+      sd.size.push(pool.summarized_active);
     }
   }
 
@@ -615,12 +1164,25 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
 
-  // Grow a pool envelope to accommodate new_active bytes.
-  // The envelope only grows (never shrinks) — it represents reserved capacity.
-  function grow_pool_envelope(pool, pool_key, new_active) {
-    if (new_active <= pool.max) return;
-    const delta = new_active - pool.max;
-    pool.max = new_active;
+  // Shift all elements stacked above a pool envelope by delta (no animation).
+  // Used during timestep-0 initialization when there are no transition frames.
+  function shift_above_pool_no_anim(pool_key, delta) {
+    const pidx = current.indexOf(`pool:${pool_key}`);
+    if (pidx >= 0) {
+      for (let j = pidx + 1; j < current.length; j++) {
+        const e = current_data[j];
+        e.offsets[e.offsets.length - 1] += delta;
+      }
+    }
+  }
+
+  // Grow a pool envelope to accommodate new_size bytes (the larger of active
+  // allocations and reserved segment memory). The envelope only grows (never
+  // shrinks) — it represents the pool's actual GPU memory footprint.
+  function grow_pool_envelope(pool, pool_key, new_size) {
+    if (new_size <= pool.max) return;
+    const delta = new_size - pool.max;
+    pool.max = new_size;
     const env = pool.envelope_data;
     env.timesteps.push(timestep);
     env.offsets.push(env.offsets.at(-1));
@@ -637,16 +1199,28 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   }
 
   // --- Process initially_allocated elements ---
-  // Private pool blocks are pre-loaded into pool state at timestep 0 (no
-  // animation) so that their envelope starts at the correct initial size
-  // and free events are correctly recognized as frees.
+  // These are blocks that existed before the trace window started. They come
+  // from two sources:
+  //   1. Unmatched free events (free_completed without a prior alloc in trace)
+  //   2. active_allocated blocks in the segment snapshot with no trace event
+  //
+  // For private pool blocks: pre-load into pool state at timestep 0 (no
+  // animation). This serves two purposes:
+  //   - The envelope starts at the correct initial size
+  //   - When the free event fires during replay, it's recognized as a free
+  //     (not misinterpreted as a new allocation)
+  //
+  // For non-pool blocks: added to the global stack (draw_elem) or global
+  // summarized band.
   for (const elem of initially_allocated) {
     if (include_private_inactive && get_pool_key(elem)) {
       const pk = get_pool_key(elem);
       const size = elements[elem].size;
       const pool = get_or_create_pool(pk);
+      // Mark as active so the replay loop recognizes the free event
       pool_active_elems[elem] = pk;
 
+      // Create pool envelope on first encounter
       if (pool.envelope_data === null) {
         const env = {
           elem: `pool:${pk}`,
@@ -656,43 +1230,48 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           color: 9,
         };
         pool.envelope_data = env;
+        // Add to the global stack so elements above it shift when it grows
         current.push(`pool:${pk}`);
         current_data.push(env);
         data.push(env);
       }
 
-      const inner_offset = pool.active;
       pool.active += size;
 
-      // Grow envelope directly without animation — these blocks pre-exist
-      if (pool.active > pool.max) {
-        const delta = pool.active - pool.max;
-        pool.max = pool.active;
+      // Grow envelope to fit: use max(active, reserved) because active can
+      // exceed reserved when block sizes are stale (e.g. segment shrank via
+      // unmap after the block was allocated).
+      const init_target = Math.max(pool.active, pool.reserved);
+      if (init_target > pool.max) {
+        const delta = init_target - pool.max;
+        pool.max = init_target;
         const env = pool.envelope_data;
         env.size[env.size.length - 1] = pool.max;
         total_mem += delta;
-        const pidx = current.indexOf(`pool:${pk}`);
-        if (pidx >= 0) {
-          for (let j = pidx + 1; j < current.length; j++) {
-            const e = current_data[j];
-            e.offsets[e.offsets.length - 1] += delta;
-          }
-        }
+        // Shift all elements stacked above this pool's envelope up by delta
+        shift_above_pool_no_anim(pk, delta);
       }
 
-      const stripe = {
-        elem,
-        timesteps: [0],
-        offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
-        size,
-        color: elem_color(elem),
-        opacity: 0.5,
-        ghost: elements[elem].ghost || false,
-      };
-      pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
-      data.push(stripe);
+      if (elem in draw_elem) {
+        const inner_offset = pool.drawn_active;
+        pool.drawn_active += size;
+        const stripe = {
+          elem,
+          timesteps: [0],
+          offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
+          size,
+          color: elem_color(elem),
+          opacity: 0.5,
+          ghost: elements[elem].ghost || false,
+        };
+        pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
+        data.push(stripe);
+      } else {
+        pool.summarized_active += size;
+      }
       continue;
     }
+    // Non-pool element: render individually or add to global summarized band
     if (elem in draw_elem) {
       add_allocation(elem);
     } else {
@@ -704,6 +1283,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   // Fix up pool stripe offsets — stripes are not in current_data so they
   // don't get shifted when other pools grow during initially_allocated
   // processing. Recompute from the envelope's final offset.
+  // Also create per-pool summarized data for initial non-drawn elements.
   for (const pk in pools) {
     const p = pools[pk];
     if (!p.envelope_data) continue;
@@ -714,10 +1294,95 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         s.offsets[i] = env_offset + block.inner_offset;
       }
     }
+    if (p.summarized_active > 0) {
+      p.summarized_data = {
+        elem: 'summarized',
+        timesteps: [0],
+        offsets: [env_offset + p.drawn_active],
+        size: [p.summarized_active],
+        color: 0,
+        opacity: 0.3,
+      };
+      data.push(p.summarized_data);
+    }
+  }
+
+  // --- Initialize pool reserved memory from snapshot ---
+  // The envelope height for each private pool should reflect its reserved
+  // (segment) memory, not just active allocations. We compute the initial
+  // reserved value so that replaying segment_map/segment_unmap events from
+  // the trace arrives at the correct final value (the snapshot total).
+  //
+  // Formula: initial = snapshot_total - net_trace_delta
+  //   - snapshot_total: sum of segment total_size for this pool (ground truth
+  //     at snapshot time)
+  //   - net_trace_delta: sum of segment_map sizes minus segment_unmap sizes
+  //     for this pool in the trace
+  //
+  // This works regardless of trace truncation (ring buffer overflow): the
+  // initial value represents the reserved memory at the start of the trace
+  // window, not at program start. If there are no segment events in the
+  // trace for a pool, net_trace_delta is 0 and initial = snapshot_total.
+  if (include_private_inactive) {
+    const snapshot_reserved = {};
+    for (const seg of device_segments) {
+      const pid = seg.segment_pool_id;
+      if (isPrivatePoolId(pid)) {
+        const pk = format_pool_key(pid, seg.stream ?? 0);
+        snapshot_reserved[pk] = (snapshot_reserved[pk] || 0) + seg.total_size;
+      }
+    }
+    const net_from_trace = {};
+    for (const se of pool_segment_events) {
+      net_from_trace[se.pool_key] = (net_from_trace[se.pool_key] || 0) + se.delta;
+    }
+    for (const pk in snapshot_reserved) {
+      const pool = get_or_create_pool(pk);
+      pool.reserved = snapshot_reserved[pk] - (net_from_trace[pk] || 0);
+      // Grow envelope to initial reserved (no animation — pre-existing)
+      if (pool.reserved > pool.max && pool.envelope_data) {
+        const delta = pool.reserved - pool.max;
+        pool.max = pool.reserved;
+        const env = pool.envelope_data;
+        env.size[env.size.length - 1] = pool.max;
+        total_mem += delta;
+        shift_above_pool_no_anim(pk, delta);
+      }
+    }
+    // Fix up pool stripe and summary offsets after reserved-based envelope growth.
+    for (const pk in pools) {
+      const p = pools[pk];
+      if (!p.envelope_data) continue;
+      const env_offset = p.envelope_data.offsets.at(-1);
+      for (const block of p.block_stack) {
+        const s = block.stripe_data;
+        for (let i = 0; i < s.offsets.length; i++) {
+          s.offsets[i] = env_offset + block.inner_offset;
+        }
+      }
+      if (p.summarized_data) {
+        p.summarized_data.offsets.fill(env_offset + p.drawn_active);
+      }
+    }
   }
 
   // --- Replay alloc/free actions to build the timeline ---
-  for (const elem of actions) {
+  let seg_event_idx = 0;
+  for (let action_i = 0; action_i < actions.length; action_i++) {
+    // Process segment events that occurred at or before this action position.
+    // These grow pool envelopes based on actual reserved memory changes.
+    while (seg_event_idx < pool_segment_events.length &&
+           pool_segment_events[seg_event_idx].position <= action_i) {
+      const se = pool_segment_events[seg_event_idx];
+      const pool = get_or_create_pool(se.pool_key);
+      pool.reserved += se.delta;
+      if (pool.reserved > pool.max && pool.envelope_data) {
+        grow_pool_envelope(pool, se.pool_key, pool.reserved);
+      }
+      seg_event_idx++;
+    }
+
+    const elem = actions[action_i];
     const size = elements[elem].size;
     const pool_key = include_private_inactive ? get_pool_key(elem) : null;
 
@@ -742,23 +1407,34 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           data.push(env);
         }
 
-        const inner_offset = pool.active;
         pool.active += size;
 
-        if (pool.active > pool.max) {
-          grow_pool_envelope(pool, pool_key, pool.active);
+        const envelope_target = Math.max(pool.active, pool.reserved);
+        if (envelope_target > pool.max) {
+          grow_pool_envelope(pool, pool_key, envelope_target);
         }
 
-        const stripe = {
-          elem,
-          timesteps: [timestep],
-          offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
-          size,
-          color: elem_color(elem),
-          opacity: 0.5,
-        };
-        pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
-        data.push(stripe);
+        if (elem in draw_elem) {
+          const inner_offset = pool.drawn_active;
+          pool.drawn_active += size;
+          const stripe = {
+            elem,
+            timesteps: [timestep],
+            offsets: [pool.envelope_data.offsets.at(-1) + inner_offset],
+            size,
+            color: elem_color(elem),
+            opacity: 0.5,
+          };
+          pool.block_stack.push({elem, size, inner_offset, stripe_data: stripe});
+          data.push(stripe);
+          // Shift summarized stripe up (it sits on top of drawn stripes)
+          if (pool.summarized_data) {
+            update_pool_summary(pool, timestep);
+          }
+        } else {
+          pool.summarized_active += size;
+          update_pool_summary(pool, timestep);
+        }
         advance(1);
         elements[elem].max_allocated_mem = total_mem + total_summarized_mem;
       } else {
@@ -767,6 +1443,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         const pool = pools[pool_key];
         const block_idx = pool.block_stack.findIndex(b => b.elem === elem);
         if (block_idx >= 0) {
+          // Drawn stripe freed
           advance(1);
           const block = pool.block_stack[block_idx];
           block.stripe_data.timesteps.push(timestep);
@@ -774,8 +1451,11 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
           pool.block_stack.splice(block_idx, 1);
           pool.active -= size;
+          pool.drawn_active -= size;
 
-          if (block_idx < pool.block_stack.length) {
+          // Shift drawn stripes above and the summarized stripe down
+          const need_shift = block_idx < pool.block_stack.length || pool.summarized_data;
+          if (need_shift) {
             for (let j = block_idx; j < pool.block_stack.length; j++) {
               const b = pool.block_stack[j];
               b.inner_offset -= size;
@@ -785,15 +1465,20 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
               s.timesteps.push(timestep + 3);
               s.offsets.push(pool.envelope_data.offsets.at(-1) + b.inner_offset);
             }
+            if (pool.summarized_data) {
+              update_pool_summary(pool, timestep);
+            }
             advance(3);
           }
         } else {
+          // Non-drawn element freed — summarized stripe shrinks on top
           pool.active -= size;
+          pool.summarized_active -= size;
+          update_pool_summary(pool, timestep);
           advance(1);
         }
         delete pool_active_elems[elem];
       }
-      max_size = Math.max(total_mem + total_summarized_mem, max_size);
       continue;
     }
 
@@ -831,7 +1516,17 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       }
       total_mem -= size;
     }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
+  }
+
+  // Process any remaining segment events after the last action
+  while (seg_event_idx < pool_segment_events.length) {
+    const se = pool_segment_events[seg_event_idx];
+    const pool = get_or_create_pool(se.pool_key);
+    pool.reserved += se.delta;
+    if (pool.reserved > pool.max && pool.envelope_data) {
+      grow_pool_envelope(pool, se.pool_key, pool.reserved);
+    }
+    seg_event_idx++;
   }
 
   // --- Finalize: close all still-active elements ---
@@ -848,7 +1543,16 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       s.timesteps.push(timestep);
       s.offsets.push(s.offsets.at(-1));
     }
+    if (pools[pk].summarized_data) {
+      const sd = pools[pk].summarized_data;
+      sd.timesteps.push(timestep);
+      sd.offsets.push(sd.offsets.at(-1));
+      sd.size.push(sd.size.at(-1));
+    }
   }
+  summarized_mem.timesteps.push(timestep);
+  summarized_mem.offsets.push(total_mem);
+  summarized_mem.size.push(total_summarized_mem);
   data.push(summarized_mem);
 
   return {
@@ -890,6 +1594,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       if (user_metadata_str) {
         text = `${text}\n${user_metadata_str}`;
       }
+      const annotations_str = format_annotations(elem.annotations);
+      if (annotations_str) {
+        text = `${text}\n${annotations_str}`;
+      }
       text = `${text}\n${format_frames(elem.frames)}`;
       text = `${text}${format_forward_frames(elem.forward_frames)}`;
       return text;
@@ -899,4 +1607,4 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
 export { process_alloc_data, isPrivatePoolId, formatSize, formatAddr,
          elideRepeats, frameFilter, format_user_metadata,
-         format_forward_frames, format_frames };
+         format_annotations, format_forward_frames, format_frames };

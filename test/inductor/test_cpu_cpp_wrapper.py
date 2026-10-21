@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import has_cpp_wrapper_for_device, HAS_CPU
 
 
 try:
@@ -45,6 +45,7 @@ RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
     and not IS_MACOS
+    and has_cpp_wrapper_for_device("cpu")
 )
 
 
@@ -280,6 +281,9 @@ if RUN_CPU:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_codegen_int_array_var_cache", "", test_cpu_repro.CPUReproTests()
+        ),
         BaseTest("test_scalar_input"),
         BaseTest("test_scalar_output"),
         BaseTest("test_scaled_dot_product_attention"),

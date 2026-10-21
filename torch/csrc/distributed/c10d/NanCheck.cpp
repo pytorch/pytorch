@@ -24,7 +24,7 @@ void check_for_nan_cpu(const at::Tensor& tensor) {
       tensor.scalar_type(),
       "check_for_nan_cpu",
       [&] {
-        auto* data = tensor.data_ptr<scalar_t>();
+        auto* data = tensor.const_data_ptr<scalar_t>();
         auto numel = tensor.numel();
         std::atomic<bool> found{false};
         at::parallel_for(0, numel, 1024, [&](int64_t begin, int64_t end) {

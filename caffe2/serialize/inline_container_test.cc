@@ -8,6 +8,7 @@
 #include <c10/util/Logging.h>
 #include "c10/core/CPUAllocator.h"
 #include "c10/util/irange.h"
+#include "caffe2/serialize/in_memory_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 
 namespace caffe2 {
@@ -49,7 +50,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -144,7 +145,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -231,7 +232,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output2.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -292,7 +293,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output3.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -384,7 +385,7 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
   auto writer_serialization_id = writer.serializationId();
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output4.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -425,7 +426,7 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
       {"pytorch.stream.writer.metadata",
        {{"serialization_id", writer.serializationId()},
         {"file_name", "archive"},
-        {"file_size", str(oss.str().length())}}},
+        {"file_size", str(std::move(oss).str().length())}}},
       {"pytorch.stream.reader.metadata",
        {{"serialization_id", writer.serializationId()},
         {"file_name", "archive"},
@@ -502,7 +503,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoadWithAllocator) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -577,7 +578,7 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreadsWithAllocator) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   const char* file_name = "output.zip";
   std::ofstream foo(file_name);
   foo.write(the_file.c_str(), the_file.size());
@@ -667,7 +668,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   writer.writeEndOfFile();
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
-  std::string the_file = oss.str();
+  std::string the_file = std::move(oss).str();
   std::ofstream foo(fileName, std::ios::binary);
   foo.write(the_file.c_str(), the_file.size());
   foo.close();
@@ -688,6 +689,34 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   ASSERT_EQ(totalReadSize, tensorDataSizeInBytes);
   // clean up
   remove(fileName);
+}
+
+TEST(MemoryReadAdapterTest, ClampsReadsToBufferSize) {
+  constexpr size_t kBufSize = 64;
+  std::vector<uint8_t> buf(kBufSize, 0xAA);
+  MemoryReadAdapter adapter(buf.data(), static_cast<off_t>(kBufSize));
+  ASSERT_EQ(adapter.size(), kBufSize);
+
+  std::array<uint8_t, 32> out{};
+
+  // pos straddles end: read starts at 48, only 16 bytes available.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(48, out.data(), out.size()), 16u);
+  for (size_t i = 0; i < 16; ++i) {
+    EXPECT_EQ(out[i], 0xAA);
+  }
+
+  // pos at end: zero bytes available.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(kBufSize, out.data(), out.size()), 0u);
+
+  // pos past end: still zero; no OOB memcpy.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(kBufSize + 1024, out.data(), out.size()), 0u);
+
+  // In-bounds read returns full count.
+  out.fill(0);
+  EXPECT_EQ(adapter.read(0, out.data(), out.size()), out.size());
 }
 
 } // namespace

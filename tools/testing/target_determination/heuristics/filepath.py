@@ -4,7 +4,6 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
-from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
@@ -112,15 +111,10 @@ class Filepath(HeuristicInterface):
     # Heuristic based on folders in the file path.  Takes each folder of each
     # changed file and attempts to find matches based on those folders
     def __init__(self, **kwargs: dict[str, Any]) -> None:
-        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
-        try:
-            changed_files = query_changed_files()
-        except Exception as e:
-            warn(f"Can't query changed test files due to {e}")
-            changed_files = []
+        changed_files = query_changed_files()
 
         # If only documentation files (.rst, .md) were modified, skip all tests
         if is_docs_only_change(changed_files):

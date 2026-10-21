@@ -3,12 +3,16 @@
 import io
 import os
 import sys
+import unittest
 from pathlib import Path
 from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
+from torch.testing._internal.common_cuda import SM120OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
     raise_on_run_directly,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -714,18 +718,20 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
+    @unittest.skipIf(
+        IS_WINDOWS and SM120OrLater,
+        "Process crash in PyTorchStreamWriter on SM120+ Windows",
+    )
     @skipIfTorchDynamo("too slow")
+    # 60GB was profiled as the safe figure to run this test. The check used to be
+    # inline against psutil.virtual_memory().available, which reports the host
+    # rather than the cgroup, so on a memory-capped CI container it admitted the
+    # test and the allocation below was OOM-killed instead of skipped.
+    @largeTensorTest("60GB", "cpu")
     def test_save_load_large_string_attribute(self):
         """
         Check if the model with string > 4GB can be loaded.
         """
-        import psutil
-
-        if psutil.virtual_memory().available < 60 * 1024 * 1024 * 1024:
-            # Profiled the test execution, and got this number to be safe to run the test
-            self.skipTest(
-                "Doesn't have enough memory to run test_save_load_large_string_attribute"
-            )
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:

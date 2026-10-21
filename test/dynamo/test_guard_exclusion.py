@@ -2,7 +2,8 @@
 import torch
 import torch._dynamo
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class GraphTracker:
@@ -31,9 +32,10 @@ class GraphTracker:
         self.call_log.clear()
 
 
-@skipIfTorchDynamo("uses custom backend incompatible with PYTORCH_TEST_WITH_DYNAMO")
 @torch._dynamo.config.patch(automatic_dynamic_exclusion_guard=True)
 class TestGuardExclusion(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()

@@ -3,15 +3,15 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/StorageMaterializer.h>
 #include <c10/core/SymInt.h>
-#include <c10/core/impl/COW.h>
-#include <c10/core/impl/COWDeleter.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstddef>
+#include <optional>
 #include <utility>
 
 namespace c10 {
@@ -20,11 +20,21 @@ namespace c10 {
 C10_API void warnDeprecatedDataPtr();
 
 // Used in StorageImpl to store extra metadata.
-// Currently used only for storing a custom error message
-// used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+  // Pointer extraction may materialize without ordering previous readers.
+  // Retain their allocation until completion or storage release. Lazy cloning
+  // falls back to an eager copy while this reference is present.
+  std::optional<DataPtr> cow_retired_data;
 };
+
+namespace impl::cow {
+C10_API bool has_simple_data_ptr(const StorageImpl& storage);
+C10_API void materialize_cow(StorageImpl* storage);
+C10_API void check_cow_read(const StorageImpl* storage);
+C10_API void record_done(StorageImpl& storage);
+C10_API intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage);
+} // namespace impl::cow
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -95,6 +105,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   void reset() {
     data_ptr_.clear();
+    clear_materializer();
+    if (extra_meta_) {
+      extra_meta_->cow_retired_data.reset();
+    }
     size_bytes_ = 0;
     size_bytes_is_heap_allocated_ = false;
   }
@@ -103,6 +117,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
+    clear_materializer();
+    if (extra_meta_) {
+      extra_meta_->cow_retired_data.reset();
+    }
   }
 
   void incref_pyobject() const noexcept final;
@@ -139,8 +157,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const at::DataPtr& data_ptr() const {
-    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
-      throw_data_ptr_access_error();
+    if (C10_UNLIKELY(has_immutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
+      impl::cow::check_cow_read(this);
     }
     return data_ptr_;
   }
@@ -156,7 +177,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       if (warn_deprecated_on_mutable_data_ptr_) {
         warnDeprecatedDataPtr();
       }
-      maybe_materialize_cow();
+      maybe_materialize();
     }
     return data_ptr_;
   }
@@ -168,20 +189,21 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    // We need to materialize the old COW DataPtr because it is
+    // We need to materialize the old data because it is
     // being returned as mutable.
-    maybe_materialize_cow();
-    return set_data_ptr_no_materialize_cow(std::move(data_ptr));
+    maybe_materialize();
+    return set_data_ptr_no_materialize(std::move(data_ptr));
   }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
-    refresh_has_data_ptr_check();
+    // The materializer belongs to the old allocation.
+    clear_materializer();
   }
 
   void swap_data_ptr(StorageImpl& other) {
-    maybe_materialize_cow();
-    other.maybe_materialize_cow();
+    maybe_materialize();
+    other.maybe_materialize();
     std::swap(data_ptr_, other.data_ptr_);
     std::swap(size_bytes_, other.size_bytes_);
     std::swap(
@@ -198,10 +220,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const void* data() const {
-    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
-      throw_data_ptr_access_error();
-    }
-    return data_ptr_.get();
+    return data_ptr().get();
   }
 
   void* mutable_data() {
@@ -215,7 +234,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       if (warn_deprecated_on_mutable_data_ptr_) {
         warnDeprecatedDataPtr();
       }
-      maybe_materialize_cow();
+      maybe_materialize();
     }
     return data_ptr_.mutable_get();
   }
@@ -270,6 +289,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::DataPtr&& data_ptr,
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
+    clear_materializer();
     size_bytes_ = static_cast<int64_t>(size_bytes);
     size_bytes_is_heap_allocated_ = false;
     allocator_ = nullptr;
@@ -328,13 +348,48 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     refresh_has_data_ptr_check();
   }
 
- protected:
-  // materialize_cow_storage needs to call set_data_ptr_no_materlize_cow
-  friend void c10::impl::cow::materialize_cow_storage(StorageImpl& storage);
+  // One materializer at a time.
+  void set_materializer(MaterializeFn fn) {
+    TORCH_INTERNAL_ASSERT(
+        materialize_fn_ == nullptr,
+        "Cannot set materializer: a materializer is already active on this storage.");
+    materialize_fn_ = fn;
+    refresh_has_data_ptr_check();
+  }
 
-  // Returns the previous data_ptr. If the old data_ptr was COW,
-  // this avoids materializing it
-  at::DataPtr set_data_ptr_no_materialize_cow(at::DataPtr&& data_ptr) {
+  void clear_materializer() {
+    materialize_fn_ = nullptr;
+    refresh_has_data_ptr_check();
+  }
+
+  bool has_materializer() const {
+    return materialize_fn_ != nullptr;
+  }
+
+  // Whether data_ptr()/data() (the immutable accessors) would throw. Lets
+  // callers query without a try/catch.
+  bool throw_on_immutable_data_ptr() const {
+    return throw_on_immutable_data_ptr_;
+  }
+
+  // Whether mutable_data_ptr()/mutable_data() would throw specifically because
+  // of the mutable-only check. Does not include the immutable case (query that
+  // separately) nor materializer hooks, which materialize rather than throw.
+  bool throw_on_mutable_data_ptr() const {
+    return throw_on_mutable_data_ptr_;
+  }
+
+ protected:
+  friend bool c10::impl::cow::has_simple_data_ptr(const StorageImpl&);
+  friend void c10::impl::cow::materialize_cow(StorageImpl*);
+  friend void c10::impl::cow::check_cow_read(const StorageImpl*);
+  friend void c10::impl::cow::record_done(StorageImpl&);
+  friend intrusive_ptr<StorageImpl> c10::impl::cow::lazy_clone_storage(
+      StorageImpl&);
+
+  // Returns the previous data_ptr. Bypasses materialization —
+  // only for use by materializer implementations.
+  at::DataPtr set_data_ptr_no_materialize(at::DataPtr&& data_ptr) {
     at::DataPtr old_data_ptr(std::move(data_ptr_));
     data_ptr_ = std::move(data_ptr);
     refresh_has_data_ptr_check();
@@ -343,18 +398,18 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   void refresh_has_data_ptr_check() {
-    has_mutable_data_ptr_check_ = is_cow() || throw_on_mutable_data_ptr_ ||
-        warn_deprecated_on_mutable_data_ptr_ || throw_on_immutable_data_ptr_;
+    has_immutable_data_ptr_check_ = throw_on_immutable_data_ptr_ ||
+        (materialize_fn_ == &impl::cow::materialize_cow &&
+         data_ptr_.device().is_cuda());
+    has_mutable_data_ptr_check_ = (materialize_fn_ != nullptr) ||
+        throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
+        throw_on_immutable_data_ptr_;
   }
 
-  inline bool is_cow() const {
-    return c10::impl::cow::is_cow_data_ptr(data_ptr_);
-  }
-
-  // Triggers a copy if this is a copy-on-write tensor.
-  void maybe_materialize_cow() {
-    if (is_cow()) {
-      impl::cow::materialize_cow_storage(*this);
+  void maybe_materialize() {
+    if (materialize_fn_) {
+      materialize_fn_(this);
+      clear_materializer();
     }
   }
 
@@ -365,9 +420,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation
   bool received_cuda_;
-  // All special checks in data/data_ptr calls are guarded behind this single
-  // boolean. This is for performance: .data/.data_ptr calls are commonly in the
-  // hot-path.
+  // Keep the common data access paths behind one branch each.
+  bool has_immutable_data_ptr_check_ = false;
   bool has_mutable_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
   bool throw_on_mutable_data_ptr_ = false;
@@ -375,6 +429,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool throw_on_immutable_data_ptr_ = false;
   // If we warn when mutable_data_ptr() or mutable_data() is called.
   bool warn_deprecated_on_mutable_data_ptr_ = false;
+  // Pluggable materialization hook. See MaterializeFn in StorageMaterializer.h.
+  MaterializeFn materialize_fn_ = nullptr;
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
   std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;

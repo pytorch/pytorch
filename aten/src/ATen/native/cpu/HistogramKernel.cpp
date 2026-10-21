@@ -107,12 +107,12 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             ? std::optional<TensorAccessor<const input_t, 1>>(weight.value().accessor<const input_t, 1>())
             : std::optional<TensorAccessor<const input_t, 1>>();
 
-    std::vector<input_t*> bin_seq(D);
+    std::vector<const input_t*> bin_seq(D);
     std::vector<int64_t> num_bin_edges(D);
     std::vector<input_t> leftmost_edge(D), rightmost_edge(D);
 
     for (const auto dim : c10::irange(D)) {
-        bin_seq[dim] = bin_edges[dim].data_ptr<input_t>();
+        bin_seq[dim] = bin_edges[dim].const_data_ptr<input_t>();
         num_bin_edges[dim] = bin_edges[dim].numel();
         leftmost_edge[dim] = bin_seq[dim][0];
         rightmost_edge[dim] = bin_seq[dim][num_bin_edges[dim] - 1];

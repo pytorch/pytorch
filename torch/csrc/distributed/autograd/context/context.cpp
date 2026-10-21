@@ -29,7 +29,7 @@ void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
 }
 
 void DistAutogradContext::addSendFunction(
-    const std::shared_ptr<SendRpcBackward>& func,
+    const c10::intrusive_ptr<SendRpcBackward>& func,
     int64_t autograd_message_id) {
   TORCH_INTERNAL_ASSERT(func != nullptr);
 
@@ -41,7 +41,7 @@ void DistAutogradContext::addSendFunction(
 }
 
 void DistAutogradContext::addRecvFunction(
-    std::shared_ptr<RecvRpcBackward>& func,
+    c10::intrusive_ptr<RecvRpcBackward>& func,
     int64_t autograd_message_id) {
   TORCH_INTERNAL_ASSERT(func != nullptr);
 
@@ -52,13 +52,13 @@ void DistAutogradContext::addRecvFunction(
   recvAutogradFunctions_.emplace(autograd_message_id, func);
 }
 
-std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
+std::unordered_map<int64_t, c10::intrusive_ptr<SendRpcBackward>>
 DistAutogradContext::sendFunctions() const {
   std::lock_guard<std::mutex> guard(lock_);
   return sendAutogradFunctions_;
 }
 
-std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>>
+std::unordered_map<int64_t, c10::intrusive_ptr<RecvRpcBackward>>
 DistAutogradContext::recvFunctions() const {
   std::lock_guard<std::mutex> guard(lock_);
   return recvAutogradFunctions_;
@@ -218,7 +218,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistAutogradContext::
   return state->future;
 }
 
-std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
+c10::intrusive_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
     int64_t autograd_message_id) {
   std::lock_guard<std::mutex> guard(lock_);
   auto it = sendAutogradFunctions_.find(autograd_message_id);

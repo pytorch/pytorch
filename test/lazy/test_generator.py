@@ -3,7 +3,7 @@
 import torch
 import torch._lazy.metrics as metrics
 import torch._lazy.ts_backend
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 torch._lazy.ts_backend.init()
@@ -47,7 +47,6 @@ class LazyGeneratorTest(TestCase):
         if not torch.allclose(cpu_t2, lazy_t2.to("cpu")):
             raise AssertionError(f"Expected {cpu_t2}, got {lazy_t2.to('cpu')}")
 
-    @skipIfTorchDynamo("Torch Dynamo does not support torch.Generator type")
     def test_generator_causes_multiple_compiles(self):
         """
         Test that inserting generators with different seed caused recompile

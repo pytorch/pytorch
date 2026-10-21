@@ -8,6 +8,7 @@ import math
 import unittest
 from collections.abc import Callable
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,11 +16,13 @@ from torch._dynamo.debug_utils import InputReader
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
-from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_cuda import SM100OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -33,6 +36,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    requires_block_ptr,
     requires_gpu,
     skip_windows_ci,
     TRITON_HAS_CPU,
@@ -51,6 +55,35 @@ importlib.import_module("filelock")
 
 max_block: int = TRITON_MAX_BLOCK["X"]
 
+
+def _get_no_split_threshold() -> int:
+    if torch.cuda.is_available():
+        props = DeviceProperties.create(
+            torch.device("cuda", torch.cuda.current_device())
+        )
+        # These tests reduce the whole view to one output, so xnumel is 1.
+        return V.choices._inner_reduction_no_split_threshold(
+            props, xnumel=1, num_sm=props.multi_processor_count
+        )
+    return 8192
+
+
+def tma_xfail(*args, cpu=False, extra_decorators=None):
+    """Mark a subtest as expected to fail with TMA tensor descriptors.
+
+    TMA restrictions (see Note: TMA API Restrictions in config.py):
+      R1: innermost stride must be 1
+      R2: outer strides must be 16-byte aligned
+      R3: innermost dimension must load at least 16 bytes
+    """
+    decorators = [xfail_if_cuda_tensor_descriptor]
+    if cpu:
+        decorators.append(xfail_if_cpu_tensor_descriptor)
+    if extra_decorators:
+        decorators += list(extra_decorators)
+    return subtest(arg_values=args, decorators=decorators)
+
+
 # Config shortcuts
 tiled_reduction_config = {
     "triton.prefer_nd_tiling": True,
@@ -58,35 +91,21 @@ tiled_reduction_config = {
 }
 
 
-# These xfails are due to the current restrictions with the TMA descriptor API.
-# see Note: TMA API Restrictions. In some cases TMA descriptors cannot be generated, and so tests
-# that assert on the expected number of descriptors (= equivalent block ptrs) will fail
-def xfail_if_use_tensor_descriptor(fn):
-    fn._expected_failure_use_tensor_descriptor = True
+def xfail_if_cpu_tensor_descriptor(fn):
+    fn._expected_failure_cpu_tensor_descriptor = True
     return fn
 
 
-TMA_XFAIL = test_torchinductor.TestFailure(GPU_TYPE, is_skip=False)
-TMA_TEST_XFAIL = dict.fromkeys(
-    (
-        "test_pointwise_prefer_nd_tiling_False_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_False_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size1_view_size1_stride1_offset1_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size4_view_size4_stride4_offset4_require_block_ptr_True",
-        "test_pointwise_prefer_nd_tiling_True_full_size6_view_size6_stride6_offset6_require_block_ptr_True",
-        "test_reduction_prefer_nd_tiling_False_view_size4_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_False_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size4_num_block_pointers_3_num_triton_kernels_2",
-        "test_reduction_prefer_nd_tiling_True_view_size6_num_block_pointers_3_num_triton_kernels_2",
-        "test_2d_reduction_odd_shapes_view_size1_num_block_pointers_3_num_triton_kernels_2_reduction_op1",
-        "test_broadcast_prefer_nd_tiling_False_x_size0_y_size0",
-        "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
-        "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
-        "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
-    ),
-    TMA_XFAIL,
-)
+def xfail_if_cuda_tensor_descriptor(fn):
+    fn._expected_failure_cuda_tensor_descriptor = True
+    return fn
+
+
+# These xfails are due to restrictions shared by the CPU and CUDA tensor descriptor paths.
+def xfail_if_tensor_descriptor(fn):
+    fn._expected_failure_cpu_tensor_descriptor = True
+    fn._expected_failure_cuda_tensor_descriptor = True
+    return fn
 
 
 class BlockDescriptorTestBase(InductorTestCase):
@@ -111,7 +130,7 @@ class BlockDescriptorTestBase(InductorTestCase):
         return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
-        reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        reduction_blocks = ["R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]
         return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
 
     def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
@@ -210,18 +229,18 @@ class CommonTemplate:
         "full_size,view_size,stride,offset,require_block_ptr",
         [
             ((64, 32, 32), (32, 16, 8), None, None, True),
-            ((16, 8, 8, 8), (8, 8, 4, 2), None, None, True),
+            tma_xfail(
+                (16, 8, 8, 8), (8, 8, 4, 2), None, None, True
+            ),  # R3: inner dim 2*4B < 16B
             ((8, 8, 8, 8), (4, 4, 4, 4), None, None, True),
             ((8, 8), (4, 4), None, 10, True),  # Storage offset
-            ((8, 8), (4, 4), (16, 2), None, True),  # Non-default strides
+            tma_xfail(
+                (8, 8), (4, 4), (16, 2), None, True, cpu=True
+            ),  # R1: inner stride 2 != 1
             ((8, 8), (4, 4), (1, 8), None, True),  # Transposed strides
-            (
-                (5, 9),
-                (5, 8),
-                None,
-                None,
-                True,
-            ),  # Non-power-of-2 leading dim: block ptr
+            tma_xfail(
+                (5, 9), (5, 8), None, None, True
+            ),  # R2: outer stride 9*4B not 16B-aligned
             (
                 (15, 9),
                 (15, 3),
@@ -231,17 +250,11 @@ class CommonTemplate:
             ),  # Non-power-of-2 inner dims: non-block ptr
             ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar: non-block ptr
             subtest(
-                arg_values=(
-                    (2, 4 * max_block),
-                    (2, 3 * max_block),
-                    None,
-                    None,
-                    True,
-                ),  # Inner dim multiple of max_block
+                arg_values=((2, 4 * max_block), (2, 3 * max_block), None, None, True),
                 decorators=[
-                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
+                    test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test"),
                 ],
-            ),
+            ),  # Inner dim multiple of max_block
         ],
     )
     def test_pointwise(
@@ -285,16 +298,14 @@ class CommonTemplate:
     @parametrize(
         "x_size,y_size",
         [
-            ((8, 8), (8, 1)),
+            # CUDA R3: y inner dim 1*4B < 16B.
+            # CPU: broadcasted y inner stride is 0.
+            tma_xfail((8, 8), (8, 1), cpu=True),
             ((8, 8), (1, 8)),
-            (
-                (4, 1, 4),
-                (1, 4, 1),
-            ),  # Very important case: index variables are disjoint!
-            (
-                (1, 1, 1, 4),
-                (4, 4, 4, 4),
-            ),  # Unmatched dims for first operand.
+            # CUDA R3: y inner dim 1*4B < 16B.
+            # CPU: broadcasted y inner stride is 0.
+            tma_xfail((4, 1, 4), (1, 4, 1), cpu=True),
+            ((1, 1, 1, 4), (4, 4, 4, 4)),  # Unmatched dims for first operand.
         ],
     )
     def test_broadcast(
@@ -384,7 +395,7 @@ class CommonTemplate:
         input_reader = InputReader()
         load_args(input_reader)
         args = input_reader.args
-        if self.device == "xpu":
+        if self.device == "xpu" or torch.version.hip is not None:
             atol = 1e-7
             rtol = 1e-5
         else:
@@ -443,7 +454,7 @@ class CommonTemplate:
 
         result, (triton_code,) = self._run_and_compare(foo, x, y)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     @parametrize("prefer_nd_tiling", [False, True])
     @config.patch("triton.skip_l1_cache", False)
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
@@ -505,19 +516,20 @@ class CommonTemplate:
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
             ((15, 15), None, 1),  # Non-power of 2
-            # Multiple of max block. Uses loops.
-            subtest(
-                arg_values=((3 * max_block, 2), 3, 2),
-                decorators=[
+            tma_xfail(  # R3: inner dim 2*4B < 16B. Multiple of max block, uses loops.
+                (3 * max_block, 2),
+                3,
+                2,
+                extra_decorators=[
                     test_torchinductor.skip_if_triton_cpu("Triton CPU: slow test")
                 ],
             ),
-            (
-                (2, 3 * max_block),
-                2,
-                2,
-            ),  # Multiple of max block. Uses loops.
-            ((128, 128), 3, 2),  # Test a large size, with loops.
+            ((2, 3 * max_block), 2, 2),  # Multiple of max block. Uses loops.
+            # 2-kernel split xfails TMA; on SM100+ uses single persistent kernel and passes.
+            subtest(
+                arg_values=((128, 128), 3, 2),
+                decorators=[] if SM100OrLater else [xfail_if_cuda_tensor_descriptor],
+            ),
         ],
     )
     def test_reduction(
@@ -536,6 +548,14 @@ class CommonTemplate:
         if view_size == (128, 128) and torch.version.hip is not None:
             view_size = (256, 256)
 
+        # On SM100+, larger max_block means reductions that previously needed 2
+        # kernels now fit in a single persistent kernel with fewer block pointers.
+        reduction_numel = math.prod(view_size)
+        if num_triton_kernels == 2 and reduction_numel <= _get_no_split_threshold():
+            num_triton_kernels = 1
+            if num_block_pointers is not None:
+                num_block_pointers = max(num_block_pointers - 2, 0)
+
         if self.device == "cpu" and all(
             # Multiple of max block. Uses loops.
             [
@@ -552,14 +572,6 @@ class CommonTemplate:
         device = torch.device(self.device)
 
         view = self._discontiguous_tensor(view_size, self.device)
-
-        if num_triton_kernels == 2 and (
-            config.triton.cooperative_reductions
-            or config.triton.force_cooperative_reductions
-        ):
-            # fewer kernels with cooperative reductions
-            num_triton_kernels = 1
-            num_block_pointers -= 2
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -607,7 +619,7 @@ class CommonTemplate:
             expected_num_triton_kernels=num_triton_kernels,
         )
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     def test_multiple_max_block_non_power_of_2(self):
         """
         Check that we support dims of size n * MAX_BLOCK, where n is any positive integer, not
@@ -638,7 +650,7 @@ class CommonTemplate:
         "nd_tiling,num_block_pointers",
         [
             subtest(
-                (True, 2), decorators=[xfail_if_use_tensor_descriptor]
+                (True, 2), decorators=[xfail_if_cuda_tensor_descriptor]
             ),  # With tiling, the index is affine.
             (False, 1),  # We can't infer that the load is a power of 2.
         ],
@@ -664,7 +676,7 @@ class CommonTemplate:
         "with_tiling,num_block_pointers",
         [
             subtest(
-                (True, 1), decorators=[xfail_if_use_tensor_descriptor]
+                (True, 1), decorators=[xfail_if_cuda_tensor_descriptor]
             ),  # With tiling, the index is affine.
             (False, 0),  # We can't infer that the load is a power of 2.
         ],
@@ -712,7 +724,7 @@ class CommonTemplate:
         )
 
     @decorateIf(
-        xfail_if_use_tensor_descriptor,
+        xfail_if_cuda_tensor_descriptor,
         lambda param_kwargs: not (
             param_kwargs["num_block_pointers"] == 3 and param_kwargs["num_tiles"] == 1
         ),
@@ -793,18 +805,22 @@ class CommonTemplate:
                 else:
                     self.assertNotIn(tile_name, program)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels,reduction_op",
         [
             ((15, 15), 1, 1, torch.sum),  # Non-power-of 2 shapes.
-            ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
+            subtest(
+                ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
+                # RDNA emits a 1D reduction here instead of 2D tiling.
+                decorators=[skipIfRocmArch(NAVI_ARCH)],
+            ),
             ((3, 3), 1, 1, torch.argmax),
             ((129, 129), 1, 1, torch.argmax),
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
-    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
+    @skipIfRocmArch(MI200_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
@@ -816,16 +832,15 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        if reduction_op == torch.sum and (
-            config.triton.cooperative_reductions
-            or config.triton.force_cooperative_reductions
-        ):
-            num_triton_kernels = 1
-            num_block_pointers = 1
-
         if reduction_op == torch.sum and torch.version.hip is not None:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        reduction_numel = math.prod(view_size)
+        if num_triton_kernels == 2 and reduction_numel <= _get_no_split_threshold():
+            num_triton_kernels = 1
+            num_block_pointers = 1
 
         # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
         # may result in off-by-one differences in the number of block pointers.
@@ -858,12 +873,12 @@ class CommonTemplate:
             self.assertGreaterEqual(
                 block_pointer_count,
                 min_num_block_pointers,
-                f"Too few block descriptors emitted: {block_pointer_count}",
+                lambda msg: f"{msg}\nToo few block descriptors emitted: {block_pointer_count}",
             )
             self.assertLessEqual(
                 block_pointer_count,
                 max_num_block_pointers,
-                f"Too many block descriptors emitted: {block_pointer_count}",
+                lambda msg: f"{msg}\nToo many block descriptors emitted: {block_pointer_count}",
             )
 
         self._assert_reduction_ndims(code, 2)
@@ -873,7 +888,8 @@ class CommonTemplate:
         [
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
             subtest(
-                ((128, 128), 7, 2, False), decorators=[xfail_if_use_tensor_descriptor]
+                ((128, 128), 7, 2, False),
+                decorators=[] if SM100OrLater else [xfail_if_cuda_tensor_descriptor],
             ),  # Looped Welford reduction
         ],
     )
@@ -892,15 +908,18 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
+        if torch.version.hip is not None and expected_num_triton_kernels == 2:
+            size = (256, 256)
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        reduction_numel = math.prod(size)
         if (
-            config.triton.cooperative_reductions
-            or config.triton.force_cooperative_reductions
+            expected_num_triton_kernels == 2
+            and reduction_numel <= _get_no_split_threshold()
         ):
             expected_num_triton_kernels = 1
             expected_num_block_pointers = 1
 
-        if torch.version.hip is not None and expected_num_triton_kernels == 2:
-            size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
@@ -935,11 +954,22 @@ class CommonTemplate:
             config.triton.cooperative_reductions
             or config.triton.force_cooperative_reductions
         )
+        expected_num_block_pointers = 0 if cooperative_reductions else 6
+        expected_num_triton_kernels = 1 if cooperative_reductions else 2
+
+        # On SM100+, these reductions fit in a single persistent kernel.
+        if (
+            expected_num_triton_kernels == 2
+            and view.numel() <= _get_no_split_threshold()
+        ):
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = 0
+
         result, (code,) = self._run_and_compare(
             torch.var_mean,
             view,
-            expected_num_block_pointers=0 if cooperative_reductions else 6,
-            expected_num_triton_kernels=1 if cooperative_reductions else 2,
+            expected_num_block_pointers=expected_num_block_pointers,
+            expected_num_triton_kernels=expected_num_triton_kernels,
             config_patches={"triton.prefer_nd_tiling": True},
         )
 
@@ -999,7 +1029,7 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_cuda_tensor_descriptor
     def test_fused_2d_reduction(
         self,
     ):
@@ -1053,9 +1083,28 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
+    def test_3d_reduction_with_pointwise_output(self):
+        view = self._discontiguous_tensor((5, 7, 3, 5), self.device)
+
+        _result, (code,) = self._run_and_compare(
+            functools.partial(torch.sum, dim=(1, 2, 3)),
+            view,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+            rtol=1e-4,
+            atol=1e-4,
+        )
+
+        self._assert_pointwise_ndims(code, 1)
+        self._assert_reduction_ndims(code, 3)
+
     @parametrize(
         "tile_reductions",
-        [False, subtest(True, decorators=[xfail_if_use_tensor_descriptor])],
+        [False, subtest(True, decorators=[xfail_if_cuda_tensor_descriptor])],
     )
     def test_enable_tiled_reductions(self, tile_reductions: bool):
         """
@@ -1080,7 +1129,7 @@ class CommonTemplate:
 
     # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
     @test_torchinductor.xfail_if_triton_cpu
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_reduction_padded_output_tiling(self):
         """
         Test a [Y, X, R0] reduction with tiled output dimensions.
@@ -1107,14 +1156,20 @@ class CommonTemplate:
         self._assert_pointwise_ndims(code, 2)
         self._assert_reduction_ndims(code, 1)
 
-    @xfail_if_use_tensor_descriptor
-    @parametrize("unroll", (False, True))
+    @xfail_if_cuda_tensor_descriptor
+    @parametrize(
+        "unroll",
+        # CPU tensor descriptor codegen emits fewer descriptors than the unrolled
+        # reduction test expects today. Keep the original expectation and xfail.
+        [False, subtest(True, decorators=[xfail_if_cpu_tensor_descriptor])],
+    )
     def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
         """
         Test a [Y, X, R0, R1] reduction where the input tensor is discontiguous, but we
         only reduce over the last two dimensions.
         """
         view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
+        expected_num_block_pointers = 7 if unroll else 2
 
         # We expect block pointers for the inputs and output.
         # Note there are more inputs if unrolled.
@@ -1124,7 +1179,7 @@ class CommonTemplate:
                 dim=(-1, -2),
             ),
             view,
-            expected_num_block_pointers=7 if unroll else 2,
+            expected_num_block_pointers=expected_num_block_pointers,
             expected_num_triton_kernels=1,
             config_patches={
                 "unroll_reductions_threshold": 1e4 if unroll else 1,
@@ -1176,6 +1231,53 @@ class CommonTemplate:
         # Verify 2D reduction is used (R0_BLOCK and R1_BLOCK present)
         self._assert_reduction_ndims(code, 2)
 
+    def test_3d_reduction_with_broadcast(self):
+        def fn(x, y):
+            return (x * y[:, :, None]).sum()
+
+        x = torch.empty_strided((5, 7, 9), (256, 16, 1), device=self.device).normal_()
+        y = torch.empty_strided((5, 7), (16, 1), device=self.device).normal_()
+
+        class FixedReductionBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(
+                    {
+                        "XBLOCK": 1,
+                        "R0_BLOCK": 2,
+                        "R1_BLOCK": 4,
+                        "R2_BLOCK": 4,
+                    }
+                )
+                return kernel_kwargs
+
+        expected_num_block_pointers = (
+            2 if self.block_descriptor_constructor_str == "tl.make_block_ptr" else None
+        )
+        with V.set_choices_handler(FixedReductionBlockSizeChoices()):
+            _result, (code,) = self._run_and_compare(
+                fn,
+                x,
+                y,
+                expected_num_block_pointers=expected_num_block_pointers,
+                config_patches={
+                    **tiled_reduction_config,
+                    "split_reductions": False,
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                    "triton.max_tiles": 3,
+                    "triton.persistent_reductions": False,
+                },
+            )
+
+        self._assert_reduction_ndims(code, 3)
+        for reduction_dim in range(3):
+            self.assertIn(
+                f"for r{reduction_dim}_offset in tl.range(0, r{reduction_dim}_numel",
+                code,
+            )
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            self.assertIn("tl.advance(", code)
+
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
@@ -1197,7 +1299,7 @@ class CommonTemplate:
         )
         self.assertTrue("Min" not in code[0])
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     @requires_gpu()  # FIXME this test failed on Triton-CPU
     def test_3d_permute_tiling(self):
         """
@@ -1264,6 +1366,7 @@ class CommonTemplate:
     # bernoulli operation
     # TODO: fails for triton CPU "Failed to convert to LLVM IR"
     @test_torchinductor.xfail_if_triton_cpu
+    @xfail_if_cpu_tensor_descriptor
     # Disable split_reductions on this test for now due to the interaction with LOAF
     @config.patch(split_reductions=False)
     def test_removed_buffers(self):
@@ -1282,7 +1385,7 @@ class CommonTemplate:
             rtol=0.06,
         )
 
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_pointwise_index_order(self):
         """
         Test the order of indices in pointwise kernels. Expect Z to be the leading dim,
@@ -1356,6 +1459,44 @@ class CommonTemplate:
         num_broadcasts = triton_code.count("tl.broadcast_to")
         self.assertEqual(num_broadcasts, 1)
 
+    def test_reduction_fused_with_as_strided_scatter_broadcast_error(self):
+        # Regression test for a fused pointwise+reduction kernel where the side
+        # output is materialized through as_strided_scatter. The pointwise load
+        # is rank-expanded to match the reduction loop, and the immediate store
+        # must preserve that singleton reduction dimension instead of lowering a
+        # [XBLOCK, 1] temporary to a [XBLOCK] store.
+        def fn(a, b, table):
+            dst = torch.zeros(
+                (a.shape[0], a.shape[1], a.shape[2] + 1),
+                dtype=a.dtype,
+                device=a.device,
+            )
+            side = torch.as_strided_scatter(
+                dst, a, list(a.shape), list(dst.stride()), 1
+            )
+            gathered = torch.embedding(table, a)
+            reduced = (b + gathered.unsqueeze(0)).sum(-1)
+            return side, reduced
+
+        device = torch.device(self.device)
+        base = torch.randint(0, 1024, (4, 64, 1), dtype=torch.int64, device=device)
+        a = base.expand(4, 64, 32)
+        b = torch.randn((4, 64, 32, 128), dtype=torch.float32, device=device)
+        table = torch.randn((1024, 128), dtype=torch.float32, device=device)
+
+        self._run_and_compare(
+            fn,
+            a,
+            b,
+            table,
+            atol=3e-5,
+            config_patches={
+                "triton.persistent_reductions": False,
+                "triton.max_tiles": 2,
+            },
+            expected_num_triton_kernels=2,
+        )
+
     def test_mul_broadcast_multi_output(self):
         def foo(x, y, z):
             a = x * y
@@ -1393,7 +1534,7 @@ class CommonTemplate:
     #   dim_mod4_: 32, dim_mod3_: 2, stride_mod3_: 4, dim_mod2_: 1/16,
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
-    # This is now fixed by ensuring that that wild symbols only match integers
+    # This is now fixed by ensuring that wild symbols only match integers
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)
@@ -1402,14 +1543,15 @@ class CommonTemplate:
             [2, 3, 5, 5], dtype=torch.float16, requires_grad=True, device=self.device
         )
         args = [2, 1, 0, 1]
-        self._run_and_compare(
+        _, code = self._run_and_compare(
             model,
             data,
             *args,
-            expected_num_triton_kernels=2,
-            expected_num_block_pointers=4,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=None,
             compile_kwargs={"fullgraph": True},
         )
+        self.assertIn(self.block_descriptor_constructor_str, "\n".join(code))
 
     # Integration test to test block analysis with index expressions using
     # negative strides.
@@ -1425,7 +1567,7 @@ class CommonTemplate:
     #   offsets=[(xoffset//64), ModularIndexing(xoffset, 8, 8), ModularIndexing(xoffset, 1, 8)]
     #   )
     # constant_offset = 1911
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_negative_strides(self):
         def model(x, y):
             # Slice in reverse order via a negative stride
@@ -1459,7 +1601,7 @@ class CommonTemplate:
             ),
         ],
     )
-    @xfail_if_use_tensor_descriptor
+    @xfail_if_tensor_descriptor
     def test_boundary_check(self, block_multiple, ynumel_exceed_ygrid_size, include_z):
         @dataclasses.dataclass
         class InputShape:
@@ -1527,28 +1669,37 @@ class CommonTemplate:
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
 
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
-@config.patch(cpu_backend="triton")
-@config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestCPU(BlockDescriptorTestBase):
-    device = "cpu"
-
-
-test_torchinductor.copy_tests(
-    CommonTemplate,
-    TritonBlockPointerTestCPU,
-    "cpu",
-    xfail_prop="_expected_failure_triton_cpu",
-)
-
-
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@requires_block_ptr
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
     device = GPU_TYPE
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
+
+
+def _triton_cpu_supports_tensor_descriptor() -> bool:
+    # A CPU backend existing does not imply tensor descriptor support; older
+    # builds register the backend without the driver API.
+    # Internal-only: stable is an old (3.5-era) frontend with a retrofitted
+    # 3.8-based CPU backend; drop this once stable is upgraded to 3.8.
+    try:
+        from triton.backends.cpu.driver import CPUDriver
+    except ImportError:
+        return False
+    return hasattr(CPUDriver, "tensor_descriptor")
+
+
+@unittest.skipIf(
+    not TRITON_HAS_CPU or not _triton_cpu_supports_tensor_descriptor(),
+    "requires triton CPU backend with tensor descriptor support",
+)
+@config.patch({"triton.use_tensor_descriptor": True, "cpu_backend": "triton"})
+@instantiate_parametrized_tests
+class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
+    block_descriptor_constructor_str = "tl.make_tensor_descriptor"
+    device = "cpu"
 
 
 @unittest.skipIf(
@@ -1562,6 +1713,27 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
+
+    def test_3d_reduction_descriptor_respects_tensor_rank_limit(self):
+        def reduce_3d(x):
+            return torch.sum(x, dim=(3, 4, 5))
+
+        inp = torch.empty_strided(
+            (12, 3, 4, 4, 4, 4),
+            (1536, 128, 4, 384, 32, 1),
+            device=self.device,
+        ).normal_()
+
+        _result, (code,) = self._run_and_compare(
+            reduce_3d,
+            inp,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+        )
+
+        self.assertIn("tl.load(in_ptr0 +", code)
 
     @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
     @parametrize(
@@ -1619,13 +1791,105 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         self.assertIsNotNone(x.grad)
         self.assertIsNotNone(w.grad)
 
+    @largeTensorTest("1GB", inductor=True)
+    def test_large_tensor_pointwise(self):
+        def fn(a):
+            return a + 4
+
+        t = torch.zeros(2**30 + 1, dtype=torch.int8, device=GPU_TYPE)
+        compiled_fn = torch.compile(fn)
+        actual = compiled_fn(t)
+        self.assertTrue((actual == 4).all())
+
+    @largeTensorTest("3GB", inductor=True)
+    def test_large_input_small_output_uses_tma_store(self):
+        def fn(a):
+            return a[: 128 * 512].reshape(128, 512) + 4
+
+        t = torch.zeros(2**31, dtype=torch.int8, device=GPU_TYPE)
+        actual, (code,) = run_and_get_code(torch.compile(fn), t)
+        self.assertEqual(actual, fn(t))
+        self.assertIn("tl.program_id(0).to(tl.int64)", code)
+        self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code)
+        self.assertIn("tl.make_tensor_descriptor(out_ptr0", code)
+        self.assertIn(".store([(xoffset).to(tl.int32)]", code)
+
+    def test_slice_constant_offset_disables_tma(self):
+        """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
+
+        def fn(x):
+            return x[1:] + 1
+
+        x = torch.randn(1025, device=GPU_TYPE)
+        result, (code,) = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(result, fn(x))
+        self.assertIn("tl.load", code)
+
+    def test_slice_view_dtype_unaligned_buffer(self):
+        offset = 1
+
+        def f(x):
+            return x[2:].view(dtype=torch.float32) + 1
+
+        x = torch.randn((128 + offset) * 2, dtype=torch.bfloat16, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+        self.assertEqual(actual, expected)
+
+    def test_persistent_reduction_store_small_rblock_skips_tma(self):
+        """
+        When a persistent reduction has rnumel < 16/element_size, the fixed
+        R0_BLOCK cannot satisfy TMA's 16-byte minimum.  The store must fall
+        back to scalar indexing instead of emitting an invalid descriptor.
+        """
+
+        def fn(x, running_mean, running_var, weight, bias):
+            return torch.nn.functional.batch_norm(
+                x, running_mean, running_var, weight, bias, training=True
+            )
+
+        # Input (2, 1): reduction over batch dim of size 2.
+        # R0_BLOCK = next_power_of_2(2) = 2, so 2 * 4 bytes = 8 < 16.
+        x = torch.randn(2, 1, device=GPU_TYPE)
+        weight = torch.randn(1, device=GPU_TYPE)
+        bias = torch.randn(1, device=GPU_TYPE)
+        running_mean = torch.randn(1, device=GPU_TYPE)
+        running_var = torch.randn(1, device=GPU_TYPE).abs()
+
+        result, (code,) = run_and_get_code(
+            torch.compile(fn), x, running_mean, running_var, weight, bias
+        )
+        expected = fn(x, running_mean, running_var, weight, bias)
+        self.assertEqual(result, expected)
+        # The store must fall back to scalar indexing, not TMA.
+        self.assertIn("tl.store", code)
+        self.assertNotIn("make_tensor_descriptor", code)
+
+    def test_bool_dtype_skips_tma(self):
+        """
+        torch.bool buffers map to Triton tl.int1 which has no
+        CUtensorMapDataType entry, so they should skip TMA.
+        """
+
+        def fn(a):
+            return torch.logical_not(a)
+
+        inp = torch.zeros(16, dtype=torch.bool, device=GPU_TYPE)
+        self._run_and_compare(fn, inp, expected_num_block_pointers=0)
+
+
+test_torchinductor.copy_tests(
+    CommonTemplate,
+    TritonTensorDescriptorTestCPU,
+    "cpu",
+    xfail_prop="_expected_failure_cpu_tensor_descriptor",
+)
 
 test_torchinductor.copy_tests(
     CommonTemplate,
     TritonTensorDescriptorTestCUDA,
     GPU_TYPE,
-    xfail_prop="_expected_failure_use_tensor_descriptor",
-    test_failures=TMA_TEST_XFAIL,
+    xfail_prop="_expected_failure_cuda_tensor_descriptor",
 )
 
 
@@ -2168,6 +2432,272 @@ class TestTilingExtra(InductorTestCase):
                 input_feat=input_features,
                 **params,
             )
+
+
+@unittest.skipIf(
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+@config.patch(
+    {
+        "triton.use_tensor_descriptor": True,
+        "triton.enable_host_side_tma": True,
+        "assume_aligned_inputs": True,
+    }
+)
+@instantiate_parametrized_tests
+class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
+    """Run the full pointwise/reduction suite with host-side TMA.
+    Block pointer count is skipped because host-side TMA creates
+    descriptors in the launcher, not the kernel."""
+
+    device = GPU_TYPE
+
+    def _run_and_compare(self, *args, **kwargs):
+        kwargs["expected_num_block_pointers"] = None
+        return super()._run_and_compare(*args, **kwargs)
+
+    def test_host_tma_codegen_markers(self):
+        # Host-side TMA builds descriptors in the launcher, not the kernel: the
+        # kernel body must have no in-kernel tl.make_tensor_descriptor, and the
+        # inductor metadata must carry host_tma_descriptor_args.
+        def fn(a, b):
+            return a + b
+
+        a = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        b = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        result, code_list = run_and_get_code(torch.compile(fn), a, b)
+        self.assertTrue(torch.allclose(result, fn(a, b)))
+        code = "\n".join(code_list)
+        self.assertNotIn("tl.make_tensor_descriptor", code)
+        self.assertIn("host_tma_descriptor_args", code)
+
+    def test_misaligned_offset_disables_host_tma(self):
+        # A 4-byte (float32) storage offset is not 16-byte aligned, so the
+        # misaligned input can't be host-TMA'd and falls back to a plain
+        # tl.load. (Disabling is per-buffer: the aligned output may still use a
+        # descriptor, so host_tma_descriptor_args can still appear.)
+        def fn(x):
+            return x[1:] + 1
+
+        x = torch.randn(1025, device=self.device)
+        result, code_list = run_and_get_code(torch.compile(fn), x)
+        self.assertTrue(torch.allclose(result, fn(x)))
+        self.assertIn("tl.load", "\n".join(code_list))
+
+    @config.patch("use_static_triton_launcher", True)
+    def test_static_launcher_runs_for_host_tma(self):
+        import torch._inductor.runtime.triton_heuristics as triton_heuristics
+
+        feature_calls = []
+        orig_set_feature_use = triton_heuristics.set_feature_use
+
+        def tracking_set_feature_use(feature, usage):
+            feature_calls.append((feature, usage))
+            return orig_set_feature_use(feature, usage)
+
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        x = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        eager_out = fn(x)
+        with mock.patch.object(
+            triton_heuristics, "set_feature_use", tracking_set_feature_use
+        ):
+            compiled_out, code_list = run_and_get_code(torch.compile(fn), x)
+
+        code = "\n".join(code_list)
+        self.assertIn(
+            "host_tma_descriptor_args",
+            code,
+            "host-side TMA descriptors were not generated for this kernel",
+        )
+        self.assertNotIn("tl.make_tensor_descriptor", code)
+        self.assertIn(
+            ("static_triton_launcher", True),
+            feature_calls,
+            "static Triton launcher path was not taken for host-side TMA kernel",
+        )
+        self.assertTrue(torch.allclose(compiled_out, eager_out))
+
+    def _host_tma_launcher_lines(self, fn, *args):
+        from torch._inductor.runtime import triton_heuristics
+
+        captured = []
+        orig = triton_heuristics.CompileResult._gen_launcher_code
+
+        def capture(result_self, scope, def_args, runner_args, pre_runner_lines=None):
+            if pre_runner_lines:
+                names = getattr(result_self.kernel, "tensordesc_arg_names", [])
+                captured.append((pre_runner_lines, names))
+            return orig(
+                result_self,
+                scope,
+                def_args,
+                runner_args,
+                pre_runner_lines=pre_runner_lines,
+            )
+
+        with mock.patch.object(
+            triton_heuristics.CompileResult, "_gen_launcher_code", capture
+        ):
+            result, _ = run_and_get_code(torch.compile(fn), *args)
+        self.assertTrue(captured, "no host-side TMA descriptors were emitted")
+        return captured, result
+
+    @config.patch("use_static_triton_launcher", True)
+    def test_host_tma_launcher_keeps_aligned_tensor_alive(self):
+        # The CUtensorMap stores only a device address, so the aligned (possibly
+        # cloned) tensor must be a launcher local that outlives the launch.
+        def fn(a, b):
+            return (a + b) * 2
+
+        a = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        b = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        captured, result = self._host_tma_launcher_lines(fn, a, b)
+        self.assertTrue(torch.allclose(result, fn(a, b)))
+        for lines, _ in captured:
+            expands = [ln for ln in lines if "expand_host_tma_descriptor(" in ln]
+            self.assertTrue(expands)
+            for line in expands:
+                name = line.split("_host_tma_desc")[0].strip()
+                self.assertIn(
+                    f'{name}_aligned = _host_tma_aligned({name}, "{name}")', lines
+                )
+                self.assertIn(f"{name}_aligned,", line)
+
+    def test_host_tma_meta_index_follows_signature_order(self):
+        # triton keys tensordesc_meta by signature position. Real kernels happen
+        # to encounter descriptors in signature order, so drive the mapping
+        # directly with the two orders disagreeing.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        desc = {"block_shape": [128], "shape": [1024], "strides": [1]}
+        stub = SimpleNamespace(
+            inductor_meta={
+                "host_tma_descriptor_args": {"out_ptr0": desc, "in_ptr0": desc}
+            },
+            config=SimpleNamespace(kwargs={}),
+            compile_meta={"constants": {}},
+            kernel=SimpleNamespace(
+                tensordesc_meta=[{"elem_size": 2}, {"elem_size": 4}],
+                tensordesc_arg_names=["in_ptr0", "out_ptr0"],
+            ),
+        )
+        call_args = ["in_ptr0", "out_ptr0"]
+        lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(
+            stub, list(call_args), call_args
+        )
+        meta_idx = {
+            ln.split("_host_tma_desc")[0].strip(): int(
+                ln.split("_tma_meta[")[1].split("]")[0]
+            )
+            for ln in lines
+            if "expand_host_tma_descriptor(" in ln
+        }
+        self.assertEqual(meta_idx, {"in_ptr0": 0, "out_ptr0": 1})
+
+
+test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)
+
+# The copy_tests above generates GPU_TYPE-suffixed methods; the skip/xfail
+# markers below reference the CUDA variants by name, so only apply them when
+# running on CUDA (the class itself is skipped on other backends).
+if GPU_TYPE == "cuda":
+    # The (9, True) meta-test checks that _run_and_compare raises on wrong block
+    # pointer counts. Host-side TMA disables this count check, so skip it.
+    TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda = unittest.skip(
+        "block pointer count check is disabled for host-side TMA"
+    )(
+        TritonHostSideTMATestCUDA.test_expected_num_block_pointers_expected_num_block_pointers_9_raises_True_cuda
+    )
+
+    # Known TMA API limitations: these cases also fail for device-side TMA (they
+    # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
+    # different (still-correct) codegen that breaks the device-specific code asserts,
+    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
+    # test_reduction_padded_output_tiling).
+    _HOST_TMA_EXPECTED_FAILURES = [
+        "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
+        "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
+        "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
+        "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
+        "test_pointwise_index_order_cuda",
+        "test_reduction_padded_output_tiling_cuda",
+    ]
+    for _name in _HOST_TMA_EXPECTED_FAILURES:
+        setattr(
+            TritonHostSideTMATestCUDA,
+            _name,
+            unittest.expectedFailure(getattr(TritonHostSideTMATestCUDA, _name)),
+        )
+
+    # Dynamic shapes are not yet supported for host-side TMA (the launcher cannot
+    # resolve symbolic block/shape dims). Tracked as a follow-up.
+    TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda = unittest.expectedFailure(
+        TritonHostSideTMATestCUDA.test_dynamic_shapes_pointwise_nd_tiling_False_num_block_pointers_1_cuda
+    )
+
+    # Unlike the cases above (which also fail device-side), this one passes for
+    # device-side TMA and non-TMA. Its im2col output store is emitted as a host-side
+    # TMA tensordesc store, so the generated code has no tl.make_block_ptr and the
+    # base block_descriptor_constructor_str assert does not hold. Numerics still
+    # match (the _run_and_compare check passes before the code-string assert).
+    TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda = (
+        unittest.expectedFailure(
+            TritonHostSideTMATestCUDA.test_ensure_integral_dims_and_strides_cuda
+        )
+    )
+
+
+class HostTMAHelperTest(InductorTestCase):
+    """Device-independent unit tests for host-side TMA helpers."""
+
+    def test_host_tma_aligned_clone_fallback(self):
+        from torch._inductor.runtime.triton_heuristics import _host_tma_aligned
+
+        # 16-byte-aligned base -> returned as-is (no clone).
+        aligned = torch.randn(1024)
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        self.assertIs(_host_tma_aligned(aligned, "aligned"), aligned)
+
+        # Misaligned base -> cloned into an aligned buffer, values preserved.
+        base = torch.randn(1024 + 8, dtype=torch.float16)
+        misaligned = base[1:]
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        cloned = _host_tma_aligned(misaligned, "misaligned")
+        self.assertIsNot(cloned, misaligned)
+        self.assertEqual(cloned.data_ptr() % 16, 0)
+        self.assertTrue(torch.equal(cloned, misaligned))
+
+
+@unittest.skipIf(
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+)
+class TritonHostSideTMAConfigTestCUDA(InductorTestCase):
+    @config.patch(
+        {
+            "triton.enable_host_side_tma": True,
+            "triton.use_tensor_descriptor": False,
+        }
+    )
+    def test_enable_host_side_tma_without_prereqs_warns(self):
+        # enable_host_side_tma only selects the descriptor flavor; without
+        # use_tensor_descriptor + assume_aligned_inputs it has no effect and
+        # should warn rather than silently no-op.
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        with self.assertWarnsRegex(UserWarning, "host-side TMA will be skipped"):
+            result, code_list = run_and_get_code(torch.compile(fn), x)
+        self.assertTrue(torch.allclose(result, fn(x)))
+        self.assertNotIn("host_tma_descriptor_args", "\n".join(code_list))
 
 
 if __name__ == "__main__":

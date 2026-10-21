@@ -7,7 +7,9 @@ import functools
 import inspect
 import logging
 import threading
+from collections.abc import Callable
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C._distributed_rpc import (
@@ -39,6 +41,10 @@ from .internal import (
     PythonUDF,
     RPCExecMode,
 )
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 __all__ = [
@@ -82,9 +88,9 @@ def _use_rpc_pickler(rpc_pickler):
         _default_pickler = _internal_rpc_pickler
 
 
-def _require_initialized(func):
+def _require_initialized(func: Callable[_P, _R]) -> Callable[_P, _R]:
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if not _is_current_rpc_agent_set():
             raise RuntimeError(
                 "RPC has not been initialized. Call "
@@ -427,7 +433,7 @@ def get_worker_info(worker_name=None):
 
     Args:
         worker_name (str): the string name of a worker. If ``None``, return the
-                           the id of the current worker. (default ``None``)
+                           id of the current worker. (default ``None``)
 
     Returns:
         :class:`~torch.distributed.rpc.WorkerInfo` instance for the given

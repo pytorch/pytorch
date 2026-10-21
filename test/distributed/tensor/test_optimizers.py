@@ -19,8 +19,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
     MLPModule,
+    NUM_DEVICES,
     with_comms,
 )
 
@@ -53,7 +55,9 @@ def output_fn(mod, outputs, device_mesh):
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
 
-class TestDTensorOptimizer(DTensorTestBase):
+class TestDTensorOptimizer(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     def _assert_optimizer(
         self,
         mesh,
@@ -770,7 +774,7 @@ class TestDTensorOptimizer(DTensorTestBase):
         self.assertEqual(
             misses_after_warmup,
             misses_after_steps,
-            f"Cache misses increased from {misses_after_warmup} to "
+            lambda msg: f"{msg}\nCache misses increased from {misses_after_warmup} to "
             f"{misses_after_steps} over 10 steps (expected 0 new misses "
             "after warmup)",
         )
@@ -780,6 +784,7 @@ instantiate_parametrized_tests(TestDTensorOptimizer)
 
 TestDTensorOptimizerWithLocalTensor = create_local_tensor_test_class(
     TestDTensorOptimizer,
+    base_class=LocalDTensorContinuousTestBase,
 )
 
 if __name__ == "__main__":

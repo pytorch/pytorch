@@ -345,6 +345,10 @@ def generate_function(
     tags = {"generated"} | set(
         f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
     )
+    if func.is_out_fn():
+        tags.add("out")
+    if func.name.name.inplace:
+        tags.add("inplace")
 
     return (
         NativeFunction(

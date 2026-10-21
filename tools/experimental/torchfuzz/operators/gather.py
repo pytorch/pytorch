@@ -94,9 +94,15 @@ class GatherOperator(Operator):
         # Determine dimension
         dim = 0  # Gather along dimension 0 for simplicity
 
-        # Generate code that creates valid indices within the input tensor's dimension
+        # Map the pre-generated index input (a fixed graph arg, generated once and
+        # shared across the reference and test runs) into the valid range with
+        # remainder. Do NOT synthesize a fresh in-program torch.randint: an inline
+        # randint draws from whatever device RNG is active, so a cross-device or
+        # eager-vs-compile comparison would use different indices and diverge even
+        # when the gather kernel is correct. remainder keeps every index in
+        # [0, input_size).
         return (
             f"_input_size_{output_name} = {input_names[0]}.size({dim})\n"
-            f"_index_{output_name} = torch.randint(0, _input_size_{output_name}, {output_spec.size}, device={input_names[0]}.device)\n"
+            f"_index_{output_name} = torch.remainder({input_names[1]}, _input_size_{output_name})\n"
             f"{output_name} = torch.gather({input_names[0]}, {dim}, _index_{output_name})"
         )

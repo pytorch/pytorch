@@ -44,6 +44,8 @@ from torch._dynamo.debug_utils import (
 from torch.export import ExportedProgram
 from torch.hub import tqdm
 
+from . import _minifier_sanity_guard
+
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +74,8 @@ def dump_to_minify(
     If command is "run":
         Dump exported_program to `cwd/repro.py`, with run command.
     """
-    assert command in ["minify", "run"]
+    if command not in ["minify", "run"]:
+        raise AssertionError(f"command must be 'minify' or 'run', got {command!r}")
 
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -126,7 +129,7 @@ def get_module_string(gm: torch.fx.GraphModule) -> str:
         s = first + "\n" + s
         return s
 
-    module_string = NNModuleToString.convert(gm)
+    module_string = NNModuleToString.convert(gm, allow_unsafe_repr=True)
     return _convert_to_comment(module_string)
 
 
@@ -158,8 +161,10 @@ def save_graph_repro_ep(
         raise AOTIMinifierError("If gm is defined, args should also be defined")
 
     if exported_program is None:
-        assert gm is not None
-        assert args is not None
+        if gm is None:
+            raise AssertionError("gm must not be None when exported_program is None")
+        if args is None:
+            raise AssertionError("args must not be None when exported_program is None")
         exported_program = torch.export.export(gm, args, strict=strict)
     elif gm is None:
         gm = exported_program.module(check_guards=False)
@@ -356,7 +361,7 @@ def export_for_aoti_minifier(
 ) -> torch.nn.Module | None:
     # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
     # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
-    # In these case, we return None. Otherwise, we return the exported graph module.
+    # In these cases, we return None. Otherwise, we return the exported graph module.
     # This won't affect the minifier result because the minifier is only responsible for catching
     # errors in AOTI, not export.
     #
@@ -404,7 +409,10 @@ def repro_minify(
         mod, args, kwargs, options=config_patches
     )
     compiler_name = "aot_inductor"
-    assert options.minifier_export_mode in ["dynamo", "python"]
+    if options.minifier_export_mode not in ["dynamo", "python"]:
+        raise AssertionError(
+            f"minifier_export_mode must be 'dynamo' or 'python', got {options.minifier_export_mode!r}"
+        )
     strict = options.minifier_export_mode == "dynamo"
     skip_export_error = options.skip_export_error
 
@@ -434,7 +442,8 @@ def repro_minify(
         if gm is None:
             return False
 
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"Expected torch.fx.GraphModule, got {type(gm)}")
 
         try:
             _aoti_compile_and_package_inner(
@@ -452,23 +461,25 @@ def repro_minify(
                 return False
             return True
 
-    minifier(
-        mod,
-        flat_example_inputs,
-        module_fails=functools.partial(module_fails, check_str=options.check_str),
-        dump_state=functools.partial(
-            dump_compiler_graph_state,
-            compiler_name=compiler_name,
-            config_patches=config_patches,
-            accuracy=options.accuracy,
-            strict=strict,
-        ),
-        save_dir=options.save_dir,
-        offload_to_disk=options.offload_to_disk,
-        skip_offload=options.skip_saving_eager_intermediates,
-        skip_sanity=options.skip_sanity,
-        max_granularity=options.max_granularity,
-    )
+    with _minifier_sanity_guard() as sanity:
+        minifier(
+            mod,
+            flat_example_inputs,
+            module_fails=functools.partial(module_fails, check_str=options.check_str),
+            dump_state=functools.partial(
+                dump_compiler_graph_state,
+                compiler_name=compiler_name,
+                config_patches=config_patches,
+                accuracy=options.accuracy,
+                strict=strict,
+            ),
+            save_dir=options.save_dir,
+            offload_to_disk=options.offload_to_disk,
+            skip_offload=options.skip_saving_eager_intermediates,
+            skip_sanity=options.skip_sanity,
+            max_granularity=options.max_granularity,
+        )
+    sanity.raise_if_failed()
 
 
 def run_repro(
@@ -551,7 +562,7 @@ p-value, which we leave for future work.
             default=accuracy,
             help="""\
 by default, when doing accuracy minification we will reject reductions which
-change the divergence from a floating point divergence to a integral/boolean
+change the divergence from a floating point divergence to an integral/boolean
 divergence.  This is because some operations like ReLU involve temporarily
 sharp boundaries that smooth out again afterwards; without requiring
 divergence on floating point, the minifier will often fixate on divergent

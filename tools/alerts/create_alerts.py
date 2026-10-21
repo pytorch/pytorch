@@ -11,7 +11,6 @@ from difflib import SequenceMatcher
 from typing import Any
 
 import requests
-from setuptools import distutils  # type: ignore[import,attr-defined]
 
 
 ALL_SKIPPED_THRESHOLD = 100
@@ -277,6 +276,10 @@ def get_recurrently_failing_jobs_alerts(
 
 
 def parse_args() -> argparse.Namespace:
+    # Imported here so library users that pull in filter_job_names / JobStatus
+    # do not pay for the strtobool import path.
+    from tools.strtobool import strtobool
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--repo",
@@ -299,13 +302,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-flaky-test-alert",
         help="Run this script with the flaky test alerting",
-        type=distutils.util.strtobool,
+        type=strtobool,
         default=os.getenv("WITH_FLAKY_TEST_ALERT", "YES"),
     )
     parser.add_argument(
         "--dry-run",
         help="Whether or not to actually post issues",
-        type=distutils.util.strtobool,
+        type=strtobool,
         default=os.getenv("DRY_RUN", "YES"),
     )
     return parser.parse_args()

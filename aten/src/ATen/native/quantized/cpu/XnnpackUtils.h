@@ -97,7 +97,9 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_min,         /* int8_t output_min                    */
         op_max,         /* int8_t output_max                    */
         flags,          /* uint32_t flags                       */
+#ifndef XNNPACK_NO_CODE_CACHE
         nullptr,        /* xnn_caches_t caches                  */
+#endif
         nullptr,        /* xnn_weights_cache_t weights_cache    */
         op);            /* xnn_operator_t* deconvolution_op_out */
 
@@ -130,7 +132,9 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_min,         /* int8_t output_min                  */
         op_max,         /* int8_t output_max                  */
         flags,          /* uint32_t flags                     */
+#ifndef XNNPACK_NO_CODE_CACHE
         nullptr,        /* xnn_caches_t caches                */
+#endif
         nullptr,        /* xnn_weights_cache_t weights_cache    */
         op);            /* xnn_operator_t* convolution_op_out */
   } else { /* per_channel */
@@ -160,7 +164,9 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
         op_min,         /* int8_t output_min                  */
         op_max,         /* int8_t output_max                  */
         flags,          /* uint32_t flags                     */
+#ifndef XNNPACK_NO_CODE_CACHE
         nullptr,        /* xnn_caches_t caches                */
+#endif
         nullptr,        /* xnn_weights_cache_t weights_cache    */
         op);            /* xnn_operator_t* convolution_op_out */
   }
@@ -195,7 +201,9 @@ enum xnn_status xnnp_reshape_convolution2d_nhwc(
   }
 
   size_t workspace_size = SIZE_MAX;
+#ifndef XNNPACK_NO_CODE_CACHE
   size_t workspace_alignment = SIZE_MAX;
+#endif
 
   if (!per_channel) {
     return xnn_reshape_convolution2d_nhwc_qs8(
@@ -204,7 +212,9 @@ enum xnn_status xnnp_reshape_convolution2d_nhwc(
         in_h,     /* size_t input_height           */
         in_w,     /* size_t input_width            */
         &workspace_size, /* size_t* workspace_size */
+#ifndef XNNPACK_NO_CODE_CACHE
         &workspace_alignment, /* size_t* workspace_alignment */
+#endif
         nullptr,  /* size_t* output_height_out     */
         nullptr,  /* size_t* output_width_out      */
         pt_pool); /* pthreadpool_t threadpool      */
@@ -215,7 +225,9 @@ enum xnn_status xnnp_reshape_convolution2d_nhwc(
         in_h,     /* size_t input_height           */
         in_w,     /* size_t input_width            */
         &workspace_size, /* size_t* workspace_size */
+#ifndef XNNPACK_NO_CODE_CACHE
         &workspace_alignment, /* size_t* workspace_alignment */
+#endif
         nullptr,  /* size_t* output_height_out     */
         nullptr,  /* size_t* output_width_out      */
         pt_pool); /* pthreadpool_t threadpool      */
@@ -298,7 +310,9 @@ enum xnn_status xnnp_create_fully_connected_nc(
       output_min,              /* int8_t output_min                      */
       output_max,              /* int8_t output_max                      */
       flags,                   /* uint32_t flags                         */
+#ifndef XNNPACK_NO_CODE_CACHE
       nullptr,                 /* xnn_caches_t caches                    */
+#endif
       nullptr,                 /* xnn_weights_cache_t                    */
       fully_connected_op_out); /* xnn_operator_t* fully_connected_op_out */
 }

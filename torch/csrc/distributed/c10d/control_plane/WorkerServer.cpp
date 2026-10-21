@@ -1,15 +1,29 @@
-#include <sstream>
 #include <unordered_map>
 
 #include <c10/util/Exception.h>
 #include <c10/util/FileSystem.h>
 #include <c10/util/thread_name.h>
+#include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
 
 namespace c10d::control_plane {
 
 namespace {
+// c10::Error::what() always carries a symbolized C++ backtrace, which is
+// expensive to build and does not belong in an HTTP error body by default.
+// Select the accessor the same way torch/csrc/Exceptions.h does at the Python
+// boundary, so TORCH_SHOW_CPP_STACKTRACES still gets you the frames on what is
+// after all a debug endpoint.
+std::string errorMessage(const std::exception& e) {
+  const auto* torchError = dynamic_cast<const c10::Error*>(&e);
+  if (torchError && !torch::get_cpp_stacktraces_enabled()) {
+    return torchError->what_without_backtrace();
+  }
+  return e.what();
+}
+
 class RequestImpl : public Request {
  public:
   RequestImpl(const httplib::Request& req) : req_(req) {}
@@ -45,32 +59,6 @@ class ResponseImpl : public Response {
   httplib::Response& res_;
 };
 
-std::string jsonStrEscape(const std::string& str) {
-  std::ostringstream ostream;
-  for (char ch : str) {
-    if (ch == '"') {
-      ostream << "\\\"";
-    } else if (ch == '\\') {
-      ostream << "\\\\";
-    } else if (ch == '\b') {
-      ostream << "\\b";
-    } else if (ch == '\f') {
-      ostream << "\\f";
-    } else if (ch == '\n') {
-      ostream << "\\n";
-    } else if (ch == '\r') {
-      ostream << "\\r";
-    } else if (ch == '\t') {
-      ostream << "\\t";
-    } else if (ch <= '\x1f') {
-      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-              << static_cast<int>(ch);
-    } else {
-      ostream << ch;
-    }
-  }
-  return ostream.str();
-}
 } // namespace
 
 WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
@@ -85,20 +73,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   server_.Get(
       "/handler/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
-        std::ostringstream body;
-        body << '[';
-        bool first = true;
-        for (const auto& name : getHandlerNames()) {
-          if (!first) {
-            body << ',';
-          }
-          first = false;
-
-          body << '"' << jsonStrEscape(name) << '"';
-        }
-        body << ']';
-
-        res.set_content(body.str(), "application/json");
+        res.set_content(
+            nlohmann::json(getHandlerNames()).dump(), "application/json");
       });
   server_.Post(
       "/handler/:handler",
@@ -110,7 +86,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
         } catch (const std::exception& e) {
           res.status = 404;
           res.set_content(
-              fmt::format("Handler {} not found: {}", handler_name, e.what()),
+              fmt::format(
+                  "Handler {} not found: {}", handler_name, errorMessage(e)),
               "text/plain");
           return;
         }
@@ -122,7 +99,8 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
         } catch (const std::exception& e) {
           res.status = 500;
           res.set_content(
-              fmt::format("Handler {} failed: {}", handler_name, e.what()),
+              fmt::format(
+                  "Handler {} failed: {}", handler_name, errorMessage(e)),
               "text/plain");
           return;
         } catch (...) {

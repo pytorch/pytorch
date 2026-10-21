@@ -27,6 +27,7 @@ here.
     is_initialized
     memory_stats
     get_device_capability
+    get_device_properties
     empty_cache
     record_memory_history
     snapshot
@@ -57,4 +58,14 @@ here.
 
     Event
     Stream
+```
+
+## Read More
+
+```{toctree}
+:caption: torch.mtia submodules
+:maxdepth: 1
+
+torch.mtia.memory <mtia/memory>
+torch.mtia.mtia_graph <mtia/mtia_graph>
 ```

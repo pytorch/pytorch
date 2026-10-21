@@ -38,7 +38,7 @@ void UnsafeAutoFunctionalizeKernel::computeInternal(
     auto stackTrace = node_->getMetadata("stack_trace");
     TORCH_CHECK(
         false,
-        "Oringinal Python stacktrace:\n",
+        "Original Python stacktrace:\n",
         stackTrace ? *stackTrace : "<no stack trace>",
         "\n",
         ex.what())

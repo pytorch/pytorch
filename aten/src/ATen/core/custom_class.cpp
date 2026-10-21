@@ -70,7 +70,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto name = class_type->name()->qualifiedName();
   TORCH_CHECK(
-      !customClasses().count(name),
+      !customClasses().contains(name),
       "Custom class with name ",
       name,
       " is already registered. Ensure that registration with torch::class_ is only called once.");
@@ -79,7 +79,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 
 at::ClassTypePtr getCustomClass(const std::string& class_name) {
   auto ret =
-      customClasses().count(class_name) ? customClasses()[class_name] : nullptr;
+      customClasses().contains(class_name) ? customClasses()[class_name] : nullptr;
   if (ret) {
     RECORD_CUSTOM_CLASS(class_name);
   }
@@ -152,6 +152,26 @@ c10::FunctionSchema class_base::withNewArguments(
   new_args.emplace_back(old_args[0]);
   // Skip self.
   size_t argIdx = 1;
+  for (const auto& default_arg : default_args) {
+    auto& old_arg = old_args[argIdx++];
+    new_args.emplace_back(
+        default_arg.name_,
+        old_arg.type(),
+        old_arg.real_type(),
+        old_arg.N(),
+        default_arg.value_);
+  }
+  return schema.cloneWithArguments(std::move(new_args));
+}
+
+c10::FunctionSchema class_base::withNewArgumentsStatic(
+    const c10::FunctionSchema& schema,
+    std::initializer_list<arg> default_args) {
+  const auto& old_args = schema.arguments();
+  std::vector<c10::Argument> new_args;
+  new_args.reserve(old_args.size());
+
+  size_t argIdx = 0;
   for (const auto& default_arg : default_args) {
     auto& old_arg = old_args[argIdx++];
     new_args.emplace_back(

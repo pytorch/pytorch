@@ -13,6 +13,8 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/utils/python_numbers.h>
 
+#include <Python.h>
+
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
@@ -20,11 +22,11 @@ PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
-std::vector<uint8_t> _PyOpcode_Caches_vec;
-
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 namespace {
+
+std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 struct StripFunctionCall {
   template <typename T>
@@ -212,6 +214,7 @@ enum class PyNumberSlotBit : int64_t {
   NB_INDEX = 31,
   NB_MATRIX_MULTIPLY = 32,
   NB_INPLACE_MATRIX_MULTIPLY = 33,
+  NB_DIVMOD = 34,
 };
 
 enum class PyTypeSlotBit : int64_t {
@@ -225,6 +228,8 @@ enum class PyTypeSlotBit : int64_t {
   TP_SETATTRO = 7,
   TP_DESCR_GET = 8,
   TP_DESCR_SET = 9,
+  TP_STR = 10,
+  TP_INIT = 11,
 };
 
 int64_t get_pysequence_slots(PyTypeObject* type) {
@@ -331,16 +336,33 @@ int64_t get_pynumber_slots(PyTypeObject* type) {
   if (PyType_GetSlot(type, Py_nb_inplace_matrix_multiply) != nullptr)
     slots |=
         (1LL << static_cast<int>(PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY));
+  if (PyType_GetSlot(type, Py_nb_divmod) != nullptr)
+    slots |= (1LL << static_cast<int>(PyNumberSlotBit::NB_DIVMOD));
   return slots;
+}
+
+// Helper function to check if a type has a specific method defined in its MRO
+static bool type_has_method(PyTypeObject* type, const char* method_name) {
+  // Check if the method is defined in the type or any of its base classes
+  return PyObject_HasAttrString((PyObject*)type, method_name);
 }
 
 int64_t get_pytype_slots(PyTypeObject* type) {
   int64_t slots = 0;
   if (PyType_GetSlot(type, Py_tp_hash) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_HASH));
-  if (PyType_GetSlot(type, Py_tp_iter) != nullptr)
+  // For tp_iter, only set the bit if __iter__ is actually defined in the type's
+  // MRO. CPython automatically fills tp_iter with a slot wrapper even if
+  // __iter__ is not defined.
+  if (PyType_GetSlot(type, Py_tp_iter) != nullptr &&
+      type_has_method(type, "__iter__"))
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITER));
-  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr)
+  // For tp_iternext, only set the bit if __next__ is actually defined in the
+  // type's MRO. CPython automatically fills tp_iternext with a slot wrapper
+  // even if __next__ is not defined, so we need to check if the method is truly
+  // implemented.
+  if (PyType_GetSlot(type, Py_tp_iternext) != nullptr &&
+      type_has_method(type, "__next__"))
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_ITERNEXT));
   if (PyType_GetSlot(type, Py_tp_call) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_CALL));
@@ -356,6 +378,10 @@ int64_t get_pytype_slots(PyTypeObject* type) {
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_GET));
   if (PyType_GetSlot(type, Py_tp_descr_set) != nullptr)
     slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_DESCR_SET));
+  if (PyType_GetSlot(type, Py_tp_str) != nullptr)
+    slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_STR));
+  if (PyType_GetSlot(type, Py_tp_init) != nullptr)
+    slots |= (1LL << static_cast<int>(PyTypeSlotBit::TP_INIT));
   return slots;
 }
 
@@ -389,7 +415,7 @@ PyObject* _get_type_slots(
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
-  static std::array<PyMethodDef, 4> fns = {
+  static auto fns = std::to_array<PyMethodDef>({
       PyMethodDef{
           "strip_function_call",
           PYC_FN(_strip_function_call),
@@ -403,7 +429,7 @@ void _register_functions(PyObject* mod) {
       PyMethodDef{
           "get_type_slots", PYC_FN(_get_type_slots), METH_FASTCALL, nullptr},
       PyMethodDef{nullptr, nullptr, 0, nullptr},
-  };
+  });
   PyModule_AddFunctions(mod, fns.data());
 }
 
@@ -411,34 +437,29 @@ void _register_functions(PyObject* mod) {
 
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
-  if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      dynamo != nullptr && PyModule_AddObject(torch, "_dynamo", dynamo) == 0);
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
-  if (eval_frame == nullptr ||
-      PyModule_AddObject(dynamo, "eval_frame", eval_frame) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      eval_frame != nullptr &&
+      PyModule_AddObject(dynamo, "eval_frame", eval_frame) == 0);
 
   PyObject* utils = torch_c_dynamo_utils_init();
-  if (utils == nullptr || PyModule_AddObject(dynamo, "utils", utils) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      utils != nullptr && PyModule_AddObject(dynamo, "utils", utils) == 0);
 
   PyObject* guards = torch_c_dynamo_guards_init();
-  if (guards == nullptr || PyModule_AddObject(dynamo, "guards", guards) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      guards != nullptr && PyModule_AddObject(dynamo, "guards", guards) == 0);
 
   PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
-  if (compiled_autograd == nullptr ||
-      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
-    throw python_error(); // @allow-raw-throw
-  }
+  TORCH_CHECK_PYTHON(
+      compiled_autograd != nullptr &&
+      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) == 0);
 
   auto m = py::handle(eval_frame).cast<py::module>();
 
@@ -448,10 +469,15 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
       .def_readonly("backend", &CacheEntry::backend)
-      .def_property_readonly("next", &CacheEntry::next)
+      .def_readonly(
+          "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
       .def(
           "update_diff_guard_root_manager",
-          &CacheEntry::update_diff_guard_root_manager);
+          &CacheEntry::update_diff_guard_root_manager)
+      // Python is handed copies, so compare the entries they were taken from.
+      // compile_id rules out a later entry reusing a freed one's address.
+      .def("__eq__", &CacheEntry::py_equal, py::is_operator())
+      .def("__hash__", &CacheEntry::py_hash);
 
   py::class_<PrecompileEntry>(m, "_PrecompileEntry")
       .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
@@ -477,7 +503,31 @@ void initDynamoBindings(PyObject* torch) {
   m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
   m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
+  // Read a builtin callable's PyMethodDef.ml_flags (CPython's METH_* bits) so
+  // the tp_methods arity check can derive its calling convention from CPython
+  // instead of a hand-maintained flag. Returns None for callables that carry
+  // no ml_flags (slot wrappers, Python functions). method_descriptor and
+  // classmethod_descriptor share the d_method layout prefix, so one cast serves
+  // both.
+  m.def("get_method_ml_flags", [](py::handle fn) -> py::object {
+    PyObject* o = fn.ptr();
+    int flags = -1;
+    if (PyCFunction_Check(o)) {
+      flags = PyCFunction_GetFlags(o);
+    } else if (
+        Py_IS_TYPE(o, &PyMethodDescr_Type) ||
+        Py_IS_TYPE(o, &PyClassMethodDescr_Type)) {
+      flags = reinterpret_cast<PyMethodDescrObject*>(o)->d_method->ml_flags;
+    }
+    if (flags < 0) {
+      return py::none();
+    }
+    return py::int_(flags);
+  });
+
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
+  m.def("_get_cache_entries_for_region", &_get_cache_entries_for_region);
+  m.def("_get_total_cache_entry_count", &_get_total_cache_entry_count);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
@@ -506,11 +556,12 @@ void initDynamoBindings(PyObject* torch) {
   _register_functions(dynamo);
 
   auto dynamo_module = py::handle(dynamo).cast<py::module>();
-  dynamo_module.def("has_slot", [](int64_t slots, py::object slot_bit_obj) {
-    // Convert slot_bit to int - handle both int and pybind11 enums
-    int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
-    return (slots & (1LL << slot_bit)) != 0;
-  });
+  dynamo_module.def(
+      "has_slot", [](int64_t slots, const py::object& slot_bit_obj) {
+        // Convert slot_bit to int - handle both int and pybind11 enums
+        int64_t slot_bit = py::cast<int64_t>(slot_bit_obj.attr("__index__")());
+        return (slots & (1LL << slot_bit)) != 0;
+      });
   py::enum_<PySequenceSlotBit>(dynamo_module, "PySequenceSlots")
       .value("SQ_LENGTH", PySequenceSlotBit::SQ_LENGTH)
       .value("SQ_CONCAT", PySequenceSlotBit::SQ_CONCAT)
@@ -563,7 +614,8 @@ void initDynamoBindings(PyObject* torch) {
       .value("NB_MATRIX_MULTIPLY", PyNumberSlotBit::NB_MATRIX_MULTIPLY)
       .value(
           "NB_INPLACE_MATRIX_MULTIPLY",
-          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY);
+          PyNumberSlotBit::NB_INPLACE_MATRIX_MULTIPLY)
+      .value("NB_DIVMOD", PyNumberSlotBit::NB_DIVMOD);
 
   py::enum_<PyTypeSlotBit>(dynamo_module, "PyTypeSlots")
       .value("TP_HASH", PyTypeSlotBit::TP_HASH)
@@ -575,7 +627,9 @@ void initDynamoBindings(PyObject* torch) {
       .value("TP_GETATTRO", PyTypeSlotBit::TP_GETATTRO)
       .value("TP_SETATTRO", PyTypeSlotBit::TP_SETATTRO)
       .value("TP_DESCR_GET", PyTypeSlotBit::TP_DESCR_GET)
-      .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET);
+      .value("TP_DESCR_SET", PyTypeSlotBit::TP_DESCR_SET)
+      .value("TP_STR", PyTypeSlotBit::TP_STR)
+      .value("TP_INIT", PyTypeSlotBit::TP_INIT);
 }
 
 } // namespace torch::dynamo

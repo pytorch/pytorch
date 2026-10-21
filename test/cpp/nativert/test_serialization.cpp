@@ -328,4 +328,90 @@ TEST(SerializationTest, ConstantToValueThrowsOnSymbolicTypes) {
   EXPECT_THROW(constantToValue(as_opt_tensor, false), std::exception);
 }
 
+// Verify that None-typed input values deserialized from JSON have nullptr
+// producer. Previously, they were incorrectly assigned the consuming node as
+// producer, which caused dangling pointer crashes in cleanupDeadNodes() when
+// graph passes like FuseListUnpack destroyed the consuming node.
+TEST(SerializationTest, NoneInputValueHasNullProducer) {
+  // Build a minimal JSON graph:
+  //   graph(%data):
+  //     %out = some.op(data=%data, optional_arg=None)
+  //     return (%out)
+  torch::_export::Graph jsonGraph;
+
+  // Graph input: a tensor named "data"
+  torch::_export::Argument graphInput;
+  graphInput.set_as_tensor(makeTensorArg("data"));
+  jsonGraph.set_inputs({graphInput});
+
+  // Node: some.op with a tensor input and a None input
+  torch::_export::Node node;
+  node.set_target("some.op.default");
+
+  torch::_export::NamedArgument dataInput;
+  dataInput.set_name("data");
+  torch::_export::Argument dataArg;
+  dataArg.set_as_tensor(makeTensorArg("data"));
+  dataInput.set_arg(dataArg);
+
+  torch::_export::NamedArgument noneInput;
+  noneInput.set_name("optional_arg");
+  torch::_export::Argument noneArg;
+  noneArg.set_as_none({});
+  noneInput.set_arg(noneArg);
+
+  node.set_inputs({dataInput, noneInput});
+
+  // Output: a tensor named "out"
+  torch::_export::Argument nodeOutput;
+  nodeOutput.set_as_tensor(makeTensorArg("out"));
+  node.set_outputs({nodeOutput});
+
+  jsonGraph.set_nodes({node});
+
+  // Graph output
+  torch::_export::Argument graphOutput;
+  graphOutput.set_as_tensor(makeTensorArg("out"));
+  jsonGraph.set_outputs({graphOutput});
+
+  // Build signature with proper input/output specs
+  torch::_export::GraphSignature sig;
+
+  torch::_export::UserInputSpec userInput;
+  userInput.set_arg(graphInput);
+  torch::_export::InputSpec inputSpec;
+  inputSpec.set_user_input(userInput);
+  sig.set_input_specs({inputSpec});
+
+  torch::_export::UserOutputSpec userOutput;
+  userOutput.set_arg(graphOutput);
+  torch::_export::OutputSpec outputSpec;
+  outputSpec.set_user_output(userOutput);
+  sig.set_output_specs({outputSpec});
+
+  torch::_export::GraphModule graphModule;
+  graphModule.set_graph(jsonGraph);
+  graphModule.set_signature(sig);
+
+  auto graph = jsonToGraph(graphModule);
+
+  // Find the deserialized node and check its None input
+  for (const auto& n : graph->nodes()) {
+    if (n.target() == "some.op.default") {
+      for (const auto& inp : n.inputs()) {
+        if (inp.name == "optional_arg") {
+          // The None value should have nullptr producer, not the consuming node
+          EXPECT_EQ(inp.value->type().kind(), Type::Kind::None);
+          EXPECT_EQ(inp.value->producer(), nullptr)
+              << "None input value should have nullptr producer, not the "
+                 "consuming node. This was fixed to prevent dangling pointer "
+                 "crashes in cleanupDeadNodes().";
+          return;
+        }
+      }
+    }
+  }
+  FAIL() << "Could not find the None input 'optional_arg' on 'some.op.default'";
+}
+
 } // namespace torch::nativert

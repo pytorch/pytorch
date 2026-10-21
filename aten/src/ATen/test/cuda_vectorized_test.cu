@@ -11,12 +11,14 @@ using namespace at::native::memory;
 constexpr int buffer_size = 1024;
 
 #if defined(CUDA_VERSION) && CUDA_VERSION < 13000
-__managed__ double4 buffer1[buffer_size];
-__managed__ double4 buffer2[buffer_size];
+using double4_t = double4;
 #else
-__managed__ double4_16a buffer1[buffer_size];
-__managed__ double4_16a buffer2[buffer_size];
+using double4_t = double4_16a;
 #endif
+
+// cudaMallocManaged rather than __managed__ globals: on ROCm GPUs without SVM
+// (e.g. SR-IOV VFs), kernels see the unmapped host address of a __managed__ global.
+double4_t *buffer1, *buffer2;
 
 void reset_buffers() {
   for (int i = 0; i < buffer_size; i++) {
@@ -33,13 +35,23 @@ void reset_buffers() {
 }
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
-  char *ptr = reinterpret_cast<char *>(buffer1);
+  alignas(64) static char buffer[64];
+  char *ptr = buffer;
 
+#ifdef USE_ROCM
+  // ROCm vectorizes 1-byte types up to 16 and caps 4/8-byte types at 4.
+  ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 16);
+  ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 16);
+  ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
+  ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 4);
+  ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 4);
+#else
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int16_t>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int>(ptr), 8);
   ASSERT_EQ(memory::can_vectorize_up_to<int64_t>(ptr), 8);
+#endif
 
   ASSERT_EQ(memory::can_vectorize_up_to<bool>(ptr + 1), 1);
   ASSERT_EQ(memory::can_vectorize_up_to<int8_t>(ptr + 1), 1);
@@ -73,13 +85,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   using vectorized = policies::vectorized<vec_size, array_t, thread_work_size()>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size()];
-#if !defined(USE_ROCM)
-  // This fails only on CUDA 10.x, remove this after CUDA 10.x support is dropped
-  scalar_t *buf_ = &buf[0];
-  auto accessor = [&](int index) -> scalar_t & { return buf_[index]; };
-#else
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
-#endif
   policy.load_single_arg(accessor, src + block_work_size() * blockIdx.x);
   policy.store(buf, idx);
 }
@@ -89,6 +95,8 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     return;
   }
 
+  ASSERT_EQ(cudaSuccess, cudaMallocManaged(&buffer1, buffer_size * sizeof(double4_t)));
+  ASSERT_EQ(cudaSuccess, cudaMallocManaged(&buffer2, buffer_size * sizeof(double4_t)));
   double *b1 = reinterpret_cast<double *>(buffer1);
   double *b2 = reinterpret_cast<double *>(buffer2);
 
@@ -155,4 +163,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     }
   }
 #endif
+
+  ASSERT_EQ(cudaSuccess, cudaFree(buffer1));
+  ASSERT_EQ(cudaSuccess, cudaFree(buffer2));
 }

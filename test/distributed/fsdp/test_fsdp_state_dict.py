@@ -3,6 +3,7 @@
 import io
 import itertools
 import sys
+import unittest
 from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
@@ -56,11 +57,13 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     get_full_params,
     SkipModel,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -160,7 +163,24 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(8, 8, device=device_type)
 
 
-class TestFSDPStateDict(FSDPTest):
+def _unsupported_state_dict_config(params):
+    rank0_only = params.get(
+        "state_dict_rank0_and_offload", params.get("rank0_only_and_offload", False)
+    )
+    return (rank0_only and params["state_dict_type"] != "state_dict") or (
+        params.get("use_orig_params", False)
+        and params["state_dict_type"] not in _UNFLATTENED_STATE_DICT_IMPLS
+    )
+
+
+# Skip no-op combinations at collection time instead of after spawning ranks.
+_skip_unsupported_config = decorateIf(
+    unittest.skip("Unsupported state-dict configuration"),
+    _unsupported_state_dict_config,
+)
+
+
+class TestFSDPStateDict(FSDPTestContinuous):
     @property
     def world_size(self):
         return min(torch.accelerator.device_count(), 2)
@@ -313,7 +333,7 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(
                         tensor.device,
                         torch.device("cpu"),
-                        f"{key} is unexpectedly on device {tensor.device}",
+                        lambda msg: f"{msg}\n{key} is unexpectedly on device {tensor.device}",
                     )
             else:
                 # For non-FSDP roots, the non FSDP portion can still have parameters on rank 0,
@@ -322,7 +342,7 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(
                         fsdp_state_dict,
                         {},
-                        f"Expected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}",
+                        lambda msg: f"{msg}\nExpected empty state_dict but got {fsdp_state_dict} on rank {dist.get_rank()}",
                     )
 
     @skip_if_lt_x_gpu(2)
@@ -380,6 +400,7 @@ class TestFSDPStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("rank0_only_and_offload", [False, True])
+    @_skip_unsupported_config
     def test_state_dict_with_manual_ac_wrapper(
         self,
         state_dict_type: str,
@@ -537,6 +558,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
+    @_skip_unsupported_config
     def test_basic_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -636,6 +658,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
+    @_skip_unsupported_config
     def test_buffers_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -698,6 +721,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
+    @_skip_unsupported_config
     def test_save_and_load_after_forward_state_dict(
         self, state_dict_type, mixed_precision, state_dict_rank0_and_offload
     ):
@@ -871,6 +895,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("fsdp_root", [True, False])
+    @_skip_unsupported_config
     def test_state_dict_load_into_local_module(
         self,
         state_dict_type,
@@ -1093,7 +1118,7 @@ class TestFSDPStateDict(FSDPTest):
             self.assertEqual(
                 tensor.data_ptr(),
                 sd1[prefixed_tensor_name].data_ptr(),
-                f"{prefixed_tensor_name}",
+                lambda msg: f"{msg}\n{prefixed_tensor_name}",
             )
         # should not apply mixed_precision to ignored buffers
         for buffer_name in buffer_to_buffer_name.values():
@@ -1257,7 +1282,11 @@ class TestFSDPStateDict(FSDPTest):
 
                 fsdp_model.load_state_dict(sharded)
                 for p1, p2 in zip(param_copy, fsdp_model.parameters()):
-                    self.assertEqual(p1, p2, f"not equal: {p1.sum()} vs {p2.sum()}")
+                    self.assertEqual(
+                        p1,
+                        p2,
+                        lambda msg: f"{msg}\nnot equal: {p1.sum()} vs {p2.sum()}",
+                    )
 
     @skip_if_lt_x_gpu(2)
     def test_world_size_one(self):

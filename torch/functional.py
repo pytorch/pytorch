@@ -22,7 +22,6 @@ __all__ = [
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
-    "align_tensors",
     "broadcast_shapes",
     "broadcast_tensors",
     "cartesian_prod",
@@ -84,7 +83,7 @@ def broadcast_shapes(*shapes):
 
     This is equivalent to
     ``torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape``
-    but avoids the need create to intermediate tensors. This is useful for
+    but avoids the need to create intermediate tensors. This is useful for
     broadcasting tensors of common batch shape but different rightmost shape,
     e.g. to broadcast mean vectors with covariance matrices.
 
@@ -537,7 +536,7 @@ def stft(
         such as :func:`torch.hann_window`.
 
     The STFT computes the Fourier transform of short overlapping windows of the
-    input. This giving frequency components of the signal as they change over
+    input. This gives frequency components of the signal as they change over
     time. The interface of this function is modeled after (but *not* a drop-in
     replacement for) librosa_ stft function.
 
@@ -783,6 +782,24 @@ else:
     _unique_impl_out = tuple[Tensor, Tensor, Tensor]
 
 
+def _unique_torch_function(
+    input: Tensor,
+    sorted: bool = True,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+    dim: int | None = None,
+) -> Any:
+    return handle_torch_function(
+        unique,
+        (input,),
+        input,
+        sorted=sorted,
+        return_inverse=return_inverse,
+        return_counts=return_counts,
+        dim=dim,
+    )
+
+
 def _unique_impl(
     input: Tensor,
     sorted: bool = True,
@@ -944,17 +961,6 @@ def _unique_impl(
                  [0, 1],
                  [1, 0]]])
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            unique,
-            (input,),
-            input,
-            sorted=sorted,
-            return_inverse=return_inverse,
-            return_counts=return_counts,
-            dim=dim,
-        )
-
     if dim is not None:
         output, inverse_indices, counts = _VF.unique_dim(
             input,
@@ -971,6 +977,22 @@ def _unique_impl(
             return_counts=return_counts,
         )
     return output, inverse_indices, counts
+
+
+def _unique_consecutive_torch_function(
+    input: Tensor,
+    return_inverse: bool = False,
+    return_counts: bool = False,
+    dim: int | None = None,
+) -> Any:
+    return handle_torch_function(
+        unique_consecutive,
+        (input,),
+        input,
+        return_inverse=return_inverse,
+        return_counts=return_counts,
+        dim=dim,
+    )
 
 
 def _unique_consecutive_impl(
@@ -1028,19 +1050,25 @@ def _unique_consecutive_impl(
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            unique_consecutive,
-            (input,),
-            input,
-            return_inverse=return_inverse,
-            return_counts=return_counts,
-            dim=dim,
-        )
     output, inverse_indices, counts = _VF.unique_consecutive(  # type: ignore[attr-defined]
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim
     )
     return output, inverse_indices, counts
+
+
+def _return_inverse_and_counts(
+    input,
+    sorted=True,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
+):
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor, Tensor]
+
+    if has_torch_function_unary(input):
+        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
+
+    return _unique_impl(input, sorted, return_inverse, return_counts, dim)
 
 
 def _return_counts(
@@ -1053,7 +1081,7 @@ def _return_counts(
     # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
 
     output, _, counts = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output, counts
@@ -1069,7 +1097,7 @@ def _return_output(
     # type: (Tensor, bool, bool, bool, Optional[int]) -> Tensor
 
     if has_torch_function_unary(input):
-        return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
 
     output, _, _ = _unique_impl(input, sorted, return_inverse, return_counts, dim)
     return output
@@ -1085,7 +1113,7 @@ def _return_inverse(
     # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_impl(input, sorted, return_inverse, return_counts, dim)
+        return _unique_torch_function(input, sorted, return_inverse, return_counts, dim)
 
     output, inverse_indices, _ = _unique_impl(
         input, sorted, return_inverse, return_counts, dim
@@ -1107,7 +1135,7 @@ _return_inverse_true = boolean_dispatch(
     arg_name="return_counts",
     arg_index=3,
     default=False,
-    if_true=_unique_impl,
+    if_true=_return_inverse_and_counts,
     if_false=_return_inverse,
     module_name=__name__,
     func_name="unique",
@@ -1128,6 +1156,21 @@ unique = boolean_dispatch(
 unique.__doc__ = _unique_impl.__doc__
 
 
+def _consecutive_return_inverse_and_counts(
+    input,
+    return_inverse=False,
+    return_counts=False,
+    dim=None,
+):
+    # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor, Tensor]
+    if has_torch_function_unary(input):
+        return _unique_consecutive_torch_function(
+            input, return_inverse, return_counts, dim
+        )
+
+    return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+
+
 def _consecutive_return_counts(
     input,
     return_inverse=False,
@@ -1137,7 +1180,9 @@ def _consecutive_return_counts(
     # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+        return _unique_consecutive_torch_function(
+            input, return_inverse, return_counts, dim
+        )
 
     output, _, counts = _unique_consecutive_impl(
         input, return_inverse, return_counts, dim
@@ -1154,7 +1199,9 @@ def _consecutive_return_output(
     # type: (Tensor, bool, bool, Optional[int]) -> Tensor
 
     if has_torch_function_unary(input):
-        return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+        return _unique_consecutive_torch_function(
+            input, return_inverse, return_counts, dim
+        )
 
     output, _, _ = _unique_consecutive_impl(input, return_inverse, return_counts, dim)
     return output
@@ -1169,7 +1216,9 @@ def _consecutive_return_inverse(
     # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
-        return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
+        return _unique_consecutive_torch_function(
+            input, return_inverse, return_counts, dim
+        )
 
     output, inverse_indices, _ = _unique_consecutive_impl(
         input, return_inverse, return_counts, dim
@@ -1191,7 +1240,7 @@ _consecutive_return_inverse_true = boolean_dispatch(
     arg_name="return_counts",
     arg_index=1,
     default=False,
-    if_true=_unique_consecutive_impl,
+    if_true=_consecutive_return_inverse_and_counts,
     if_false=_consecutive_return_inverse,
     module_name=__name__,
     func_name="unique_consecutive",
@@ -1433,7 +1482,7 @@ def block_diag(*tensors):
 
 def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # type: (Tensor, Tensor, float, str) -> (Tensor)
-    r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
+    r"""Computes the batched p-norm distance between each pair of the two collections of row vectors.
 
     Args:
         x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
@@ -1991,6 +2040,11 @@ def _unravel_index(indices: Tensor, shape: int | Sequence[int]) -> Tensor:
         lambda: f"'shape' cannot have negative values, but got {tuple(shape)}",
     )
 
+    torch._check_value(
+        all(dim > 0 for dim in shape) or indices.numel() == 0,
+        lambda: f"'shape' cannot have zero dimensions when 'indices' is non-empty, but got {tuple(shape)}",
+    )
+
     coefs = list(
         reversed(
             list(
@@ -2131,6 +2185,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> warnings.filterwarnings("ignore", message=".*torch.lu is deprecated")  # docs: hide
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU
@@ -2216,7 +2271,3 @@ lu = boolean_dispatch(
     func_name="lu",
 )
 lu.__doc__ = _lu_impl.__doc__
-
-
-def align_tensors(*tensors):
-    raise RuntimeError("`align_tensors` not yet implemented.")

@@ -29,6 +29,7 @@
 #include <type_traits>
 
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/ThrustAllocator.h>
@@ -266,9 +267,8 @@ Tensor& add_out_dense_sparse_compressed_cuda(
               // dimension.
               thrust::for_each(
                   policy,
-                  thrust::make_counting_iterator(int64_t(0)),
-                  thrust::make_counting_iterator(
-                      int64_t(src_compressed_indices.size(-1) - 1)),
+                  cccl_counting_iterator<int64_t>{0ll},
+                  cccl_counting_iterator<int64_t>{src_compressed_indices.size(-1) - 1},
                   [values_accessor,
                    compressed_indices_accessor,
                    plain_indices_accessor,
@@ -340,8 +340,12 @@ Tensor& add_out_sparse_compressed_cuda(
       return out;
     }
 
-    at::native::resize_as_sparse_compressed_(out, self);
-    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
+    // csrgeam2 must not read from storage that out is written to and
+    // resized into, so operate on clones of any input aliasing out.
+    const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
+    const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
+    at::native::resize_as_sparse_compressed_(out, self_);
+    sparse::impl::cuda::add_out_sparse_csr(self_, other_, Scalar(1), alpha, out);
   }
   return out;
 }

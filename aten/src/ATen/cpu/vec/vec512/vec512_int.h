@@ -23,7 +23,7 @@ struct Vectorizedi {
   }
 
  public:
-  Vectorizedi() {}
+  Vectorizedi() = default;
   Vectorizedi(__m512i v) : values(v) {}
   operator __m512i() const {
     return values;
@@ -210,7 +210,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(int32_t v) {
     values = _mm512_set1_epi32(v);
   }
@@ -459,7 +459,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(int16_t v) {
     values = _mm512_set1_epi16(v);
   }
@@ -740,7 +740,7 @@ class Vectorized8 : public Vectorizedi {
     return 64;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8() {}
+  Vectorized8() = default;
   Vectorized8(T v) {
     values = _mm512_set1_epi8(v);
   }

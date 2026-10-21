@@ -20,13 +20,12 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     find_free_port,
     IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
     skipIfWindows,
-    TEST_XPU,
-    xfailIf,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
@@ -190,7 +189,7 @@ class LoggingTests(LoggingTestCase):
     @requires_cuda_and_triton
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
         fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
@@ -227,13 +226,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 201, in outmost_fn
+    -   File [file_path], line 200, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 204, in outer_fn
+    -   File [file_path], line 203, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 207, in fn
+    -   File [file_path], line 206, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 210, in inner
+    -   File [file_path], line 209, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -359,9 +358,7 @@ class LoggingTests(LoggingTestCase):
         except Exception:
             pass
         record = self.getRecord(records, "WON'T CONVERT")
-        self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            """\
+        expected = """\
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
@@ -375,7 +372,13 @@ torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",
+    output = output.add(torch.ones(10, 10))"""
+        expected = expectedIfCppFakeTensor(
+            expected.replace("FakeTensor(...", "tensor(..."), expected
+        )
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            expected,
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -511,13 +514,13 @@ Found from :
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.INFO,
-                    msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                    msg=lambda msg: f"{msg}\nexpected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
             else:
                 self.assertEqual(
                     logger.getEffectiveLevel(),
                     logging.DEBUG,
-                    msg=f"expected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                    msg=lambda msg: f"{msg}\nexpected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
                 )
 
     @make_logging_test(graph_breaks=True)
@@ -1062,6 +1065,18 @@ Mutating object of type dict (source name: L['mod']._buffers)
 
         self.assertTrue(found_funcname)
 
+    def test_flex_gemm_log_levels(self):
+        from torch._logging._internal import _parse_log_settings
+
+        log_name = "torch._inductor.kernel.flex_gemm.debug"
+        concise = _parse_log_settings("flex_gemm")
+        verbose = _parse_log_settings("+flex_gemm")
+
+        self.assertEqual(concise.log_qname_to_level[log_name], logging.INFO)
+        self.assertEqual(verbose.log_qname_to_level[log_name], logging.DEBUG)
+        self.assertEqual(concise.artifact_names, set())
+        self.assertEqual(verbose.artifact_names, set())
+
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
@@ -1153,7 +1168,7 @@ print("arf")
         fn_opt = torch.compile(fn, backend="eager")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
-        msg0 = munge_exc(records[0].getMessage())
+        msg0 = munge_exc(records[0].getMessage(), strip_carets=False)
         self.assertExpectedInline(
             msg0,
             """\
@@ -1324,12 +1339,12 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         record = self.getRecord(records, "TREE_GUARD_MANAGER")
         self.assertExpectedInline(
             munge_global_state_json(record.getMessage()),
-            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"cuda_matmul_precision": "#","default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
     def test_cudagraph_static_inputs(self, records):
-        @torch.compile(mode="reduce-overhead")
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             return x + 1
 
@@ -1339,7 +1354,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 4)
 
-    @xfailIf(TEST_XPU)  # https://github.com/pytorch/pytorch/issues/157778
     @make_logging_test(perf_hints=True)
     @requires_gpu
     def test_optimizer_non_static_param(self, records):
@@ -1347,7 +1361,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         for param in params:
             param.grad = torch.zeros_like(param)
         opt = torch.optim.Adam(params)
-        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
         compiled_opt_step()
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
@@ -1361,7 +1375,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             def f(a, b):
                 return torch.mm(a, b)
 
-            f = torch.compile(f, mode="max-autotune-no-cudagraphs")
+            f = torch.compile(f, mode="max-autotune-no-cudagraphs")  # noqa: UNSPECIFIED_BACKEND
             f(
                 torch.randn(10, 10, device=device_type),
                 torch.randn(10, 10, device=device_type),
@@ -1481,7 +1495,7 @@ fn(torch.randn(5))
 
         foo()
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def baz(x):
             return x + 1
 
@@ -1504,6 +1518,102 @@ TorchDynamo attempted to trace the following frames: [
   * baz test_logging.py:N
 ]""",
         )
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_reason_logging(self, records):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with torch._dynamo.config.patch(disable=True):
+            torch.compile(fn, backend="eager")(x)
+
+        skip_records = [r for r in records if "skipping:" in r.getMessage()]
+        self.assertGreater(len(skip_records), 0)
+        msg = skip_records[0].getMessage()
+        self.assertIn("Dynamo tracing is disabled", msg)
+        self.assertIn("fn", msg)
+
+    @make_logging_test(dynamo=logging.DEBUG)
+    def test_skip_reason_logging_dispatch_mode(self, records):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class SkipMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(5)
+        with SkipMode():
+            torch.compile(fn, backend="eager")(x)
+
+        skip_records = [r for r in records if "skipping:" in r.getMessage()]
+        self.assertGreater(len(skip_records), 0)
+        msg = skip_records[0].getMessage()
+        self.assertIn("non-infra torch dispatch mode present", msg)
+        self.assertIn("fn", msg)
+
+    @requires_gpu
+    @torch._inductor.config.patch("force_disable_caches", True)
+    @make_logging_test(autotuning_inputs=True)
+    def test_autotuning_inputs(self, records):
+        @torch.compile(mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
+        def f(x):
+            return (x * 2.0 + 1.0).sum(dim=1)
+
+        f(torch.randn(2048, 4096, device=device_type))
+
+        autotune_records = [r for r in records if ".__autotuning_inputs" in r.name]
+        self.assertGreater(len(autotune_records), 0)
+        msg = "\n".join(r.getMessage() for r in autotune_records)
+        self.assertIn("Autotuning inputs for kernel", msg)
+        self.assertIn("shape=(", msg)
+        self.assertIn("dtype=torch.float32", msg)
+        self.assertIn("stride=(", msg)
+
+    @requires_gpu
+    @torch._inductor.config.patch("force_disable_caches", True)
+    @make_logging_test(inductor=logging.DEBUG)
+    def test_autotuning_inputs_off_by_default(self, records):
+        # off_by_default: must stay silent even with the parent inductor log at DEBUG
+        @torch.compile(mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
+        def f(x):
+            return (x * 2.0 + 1.0).sum(dim=1)
+
+        f(torch.randn(2048, 4096, device=device_type))
+        self.assertEqual(
+            len([r for r in records if ".__autotuning_inputs" in r.name]), 0
+        )
+
+
+class PartitionedScatterLoggingTests(LoggingTestCase):
+    """
+    Dedicated tests for the partitioned_scatter TORCH_LOGS artifact.
+    """
+
+    @make_logging_test(partitioned_scatter=True)
+    def test_partitioned_scatter(self, records):
+        from torch._inductor import config as inductor_config
+
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        with inductor_config.patch(
+            partitioned_scatter_enabled=True,
+            partitioned_scatter_force=True,
+        ):
+            fn_opt = torch.compile(f, backend="inductor", fullgraph=True)
+            out = torch.zeros(n)
+            idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+            vals = torch.randn(N)
+            fn_opt(out, idx, vals)
+
+        # At least one debug record should be emitted (APPLY or SKIP decision).
+        self.assertGreater(len(records), 0)
 
 
 # non single record tests
@@ -1552,6 +1662,8 @@ exclusions = {
     "loop_tiling",
     "auto_chunker",
     "autotuning",
+    "autotuning_inputs",
+    "incremental",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
@@ -1559,6 +1671,9 @@ exclusions = {
     "node_runtime_estimation",
     "caching",
     "overlap_scheduling",
+    "partitioned_scatter",
+    # Only emits for torch._native DSL ops, not for a plain torch.compile.
+    "native_dsl_compile",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

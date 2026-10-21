@@ -2,6 +2,11 @@
 cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 project(custom_ops)
 
+# CI reuses these build artifacts across runners that may have different
+# absolute workspace paths; emit $ORIGIN-relative RUNPATH so the binary finds
+# its sibling .so wherever the build tree is dropped.
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE)
+
 if(USE_ROCM)
 include(utils)
 include(LoadHIP)

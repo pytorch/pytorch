@@ -215,7 +215,7 @@ static void CanonicalizeOutputs(Block* block) {
         CanonicalizeIfOutputs(n);
       } break;
     }
-    // Since an a control flow node's outputs are after
+    // Since a control flow node's outputs are after
     // the values outputted within its blocks, first canonicalize
     // the nodes outputs and then recurse on its blocks
     for (Block* b : n->blocks()) {

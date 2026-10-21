@@ -18,8 +18,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_XPU,
-    xfailIf,
 )
 
 
@@ -35,6 +33,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_module = torch.get_device_module(device_type)
 
 
 class Layer(nn.Module):
@@ -53,8 +52,8 @@ class Layer(nn.Module):
         # Record the fake forward compute time.
         self.e1.record()
         if self.sleep_cycles > 0:
-            if torch.cuda.is_available():
-                torch.cuda._sleep(self.sleep_cycles)
+            if hasattr(device_module, "_sleep"):
+                device_module._sleep(self.sleep_cycles)
         if self.optional_param is not None:
             x = x + self.optional_param  # force the param to be part of the graph
         self.e2.record()
@@ -104,9 +103,9 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
     def _dist_train(self):
         rank = self.rank
         world_size = self.world_size
-        # Save the original torch.distributed.all_gather_into_tensor function since we will
+        # Save the original torch.distributed.all_gather_single function since we will
         # patch it to include an artificial delay.
-        orig_all_gather = torch.distributed.all_gather_into_tensor
+        orig_all_gather = torch.distributed.all_gather_single
 
         def run(compute_cycles, all_gather_cycles):
             has_params = all_gather_cycles > 0
@@ -141,8 +140,8 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                 def _delayed_all_gather(*args, **kwargs):
                     nonlocal all_gather_called
                     all_gather_called = True
-                    if torch.cuda.is_available():
-                        torch.cuda._sleep(all_gather_cycles)
+                    if hasattr(device_module, "_sleep"):
+                        device_module._sleep(all_gather_cycles)
                     if not orig_all_gather:
                         raise AssertionError("Expected orig_all_gather to be truthy")
                     return orig_all_gather(*args, **kwargs)
@@ -152,9 +151,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                 # Even though both e1 & e2 are on the compute stream, since
                 # compute depends on all_gather, e2-e1 includes all_gather time.
                 e1.record()
-                with patch(
-                    "torch.distributed.all_gather_into_tensor", _delayed_all_gather
-                ):
+                with patch("torch.distributed.all_gather_single", _delayed_all_gather):
                     out = model(batch)
                     if has_params and world_size > 1:
                         self.assertTrue(all_gather_called)
@@ -195,7 +192,7 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
                 "gpu_total": gpu_total.avg(),
             }
 
-        sleep_cycles = int(100 * get_cycles_per_ms())
+        sleep_cycles = int(100 * get_cycles_per_ms(device_type))
 
         e1 = run(0, 0)  # no compute, no all-gather
         e2 = run(0, sleep_cycles)  # no compute, only all-gather
@@ -251,7 +248,6 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
             self.assertTrue(compute_only + all_gather_only > 1.1 * both)
 
     @unittest.skipIf(TEST_HPU, "HPU doesn't has HW sleep API support, skipping")
-    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1504
     @skip_if_lt_x_gpu(2)
     def test_forward_overlap(self):
         self._dist_train()

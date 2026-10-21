@@ -191,5 +191,20 @@ class TestRearrange(TestCase):
             rearrange(x, "a ... -> ... a")
 
 
+class TestRearrangeTorchFuncExport(TestCase):
+    def test_torch_func_rearrange_import(self) -> None:
+        from torch.func import rearrange as torch_func_rearrange
+
+        # Verify the import works and is the same function
+        self.assertIs(torch_func_rearrange, rearrange)
+
+    def test_torch_func_rearrange_basic(self) -> None:
+        from torch.func import rearrange as torch_func_rearrange
+
+        x = torch.randn((2, 3, 4))
+        result = torch_func_rearrange(x, "b h w -> h (b w)")
+        self.assertEqual(result.shape, torch.Size([3, 8]))
+
+
 if __name__ == "__main__":
     run_tests()

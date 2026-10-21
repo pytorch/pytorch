@@ -16,6 +16,25 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 
 
+if HAS_GPU_AND_TRITON:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def _fill_kernel(
+        buf_ptr,
+        num_tokens,
+        stride_t,
+        stride_i,
+        INNER: tl.constexpr,
+    ):
+        pid = tl.program_id(0)
+        if pid >= num_tokens:
+            return
+        for i in range(INNER):
+            tl.store(buf_ptr + pid * stride_t + i * stride_i, 1.0)
+
+
 class TestNeedsExactStrides(InductorTestCase):
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):
@@ -98,6 +117,39 @@ class TestNeedsExactStrides(InductorTestCase):
                     pass
                 if not called:
                     raise AssertionError
+
+    @parametrize("n", [64, 128, 256])
+    def test_dynamic_size_one_leading_dim_view_triton_kernel_wrapper_functional(
+        self, n
+    ):
+        device = torch.accelerator.current_accelerator()
+        inner = 8
+
+        def fn(x):
+            num_tokens = x.shape[0]
+            aligned_num_tokens = ((num_tokens + 3) // 4) * 4
+            buf = torch.empty(
+                inner * aligned_num_tokens,
+                dtype=torch.float32,
+                device=x.device,
+            ).as_strided(
+                (1, num_tokens, inner),
+                (inner * aligned_num_tokens, 1, aligned_num_tokens),
+            )
+
+            _fill_kernel[(num_tokens,)](
+                buf,
+                num_tokens,
+                stride_t=buf.stride(1),
+                stride_i=buf.stride(2),
+                INNER=inner,
+            )
+
+            return buf
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+        x = torch.randn(n, inner, device=device)
+        self.assertEqual(compiled(x.clone()), fn(x.clone()))
 
 
 instantiate_parametrized_tests(TestNeedsExactStrides)

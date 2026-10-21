@@ -45,7 +45,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   // example in x86 using _mm512_cvtps_epi32 or mm512_round_ps with
   // _MM_FROUND_CUR_DIRECTION option that also follow the current rounding mode.
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  auto qvalue = fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
+  auto qvalue = fbgemm::Quantize<typename T::underlying>(
       value,
       static_cast<int32_t>(zero_point),
       static_cast<float>(scale),
@@ -60,7 +60,7 @@ void quantize_vec(
     const float* src,
     T* dst,
     size_t count) {
-  fbgemm::Quantize<typename T::underlying, false /*LEGACY*/>(
+  fbgemm::Quantize<typename T::underlying>(
       src,
       (typename T::underlying*)dst,
       count,
@@ -79,7 +79,17 @@ T quantize_val_arm(
   constexpr int32_t qmin = std::numeric_limits<T>::min();
   constexpr int32_t qmax = std::numeric_limits<T>::max();
   float inv_scale = 1.0f / scale;
+#ifndef _MSC_VER
+  auto r = static_cast<int32_t>(std::nearbyint(value * inv_scale));
+  // builtin_add_overflow() returns true in case of overflow
+  if (__builtin_add_overflow(zero_point, r, &r)) {
+    // zero_point must be a non-negative value between qmin and qmax,
+    // i.e. only overflow can happen.
+    r = qmax;
+  }
+#else
   auto r = zero_point + static_cast<int32_t>(std::nearbyint(value * inv_scale));
+#endif
   r = std::max(r, qmin);
   r = std::min(r, qmax);
   return static_cast<T>(r);

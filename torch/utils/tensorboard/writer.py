@@ -140,7 +140,7 @@ class FileWriter:
         Args:
           graph: A `Graph` protocol buffer.
           walltime: float. Optional walltime to override the default (current)
-            _get_file_writerfrom time.time())
+            walltime (from time.time()) seconds after epoch
         """
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
@@ -301,11 +301,11 @@ class SummaryWriter:
 
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
-              name of the hyper parameter and it's corresponding value.
+              name of the hyper parameter and its corresponding value.
               The type of the value can be one of `bool`, `string`, `float`,
               `int`, or `None`.
             metric_dict (dict): Each key-value pair in the dictionary is the
-              name of the metric and it's corresponding value. Note that the key used
+              name of the metric and its corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
               you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
@@ -325,7 +325,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_hparam.png
+        .. image:: /_static/img/tensorboard/add_hparam.png
            :scale: 50 %
 
         """
@@ -374,7 +374,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_scalar.png
+        .. image:: /_static/img/tensorboard/add_scalar.png
            :scale: 50 %
 
         """
@@ -410,7 +410,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_scalars.png
+        .. image:: /_static/img/tensorboard/add_scalars.png
            :scale: 50 %
 
         """
@@ -494,7 +494,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_histogram.png
+        .. image:: /_static/img/tensorboard/add_histogram.png
            :scale: 50 %
 
         """
@@ -563,7 +563,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_histogram_raw.png
+        .. image:: /_static/img/tensorboard/add_histogram_raw.png
            :scale: 50 %
 
         """
@@ -622,7 +622,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_image.png
+        .. image:: /_static/img/tensorboard/add_image.png
            :scale: 50 %
 
         """
@@ -666,7 +666,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_images.png
+        .. image:: /_static/img/tensorboard/add_images.png
            :scale: 30 %
 
         """

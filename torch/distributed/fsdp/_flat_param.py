@@ -29,7 +29,6 @@ from torch.distributed.utils import (
 )
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
-from torch.utils._typing_utils import not_none
 
 from ._fsdp_extensions import (
     _ext_post_unflatten_transform,
@@ -601,7 +600,6 @@ class FlatParamHandle:
         self._needs_pre_backward_unshard = False
         # Was the handle prefetched? Set on successful _prefetch_handle and unshard
         self._prefetched = False
-        self._compute_stream: torch.Stream | None = None
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1324,11 +1322,6 @@ class FlatParamHandle:
             self._use_sharded_views()
         ret = False
         if self._use_orig_params and not self._skip_writeback_check:
-            # Wait for the compute stream since _writeback_orig_params reads
-            # original parameters that may still be in use during prefetch.
-            self._device_handle.current_stream().wait_stream(
-                not_none(self._compute_stream)
-            )
             ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
@@ -1480,7 +1473,7 @@ class FlatParamHandle:
             )
             dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
-            dist.all_gather_into_tensor(
+            dist.all_gather_single(
                 padded_unsharded_flat_param,
                 sharded_flat_param,
                 pg,
@@ -1603,9 +1596,7 @@ class FlatParamHandle:
             device=self.device,
             dtype=sharded_grad.dtype,
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_grad, sharded_grad, self.process_group
-        )
+        dist.all_gather_single(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
             unsharded_size
@@ -1756,21 +1747,32 @@ class FlatParamHandle:
             _same_storage(self.flat_param, self._get_padded_unsharded_flat_param()),
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
+        cpu_offload_ctx = (
+            contextlib.nullcontext()
+            if self.flat_param.device.type == "cpu"
+            else self._offload_to_cpu()
+        )
+        with cpu_offload_ctx:
+            yield
+
+    @contextlib.contextmanager
+    def _offload_to_cpu(self):
         self.flat_param_to(torch.device("cpu"))
         self._free_unsharded_flat_param()
         try:
             yield
         finally:
-            _p_assert(
-                self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
-                f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
-            )
-            padded_unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-            # Copy from CPU to the compute device
-            padded_unsharded_flat_param[: self.flat_param.numel()].copy_(
-                self.flat_param
-            )
-            self._use_unsharded_flat_param(padded_unsharded_flat_param)
+            self._restore_unsharded_flat_param_from_cpu()
+
+    def _restore_unsharded_flat_param_from_cpu(self):
+        _p_assert(
+            self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
+            f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
+        )
+        padded_unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
+        # Copy from CPU to the compute device
+        padded_unsharded_flat_param[: self.flat_param.numel()].copy_(self.flat_param)
+        self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def reshard(self, free_unsharded_flat_param: bool):
         """
@@ -1849,6 +1851,14 @@ class FlatParamHandle:
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
+            # For `NO_SHARD`, this drops the only FSDP reference to the H2D
+            # copy that `pre_unshard()` allocated on the pre-unshard stream,
+            # and no all-gather ran to record it. Hand it to the consuming
+            # stream so the allocator does not reuse it under running kernels.
+            if not self.uses_sharded_strategy:
+                _no_dispatch_record_stream(
+                    flat_param.data, self._device_handle.current_stream()
+                )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
             if skip_use_sharded_views:  # type: ignore[possibly-undefined]
@@ -2762,7 +2772,7 @@ def _convert_to_params(
 
 
 def _is_truly_contiguous(x: Tensor) -> bool:
-    # Special case: Pytorch thinks that 1x1 channels_last convolution weights are
+    # Special case: PyTorch thinks that 1x1 channels_last convolution weights are
     # both contiguous and channels_last contiguous at the same time.
     # CuDNN does not agree though and refuses to select faster kernels.
     # It is the reason of having the extra check here.

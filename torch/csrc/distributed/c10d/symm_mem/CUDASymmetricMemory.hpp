@@ -1,10 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+
+#include <shared_mutex>
 
 namespace c10d::symmetric_memory {
 
@@ -56,6 +59,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
+  std::string get_group_name() override;
   int get_world_size() override;
   c10::Device get_device() override;
   bool world_within_direct_access() override;
@@ -79,6 +83,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
+      void* mc_signal_pad_addr,
+      size_t barrier_state_offset,
       HandleType mc_handle,
       void* mc_addr,
       size_t buffer_size,
@@ -88,17 +94,33 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       std::string group_name);
 
  private:
+  struct DevicePointerTables {
+    explicit DevicePointerTables(int device_idx) : device_idx(device_idx) {}
+    ~DevicePointerTables();
+
+    DevicePointerTables(const DevicePointerTables&) = delete;
+    DevicePointerTables& operator=(const DevicePointerTables&) = delete;
+    DevicePointerTables(DevicePointerTables&&) = delete;
+    DevicePointerTables& operator=(DevicePointerTables&&) = delete;
+
+    int device_idx;
+    c10::DataPtr buffers;
+    c10::DataPtr signal_pads;
+  };
+
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
+  void* mc_signal_pad_addr_;
+  // Bytes from a signal pad to the multimem barrier's state; see alloc().
+  size_t barrier_state_offset_;
   HandleType mc_handle_;
   void* mc_addr_;
   size_t buffer_size_;
   int local_device_idx_;
   int rank_;
   int world_size_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
+  DevicePointerTables pointer_tables_;
   std::string group_name_;
 
   friend class CUDASymmetricMemory;
@@ -111,7 +133,10 @@ struct Block : public c10::intrusive_ptr_target {
   int device_idx;
   size_t block_size;
   size_t buffer_size;
-  size_t signal_pad_offset;
+  // Byte offset from the allocation base (alloc_ref->ptr) to the start of the
+  // user buffer. The signal pad occupies the first two thirds of
+  // [0, buffer_offset) and the multimem barrier's state the last; see alloc().
+  size_t buffer_offset;
   std::optional<std::string> default_group_name;
   std::map<std::string, c10::intrusive_ptr<CUDAPeerAllocInfo>> symm_mems;
 
@@ -120,7 +145,7 @@ struct Block : public c10::intrusive_ptr_target {
       int device_idx,
       size_t block_size,
       size_t buffer_size,
-      size_t signal_pad_offset,
+      size_t buffer_offset,
       const std::optional<std::string>& group_name);
 };
 

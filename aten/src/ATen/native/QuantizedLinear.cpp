@@ -264,7 +264,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
-  fbgemm::Quantize<int8_t, false /*LEGACY*/>(
+  fbgemm::Quantize<int8_t>(
       /*src=*/weight_contig.const_data_ptr<float>(),
       /*dst=*/quantized.mutable_data_ptr<int8_t>(),
       /*len=*/weight_contig.numel(),

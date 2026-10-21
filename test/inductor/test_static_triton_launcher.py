@@ -1,16 +1,26 @@
 # Owner(s): ["module: inductor"]
+import gc
 import os
+import pickle
 import random
+import shutil
 import tempfile
+import unittest
+import weakref
+from types import SimpleNamespace
 from unittest import mock
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
+from torch._inductor.runtime.runtime_utils import triton_hash_to_path_key
 from torch._inductor.runtime.static_triton_launcher import (
+    _STATIC_LAUNCHER_REGISTRY,
+    register_statically_launched_kernel,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedTritonKernel,
     StaticallyLaunchedXpuKernel,
 )
 from torch._inductor.runtime.triton_compat import (
@@ -20,10 +30,16 @@ from torch._inductor.runtime.triton_compat import (
     triton,
 )
 from torch._inductor.runtime.triton_helpers import libdevice
+from torch._inductor.runtime.triton_heuristics import (
+    CachingAutotuner,
+    StaticTritonCompileResult,
+)
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfXpu
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.utils._triton import has_triton_cuda_tma_device
 
 
 if HAS_XPU_AND_TRITON:
@@ -38,6 +54,330 @@ def _patched_getitem(self, grid):
         return orig_launcher(*args, **kwargs)
 
     return launcher_with_native_code
+
+
+class TestStaticTritonLauncherUnit(TestCase):
+    @staticmethod
+    def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
+        fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
+        src = SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={})
+        metadata = SimpleNamespace(
+            num_warps=4,
+            shared=0,
+            num_ctas=1,
+            global_scratch_size=32,
+            global_scratch_align=16,
+        )
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
+            src=src,
+            metadata=metadata,
+            _cubin_path="/tmp/scratch_kernel.cubin",
+            hash="hash",
+            asm={"cubin": b"cubin"},
+        )
+        kernel = kernel_cls(compiled_kernel)
+        kernel.function = 1
+        return kernel
+
+    def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
+        load_calls = []
+        kernel_capsule = object()
+
+        class FakeImpl:
+            @staticmethod
+            def _load_kernel(path, name, shared, device):
+                load_calls.append((path, name, shared, device))
+                return kernel_capsule, 7, 11
+
+        launcher = object.__new__(StaticallyLaunchedXpuKernel)
+        launcher.function = None
+        launcher.module = None
+        launcher.device_agnostic = False
+        launcher.functions = {}
+        launcher.modules = {}
+        launcher.cubin_path = "/tmp/kernel.zebin"
+        launcher.cubin_raw = b"zebin"
+        launcher.name = "kernel"
+        launcher.shared = 13
+        launcher.C_impl = FakeImpl
+
+        launcher.load_kernel(3)
+
+        self.assertEqual(load_calls, [("/tmp/kernel.zebin", "kernel", 13, 3)])
+        self.assertIs(launcher.function, kernel_capsule)
+        self.assertEqual(launcher.n_regs, 7)
+        self.assertEqual(launcher.n_spills, 11)
+        self.assertIsNone(launcher.module)
+        self.assertIsNone(launcher.cubin_path)
+        self.assertIsNone(launcher.cubin_raw)
+
+        launcher.close()
+        self.assertIsNone(launcher.function)
+        self.assertIsNone(launcher.module)
+
+    def test_fast_launcher_keeps_kernel_owner_alive(self):
+        """
+        _build_fast_launcher bakes kernel.function into a _FastCudaLauncher and
+        replaces the "runner" global, dropping the launcher's only reference to
+        the owning kernel. It must retain the owner so the kernel (and its
+        loaded module) cannot be collected/unloaded while the fast launcher is
+        still callable.
+        """
+        import types
+
+        class FakeFastLauncher:
+            def __init__(self, func, num_warps, shared, arg_tys, n_scratch):
+                self.func = func
+
+        kernel = object.__new__(StaticallyLaunchedCudaKernel)
+        kernel.function = 0xF00D
+        kernel.num_warps = 4
+        kernel.shared = 0
+        kernel.arg_tys = "O"
+        kernel.has_global_scratch = False
+        kernel.has_profile_scratch = False
+
+        launcher_globals = {"runner": kernel.run}
+
+        def _launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            _launcher_body.__code__, launcher_globals, "launcher"
+        )
+        launcher._is_static = True
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+
+        with mock.patch("torch._C._FastCudaLauncher", FakeFastLauncher, create=True):
+            fast_launcher = autotuner._build_fast_launcher(launcher)
+
+        self.assertIsNotNone(fast_launcher)
+        self.assertIs(fast_launcher._static_kernel_owner, kernel)
+        self.assertNotIn(kernel.run, fast_launcher.__globals__.values())
+
+        owner_ref = weakref.ref(kernel)
+        del kernel, launcher, launcher_globals
+        gc.collect()
+        # Only fast_launcher._static_kernel_owner keeps the kernel alive now.
+        self.assertIsNotNone(owner_ref())
+
+        del fast_launcher
+        gc.collect()
+        self.assertIsNone(owner_ref())
+
+    def test_resolve_load_device_cpu_stays_none(self):
+        # CPU has no device index; its DeviceGuard is a no-op. Resolving its None to a
+        # concrete index makes the guard call exchange_device, which CPU does not
+        # implement, breaking the triton CPU backend's _make_launchers.
+        from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
+
+        self.assertIsNone(_resolve_load_device(None, "cpu"))
+        self.assertEqual(_resolve_load_device(3, "cpu"), 3)
+        # The resolved CPU value must be usable in a DeviceGuard without raising.
+        iface = get_interface_for_device("cpu")
+        with DeviceGuard(iface, _resolve_load_device(None, "cpu")):
+            pass
+
+    @skipIfRocm
+    def test_global_scratch_allocation(self):
+        kernel = self._global_scratch_kernel()
+        scratch = SimpleNamespace(data_ptr=lambda: 2)
+        alloc_fn = mock.Mock(return_value=scratch)
+        launch_kernel = mock.Mock()
+        kernel.C_impl = SimpleNamespace(_launch_kernel=launch_kernel)
+
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
+        with mock.patch(
+            "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+            return_value=allocator_var,
+        ):
+            kernel.run(2, 3, 1, 4, 5)
+
+        alloc_fn.assert_called_once_with(192, 16, 4)
+        launch_kernel.assert_called_once_with(1, 2, 3, 1, 4, 0, "OO", (5, scratch), 4)
+
+    @skipIfRocm
+    def test_fast_launcher_rejects_global_scratch(self):
+        import types
+
+        kernel = self._global_scratch_kernel()
+
+        def launcher_body(grid_0, grid_1, grid_2, stream, *args):
+            runner(grid_0, grid_1, grid_2, stream, *args)  # noqa: F821
+
+        launcher = types.FunctionType(
+            launcher_body.__code__, {"runner": kernel.run}, "launcher"
+        )
+        launcher._is_static = True
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.inductor_meta = {"use_fast_triton_launcher": True}
+        autotuner.device_props = SimpleNamespace(type="cuda")
+        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNone(autotuner._build_fast_launcher(launcher))
+        fast_launcher.assert_not_called()
+
+    def test_xpu_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel(StaticallyLaunchedXpuKernel)
+
+    @unittest.skipUnless(torch.version.hip, "ROCm only")
+    def test_rocm_rejects_global_scratch(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Global scratch not yet supported"
+        ):
+            self._global_scratch_kernel()
+
+    def test_register_statically_launched_kernel(self):
+        # A registered device type dispatches to its kernel class.
+        class FakeNpuKernel(StaticallyLaunchedTritonKernel):
+            def C_impl(self):
+                raise AssertionError("unused in this unit test")
+
+            def __init__(self, kernel):
+                # Avoid the heavy base-class init; the dispatch only needs
+                # to instantiate the registered class.
+                self._kernel = kernel
+
+        register_statically_launched_kernel("npu", FakeNpuKernel)
+        try:
+            kernel = SimpleNamespace(
+                src=SimpleNamespace(fn=SimpleNamespace(__name__="k", arg_names=[])),
+                metadata=SimpleNamespace(num_warps=4, shared=0, num_ctas=1),
+                _cubin_path=None,
+                hash="h",
+            )
+            launcher = statically_launched_kernel_by_device(kernel, "npu")
+            self.assertIsInstance(launcher, FakeNpuKernel)
+        finally:
+            # Un-register so the fixture does not leak into other tests.
+            _STATIC_LAUNCHER_REGISTRY.pop("npu", None)
+
+    def test_register_statically_launched_kernel_validation(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "is not registered for static launcher"
+        ):
+            statically_launched_kernel_by_device(object(), "nope")
+        with self.assertRaisesRegex(ValueError, "already registered"):
+            # cuda is registered by default.
+            register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
+        # Non-class inputs (the per-device launcher argument) must raise a clear
+        # TypeError before issubclass can produce its native "must be a class".
+        for bad in (None, object(), object):
+            with self.assertRaises(TypeError):
+                register_statically_launched_kernel("npu", bad)
+        registry = dict(_STATIC_LAUNCHER_REGISTRY)
+        try:
+            register_statically_launched_kernel(
+                "cuda", StaticallyLaunchedXpuKernel, override=True
+            )
+            self.assertIs(
+                _STATIC_LAUNCHER_REGISTRY["cuda"], StaticallyLaunchedXpuKernel
+            )
+        finally:
+            _STATIC_LAUNCHER_REGISTRY.clear()
+            _STATIC_LAUNCHER_REGISTRY.update(registry)
+
+    @staticmethod
+    def _autotuner_with_static_cubin(cubin_raw):
+        autotuner = object.__new__(CachingAutotuner)
+        result = object.__new__(StaticTritonCompileResult)
+        result.kernel = SimpleNamespace(cubin_raw=cubin_raw)
+        autotuner.compile_results = [result]
+        return autotuner, result
+
+    def test_prepare_for_caching_drops_cubin_raw_by_default(self):
+        autotuner, result = self._autotuner_with_static_cubin(b"cubin")
+        autotuner.prepare_for_caching()
+        self.assertIsNone(result.kernel.cubin_raw)
+
+    @torch._inductor.config.patch("keep_static_cubin_raw", True)
+    def test_prepare_for_caching_keeps_cubin_raw_when_configured(self):
+        autotuner, result = self._autotuner_with_static_cubin(b"cubin")
+        autotuner.prepare_for_caching()
+        self.assertEqual(result.kernel.cubin_raw, b"cubin")
+
+    def _can_statically_launch(self, kernel_name, filenames):
+        from torch._inductor.runtime.hints import HeuristicType
+
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory)
+        metadata_group = {}
+        for filename in filenames:
+            path = os.path.join(directory, filename)
+            with open(path, "wb") as f:
+                f.write(b"binary")
+            metadata_group[filename] = path
+        fn = SimpleNamespace(__name__=kernel_name, arg_names=["out"], params=[])
+
+        class FakeCompiledKernel(SimpleNamespace):
+            launch_enter_hook = None
+            launch_exit_hook = None
+
+        compiled_kernel = FakeCompiledKernel(
+            src=SimpleNamespace(fn=fn, signature={0: "*fp32"}, constants={}),
+            metadata=SimpleNamespace(num_warps=4, shared=0, num_ctas=1),
+            metadata_group=metadata_group,
+            hash="ab" * 32,
+            asm={"cubin": b"binary"},
+        )
+        with torch._inductor.config.patch(use_static_triton_launcher=True):
+            static_kernel = StaticTritonCompileResult.can_statically_launch(
+                compiled_kernel,
+                {},
+                {"device_type": "cuda", "device": 0},
+                HeuristicType.POINTWISE,
+            )
+        return static_kernel, metadata_group
+
+    @skipIfRocm
+    def test_static_launch_takes_cubin_from_metadata_group(self):
+        # Triton truncates long cache filenames, so the kernel symbol does not
+        # name the binary.
+        static_kernel, metadata_group = self._can_statically_launch(
+            "kernel_with_a_long_name", ["kernel_with.cubin", "kernel_with.json"]
+        )
+        self.assertEqual(static_kernel.cubin_path, metadata_group["kernel_with.cubin"])
+        self.assertEqual(static_kernel.cubin_filename, "kernel_with.cubin")
+
+        restored = pickle.loads(pickle.dumps(static_kernel))
+        self.assertIsNone(restored.cubin_path)
+        self.assertEqual(restored.cubin_filename, "kernel_with.cubin")
+
+        restored.cubin_raw = b"binary"
+        result = object.__new__(StaticTritonCompileResult)
+        result.kernel = restored
+        result.compile_meta = {"device": 0, "device_type": "cuda"}
+        with (
+            tempfile.TemporaryDirectory() as cache_dir,
+            mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": cache_dir}),
+        ):
+            result.reload_cubin_path()
+            self.assertEqual(
+                restored.cubin_path,
+                os.path.join(
+                    cache_dir, triton_hash_to_path_key("ab" * 32), "kernel_with.cubin"
+                ),
+            )
+            with open(restored.cubin_path, "rb") as f:
+                self.assertEqual(f.read(), b"binary")
+
+    @skipIfRocm
+    def test_static_launch_rejects_ambiguous_metadata_group(self):
+        for filenames in (["kernel.json"], ["kernel.cubin", "kernel_1.cubin"]):
+            with self.subTest(filenames=filenames):
+                static_kernel, _ = self._can_statically_launch("kernel", filenames)
+                self.assertIsNone(static_kernel)
 
 
 @requires_gpu_and_triton
@@ -100,6 +440,12 @@ class TestStaticTritonLauncher(TestCase):
         return result
 
     def test_basic(self):
+        """Verify _FastCudaLauncher correctly launches a kernel with tensor + scalar args.
+
+        Compiles a simple kernel, wraps it in _FastCudaLauncher, then invokes
+        via vectorcall and checks the output tensor has the expected value.
+        """
+
         @triton.jit
         def simple_kernel(arg0, arg1):
             x = tl.load(arg0)
@@ -170,6 +516,71 @@ class TestStaticTritonLauncher(TestCase):
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.run(1, 1, 1, stream, new_arg0, 50, 50, 50, 50)
         self.assertEqual(new_arg0, arg0)
+
+    def test_float_scalars(self):
+        @triton.jit
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        # Just above the fp16 midpoint between 1.0 and 1.0 + 2**-10. Triton
+        # rounds this directly from fp64 to fp16; narrowing through fp32 first
+        # incorrectly rounds it down to 1.0.
+        scalar = float.fromhex("0x1.0020000000001p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(
+            arg0,
+            torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE),
+        )
+        self.assertEqual(launcher.arg_tys, "Oefd")
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
+
+        with self.assertRaisesRegex(OverflowError, "too large to pack"):
+            launcher.run(1, 1, 1, stream, new_arg0, 65520.0, 0.0, 0.0)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not HAS_XPU_AND_TRITON and not SM80OrLater,
+        "uses bfloat16 which requires SM >= 80 or XPU",
+    )
+    def test_bfloat16_scalar(self):
+        @triton.jit
+        def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        # Triton's launcher truncates the fp32 representation to bf16. A
+        # round-to-nearest conversion would instead produce 1.0078125.
+        scalar = float.fromhex("0x1.018p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        self.assertEqual(
+            arg0, torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        )
+        self.assertEqual(launcher.arg_tys, "Oyfd")
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        launcher.run(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, arg0)
+
+        new_arg0.zero_()
+        launcher.run(1, 1, 1, stream, new_arg0, 1e300, 0.0, 0.0)
+        self.assertEqual(
+            new_arg0,
+            torch.tensor([float("inf")], dtype=torch.float64, device=GPU_TYPE),
+        )
 
     def test_basic_1arg(self):
         @triton.jit
@@ -298,7 +709,8 @@ class TestStaticTritonLauncher(TestCase):
         arg1 = 5
         args = (arg0, arg1)
         compiled_kernel = simple_kernel[(1,)](*args)
-        # Allocate 50 KB of memory
+        # Allocate 50 KB without adding a local-accessor kernel parameter. On
+        # XPU this exercises the static shared-memory argument-count path.
         compiled_kernel.shared = 50000
         launcher = self._make_launcher(compiled_kernel)
         self.assertEqual(arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE))
@@ -309,6 +721,54 @@ class TestStaticTritonLauncher(TestCase):
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_n_spills_reported_per_lane(self):
+        # Inductor's spill thresholds are calibrated on the CUDA/HIP unit,
+        # dword-equivalents per lane, while Level Zero reports spill memory in
+        # bytes per hardware thread. The static launcher normalizes the same way
+        # the triton driver does (intel/intel-xpu-backend-for-triton#7950), so
+        # the two must report the same number for the same binary.
+        @triton.jit
+        def spilling_kernel(z, BLOCK: tl.constexpr):
+            off = tl.arange(0, BLOCK)
+            a = tl.load(z + off)
+            result = tl.sum(a, axis=0, keep_dims=True)
+            tl.store(z + off, a + result)
+
+        BLOCK = 1024 * 8
+        z = torch.empty(BLOCK, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = spilling_kernel[(1,)](z, BLOCK=BLOCK, num_warps=2)
+        launcher = self._make_launcher(compiled_kernel)
+
+        if compiled_kernel.n_spills == 0:
+            raise unittest.SkipTest("fixture no longer spills on this IGC version")
+        self.assertEqual(launcher.n_spills, compiled_kernel.n_spills)
+
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "XPU only")
+    def test_xpu_kernel_arg_count_mismatch(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            tl.store(arg0, 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        launcher = self._make_launcher(compiled_kernel)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+
+        with self.assertRaisesRegex(RuntimeError, "Kernel argument count mismatch"):
+            launcher.C_impl._launch_kernel(
+                launcher.function,
+                1,
+                1,
+                1,
+                launcher.num_warps,
+                launcher.shared,
+                f"{launcher.arg_tys}i",
+                (arg0, 0),
+                stream,
+            )
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
     def test_too_high_shared_mem(self):
@@ -420,6 +880,58 @@ def kernel_many_args(out_tensor, {decl}):
         launcher.run(1, 1, 1, stream, buf1, *kernel_args)
         self.assertEqual(buf0, buf1)
 
+    def test_launcher_keeps_module_owner_alive_until_release(self):
+        """
+        Generated launchers capture ``runner=self.kernel.run``.  That closure
+        must keep the static kernel owner alive, otherwise its module could be
+        unloaded while the launcher can still be called.
+        """
+        unloaded_modules = []
+
+        class FakeImpl:
+            @staticmethod
+            def _unload_kernel(mod):
+                unloaded_modules.append(mod)
+
+        class FakeKernelOwner:
+            __del__ = StaticallyLaunchedCudaKernel.__del__
+
+            def __init__(self):
+                self.name = "fake_kernel"
+                self.module = 0xC0FFEE
+                self.function = 0xF00D
+                self.functions = {}
+                self.modules = {}
+                self.C_impl = FakeImpl
+
+            def close(self):
+                return StaticallyLaunchedCudaKernel.close(self)
+
+            def run(self, *_args, **_kwargs):
+                return None
+
+        owner = FakeKernelOwner()
+        owner_ref = weakref.ref(owner)
+
+        class FakeLauncher:
+            def __init__(self, runner):
+                self.runner = runner
+
+            def __call__(self, stream):
+                return self.runner(1, 1, 1, stream)
+
+        launcher = FakeLauncher(owner.run)
+
+        del owner
+        gc.collect()
+        self.assertIsNotNone(owner_ref())
+        self.assertEqual(unloaded_modules, [])
+
+        del launcher
+        gc.collect()
+        self.assertIsNone(owner_ref())
+        self.assertEqual(unloaded_modules, [0xC0FFEE])
+
 
 @requires_gpu_and_triton
 @torch._inductor.config.patch(
@@ -482,6 +994,35 @@ class TestStaticTritonCompileResult(TestCase):
         x2 = x.clone().detach_()
         self.assertEqual(foo(x), x2 + 5)
 
+    @skipIfXpu(msg="Tests CUDA static launcher dtype validation")
+    @torch._inductor.config.patch({"compile_threads": 1, "fx_graph_cache": False})
+    def test_custom_op_bad_fake_dtype_fails_fast(self):
+        namespace = f"test_static_launcher_dtype_validation_{random.randint(0, 2**32)}"
+
+        @torch.library.custom_op(f"{namespace}::bad_meta_mul", mutates_args=())
+        def bad_meta_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a * b
+
+        @bad_meta_mul.register_fake
+        def _(a, b):
+            return torch.empty_like(a, dtype=torch.bfloat16)
+
+        op = getattr(torch.ops, namespace).bad_meta_mul
+
+        @torch.compile(fullgraph=True)
+        def f(a, b):
+            x = op(a, b)
+            return x + 1
+
+        a = torch.randn(1 << 20, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(1 << 20, device=GPU_TYPE, dtype=torch.float32)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)expected dtype torch\.bfloat16 but got torch\.float32.*incorrect fake",
+            lambda: f(a, b),
+        )
+
     def test_empty_tensor(self):
         @torch.compile()
         def foo(x, y):
@@ -528,6 +1069,380 @@ class TestStaticTritonCompileResult(TestCase):
                 mocked.assert_not_called()
 
             self.assertEqual(result, torch.cat(((x * 4), y + 10)))
+
+
+@requires_gpu_and_triton
+@skipIfXpu
+class TestFastCudaLauncher(TestCase):
+    """Tests for _FastCudaLauncher vectorcall C extension."""
+
+    def setUp(self):
+        super().setUp()
+        self.tmp_files = []
+
+    def tearDown(self):
+        super().tearDown()
+        for tmp_file in self.tmp_files:
+            try:
+                os.remove(tmp_file.name)
+            except OSError:
+                pass
+
+    def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
+        if hasattr(kernel, "_cubin_path"):
+            return
+        binary_key = "hsaco" if torch.version.hip else "cubin"
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as tmp_file:
+            tmp_file.write(kernel.asm[binary_key])
+            self.tmp_files.append(tmp_file)
+            return tmp_file.name
+
+    def _make_launcher(
+        self,
+        compiled_kernel: CompiledKernel,
+    ) -> StaticallyLaunchedCudaKernel:
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        compiled_kernel._cubin_path = cubin_file
+        result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
+        old_cubin_path = result.cubin_path
+        if old_cubin_path is None:
+            raise AssertionError
+        result.cubin_path = None
+        result.reload_cubin_from_raw(old_cubin_path)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        result.load_kernel(device_interface.current_device())
+        return result
+
+    def _make_fast_launcher(self, kernel):
+        from torch._C import _FastCudaLauncher
+
+        n_scratch = 0
+        if getattr(kernel, "has_global_scratch", False):
+            n_scratch += 1
+        if getattr(kernel, "has_profile_scratch", False):
+            n_scratch += 1
+        return _FastCudaLauncher(
+            kernel.function, kernel.num_warps, kernel.shared, kernel.arg_tys, n_scratch
+        )
+
+    def test_basic(self):
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            y = arg1
+            tl.store(arg0, x + y)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, 5)
+        self.assertEqual(
+            new_arg0, torch.tensor([5], dtype=torch.int32, device=GPU_TYPE)
+        )
+
+    def test_float_scalars(self):
+        @triton.jit
+        def floats(arg0, arg1: tl.float16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        scalar = float.fromhex("0x1.0020000000001p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=GPU_TYPE)
+        self.assertEqual(arg0, expected)
+        self.assertEqual(launcher.arg_tys, "Oefd")
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, expected)
+
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_bfloat16_scalar(self):
+        @triton.jit
+        def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
+            x = tl.load(arg0)
+            y = arg1 + arg2 + arg3
+            tl.store(arg0, x + y)
+
+        scalar = float.fromhex("0x1.018p+0")
+        arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
+        launcher = self._make_launcher(compiled_kernel)
+        expected = torch.tensor([3.0], dtype=torch.float64, device=GPU_TYPE)
+        self.assertEqual(arg0, expected)
+        self.assertEqual(launcher.arg_tys, "Oyfd")
+        fast = self._make_fast_launcher(launcher)
+
+        new_arg0 = torch.zeros(1, dtype=torch.float64, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, new_arg0, scalar, 1.0, 1.0)
+        self.assertEqual(new_arg0, expected)
+
+    def test_multiple_tensor_args(self):
+        """Verify _FastCudaLauncher handles multiple tensor pointer args correctly."""
+
+        @triton.jit
+        def add_kernel(a, b, out):
+            x = tl.load(a)
+            y = tl.load(b)
+            tl.store(out, x + y)
+
+        a = torch.tensor([3], dtype=torch.int32, device=GPU_TYPE)
+        b = torch.tensor([7], dtype=torch.int32, device=GPU_TYPE)
+        out = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = add_kernel[(1,)](a, b, out)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        out2 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(1, 1, 1, stream, a, b, out2)
+        self.assertEqual(out2, torch.tensor([10], dtype=torch.int32, device=GPU_TYPE))
+
+    def test_zero_grid(self):
+        """Verify zero-grid launch is a no-op (kernel does not execute)."""
+
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            tl.store(arg0, x + arg1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        target = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        fast(0, 1, 1, stream, target, 99)
+        self.assertEqual(target, torch.tensor([0], dtype=torch.int32, device=GPU_TYPE))
+
+    def test_wrong_arg_count(self):
+        """Verify _FastCudaLauncher raises RuntimeError on argument count mismatch."""
+
+        @triton.jit
+        def simple_kernel(arg0, arg1):
+            x = tl.load(arg0)
+            tl.store(arg0, x + arg1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0, 5)
+        launcher = self._make_launcher(compiled_kernel)
+        fast = self._make_fast_launcher(launcher)
+
+        device_interface = get_interface_for_device(GPU_TYPE)
+        stream = device_interface.get_raw_stream(device_interface.current_device())
+        with self.assertRaises(RuntimeError):
+            fast(1, 1, 1, stream, arg0)  # missing arg1
+
+    def test_too_many_args_raises_value_error(self):
+        """Verify _FastCudaLauncher raises ValueError when nArgs > MAX_ARGS (121)."""
+        from torch._C import _FastCudaLauncher
+
+        # Use a dummy CUfunction (0) — construction should fail before launch.
+        # 'O' is the pointer type code; 130 of them exceeds MAX_ARGS=121.
+        arg_tys = "O" * 130
+        with self.assertRaises(ValueError):
+            _FastCudaLauncher(0, 1, 0, arg_tys, 0)
+
+
+@requires_gpu_and_triton
+@torch._inductor.config.patch(
+    {
+        "use_static_triton_launcher": True,
+        "strict_static_triton_launcher": True,
+        "use_fast_triton_launcher": True,
+    }
+)
+class TestFastCudaLauncherCompileResult(TestCase):
+    """E2E tests verifying _FastCudaLauncher handling in torch.compile.
+
+    CUDA tests assert both correctness (output matches eager) and that the
+    _FastCudaLauncher C extension was constructed, not silently skipped. XPU
+    uses its own static launcher and must fall back without the CUDA-only fast
+    launcher.
+    """
+
+    def _patch_build_fast_launcher(self):
+        """Context manager that tracks _build_fast_launcher calls.
+
+        Returns a list that accumulates True/False for each call,
+        indicating whether a _FastCudaLauncher was successfully built.
+        """
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        results = []
+        original = CachingAutotuner._build_fast_launcher
+
+        def tracking_build(autotuner_self, launcher):
+            result = original(autotuner_self, launcher)
+            results.append(result is not None)
+            return result
+
+        return mock.patch.object(
+            CachingAutotuner, "_build_fast_launcher", tracking_build
+        ), results
+
+    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181491")
+    def test_basic_compile(self):
+        """Verify torch.compile uses _FastCudaLauncher and produces correct output."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher:
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=GPU_TYPE)
+            y = torch.randn(10, device=GPU_TYPE)
+            self.assertEqual(foo(x, y), x + y)
+            if GPU_TYPE == "xpu":
+                self.assertTrue(results, "_build_fast_launcher was not reached on XPU")
+                self.assertFalse(
+                    any(results), "_FastCudaLauncher should not be built on XPU"
+                )
+            else:
+                self.assertTrue(
+                    any(results),
+                    "_FastCudaLauncher was not built by any CachingAutotuner",
+                )
+
+    def test_disable_fast_launcher(self):
+        """Verify disabling the config falls back to the regular launcher."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher, torch._inductor.config.patch("use_fast_triton_launcher", False):
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=GPU_TYPE)
+            y = torch.randn(10, device=GPU_TYPE)
+            result = foo(x, y)
+            self.assertEqual(result, x + y)
+            self.assertFalse(
+                any(results),
+                "_FastCudaLauncher should not be built when config is disabled",
+            )
+
+    @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(),
+        "requires Triton device-side TMA support on CUDA",
+    )
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_device_tma_gemm_falls_back_from_fast_launcher(self):
+        """A global-scratch kernel repeatedly uses the regular static launcher."""
+
+        @triton.jit
+        def device_tma_gemm(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M: tl.constexpr,
+            N: tl.constexpr,
+            K: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            a_desc = tl.make_tensor_descriptor(
+                a_ptr,
+                [M, K],
+                [K, 1],
+                [BLOCK_M, BLOCK_K],
+            )
+            b_desc = tl.make_tensor_descriptor(
+                b_ptr,
+                [N, K],
+                [K, 1],
+                [BLOCK_N, BLOCK_K],
+            )
+            c_desc = tl.make_tensor_descriptor(
+                c_ptr,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            offset_m = pid_m * BLOCK_M
+            offset_n = pid_n * BLOCK_N
+            accumulator = tl.zeros((BLOCK_M, BLOCK_N), tl.float32)
+            for offset_k in range(0, K, BLOCK_K):
+                a = a_desc.load([offset_m, offset_k])
+                b = b_desc.load([offset_n, offset_k])
+                accumulator = tl.dot(a, b.T, accumulator)
+            c_desc.store([offset_m, offset_n], accumulator.to(tl.bfloat16))
+
+        M = 64
+        N = 64
+        K = 32
+        BLOCK_M = 32
+        BLOCK_N = 32
+        BLOCK_K = 32
+
+        @torch.compile(fullgraph=True)
+        def gemm(a, b):
+            out = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            device_tma_gemm[(M // BLOCK_M, N // BLOCK_N)](
+                a,
+                b,
+                out,
+                M=M,
+                N=N,
+                K=K,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                BLOCK_K=BLOCK_K,
+            )
+            return out
+
+        patcher, results = self._patch_build_fast_launcher()
+        alloc_fn = mock.Mock(
+            side_effect=lambda size, _alignment, _stream: torch.empty(
+                size, dtype=torch.uint8, device="cuda"
+            )
+        )
+        allocator_var = SimpleNamespace(get=lambda: alloc_fn)
+
+        with (
+            patcher,
+            mock.patch(
+                "torch._inductor.runtime.static_triton_launcher._triton_allocator_var",
+                return_value=allocator_var,
+            ),
+        ):
+            for _ in range(3):
+                a = torch.randn((M, K), device="cuda", dtype=torch.bfloat16)
+                b = torch.randn((N, K), device="cuda", dtype=torch.bfloat16)
+                self.assertEqual(gemm(a, b), a @ b.T, atol=1e-2, rtol=1e-2)
+
+        self.assertTrue(results, "_build_fast_launcher was not reached")
+        self.assertFalse(
+            any(results),
+            "global-scratch kernels must use the regular static launcher",
+        )
+        self.assertGreater(alloc_fn.call_count, 0)
+        for call in alloc_fn.call_args_list:
+            self.assertGreater(call.args[0], 0)
 
 
 if __name__ == "__main__":

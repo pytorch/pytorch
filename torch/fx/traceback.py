@@ -1,5 +1,5 @@
-import copy
 import logging
+import threading
 import traceback
 from collections import defaultdict
 from collections.abc import Callable, Iterator
@@ -40,6 +40,12 @@ __all__ = [
 
 current_meta: dict[str, Any] = {}
 current_replay_node: Node | None = None
+# Thread-local holder for the optional name of the subgraph being compiled by a
+# nested/regional inductor compile (e.g. a regional inductor scooped-out region
+# or an invoke_subgraph submodule). Used to disambiguate trace_structured
+# records emitted from sub-compiles within a single frame. Used for debugging
+# only!
+_regional_inductor_subgraph_name_tls = threading.local()
 # Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
 should_preserve_node_meta = False
 # Preserve the "seq_nr" node meta field
@@ -73,6 +79,8 @@ def _register_fx_metadata(module_name: str, metadata: dict[str, Any]) -> None:
 
 @compatibility(is_backward_compatible=False)
 class NodeSourceAction(Enum):
+    """Enum representing the action taken to produce a node in provenance tracking."""
+
     CREATE = "create"
     REPLACE = "replace"
 
@@ -117,11 +125,9 @@ class NodeSource:
             self.node_info = self.NodeInfo(
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
-            self.from_node = (
-                copy.deepcopy(node.meta["from_node"])
-                if "from_node" in node.meta
-                else []
-            )
+            # NodeSource records are immutable after construction, so share them
+            # while copying the outer list to preserve its snapshot semantics.
+            self.from_node = list(node.meta.get("from_node", ()))
         else:
             self.node_info = None
             self.from_node = []
@@ -295,7 +301,7 @@ def set_stack_trace(stack: list[str]) -> None:
             current_meta["stack_trace"] = "".join(stack)
         else:
             # when the stack is empty, we explicitly clear the stack_trace to avoid
-            # propagating it to future node.˙
+            # propagating it to future node.
             current_meta.pop("stack_trace", None)
 
 
@@ -337,21 +343,61 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
     global current_meta
 
     has_custom = "custom" in current_meta
-    old_custom = copy.copy(current_meta.get("custom", {}))
+    old_custom = current_meta.get("custom", {})
 
     try:
-        if not has_custom:
-            current_meta["custom"] = dict[str, Any]()
-
-        # Update with all key-value pairs from the input dict
-        current_meta["custom"].update(annotation_dict)
+        # Rebind instead of updating in place: a shallow copy of current_meta
+        # (e.g. the one preserve_node_meta restores when Dynamo traces a frame
+        # entered under an ambient annotation) shares the enclosing dict.
+        current_meta["custom"] = {**old_custom, **annotation_dict}
         yield
     finally:
         if has_custom:
-            # Restore the original custom dict
             current_meta["custom"] = old_custom
         else:
             del current_meta["custom"]
+
+
+# Key under node.meta["custom"] used to carry the activation-checkpointing budget
+# set by ``torch.autograd.graph.region_activation_memory_budget``. Shared by that
+# writer and the reader below so the partitioner / AOTAutograd cache read it the
+# same way.
+MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+
+
+@contextmanager
+def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
+    with (
+        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
+        preserve_node_meta(),
+    ):
+        yield
+
+
+@contextmanager
+def _dynamo_annotate(
+    annotation_items: tuple[tuple[str, Any], ...],
+) -> Iterator[None]:
+    """Re-enter ``annotate`` in code Dynamo generates to resume after a graph break.
+
+    The annotation is passed as a tuple of items so it can be embedded as a
+    bytecode constant.
+    """
+    with annotate(dict(annotation_items)), preserve_node_meta():
+        yield
+
+
+def _get_memory_budget_annotation(node: Node) -> float | None:
+    """
+    Read the ``region_activation_memory_budget`` annotation off an FX node,
+    returning ``None`` if absent. The value is written only by
+    ``torch.autograd.graph.region_activation_memory_budget``, which validates it
+    and stores a ``float``.
+    """
+    custom = node.meta.get("custom")
+    if not isinstance(custom, dict):
+        return None
+    return custom.get(MEMORY_BUDGET_ANNOTATION_KEY)
 
 
 @compatibility(is_backward_compatible=False)
@@ -382,7 +428,16 @@ def annotate_fn(
     """
     from functools import wraps
 
+    from torch.fx.proxy import _register_stack_trace_anchor
+
     def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        # Register the wrapped function as a stack-trace anchor so make_fx
+        # preserves its frame in node.meta["stack_trace"]. The user
+        # explicitly opted into annotating this function, so its frame is a
+        # meaningful attribution point even though it isn't an
+        # ``nn.Module.forward``.
+        _register_stack_trace_anchor(func)
+
         @wraps(func)
         # NB: Do not annotate with _P.args/_P.kwargs here. Dynamo guards on
         # the identity of ParamSpec annotation objects, causing guard failures.
@@ -502,11 +557,17 @@ def get_current_meta() -> dict[str, Any]:
     return current_meta
 
 
+def _get_current_annotation() -> dict[str, Any] | None:
+    """Return a copy of the active ``annotate`` metadata, or None when empty."""
+    custom = current_meta.get("custom")
+    return dict(custom) if custom else None
+
+
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def set_current_replay_node(node: Node | None) -> Iterator[None]:
     """
-    Set the currently replay node. If `current_replay_node` is not None,
+    Set the current replay node. If `current_replay_node` is not None,
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
     """
     # See [Note] annotation for more details.
@@ -522,9 +583,35 @@ def set_current_replay_node(node: Node | None) -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_replay_node() -> Node | None:
     """
-    Get the currently replay node
+    Get the current replay node
     """
     return current_replay_node
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def _set_regional_inductor_subgraph_name(name: str | None) -> Iterator[None]:
+    """
+    Set the name of the subgraph currently being sub-compiled by regional
+    inductor (a scooped-out region or an invoke_subgraph submodule). Used to
+    tag trace_structured records so artifacts emitted from different
+    sub-compiles within the same frame can be distinguished.
+    """
+    saved = getattr(_regional_inductor_subgraph_name_tls, "value", None)
+    try:
+        _regional_inductor_subgraph_name_tls.value = name
+        yield
+    finally:
+        _regional_inductor_subgraph_name_tls.value = saved
+
+
+@compatibility(is_backward_compatible=False)
+def _get_regional_inductor_subgraph_name() -> str | None:
+    """
+    Get the name of the subgraph currently being sub-compiled by regional
+    inductor, or None.
+    """
+    return getattr(_regional_inductor_subgraph_name_tls, "value", None)
 
 
 @compatibility(is_backward_compatible=False)

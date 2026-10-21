@@ -1,5 +1,7 @@
 #include <ATen/CachedTensorUtils.h>
 
+#include <atomic>
+
 #include <c10/util/flat_hash_map.h>
 
 namespace at::caching {
@@ -7,7 +9,7 @@ namespace at::caching {
 
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 
-static bool cached_tensorimpls_enabled = false;
+static std::atomic<bool> cached_tensorimpls_enabled{false};
 
 // Like `cached_casts` in autocast_mode, we hash on the TensorImpl*
 //  and keep the pointer alive with a weakref value.
@@ -16,7 +18,7 @@ static std::mutex cached_tensorimpl_mutex;
 
 
 bool is_cached_tensor(const at::Tensor& t) {
-  if (!cached_tensorimpls_enabled) {
+  if (!cached_tensorimpls_enabled.load(std::memory_order_acquire)) {
     return false;
   }
   const std::lock_guard<std::mutex> lock(cached_tensorimpl_mutex);
@@ -24,7 +26,7 @@ bool is_cached_tensor(const at::Tensor& t) {
 }
 
 void add_cached_tensor(const at::Tensor& t) {
-  TORCH_INTERNAL_ASSERT(cached_tensorimpls_enabled);
+  TORCH_INTERNAL_ASSERT(cached_tensorimpls_enabled.load(std::memory_order_acquire));
   const std::lock_guard<std::mutex> lock(cached_tensorimpl_mutex);
   cached_tensorimpls.emplace(t.unsafeGetTensorImpl(), weakref_type(t.getIntrusivePtr()));
 }
@@ -36,7 +38,7 @@ void remove_cached_tensor(const at::Tensor& t) {
 }
 
 void set_cached_tensors_enabled(bool enabled) {
-  cached_tensorimpls_enabled = enabled;
+  cached_tensorimpls_enabled.store(enabled, std::memory_order_release);
 }
 
 size_t adjusted_use_count(const at::Tensor& t) {

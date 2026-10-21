@@ -145,8 +145,9 @@ def _create_rearrange_callable(
         )
     )
 
-    exec(custom_rearrange_callable_code)
-    return locals()[custom_rearrange_callable_name]
+    namespace: dict = {}
+    exec(custom_rearrange_callable_code, globals(), namespace)
+    return namespace[custom_rearrange_callable_name]
 
 
 def rearrange(

@@ -85,8 +85,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         with V.fake_mode:
             for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
-                assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
-                assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
+                if len(get_free_symbols(inp.get_size(), unbacked_only=True)) != 0:
+                    raise AssertionError("expected no unbacked symbols in input size")
+                if len(get_free_symbols(inp.get_stride(), unbacked_only=True)) != 0:
+                    raise AssertionError("expected no unbacked symbols in input stride")
 
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
 
@@ -185,7 +187,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
         log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
 
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=compile_inputs,
@@ -197,6 +200,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
         )
+        # Donation indices use the parent graph's placeholder ordering, not ours
+        # (same as SubgraphLowering).
+        bm_graph_lowering.bw_donated_idxs = None
 
         for sym_inp in self.sym_inputs:
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
@@ -221,9 +227,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self,
     ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
         """Create a benchmark request for async autotuning."""
-        assert self._compiled_module is not None, (
-            "Module must be compiled before creating benchmark request"
-        )
+        if self._compiled_module is None:
+            raise AssertionError(
+                "Module must be compiled before creating benchmark request"
+            )
         input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
         output_tensor_meta = TensorMeta.from_irnodes(self.layout)
 
@@ -247,9 +254,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self,
     ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
         """Benchmark request for async autotuning. Pre-compiled when pipeline_max_autotune_gemm is enabled."""
-        assert self._bmreq is not None, (
-            "bmreq accessed but pipeline_max_autotune_gemm was not enabled during __init__"
-        )
+        if self._bmreq is None:
+            raise AssertionError(
+                "bmreq accessed but pipeline_max_autotune_gemm was not enabled during __init__"
+            )
         return self._bmreq
 
     def _ensure_compiled(self) -> None:
@@ -257,18 +265,42 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if self._compiled_module is None:
             self._compiled_module = self._compile_for_benchmarking()
 
+    def _ensure_benchmark_request(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Create the benchmark request under the caller's active policy."""
+        self._ensure_compiled()
+        if self._bmreq is None:
+            self._bmreq = self._create_benchmark_request()
+        return self._bmreq
+
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
         """Regular benchmarking: compile if needed, then use benchmarker."""
-        self._ensure_compiled()
+        bmreq = (
+            self._ensure_benchmark_request()
+            if self.layout.device.type != "cpu"
+            else None
+        )
+        if bmreq is None:
+            self._ensure_compiled()
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
 
         def fn() -> Any:
             return bm_func([*sym_inputs, *args])
 
+        if bmreq is not None:
+            bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+            if (
+                config.profile_bandwidth_with_do_bench_using_profiling
+                and not self._benchmark_with_cudagraphs
+                and not bmreq.config_cudagraph_benchmarking
+            ):
+                return do_bench_using_profiling(fn)
+            return bmreq.benchmark_run_fn(fn, out=out)
+
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
-
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
@@ -282,7 +314,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
@@ -293,7 +326,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def output_node(self) -> ir.TensorBox:
-        assert self.gm is not None
+        if self.gm is None:
+            raise AssertionError("expected self.gm to be set")
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
@@ -406,10 +440,11 @@ class SubgraphTemplate(KernelTemplate):
         if not decompositions:
             return []
 
-        assert len(decompositions) == len(non_tensor_args), (
-            f"decompositions and non_tensor_args must have same length, "
-            f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
-        )
+        if len(decompositions) != len(non_tensor_args):
+            raise AssertionError(
+                f"decompositions and non_tensor_args must have same length, "
+                f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
+            )
 
         # Default to empty config_patches if not provided
         if config_patches_list is None:
@@ -501,7 +536,7 @@ class SubgraphTemplate(KernelTemplate):
         if not kwargs:
             return base_name
 
-        def sanitize_value(v: Any) -> str:
+        def sanitize_value(v: object) -> str:
             """Convert a value to a valid Python identifier component."""
             s = str(v)
             # Replace invalid characters with underscores
@@ -519,11 +554,12 @@ class SubgraphTemplate(KernelTemplate):
     def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:
         """Validate that kwargs contains only non-tensor arguments."""
         for key, value in kwargs.items():
-            assert not isinstance(value, (torch.Tensor, Buffer)), (
-                f"kwargs['{key}'] contains tensor {type(value)}. "
-                f"Tensor arguments should be in input_nodes, not kwargs. "
-                f"Only scalar/non-tensor parameters should be in kwargs."
-            )
+            if isinstance(value, (torch.Tensor, Buffer)):
+                raise AssertionError(
+                    f"kwargs['{key}'] contains tensor {type(value)}. "
+                    f"Tensor arguments should be in input_nodes, not kwargs. "
+                    f"Only scalar/non-tensor parameters should be in kwargs."
+                )
 
     def _validate_layout_equivalence(
         self,
@@ -592,10 +628,11 @@ class SubgraphTemplate(KernelTemplate):
             output = fn(*example_inputs)
 
             # Assert single output
-            assert isinstance(output, torch.Tensor), (
-                f"Expected single tensor output, got {type(output)}. "
-                f"Multi-output custom ops not yet supported in autotuning."
-            )
+            if not isinstance(output, torch.Tensor):
+                raise AssertionError(
+                    f"Expected single tensor output, got {type(output)}. "
+                    f"Multi-output custom ops not yet supported in autotuning."
+                )
 
             return FixedLayout(
                 device=output.device,

@@ -164,8 +164,7 @@ def _test_pg_transport_with_mixed_content(self, device) -> None:
 
 
 def _test_pg_transport_with_sharded_tensor(self, device) -> None:
-    # Set current accelerator device for NCCL/XCCL
-    if device.type == "cuda" or device.type == "xpu":
+    if device.type != "cpu":
         torch.accelerator.set_device_index(device)
 
     state_dict = _create_sharded_tensor_state_dict(self.rank, self.world_size, device)
@@ -415,6 +414,7 @@ class TestPrepareStateDict(TestCase):
 
 class TestPGTransportMocked(TestCase):
     def setUp(self):
+        super().setUp()
         self.device = torch.device("cpu")
         self.pg = MagicMock()
         self.timeout = timedelta(seconds=10)
@@ -573,6 +573,7 @@ class TestPGTransportMocked(TestCase):
 
 class TestPGTransportEdgeCases(TestCase):
     def setUp(self):
+        super().setUp()
         self.device = torch.device("cpu")
         self.pg = MagicMock()
         self.timeout = timedelta(seconds=10)

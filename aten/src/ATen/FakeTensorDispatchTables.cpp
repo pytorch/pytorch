@@ -1,0 +1,68 @@
+#include <ATen/FakeTensorDispatchTables.h>
+
+#include <c10/util/Exception.h>
+#include <c10/util/LeftRight.h>
+
+#include <unordered_set>
+
+namespace at::impl {
+namespace {
+
+struct FakeDispatchTables {
+  std::unordered_set<c10::OperatorName> decomp;
+  std::unordered_set<c10::OperatorName> meta;
+  std::unordered_set<c10::OperatorName> op_impl;
+  std::unordered_set<c10::OperatorName> prim_meta;
+  std::unordered_set<c10::OperatorName> python_cia;
+  std::unordered_set<c10::OperatorName> custom_op_impl;
+};
+
+c10::LeftRight<FakeDispatchTables>& fakeDispatchTables() {
+  static c10::LeftRight<FakeDispatchTables> tables;
+  return tables;
+}
+
+template <typename Tables>
+auto& setForCategory(Tables& t, FakeDispatchCategory category) {
+  switch (category) {
+    case FakeDispatchCategory::Decomp:
+      return t.decomp;
+    case FakeDispatchCategory::Meta:
+      return t.meta;
+    case FakeDispatchCategory::OpImpl:
+      return t.op_impl;
+    case FakeDispatchCategory::PrimMeta:
+      return t.prim_meta;
+    case FakeDispatchCategory::PythonCIA:
+      return t.python_cia;
+    case FakeDispatchCategory::CustomOpImpl:
+      return t.custom_op_impl;
+  }
+  TORCH_INTERNAL_ASSERT(false, "unknown FakeDispatchCategory");
+}
+
+} // namespace
+
+void fakeDispatchTableAdd(
+    FakeDispatchCategory category,
+    const c10::OperatorName& name) {
+  fakeDispatchTables().write(
+      [&](FakeDispatchTables& t) { setForCategory(t, category).insert(name); });
+}
+
+void fakeDispatchTableRemove(
+    FakeDispatchCategory category,
+    const c10::OperatorName& name) {
+  fakeDispatchTables().write(
+      [&](FakeDispatchTables& t) { setForCategory(t, category).erase(name); });
+}
+
+bool fakeDispatchTableContains(
+    FakeDispatchCategory category,
+    const c10::OperatorName& name) {
+  return fakeDispatchTables().read([&](const FakeDispatchTables& t) {
+    return setForCategory(t, category).contains(name);
+  });
+}
+
+} // namespace at::impl

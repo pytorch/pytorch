@@ -98,10 +98,13 @@ class ROCmTemplate(KernelTemplate):
             unique(self.input_nodes[idx].get_name() for idx in input_reorder)
         )
         expected_args.extend([self.output_node.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
-            call_args,
-            expected_args,
-        )
+        if list(call_args)[: len(expected_args)] != expected_args:
+            raise AssertionError(
+                (
+                    call_args,
+                    expected_args,
+                )
+            )
 
         size_args = (
             self.size_args() if hasattr(self, "size_args") else ()

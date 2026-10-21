@@ -157,7 +157,7 @@ SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam alg
     It is important to not conflate a semantically sparse tensor (a tensor where many
     of its values are zeros) with a sparse layout tensor (a tensor where ``.is_sparse``
     returns ``True``). The SparseAdam approximation is intended for `semantically` sparse
-    tensors and the sparse layout is only a implementation detail. A clearer implementation
+    tensors and the sparse layout is only an implementation detail. A clearer implementation
     would be to use MaskedTensors, but those are experimental.
 
 

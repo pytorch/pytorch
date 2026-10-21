@@ -8,7 +8,7 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any, final, NamedTuple, TYPE_CHECKING
 
@@ -192,13 +192,14 @@ _BACKEND_KEYS_TO_OVERRIDE = [
 def _override_composite_implicit_decomp(cia_ops_to_callable):
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops that user specified. Ideally we want to not-decompose
-    # ALL composite ops but today's C++ functinalization relies on
+    # ALL composite ops but today's C++ functionalization relies on
     # the fact that it is working with the opset after decomp is run.
     # Hence we can only do it for functional ops. One caveat is that
     # there are some composite ops that lie about their schema (claimed to be
     # functional but not really aka dropout), for these cases, we just decompose.
     saved_tables = {}
     patched_ops = set()
+    registered_fake_ops = set()
     for op_overload, decomp_callable in cia_ops_to_callable.items():
         saved_tables[op_overload] = op_overload.py_kernels.copy()
         patched_ops.add(op_overload)
@@ -211,12 +212,9 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
         # See NOTE: Registering old CIA to Backend kernel
         # It is important that we cache this before we override py_kernels.
         orig_cia_callable = _get_decomp_for_cia(op_overload)
-        if torch._C.DispatchKey.CompositeImplicitAutograd in op_overload.py_kernels:
-            del op_overload.py_kernels[torch._C.DispatchKey.CompositeImplicitAutograd]
-
-        op_overload.py_impl(torch._C.DispatchKey.CompositeImplicitAutograd)(
-            decomp_callable
-        )
+        cia_key = torch._C.DispatchKey.CompositeImplicitAutograd
+        op_overload.py_kernels[cia_key] = decomp_callable
+        op_overload._dispatch_cache.clear()
 
         # [NOTE] Directly registering fake tensor rule to CIA ops
         # The problem we are facing here is if your CIA custom rule
@@ -242,6 +240,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
                     original_callable=orig_cia_callable,
                 )
             )
+            registered_fake_ops.add(op_overload)
 
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
@@ -269,6 +268,9 @@ def _override_composite_implicit_decomp(cia_ops_to_callable):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+        # Only remove fake rules this context added; ops such as aten.item
+        # have process-global fake rules that must survive.
+        for op in registered_fake_ops:
             _deregister_op_impl(op)
 
 
@@ -328,6 +330,19 @@ def default_decompositions() -> "CustomDecompTable":
     return CustomDecompTable()
 
 
+def _raise_joint_parameter_mutation_error(
+    mutated_parameters: Iterable[str | None],
+) -> None:
+    names = [repr(name) for name in mutated_parameters]
+    parameter_word = "parameter" if len(names) == 1 else "parameters"
+    raise RuntimeError(
+        "Mutating module parameters while exporting a joint forward/backward "
+        "graph is not supported. Only buffers can be mutated as module state. "
+        "If this state does not need gradients, register it as a buffer "
+        f"instead. Found mutation on {parameter_word}: {', '.join(names)}."
+    )
+
+
 def _decompose_and_get_gm_with_new_signature_constants(
     ep: "ExportedProgram",
     *,
@@ -352,6 +367,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
         return (
             joint_loss_index is not None
             or ep.graph_signature.backward_signature is not None
+        )
+
+    if joint_loss_index is not None and ep.graph_signature.parameters_to_mutate:
+        _raise_joint_parameter_mutation_error(
+            ep.graph_signature.parameters_to_mutate.values()
         )
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
@@ -505,7 +525,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 new_graph_signature = aten_export_artifact.sig
 
                 # In the previous step, we assume constants as buffers for AOTDispatcher to
-                # functianalize properly, so undo that here
+                # functionalize properly, so undo that here
                 new_graph_signature = (
                     _override_graph_signature_for_temp_registered_constants(
                         new_graph_signature, temp_registered_constants
@@ -521,8 +541,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     ep.graph_signature, new_graph_signature
                 )
 
-                constants = _materialize_and_lift_constants(
-                    gm, new_graph_signature, new_fake_constant_attrs
+                constants = {
+                    **ep.constants,
+                    **aten_export_artifact.constants,
+                }
+                constants.update(
+                    _materialize_and_lift_constants(
+                        gm, new_graph_signature, new_fake_constant_attrs
+                    )
                 )
 
                 placeholder_naming_pass(
@@ -571,7 +597,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 if name not in unwrapped_params_buffers:
                     new_state_dict.pop(name)
 
-        return gm, new_graph_signature, new_state_dict
+        return gm, new_graph_signature, new_state_dict, constants
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -606,7 +632,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 joint_loss_index if joint_loss_index is not None else None
             ),
         )
-        assert isinstance(gm, torch.fx.GraphModule)  # noqa: S101
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
         gm.graph.eliminate_dead_code()
 
     # Update the signatures with the new placeholder names in case they
@@ -712,6 +739,13 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # (3) graph_signature.user_inputs_to_mutate tells us buffer & input mutations
     # map (3) -> (2) for input order, -> (1) for input type
     user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
+    backward_mutated_parameters = []
+    for name in graph_signature.inputs_mutated_in_backward:
+        input_spec = ep.graph_signature.input_specs[user_inputs_index[name]]
+        if input_spec.kind == InputKind.PARAMETER:
+            backward_mutated_parameters.append(input_spec.target)
+    if backward_mutated_parameters:
+        _raise_joint_parameter_mutation_error(backward_mutated_parameters)
     mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
     expected_names = [node.name for node in new_outputs[: len(mutation_names)]]
     if mutation_names != expected_names:
@@ -721,6 +755,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
         i = user_inputs_index[input_name]
         input_spec = ep.graph_signature.input_specs[i]
+        if input_spec.kind == InputKind.PARAMETER:
+            _raise_joint_parameter_mutation_error([input_spec.target])
         if input_spec.kind not in (InputKind.USER_INPUT, InputKind.BUFFER):
             raise AssertionError(
                 f"expected input_spec.kind to be USER_INPUT or BUFFER, got {input_spec.kind}"
@@ -800,17 +836,19 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # values; since these become specialized, we replace such metadata with
     # the original values.
     # Also, set the param/buffer metadata back to the placeholders.
+    inputs_to_parameters = new_graph_signature.inputs_to_parameters
+    inputs_to_buffers = new_graph_signature.inputs_to_buffers
     for old_node, new_node in zip(old_placeholders, new_placeholders):
         if not isinstance(old_node.meta["val"], torch.Tensor):
             new_node.meta["val"] = old_node.meta["val"]
 
         if (
-            new_node.target in new_graph_signature.inputs_to_parameters
-            or new_node.target in new_graph_signature.inputs_to_buffers
+            new_node.target in inputs_to_parameters
+            or new_node.target in inputs_to_buffers
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature, ep.state_dict
+    return gm, new_graph_signature, ep.state_dict, ep.constants
 
 
 def _remove_unnecessary_copy_op_pass(
@@ -819,14 +857,16 @@ def _remove_unnecessary_copy_op_pass(
     """
     Removes redundant copy_ node that was introduced due to mutated buffer.
     """
+    buffers_to_mutate = new_graph_signature.buffers_to_mutate
+    parameters_to_mutate = new_graph_signature.parameters_to_mutate
     with gm._set_replace_hook(new_graph_signature.get_replace_hook()):
         for node in gm.graph.nodes:
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
                     if isinstance(out, torch.fx.Node) and (
-                        out.name in new_graph_signature.buffers_to_mutate
-                        or out.name in new_graph_signature.parameters_to_mutate
+                        out.name in buffers_to_mutate
+                        or out.name in parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
@@ -846,6 +886,10 @@ def _common_getitem_elimination_pass(
             if not isinstance(module, torch.fx.GraphModule):
                 continue
 
+            # Signatures name root-graph nodes, and names repeat across
+            # subgraphs, so only root dedups may rewrite them.
+            is_root_graph = module is gm
+
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
@@ -854,11 +898,12 @@ def _common_getitem_elimination_pass(
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
                         node.replace_all_uses_with(getitems[new_id])
-                        for entry in module_call_graph:
-                            if entry.signature is not None:
-                                entry.signature.replace_all_uses_with(
-                                    node, getitems[new_id]
-                                )
+                        if is_root_graph:
+                            for entry in module_call_graph:
+                                if entry.signature is not None:
+                                    entry.signature.replace_all_uses_with(
+                                        node, getitems[new_id]
+                                    )
                         module.graph.erase_node(node)
                     else:
                         getitems[new_id] = node
@@ -886,6 +931,16 @@ def _get_updated_module_call_graph(
         **graph_signature.inputs_to_parameters,
         **graph_signature.inputs_to_buffers,
     }
+    old_graph_non_user_inputs = {
+        **old_graph_params_buffers,
+        **old_graph_signature.inputs_to_lifted_tensor_constants,
+        **old_graph_signature.inputs_to_lifted_custom_objs,
+    }
+    new_graph_non_user_inputs = {
+        **new_graph_params_buffers,
+        **graph_signature.inputs_to_lifted_tensor_constants,
+        **graph_signature.inputs_to_lifted_custom_objs,
+    }
 
     # use node-level provenance metadata to create a map
     # from old node names to new node names
@@ -897,7 +952,7 @@ def _get_updated_module_call_graph(
     ]
     old_user_input_names = list(
         filter(
-            lambda x: x not in old_graph_params_buffers
+            lambda x: x not in old_graph_non_user_inputs
             and x not in old_graph_signature.input_tokens,
             old_user_input_names,
         )
@@ -910,12 +965,12 @@ def _get_updated_module_call_graph(
         if history := node.meta.get("from_node", []):
             provenance[history[-1].name] = node.name
 
-        # For params and buffers, we might have applied parameterizaiton rule
+        # For params and buffers, we might have applied parameterization rule
         # so that the names might have changed. But for user inputs, we know we
         # must preserve the old name.
         elif node.op == "placeholder":
             if not (
-                node.target in new_graph_params_buffers
+                node.target in new_graph_non_user_inputs
                 or node.target in graph_signature.input_tokens
             ):
                 if node.target in new_user_input_names:
@@ -1002,6 +1057,7 @@ def _decompose_exported_program(
         gm,
         new_graph_signature,
         state_dict,
+        constants,
     ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
@@ -1040,7 +1096,7 @@ def _decompose_exported_program(
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
-        constants=ep.constants,
+        constants=constants,
     )
     return exported_program
 
@@ -1202,11 +1258,24 @@ class ExportedProgram:
         both the name of the buffer as well as the buffer itself.
         """
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
+        # Lazily computed on first use to avoid calling graph_module.state_dict()
+        # unless at least one buffer is absent from state_dict and constants.
+        gm_state_dict = None
         for buffer_name in self.graph_signature.buffers:
             if buffer_name in non_persistent_buffers:
                 yield buffer_name, self.constants[buffer_name]
-            else:
+            elif buffer_name in self.state_dict:
                 yield buffer_name, self.state_dict[buffer_name]
+            elif buffer_name in self.constants:
+                yield buffer_name, self.constants[buffer_name]
+            else:
+                # Nested invoke_subgraph tracing can surface lifted tensor
+                # constants owned by an inner subgraph as persistent buffers
+                # in the top-level graph signature; the tensor lives in the
+                # subgraph submodule rather than state_dict or constants.
+                if gm_state_dict is None:
+                    gm_state_dict = self.graph_module.state_dict()
+                yield buffer_name, gm_state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1386,6 +1455,7 @@ class ExportedProgram:
             )
 
         additional_inputs = []
+        gm_state_dict = None
         for input_ in self.graph_signature.input_specs:
             if input_.kind == InputKind.USER_INPUT:
                 continue
@@ -1397,8 +1467,17 @@ class ExportedProgram:
                     # This is a non-persistent buffer, grab it from our
                     # constants instead of the state dict.
                     additional_inputs.append(self.constants[input_.target])
-                else:
+                elif input_.target in self.state_dict:
                     additional_inputs.append(self.state_dict[input_.target])
+                elif input_.target in self.constants:
+                    additional_inputs.append(self.constants[input_.target])
+                else:
+                    # Nested invoke_subgraph tracing can leave a lifted tensor
+                    # constant in the subgraph submodule's state rather than
+                    # the top-level state_dict or constants.
+                    if gm_state_dict is None:
+                        gm_state_dict = self.graph_module.state_dict()
+                    additional_inputs.append(gm_state_dict[input_.target])
             elif input_.kind in (
                 InputKind.CONSTANT_TENSOR,
                 InputKind.CUSTOM_OBJ,
@@ -1421,10 +1500,12 @@ class ExportedProgram:
             print_output=False, colored=False
         ).replace("\n", "\n    ")
         graph_signature = str(self.graph_signature).replace("\n", "\n    ")
+        # No space after "Graph signature:" — graph_signature starts with
+        # a newline; trailing whitespace breaks expecttest snapshots.
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph signature: {graph_signature}\n"
+            f"Graph signature:{graph_signature}\n"
             f"Range constraints: {self.range_constraints}\n"
         )
         return string

@@ -62,7 +62,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
       "_amp_foreach_non_finite_check_and_unscale_cpu",
       [&iter, &found_inf, &inv_scale] {
           auto* found_inf_ptr = found_inf.data_ptr<float>();
-          auto* inv_scale_ptr = inv_scale.data_ptr<float>();
+          const auto* inv_scale_ptr = inv_scale.const_data_ptr<float>();
 
           using opmath_t = at::opmath_type<scalar_t>;
 
@@ -96,7 +96,7 @@ void _amp_foreach_non_finite_check_and_unscale_cpu_kernel(
         "_amp_foreach_non_finite_check_and_unscale_cpu",
         [&iter, &found_inf, &inv_scale] {
           auto* found_inf_ptr = found_inf.data_ptr<float>();
-          auto* inv_scale_ptr = inv_scale.data_ptr<float>();
+          const auto* inv_scale_ptr = inv_scale.const_data_ptr<float>();
           at::native::cpu_kernel_vec(
               iter,
               [found_inf_ptr, inv_scale_ptr](scalar_t val_in) -> scalar_t {
@@ -166,7 +166,7 @@ at::Tensor& _amp_update_scale_cpu_kernel(
 
   float* current_scale_ptr = current_scale.data_ptr<float>();
   int* growth_tracker_ptr = growth_tracker.data_ptr<int>();
-  float* found_inf_ptr = found_inf.data_ptr<float>();
+  const float* found_inf_ptr = found_inf.const_data_ptr<float>();
 
   if (*found_inf_ptr) {
     *current_scale_ptr = (*current_scale_ptr) * backoff_factor;

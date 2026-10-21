@@ -310,8 +310,8 @@ struct ParserImpl {
 
       if (kind == TK_FOR) {
         // TK_FOR targets should only parse exprs prec greater than 4, which
-        // only includes subset of Exprs that suppose to be on the LHS according
-        // to the python grammar
+        // only includes subset of Exprs that are supposed to be on the LHS
+        // according to the python grammar
         // https://docs.python.org/3/reference/grammar.html
         auto target = parseLHSExp();
         L.expect(TK_IN);

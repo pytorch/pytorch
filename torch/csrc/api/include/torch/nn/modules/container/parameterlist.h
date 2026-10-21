@@ -45,21 +45,21 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
     stream << ')';
   }
 
-  /// push the a given parameter at the end of the list
+  /// push a given parameter at the end of the list
   void append(torch::Tensor&& param) {
     bool requires_grad = param.requires_grad();
     register_parameter(
         std::to_string(parameters_.size()), std::move(param), requires_grad);
   }
 
-  /// push the a given parameter at the end of the list
+  /// push a given parameter at the end of the list
   void append(const torch::Tensor& param) {
     bool requires_grad = param.requires_grad();
     register_parameter(
         std::to_string(parameters_.size()), param, requires_grad);
   }
 
-  /// push the a given parameter at the end of the list
+  /// push a given parameter at the end of the list
   /// And the key of the pair will be discarded, only the value
   /// will be added into the `ParameterList`
   void append(const OrderedDict<std::string, torch::Tensor>::Item& pair) {

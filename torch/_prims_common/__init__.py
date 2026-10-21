@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch.types import BoolLikeType
+
     class _WorksWithInt(typing.Protocol):
         def __add__(self, other: Any) -> typing.Self: ...
 
@@ -185,7 +187,7 @@ def compare_tensor_meta(
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
         same_strides, idx = check_significant_strides(
-            a, b, allow_rhs_unbacked=allow_rhs_unbacked
+            a, b, only_cuda=False, allow_rhs_unbacked=allow_rhs_unbacked
         )
         if not same_strides:
             msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
@@ -215,13 +217,16 @@ def _check_strides_helper(
     significant_only=True,
     allow_rhs_unbacked=False,
 ) -> tuple[bool, int | None]:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
-    # and for tensors with more than one element
+    # and for tensors with more than one element. Use guard_or_false on the
+    # numel gate so unbacked shapes don't trigger a data-dependent guard.
     if (
         not only_cuda or a.device.type == "cuda" or b.device.type == "cuda"
-    ) and a.numel() > 0:
+    ) and guard_or_false(a.numel() > 0):
         for idx in range(a.ndim):
             check = not significant_only or a.shape[idx] > 1
             # TODO: Check the symbols are consistent with each other
@@ -251,49 +256,15 @@ def check_all_strides(
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
-def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
+def check_contiguous_sizes_strides(sizes, strides):
     """
     Performs an equality check between actual stride & expected stride (based on composed sizes),
     handling contiguous stride representations:
     e.g. torch.empty(u0, u1, u2).contiguous().stride() -> (Max(1, u1) * Max(1, u2), Max(1, u2), 1)
     and we'd like to treat this equal to (u1 * u2, u2, 1) for comparison purposes.
+    Returns False on data dependency.
     """
-
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_or_true,
-        is_nested_int,
-    )
-
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-
-    expected_stride = 1
-    expected_stride_max = 1
-
-    # pyrefly: ignore [bad-assignment]
-    for x, y in reversed(tuple(zip(sizes, strides))):
-        # Skips checking strides when a dimension has length 1.
-        if maybe_guard_or_false(x == 1):
-            continue
-
-        if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
-            y != expected_stride_max
-        ):
-            return False
-
-        #  We symbolically check both paths to maximize the cases where this function
-        #  returns true. This is because make_contiguous_strides_for adds the max
-        #  symbolically, and in some other situations the max might not be there.
-        #  And we want to ensure we return true in both cases.
-        expected_stride_max *= x if is_nested_int(x) else sym_max(x, 1)  # type:ignore[assignment]
-
-        expected_stride *= x
-
-    return True
+    return torch._C._is_contiguous_or_false(sizes, strides)
 
 
 # This function is equivalent to compute_contiguous() from TensorImpl.cpp
@@ -304,79 +275,28 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_or_false,
-        guard_size_oblivious,
-    )
+    if not false_if_dde:
+        return torch._C._is_contiguous(a.shape, a.stride(), a.numel())
 
-    def eval_eager(x):
-        return bool(x)
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-
-    if maybe_guard_or_false(a.numel() < 2):
+    if guard_or_false(a.numel() < 2):
         return True
 
-    return check_contiguous_sizes_strides(
-        a.shape, a.stride(), false_if_dde=false_if_dde
-    )
+    return check_contiguous_sizes_strides(a.shape, a.stride())
 
 
 # This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
 def is_channels_last_contiguous_2d(a: Tensor, false_if_dde=False) -> bool:
-    # NHWC or not channels last 2D contiguous
-    if a.ndim != 4:
-        return False
-
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-
-    expected_stride = 1
-    for idx in (1, 3, 2, 0):
-        length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
-            continue
-
-        stride = a.stride()[idx]
-        if maybe_guard_or_true(stride != expected_stride):
-            return False
-
-        expected_stride *= length
-
-    return True
+    if false_if_dde:
+        return torch._C._is_channels_last_contiguous_2d_or_false(a.shape, a.stride())
+    return torch._C._is_channels_last_contiguous_2d(a.shape, a.stride())
 
 
 def is_channels_last_contiguous_3d(a: Tensor, false_if_dde=False) -> bool:
-    # NDHWC or not channels last 3D contiguous
-    if a.ndim != 5:
-        return False
-
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
-
-    def eval_eager(x):
-        return bool(x)
-
-    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
-    maybe_guard_or_true = guard_or_true if false_if_dde else eval_eager
-
-    expected_stride = 1
-    for idx in (1, 4, 3, 2, 0):
-        length = a.shape[idx]
-        if maybe_guard_or_false(length == 1):
-            continue
-
-        stride = a.stride()[idx]
-        if maybe_guard_or_true(stride != expected_stride):
-            return False
-
-        expected_stride *= length
-
-    return True
+    if false_if_dde:
+        return torch._C._is_channels_last_contiguous_3d_or_false(a.shape, a.stride())
+    return torch._C._is_channels_last_contiguous_3d(a.shape, a.stride())
 
 
 _memory_formats = {
@@ -463,6 +383,32 @@ def is_channels_last_contiguous_or_false(a: Tensor) -> bool:
     ) or is_channels_last_contiguous_or_false_3d(a)
 
 
+# Defined at module scope so the class is built once, not rebuilt on every call.
+class K(NamedTuple):
+    size: int
+    stride: int
+
+    def __lt__(self, other):
+        from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
+        # for backed symbols, this is practically a < operation
+        # for unbacked, we return True if < is statically known,
+        # then try to answer this symbolically, with stride ordering semantics
+        # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
+        return (
+            guard_or_false(
+                self.stride < other.stride
+            )  # checks statically known inequality
+            or (
+                (
+                    guard_or_false(self.stride == 0)
+                    or guard_or_false(other.stride % self.stride == 0)
+                )
+                and guard_or_true(self.stride != other.stride)
+            )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
+        )
+
+
 def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     """
     Helper function for is_non_overlapping_and_dense.
@@ -473,7 +419,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     this may be non-overlapping & dense at runtime, for values {u0: 4, u1: 4, u2: 4, u3: 1},
     but isn't true for all values.
     """
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
     from torch.utils._sympy.functions import Max
 
     # Short-circuits for 0/1-element tensors
@@ -491,34 +437,12 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     # This sort is done in a size-oblivious way, which helps if we do a
     # comparison like 2048*u0 > u0; we just want this to return True
     # (and not worry about what if u0 is zero).
-    class K(NamedTuple):
-        size: int
-        stride: int
-
-        def __lt__(self, other):
-            # for backed symbols, this is practically a < operation
-            # for unbacked, we return True if < is statically known,
-            # then try to answer this symbolically, with stride ordering semantics
-            # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
-            return (
-                guard_or_false(
-                    self.stride < other.stride
-                )  # checks statically known inequality
-                or (
-                    (
-                        guard_or_false(self.stride == 0)
-                        or guard_or_false(other.stride % self.stride == 0)
-                    )
-                    and guard_or_true(self.stride != other.stride)
-                )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
-            )
-
     lengths_and_strides = sorted(map(K, sizes, strides))
 
     # verify actual strides match the expected (composed sizes)
     sizes = [x.size for x in lengths_and_strides][::-1]
     strides = [x.stride for x in lengths_and_strides][::-1]
-    return check_contiguous_sizes_strides(sizes, strides, false_if_dde=True)
+    return check_contiguous_sizes_strides(sizes, strides)
 
 
 def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
@@ -868,13 +792,18 @@ def is_valid_permutation(rank: int, perm: DimsSequenceType) -> bool:
     return isinstance(perm, Sequence) and sorted(perm) == list(range(rank))
 
 
-def is_same_shape(a: Sequence, b: Sequence) -> bool:
+def is_same_shape(a: Sequence, b: Sequence) -> BoolLikeType:
     """
     Compares two shapes a and b, returning True if they are the same
     (their ranks and corresponding lengths match) and False otherwise.
-    """
 
-    return tuple(a) == tuple(b)
+    Uses sym_eq for shape comparison so the result is safe to pass to
+    torch._check on tensors with unbacked SymInt dimensions; for backed
+    or concrete shapes the behaviour is unchanged.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
+    return sym_eq(tuple(a), tuple(b))
 
 
 def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
@@ -1123,8 +1052,52 @@ _integer_dtypes = (
     torch.int32,
     torch.int64,
 )
-_low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
+_low_precision_dtypes = (
+    torch.float16,
+    torch.bfloat16,
+    torch.complex32,
+    torch.bcomplex32,
+)
+_complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.complex128)
+
+
+# Shell dtypes with no defined value conversion. Mirrors c10::isShellType and
+# the eager check in aten/src/ATen/native/Copy.cpp so tracing rejects the same
+# casts.
+_uncastable_shell_dtypes = frozenset(
+    (
+        torch.float4_e2m1fn_x2,
+        torch.bits1x8,
+        torch.bits2x4,
+        torch.bits4x2,
+        torch.bits8,
+        torch.bits16,
+        *(getattr(torch, f"uint{i}") for i in range(1, 8)),
+        *(getattr(torch, f"int{i}") for i in range(1, 8)),
+    )
+)
+
+
+def check_shell_dtype_cast(src: torch.dtype, dst: torch.dtype) -> None:
+    if src == dst or not (
+        src in _uncastable_shell_dtypes or dst in _uncastable_shell_dtypes
+    ):
+        return
+    if torch.float4_e2m1fn_x2 in (src, dst):
+        raise NotImplementedError(
+            f"Casting from {src} to {dst} is not supported. "
+            "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+            "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+            "the nibbles (low 4 bits are the first element, high 4 bits the "
+            "second); to encode, pack fp4 codes into torch.uint8 and "
+            ".view(torch.float4_e2m1fn_x2)."
+        )
+    shell = src if src in _uncastable_shell_dtypes else dst
+    raise NotImplementedError(
+        f"Casting from {src} to {dst} is not supported: {shell} is a shell dtype "
+        "with no defined conversions. Use .view() to reinterpret the bytes as a "
+        "same-size integer dtype instead."
+    )
 
 
 def is_boolean_dtype(dtype: torch.dtype) -> bool:
@@ -1168,11 +1141,12 @@ _complex_to_real_dtype_map = {
     torch.complex128: torch.float64,
     torch.complex64: torch.float32,
     torch.complex32: torch.float16,
+    torch.bcomplex32: torch.bfloat16,
 }
 
 _real_to_complex_dtype_map = {
     torch.float16: torch.complex32,
-    torch.bfloat16: torch.complex64,
+    torch.bfloat16: torch.bcomplex32,
     torch.float32: torch.complex64,
     torch.float64: torch.complex128,
 }
@@ -1219,6 +1193,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     if dtype in _integer_dtypes:
         return sym_int
     if dtype.is_floating_point:
+        # pyrefly: ignore [bad-return]
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
@@ -1263,13 +1238,13 @@ def check_fp_or_complex(
 ):
     """
     Checks whether the input is floating point or complex.
-    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
+    If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and [b]complex32
     """
-    torch._check(
+    torch._check_not_implemented(
         is_float_dtype(dtype) or is_complex_dtype(dtype),
         lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    torch._check(
+    torch._check_not_implemented(
         allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
         lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
     )
@@ -1361,7 +1336,7 @@ def get_higher_dtype(
         (torch.float16, torch.bfloat16),
         (torch.float32,),
         (torch.float64,),
-        (torch.complex32,),
+        (torch.complex32, torch.bcomplex32),
         (torch.complex64,),
         (torch.complex128,),
     )
@@ -1491,6 +1466,7 @@ _computation_dtype_map = {
     torch.bfloat16: torch.float32,
     torch.float16: torch.float32,
     torch.complex32: torch.complex64,
+    torch.bcomplex32: torch.complex64,
 }
 
 
@@ -1537,7 +1513,7 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
 #   - VIEW, a view of an input tensor is returned
 #   - INPLACE, one or more input tensors is modified
 #
-# these descriptors are mututally exclusive and exhaustive.
+# these descriptors are mutually exclusive and exhaustive.
 class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
@@ -1598,7 +1574,7 @@ def elementwise_dtypes(
     partially ordered as follows:
 
     bool -> uint8, int8 -> int16 -> int32 -> int64 ->
-      float16, bfloat16 -> float32 -> float64 -> complex32 -> complex64 -> complex128
+      float16, bfloat16 -> float32 -> float64 -> complex32, bcomplex32 -> complex64 -> complex128
 
     The result dtype is selected by:
       - if no tensor's dtype has the same corresponding type as the one selected,
@@ -1618,7 +1594,7 @@ def elementwise_dtypes(
 
     The "corresponding complex dtypes" are:
       float16    -> complex32
-      bfloat16   -> complex64
+      bfloat16   -> bcomplex32
       float32    -> complex64
       float64    -> complex128
       complex32  -> complex32
@@ -1629,7 +1605,7 @@ def elementwise_dtypes(
     dtype by mapping low precision floating point and complex dtypes as follows:
 
       float16   -> float32
-      bfloat16  -> float32
+      bfloat16  -> bcomplex32
       complex32 -> complex64
 
     This is referred to as "op math", and the NO_OPMATH type promotion kind disables this mapping, making the
@@ -1814,7 +1790,7 @@ def make_contiguous_strides_for(
         if len(shape) < 2:
             return result
         # Use sym_max to handle unbacked symbolic dimensions
-        return result[:-2] + (1, sym_max(shape[-2], 1))
+        return result[:-2] + (1, sym_max(shape[-2], 1))  # type: ignore[return-value]
 
 
 def make_channels_last_1d_strides_for(
@@ -1828,7 +1804,7 @@ def make_channels_last_1d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 3
     for idx in (1, -1, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1848,7 +1824,7 @@ def make_channels_last_2d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 4
     for idx in (1, -1, -2, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1867,7 +1843,7 @@ def make_channels_last_3d_strides_for(
     multiplier: _IntLikeT | int = 1
     strides: list[_IntLikeT | int] = [0] * 5
     for idx in (1, -1, -2, -3, 0):
-        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # NOTE: intentional divergence from make_contiguous_strides_for
         # This is consistent with eager
         strides[idx] = multiplier
         multiplier *= shape[idx]
@@ -1933,6 +1909,7 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
+    # pyrefly: ignore [bad-return]
     return sym_float(correction)
 
 
@@ -2065,6 +2042,17 @@ def are_strides_like_channels_last_or_false(
 
 
 def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
+    """DDE-safe Python equivalent of ``Tensor.suggest_memory_format()``.
+
+    Returns ``torch.channels_last`` for 4D tensors with NHWC-pattern strides,
+    ``torch.channels_last_3d`` for 5D NDHWC, otherwise ``torch.contiguous_format``.
+    Uses ``are_strides_like_channels_last_or_false`` internally — when
+    contiguity can't be statically decided (e.g., unbacked symbolic strides),
+    falls back to ``contiguous_format`` instead of raising a data-dependent
+    error. Mirrors eager ``Tensor.suggest_memory_format()`` (with the default
+    ``channels_last_strides_exact_match=false``) for inputs eager would also
+    classify the same way.
+    """
     if x.layout != torch.strided:
         return torch.contiguous_format
 
@@ -2140,10 +2128,38 @@ def layout_or_default(layout: torch.layout | None) -> torch.layout:
     return layout if layout is not None else torch.strided
 
 
-def clone_preserve_strides(x):
+def clone_preserve_strides(x, *, base=None):
+    """Clone x, preserving its size, stride and storage_offset.
+
+    The clone spans storage_offset + span elements and is copied out of x's storage,
+    so it is only meaningful while all of that storage is addressable. That holds in
+    eager, but a tracing backend may materialize an intermediate view as a buffer
+    sized to the view alone, leaving the leading storage_offset elements outside any
+    allocation. Callers tracing a view with a non-zero storage_offset must therefore
+    pass its ``base``, so the clone is taken from the base and x's view re-derived
+    from it -- every access then stays inside one real buffer. See how
+    auto_functionalize clones mutable custom-op args via their bases.
+
+    A ``base`` must span all of x: the buffer is sized to the base's required
+    extent, and x is then re-derived from it at x's own storage_offset. Anything
+    x addresses beyond that extent is not in the clone. Eager catches this when
+    setStorage bounds-checks the re-derive, but under fake tensors it passes and
+    codegens an out-of-bounds read, so the contract is checked explicitly.
+    """
+    src = x if base is None else base
     needed_size = compute_required_storage_length(
-        x.size(), x.stride(), x.storage_offset()
+        src.size(), src.stride(), src.storage_offset()
     )
+    if base is not None:
+        x_size = compute_required_storage_length(
+            x.size(), x.stride(), x.storage_offset()
+        )
+        torch._check(
+            x_size <= needed_size,
+            lambda: f"clone_preserve_strides: base spans {needed_size} elements but x "
+            f"addresses {x_size}, so cloning through the base would drop what x needs. "
+            f"Pass a base that spans x, or omit base to clone x's own storage.",
+        )
     # Our eager implementations for *_scatter ops are all primitives w.r.t autograd,
     # so these as_strided() calls are not seen by autograd.
     # We need to mimic this behavior in our ref/prim implementations.
@@ -2157,7 +2173,7 @@ def clone_preserve_strides(x):
         torch._C._dispatch_tls_set_dispatch_key_excluded(
             torch._C.DispatchKey.ADInplaceOrView, True
         )
-        buffer = torch.as_strided(x, (needed_size,), (1,), 0).clone()
+        buffer = torch.as_strided(src, (needed_size,), (1,), 0).clone()
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(

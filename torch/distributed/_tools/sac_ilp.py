@@ -61,7 +61,10 @@ def sac_milp(
 
     """
     num_nodes = len(graph.nodes)
-    M = 10**2  # note: numerical issue may occur if M is too big
+    max_runtime = max(
+        (graph.nodes[i]["sac_runtime"] for i in range(num_nodes)), default=1
+    )
+    M = max(10**2, 2 * max_runtime)
     MEM_MULTIPLIER = 2**30
 
     # Create a MILP problem

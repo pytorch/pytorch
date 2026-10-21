@@ -105,7 +105,7 @@ void PrefixStore::multiSet(
   store_->multiSet(prefixed_keys, values);
 }
 
-// Returns true if this store support append, multiGet and multiSet
+// Returns true if this store supports append, multiGet and multiSet
 bool PrefixStore::hasExtendedApi() const {
   return store_->hasExtendedApi();
 }
@@ -152,7 +152,7 @@ std::vector<std::string> PrefixStore::listKeys() {
   filteredKeys.reserve(keys.size());
 
   for (auto& key : keys) {
-    if (key.find(prefix_) == 0) {
+    if (key.starts_with(prefix_)) {
       key = key.substr(prefix_.size() + 1);
       filteredKeys.push_back(std::move(key));
     }

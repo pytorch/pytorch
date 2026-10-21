@@ -11,14 +11,14 @@ from operator import mul
 
 
 import torch
-import torch.cuda
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM
-from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
+    gradcheck, gradgradcheck, MI300_ARCH, set_default_dtype, skipIfRocmArch, skipIfTorchDynamo, TEST_WITH_ROCM, \
+    TEST_ACCELERATOR, TEST_MPS
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
@@ -110,7 +110,9 @@ module_tests = [
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
         with_tf32=True,
-        tf32_precision=0.005,
+        # See no_bias variant below for rationale; same K=10 shape, seed-
+        # dependent realization near the AMD XF32 envelope (issue #155216).
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -121,15 +123,16 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()),
         with_tf32=True,
-        tf32_precision=0.005,
-        # ROCM: skipping tf32 test on gfx94 archs due to tolerance issue.
-        test_cuda=not (TEST_WITH_ROCM and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName),
+        # AMD XF32 at K=10 sits right at the 0.005 envelope (ideal 5.2e-3;
+        # ideal NV-TF32 2.3e-3). ROCm tolerance relaxed to cover the
+        # seed-dependent realization; see https://github.com/jeffdaily/tf32_analysis.
+        tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
         module_name='RReLU',
         input_size=(1, 2, 2),
-        test_cuda=False,
+        test_accelerator=False,
         default_dtype=torch.double,
     ),
     dict(
@@ -138,7 +141,7 @@ module_tests = [
         cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
         input_size=(4, 4, 5),
         desc='with_up_down',
-        test_cuda=False,
+        test_accelerator=False,
         default_dtype=torch.double,
     ),
     dict(
@@ -802,7 +805,7 @@ def multilabelmarginloss_0d_no_reduce_test():
         input_fn=lambda: torch.randn(()),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False)
@@ -819,7 +822,7 @@ def multilabelmarginloss_1d_no_reduce_test():
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -837,7 +840,7 @@ def multilabelmarginloss_index_neg_test():
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -855,7 +858,7 @@ def multilabelmarginloss_no_reduce_test():
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -962,7 +965,7 @@ def multimarginloss_no_reduce_test():
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -980,7 +983,7 @@ def multimarginloss_1d_no_reduce_test():
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -998,7 +1001,7 @@ def multimarginloss_1d_input_0d_target_no_reduce_test():
         input_fn=lambda: torch.randn(10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduction='none'),
+            loss_reference_fns['MultiMarginLoss'](i, t.type_as(i).long(), reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -1016,7 +1019,7 @@ def multimarginloss_p_no_reduce_test():
         input_fn=lambda: torch.randn(5, 10).clamp_(1e-2, 1 - 1e-2),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), p=2, reduction='none'),
+            loss_reference_fns['MultiMarginLoss'](i, t.type_as(i).long(), p=2, reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
         pickle=False,
@@ -1035,7 +1038,7 @@ def multimarginloss_margin_no_reduce_test():
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(),
+            loss_reference_fns['MultiMarginLoss'](i, t.type_as(i).long(),
                                                   margin=0.5, reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
@@ -1057,7 +1060,7 @@ def multimarginloss_weights_no_reduce_test():
         input_fn=lambda: torch.randn(5, 10),
         cpp_var_map={'i': '_get_input()', 't': t, 'weights': weights},
         reference_fn=lambda i, *_:
-            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(),
+            loss_reference_fns['MultiMarginLoss'](i, t.type_as(i).long(),
                                                   weight=weights, reduction='none'),
         check_sum_reduction=True,
         check_gradgrad=False,
@@ -2317,7 +2320,7 @@ def get_new_module_tests():
             input_size=(2, 128),
             fullname='softmax_lastdim_dtype',
             pickle=False,
-            test_cuda=False,
+            test_accelerator=False,
             default_dtype=torch.double,
         ),
         dict(
@@ -2342,7 +2345,7 @@ def get_new_module_tests():
             input_size=(2, 2, 4, 4),  # regular spatial algorithm
             fullname='softmax_spatial_dtype',
             pickle=False,
-            test_cuda=False,
+            test_accelerator=False,
             default_dtype=torch.double,
         ),
         dict(
@@ -2350,7 +2353,7 @@ def get_new_module_tests():
             cpp_options_args='F::SoftmaxFuncOptions(0)',
             input_size=(2, 3, 4, 5),
             fullname='softmax_functional_dim0',
-            test_cuda=False,
+            test_accelerator=False,
             pickle=False,
             default_dtype=torch.double,
         ),
@@ -2359,7 +2362,7 @@ def get_new_module_tests():
             cpp_options_args='F::SoftmaxFuncOptions(3)',
             input_size=(2, 3, 4, 5),
             fullname='softmax_functional_dim3',
-            test_cuda=False,
+            test_accelerator=False,
             pickle=False,
             default_dtype=torch.double,
         ),
@@ -2368,7 +2371,7 @@ def get_new_module_tests():
             cpp_options_args='F::SoftmaxFuncOptions(-1)',
             input_size=(),
             fullname='softmax_functional_scalar',
-            test_cuda=False,
+            test_accelerator=False,
             pickle=False,
         ),
         dict(
@@ -2424,7 +2427,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::UnfoldOptions({2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
             input_size=(2, 4, 3, 3),
             check_gradgrad=False,
-            test_cuda=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2433,7 +2436,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::FoldOptions({3, 3}, {2, 2}).dilation({1, 1}).padding({0, 0}).stride({1, 1})',
             input_size=(2, 16, 4),
             check_gradgrad=False,
-            test_cuda=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2443,7 +2446,7 @@ def get_new_module_tests():
             input_size=(16, 4),
             check_gradgrad=False,
             ref=single_batch_reference_fn,
-            test_cuda=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2452,7 +2455,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::UnfoldOptions(2).dilation(1).padding(0).stride(1)',
             input_size=(2, 4, 3, 3),
             check_gradgrad=False,
-            test_cuda=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2461,7 +2464,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::FoldOptions(3, 2).dilation(1).padding(0).stride(1)',
             input_size=(2, 16, 4),
             check_gradgrad=False,
-            test_cuda=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2471,7 +2474,7 @@ def get_new_module_tests():
             input_size=(16, 4),
             ref=single_batch_reference_fn,
             check_gradgrad=False,
-            test_cuda=True,
+            test_accelerator=True,
             default_dtype=torch.double,
         ),
         dict(
@@ -2480,7 +2483,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::RReLUOptions().lower(0.1).upper(0.9)',
             input_size=(),
             desc='with_up_down_scalar',
-            test_cuda=False,
+            test_accelerator=False,
             default_dtype=torch.double,
         ),
         dict(
@@ -2589,6 +2592,11 @@ def get_new_module_tests():
             desc='multilayer_coder',
             with_tf32=True,
             tf32_precision=0.05 if SM90OrLater else 0.03,
+            # gfx942 runs TF32 on the XF32 hardware path; this K=4 multilayer entry
+            # amplifies the TF32-class per-gemm error to 4e-3..2e-2 relative on every
+            # compare, which no absolute tolerance describes. The _fp32 sibling keeps
+            # the correctness coverage; see https://github.com/pytorch/pytorch/issues/196605.
+            tf32_decorator=skipIfRocmArch(MI300_ARCH),
             default_dtype=torch.double,
         ),
         dict(
@@ -2685,7 +2693,7 @@ def get_new_module_tests():
         'Hardswish': {'check_gradgrad': False, 'check_jit': False, 'default_dtype': torch.double},
         # For RRelu, test that compare CPU and GPU results fail because RNG
         # is different between CPU and GPU
-        'RReLU': {'test_cuda': False, 'default_dtype': torch.double},
+        'RReLU': {'test_accelerator': False, 'default_dtype': torch.double},
         'ELU': {'default_dtype': torch.double},
         'GELU': {'default_dtype': torch.double},
         'GLU': {'default_dtype': torch.double},
@@ -2842,6 +2850,29 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
             input, target, weight=weight, reduction=reduction,
             ignore_index=ignore_index, label_smoothing=label_smoothing
         )
+
+
+def linear_cross_entropy_loss_reference(input, linear_weight, target,
+                                        linear_bias=None,
+                                        weight=None,
+                                        ignore_index=None,
+                                        reduction='mean',
+                                        label_smoothing=0.0):
+    num_classes = linear_weight.shape[0]
+    out_features = linear_weight.shape[1:-1]
+    in_features = linear_weight.shape[-1]
+    num_batches = input.shape[:-1]
+    logits = F.linear(
+        input,
+        linear_weight.reshape((-1, in_features)),
+        linear_bias.reshape(-1) if linear_bias is not None else None,
+    ).reshape((*num_batches, num_classes, *out_features))
+    ignore_index = ignore_index if ignore_index is not None else -100
+    return F.cross_entropy(
+        logits, target, weight=weight,
+        reduction=reduction, ignore_index=ignore_index,
+        label_smoothing=label_smoothing
+    )
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
@@ -3086,7 +3117,8 @@ loss_reference_fns: dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
+    'CrossEntropyLoss': cross_entropy_loss_reference,
+    'LinearCrossEntropyLoss': linear_cross_entropy_loss_reference,
 }
 
 
@@ -3291,7 +3323,7 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input), strict=True):
-                    jacobian_x[:, i] = d_x.contiguous().view(-1)
+                    jacobian_x[:, i] = d_x.reshape(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
@@ -3350,8 +3382,15 @@ class TestBase:
                 if name in {'constructor_args', 'extra_args'}:
                     kwargs[name] = ()
                 else:
-                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or it's size!")
+                    raise ValueError(f"{self.get_name()}: Specify {name} by a value, a function to generate it, or its size!")
         self._extra_kwargs = kwargs
+        # Lazily drawn args (input, target, constructor args), cached so repeated
+        # reads within one test agree. The instance is shared by every generated
+        # test_nn variant, so ModuleTest/CriterionTest clear this on entry to
+        # __call__ and test_cuda: a sibling's leftover entry skips a draw and shifts
+        # the RNG position of every later draw (the input in __call__, the
+        # parameters in test_cuda), so the in-suite configuration would differ from
+        # the standalone repro. Subclasses with their own entry points do not clear.
         self._arg_cache = {}
 
     def get_name(self):
@@ -3425,7 +3464,8 @@ class ModuleTest(TestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
+        # Skip MPS due to MPS limitations in some dtypes and ops
+        self.should_test_accelerator = kwargs.get('test_accelerator', True) if not TEST_MPS else False
         self.should_test_pickle = kwargs.get('pickle', True)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.FIXME_no_cuda_gradgrad_comparison = \
@@ -3437,6 +3477,7 @@ class ModuleTest(TestBase):
             self.default_dtype = torch.get_default_dtype()
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3522,11 +3563,15 @@ class ModuleTest(TestBase):
 
                 test_case.assertEqual(out, output)
                 test_case.assertEqual(grad, d_input, atol=1e-4, rtol=0)
-                test_case.assertEqual(test_case._get_parameters(module)[1], d_param)
+                # Parameter grads can differ by a few ulps between runs when the backward
+                # accumulates atomically (e.g. embedding_dense_backward's fused path since
+                # #172454); use the same bound as the grad-input compare above.
+                test_case.assertEqual(test_case._get_parameters(module)[1], d_param, atol=1e-4, rtol=0)
 
-    def test_cuda(self, test_case):
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
+    def test_accelerator(self, test_case):
+        self._arg_cache.clear()
+        if not TEST_ACCELERATOR or not self.should_test_accelerator:
+            raise unittest.SkipTest('Excluded from Accelerator tests')
 
         with set_default_dtype(self.default_dtype):
             cpu_input = self._get_input()
@@ -3539,7 +3584,7 @@ class ModuleTest(TestBase):
             gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
+            gpu_module = self.constructor(*self.constructor_args).float().to(self.device)
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
             for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0], strict=True):
@@ -3649,6 +3694,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode')
         self.supports_forward_ad = kwargs.get('supports_forward_ad', False)
         self.supports_fwgrad_bwgrad = kwargs.get('supports_fwgrad_bwgrad', False)
+        self.device = torch.accelerator.current_accelerator(check_available=True)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -3724,26 +3770,30 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
 
-        def assert_module_parameters_are(tensor_type, device_id=None):
+        def assert_module_parameters_are(dtype, device=None):
             for p in module.parameters():
-                test_case.assertIsInstance(p, tensor_type)
-                if device_id is not None:
-                    test_case.assertEqual(p.get_device(), device_id)
+                test_case.assertEqual(p.dtype, dtype)
+                if device is None:
+                    test_case.assertEqual(p.device.type, 'cpu')
+                else:
+                    test_case.assertEqual(p.get_device(), device)
 
-        if all(isinstance(t, torch.LongTensor) for t in input_tuple) and TEST_CUDA:
-            # check that cuda() moves module parameters to correct GPU device,
+        if all(isinstance(t, torch.LongTensor) for t in input_tuple) \
+                and TEST_ACCELERATOR \
+                and self.should_test_accelerator:
+            # check that to(device) moves module parameters to correct GPU device,
             # and that float() casts parameters correctly
-            input_tuple = tuple(t.cuda() for t in input_tuple)
-            module.float().cuda()
+            input_tuple = tuple(t.to(self.device) for t in input_tuple)
+            module.float().to(self.device)
             module(*input_tuple)
-            assert_module_parameters_are(torch.cuda.FloatTensor, 0)  # type: ignore[attr-defined]
+            assert_module_parameters_are(torch.float32, 0)
 
-            if torch.cuda.device_count() > 1:
-                input_tuple = tuple(t.cuda(1) for t in input_tuple)
-                module.cuda(1)
-                with torch.cuda.device(1):
+            if torch.accelerator.device_count() > 1:
+                input_tuple = tuple(t.to(1) for t in input_tuple)
+                module.to(1)
+                with torch.accelerator.device_index(1):
                     module(*input_tuple)
-                assert_module_parameters_are(torch.cuda.FloatTensor, 1)  # type: ignore[attr-defined]
+                assert_module_parameters_are(torch.float32, 1)
         else:
             # check that float()/double() casters work correctly
             def to_type(tensor, real, complex):
@@ -3768,64 +3818,64 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             input_tuple = tuple(to_single(t) for t in input_tuple)
             module.float()
             module(*input_tuple)
-            assert_module_parameters_are(torch.FloatTensor)
+            assert_module_parameters_are(torch.float32)
 
             # and back to double
             input_tuple = tuple(to_double(t) for t in input_tuple)
             module.double()
             module(*input_tuple)
-            assert_module_parameters_are(torch.DoubleTensor)
+            assert_module_parameters_are(torch.float64)
 
-            if TEST_CUDA and self.should_test_cuda:
-                # check that cuda() moves module parameters to correct GPU device,
+            if TEST_ACCELERATOR and self.should_test_accelerator:
+                # check that to(device) moves module parameters to correct GPU device,
                 # and that float() casts parameters correctly
 
                 # to GPU0
-                input_tuple = tuple(to_single(t).cuda() for t in input_tuple)
-                module.float().cuda()
+                input_tuple = tuple(to_single(t).to(self.device) for t in input_tuple)
+                module.float().to(self.device)
                 module(*input_tuple)
-                assert_module_parameters_are(torch.cuda.FloatTensor, 0)  # type: ignore[attr-defined]
+                assert_module_parameters_are(torch.float32, 0)
 
                 # to CPU
                 input_tuple = tuple(t.cpu() for t in input_tuple)
                 module.cpu()
                 module(*input_tuple)
-                assert_module_parameters_are(torch.FloatTensor)
+                assert_module_parameters_are(torch.float32)
 
                 # back to GPU0
-                input_tuple = tuple(t.cuda() for t in input_tuple)
-                module.cuda()
+                input_tuple = tuple(t.to(self.device) for t in input_tuple)
+                module.to(self.device)
                 module(*input_tuple)
-                assert_module_parameters_are(torch.cuda.FloatTensor, 0)  # type: ignore[attr-defined]
+                assert_module_parameters_are(torch.float32, 0)
 
                 # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
                     with torch.backends.cudnn.flags(enabled=False):
                         module(*input_tuple)
-                        assert_module_parameters_are(torch.cuda.FloatTensor, 0)  # type: ignore[attr-defined]
+                        assert_module_parameters_are(torch.float32, 0)
 
-                if torch.cuda.device_count() >= 2:
+                if torch.accelerator.device_count() >= 2:
                     # test cross-GPU transfer works
                     # to GPU1
-                    input_tuple = tuple(t.cuda(1) for t in input_tuple)
-                    module.cuda(1)
-                    with torch.cuda.device(1):
+                    input_tuple = tuple(t.to(1) for t in input_tuple)
+                    module.to(1)
+                    with torch.accelerator.device_index(1):
                         module(*input_tuple)
-                    assert_module_parameters_are(torch.cuda.FloatTensor, 1)  # type: ignore[attr-defined]
+                    assert_module_parameters_are(torch.float32, 1)
 
                 if not self.skip_double:
                     # test double()
-                    input_tuple = tuple(to_double(t).cuda() for t in input_tuple)
-                    module.double().cuda()
+                    input_tuple = tuple(to_double(t).to(self.device) for t in input_tuple)
+                    module.double().to(self.device)
                     module(*input_tuple)
-                    assert_module_parameters_are(torch.cuda.DoubleTensor, 0)  # type: ignore[attr-defined]
+                    assert_module_parameters_are(torch.float64, 0)
 
                 # test half()
                 if not self.skip_half:
-                    input_tuple = tuple(to_half(t).cuda() for t in input_tuple)
-                    module.half().cuda()
+                    input_tuple = tuple(to_half(t).to(self.device) for t in input_tuple)
+                    module.half().to(self.device)
                     module(*input_tuple)
-                    assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
+                    assert_module_parameters_are(torch.float16, 0)
         torch.set_num_threads(num_threads)
 
     def _get_target(self):
@@ -3843,7 +3893,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.should_test_accelerator = kwargs.get('test_accelerator', True)
         self.check_forward_only = kwargs.get('check_forward_only', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
@@ -3856,8 +3906,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.default_dtype = kwargs.get('default_dtype')
         if self.default_dtype is None:
             self.default_dtype = torch.get_default_dtype()
+        self.device = torch.accelerator.current_accelerator(check_available=True)
 
     def __call__(self, test_case):
+        self._arg_cache.clear()
         with set_default_dtype(self.default_dtype):
             module = self.constructor(*self.constructor_args)
             input = self._get_input()
@@ -3894,7 +3946,9 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             if self.check_gradgrad:
                 gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
-    def test_cuda(self, test_case, dtype, extra_args=None):
+    def test_accelerator(self, test_case, dtype, extra_args=None):
+        self._arg_cache.clear()
+
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return obj.detach().to(dtype=dtype).requires_grad_(requires_grad)
@@ -3903,8 +3957,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             else:
                 return obj
 
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
+        if not TEST_ACCELERATOR or not self.should_test_accelerator:
+            raise unittest.SkipTest('Excluded from Accelerator tests')
 
         with set_default_dtype(self.default_dtype):
             cpu_input = self._get_input()
@@ -3922,7 +3976,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             # GPU setup
             gpu_input = to_gpu(cpu_input)
             gpu_target = to_gpu(cpu_target)
-            gpu_module.cuda()
+            gpu_module.to(self.device)
 
             # torch.HalfTensor doesn't support most operations, converting back to default
             if dtype in {torch.half, torch.bfloat16}:

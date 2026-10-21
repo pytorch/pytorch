@@ -12,7 +12,6 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
 import pytest
-from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
@@ -25,6 +24,11 @@ from torch.testing._internal.common_utils import (
     xpassIfTorchDynamo_np,
 )
 
+
+if numpy.lib.NumpyVersion(numpy.__version__) >= "2.0.0":
+    from numpy.linalg._linalg import _multi_dot_matrix_chain_order
+else:
+    from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 
 # If we are going to trace through these, we should use NumPy
 # If testing on eager mode, we use torch._numpy
@@ -1077,6 +1081,7 @@ class TestLstsq(LstsqCases, TestCase):
 @instantiate_parametrized_tests
 class TestMatrixPower(TestCase):
     def setUp(self):
+        super().setUp()
         self.rshft_0 = np.eye(4)
         self.rshft_1 = self.rshft_0[[3, 0, 1, 2]]
         self.rshft_2 = self.rshft_0[[2, 3, 0, 1]]

@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <ATen/ops/dequantize.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_types.h>
 
@@ -351,7 +352,7 @@ class Attr {
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
         binary_m = at::native::onednn::make_onednn_memory(
-            md, engine, binary.data_ptr());
+            md, engine, binary.const_data_ptr());
 
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});

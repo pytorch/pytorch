@@ -18,7 +18,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
@@ -92,6 +92,11 @@ def get_freeable_input_buf(
 ) -> dict[str, FreeableInputBuffer]:
     """
     Create and keep track of all input buffers that can be freed during the program
+
+    This is a naming-based ownership estimate.
+    Assumptions:
+    Inputs that ``is_nonfreeable_buffers`` are treated as persistent
+    All other graph inputs are assumed freeable after their last use.
 
     Returns:
         A dictionary containing all freeable input buffers, keyed by their names.
@@ -215,7 +220,7 @@ def compute_size_for_scheduler_buffer(
             return buf_size
 
     for sched_buf in name_to_buf.values():
-        # skip if sched_buf is already processed as an user of another SchedulerBuffer
+        # skip if sched_buf is already processed as a user of another SchedulerBuffer
         # whose layout is of the type MultiOutputLayout
         if sched_buf.get_name() not in sched_buf_to_size:
             _compute_and_update_buf_size(sched_buf)
@@ -381,7 +386,8 @@ def compute_memory_timeline(
                 if step > max_step:
                     max_step = step
                     max_step_snode = succ_node
-            assert max_step_snode is not None
+            if max_step_snode is None:
+                raise AssertionError("expected max_step_snode to be set")
         return max_step, max_step_snode
 
     # 1. for freeable input buffers
@@ -389,7 +395,8 @@ def compute_memory_timeline(
         end_step = -1
         if buf_name not in graph_outputs:
             end_step, end_step_snode = _get_end_step_and_snode(input_buf)
-            assert end_step_snode is not None
+            if end_step_snode is None:
+                raise AssertionError("expected end_step_snode to be set")
             buf_to_snode_last_use[input_buf] = end_step_snode
 
         buf_info_list.append(
@@ -416,7 +423,8 @@ def compute_memory_timeline(
                     end_step = step
                     buf_to_snode_last_use[sched_buf] = node
                 else:
-                    assert end_step_snode is not None
+                    if end_step_snode is None:
+                        raise AssertionError("expected end_step_snode to be set")
                     buf_to_snode_last_use[sched_buf] = end_step_snode
 
             buf_info_list.append(
@@ -432,6 +440,54 @@ def compute_memory_timeline(
     return buf_info_list, node_to_step, buf_to_snode_last_use
 
 
+def peak_memory_from_buf_info_list(
+    buf_info_list: list[BufferInfo], num_steps: int
+) -> tuple[int, list[int]]:
+    """Compute peak and per-step live memory from buffer lifetimes.
+
+    Skip the free for graph-output buffers (`end_step == -1`); otherwise
+    `delta[0] -= size_free` would cancel the alloc.
+    """
+    delta = [0] * (num_steps + 1)
+    for bi in buf_info_list:
+        delta[bi.start_step] += bi.size_alloc
+        if bi.end_step != -1:
+            delta[bi.end_step + 1] -= bi.size_free
+
+    max_memory = 0
+    cur_memory = 0
+    memories_at_nodes = [0] * (num_steps + 1)
+    for t in range(num_steps + 1):
+        cur_memory += delta[t]
+        memories_at_nodes[t] = cur_memory
+        if cur_memory > max_memory:
+            max_memory = cur_memory
+    return max_memory, memories_at_nodes
+
+
+def live_memory_before_steps_from_buf_info_list(
+    buf_info_list: list[BufferInfo], num_steps: int
+) -> list[int]:
+    """Compute live bytes before each scheduler step runs."""
+    delta = [0] * (num_steps + 1)
+    cur_memory = 0
+    for bi in buf_info_list:
+        if isinstance(bi.buffer, FreeableInputBuffer):
+            cur_memory += bi.size_alloc
+        else:
+            delta[bi.start_step + 1] += bi.size_alloc
+
+        if bi.end_step != -1:
+            delta[bi.end_step + 1] -= bi.size_free
+
+    live_before = [0] * (num_steps + 1)
+    live_before[0] = cur_memory
+    for t in range(1, num_steps + 1):
+        cur_memory += delta[t]
+        live_before[t] = cur_memory
+    return live_before
+
+
 def estimate_peak_memory(
     nodes: list[BaseSchedulerNode],
     name_to_freeable_input_buf: dict[str, FreeableInputBuffer],
@@ -445,29 +501,93 @@ def estimate_peak_memory(
         int: peak memory
         List[int]: memory usage at each node (or each step).
     """
-
     buf_info_list, _, _ = compute_memory_timeline(
         nodes, name_to_freeable_input_buf, graph_outputs
     )
+    return peak_memory_from_buf_info_list(buf_info_list, len(nodes))
 
-    # incremental memory changes at each step
-    memory = [0 for _ in range(len(nodes) + 1)]
 
-    # for each buffer, update memory when created and when freed
-    for buf_info in buf_info_list:
-        memory[buf_info.start_step] += buf_info.size_alloc
-        memory[buf_info.end_step + 1] -= buf_info.size_free
+def estimate_region_peak_memory(
+    nodes_in_window: Iterable[BaseSchedulerNode],
+    *,
+    region_start: int,
+    region_end: int,
+    step_of: Callable[[BaseSchedulerNode], int],
+    graph_outputs: OrderedSet[str],
+    cur_memory: int = 0,
+) -> int:
+    """Peak memory inside `[region_start, region_end]` for the
+    hypothetical post-reorder schedule.
 
-    # get peak memory by compute the cumulative memories
-    max_memory = 0
-    cur_memory = 0
-    memories_at_nodes = []
-    for t in range(len(nodes) + 1):
-        cur_memory += memory[t]
-        memories_at_nodes.append(cur_memory)
-        max_memory = max(max_memory, cur_memory)
+    Walks `nodes_in_window` (post-rewrite, in proposed order). For
+    each node: alloc = sum of `size_alloc` over its outputs; free =
+    sum of `size_free` over `pred_buffers` whose proposed last
+    consumer is this node. Then accumulates per step starting from
+    `cur_memory` (live bytes at the window boundary) and returns
+    the maximum live bytes.
+    """
+    peak, _, _ = estimate_region_memory(
+        nodes_in_window,
+        region_start=region_start,
+        region_end=region_end,
+        step_of=step_of,
+        graph_outputs=graph_outputs,
+        cur_memory=cur_memory,
+    )
+    return peak
 
-    return (max_memory, memories_at_nodes)
+
+def estimate_region_memory(
+    nodes_in_window: Iterable[BaseSchedulerNode],
+    *,
+    region_start: int,
+    region_end: int,
+    step_of: Callable[[BaseSchedulerNode], int],
+    graph_outputs: OrderedSet[str],
+    cur_memory: int = 0,
+) -> tuple[int, list[int], list[int]]:
+    """Estimate the peak and live memory around each step in a schedule region."""
+    R = region_end - region_start + 1
+    region = [SNodeMemory(0, 0) for _ in range(R)]
+
+    for node in nodes_in_window:
+        s = step_of(node)
+        slot = s - region_start
+        if not (0 <= slot < R):
+            raise AssertionError(f"expected 0 <= slot < {R}, got {slot}")
+
+        for buf in node.get_outputs():
+            bi = buf.mpi_buffer
+            region[slot].size_alloc += bi.size_alloc
+            name = buf.get_name()
+            if name in graph_outputs:
+                continue
+            succ_steps = [step_of(n) for n in bi.succ_nodes]
+            if not succ_steps:
+                region[slot].size_free += bi.size_free
+
+        for pb in node.mpi_node.pred_buffers:
+            name = pb.get_name()
+            if name in graph_outputs:
+                continue
+            succ_steps = [step_of(n) for n in pb.mpi_buffer.succ_nodes]
+            if not succ_steps:
+                raise AssertionError("expected non-empty succ_steps")
+            if max(succ_steps) == s:
+                region[slot].size_free += pb.mpi_buffer.size_free
+
+    cur = cur_memory
+    peak = cur
+    live_before = [0] * (R + 1)
+    live_after = [0] * R
+    for i, af in enumerate(region):
+        live_before[i] = cur
+        cur += af.size_alloc
+        live_after[i] = cur
+        peak = max(peak, cur)
+        cur -= af.size_free
+    live_before[R] = cur
+    return peak, live_before, live_after
 
 
 @dataclasses.dataclass
@@ -551,7 +671,7 @@ def topological_sort_lpmf(
     https://www.cs.york.ac.uk/rts/docs/DAC-1964-2006/PAPERS/2006/DAC06/PDFFILES/P0689.PDF
 
     The algorithm maintains the max memory so far.
-    At every iteration, for each scheduleable node, it computes:
+    At every iteration, for each schedulable node, it computes:
         - how much memory needs to be allocated for the output buffers of this node;
         - how much memory can be freed as a result of executing this node.
     This gives us two values for each node:
@@ -661,14 +781,20 @@ def topological_sort_lpmf(
 
         # update successor nodes and nodes_to_schedule
         for succ_node in selected_node.mpi_node.succ_nodes:
-            assert node_info[succ_node]["indegree"] > 0
+            if node_info[succ_node]["indegree"] <= 0:
+                raise AssertionError(
+                    f"expected positive indegree, got {node_info[succ_node]['indegree']}"
+                )
             node_info[succ_node]["indegree"] -= 1
             if node_info[succ_node]["indegree"] == 0:
                 nodes_to_schedule.add(succ_node)
 
         # update predecessor nodes
         for buf in selected_node.mpi_node.pred_buffers:
-            assert buf_info[buf]["outdegree"] > 0
+            if buf_info[buf]["outdegree"] <= 0:
+                raise AssertionError(
+                    f"expected positive outdegree, got {buf_info[buf]['outdegree']}"
+                )
             buf_info[buf]["outdegree"] -= 1
             if buf_info[buf]["outdegree"] == 1:
                 for succ_node in buf.mpi_buffer.succ_nodes:
@@ -708,7 +834,10 @@ def topological_sort_bfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNo
 
     def _node_priority(node: BaseSchedulerNode) -> list[int]:
         # priority is the order in which predecessor nodes are executed
-        assert node_info[node]["indegree"] == 0
+        if node_info[node]["indegree"] != 0:
+            raise AssertionError(
+                f"expected zero indegree, got {node_info[node]['indegree']}"
+            )
         exec_orders = sorted(
             OrderedSet(
                 node_info[pred_node]["order"] for pred_node in node.mpi_node.pred_nodes
@@ -738,7 +867,10 @@ def topological_sort_bfs(nodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNo
 
         # update successor nodes and nodes_to_schedule
         for succ_node in selected_node.mpi_node.succ_nodes:
-            assert node_info[succ_node]["indegree"] > 0
+            if node_info[succ_node]["indegree"] <= 0:
+                raise AssertionError(
+                    f"expected positive indegree, got {node_info[succ_node]['indegree']}"
+                )
             node_info[succ_node]["indegree"] -= 1
             if node_info[succ_node]["indegree"] == 0:
                 heapq.heappush(
@@ -828,7 +960,8 @@ def validate_graph_acyclic(nodes: list[BaseSchedulerNode]) -> None:
         path.append(node)
 
         for pred_node in node.mpi_node.pred_nodes:
-            assert pred_node != node
+            if pred_node == node:
+                raise AssertionError("expected pred_node != node (self-loop)")
             dfs_visit(pred_node)
 
         path.pop()
@@ -972,7 +1105,10 @@ def reorder_for_peak_memory(
                 )
             else:
                 order = method(nodes)
-            assert len(order) == len(nodes)
+            if len(order) != len(nodes):
+                raise AssertionError(
+                    f"expected order length {len(nodes)}, got {len(order)}"
+                )
             peak_memory, _ = estimate_peak_memory(
                 order, name_to_freeable_input_buf, graph_outputs
             )

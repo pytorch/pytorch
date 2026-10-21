@@ -133,6 +133,8 @@ class DispatchKey(Enum):
     Autocast = auto()
     AutocastCPU = auto()
     AutocastCUDA = auto()
+    AutocastXPU = auto()
+    AutocastPrivateUse1 = auto()
     Batched = auto()
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
@@ -755,6 +757,14 @@ class NativeFunction:
         if namespace == "aten" and "pt2_compliant_tag" in valid_tags:
             tags_inp.append("pt2_compliant_tag")
 
+        # All out= ops receive the "out" tag.
+        if func.is_out_fn() and "out" in valid_tags:
+            tags_inp.append("out")
+
+        # All inplace ops receive the "inplace" tag.
+        if func.name.name.inplace and "inplace" in valid_tags:
+            tags_inp.append("inplace")
+
         tags: set[str] = set()
         for t in tags_inp:
             if len(valid_tags) == 0:
@@ -1097,9 +1107,11 @@ class NativeFunction:
                 )
 
         # NB: if your function accidentally has rand/dropout/... in its name
-        # but is not actually random, feel free to amend this to special case
+        # but is not actually random, feel free to amend this to special case.
+        # The stateless _philox_* ops are fully determined by their key input
+        # (e.g. _philox_randint_), so they are intentionally not tagged.
         if (
-            "rand" in str(self.func.name)
+            ("rand" in str(self.func.name) and "_philox_" not in str(self.func.name))
             or (
                 (
                     "dropout" in str(self.func.name)
@@ -2035,7 +2047,6 @@ class BaseTy(Enum):
     ScalarType = auto()
     Tensor = auto()
     int = auto()
-    Dimname = auto()
     DimVector = auto()
     float = auto()
     str = auto()

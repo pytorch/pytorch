@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 
@@ -18,6 +18,8 @@
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
 #include <ATen/cuda/CUDAConfig.h>
+
+#include <utility>
 
 #if !AT_ROCM_ENABLED()
 
@@ -93,8 +95,9 @@ bool _use_miopen_ctc_loss(
       (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3);
 
   if (use_miopen) {
-    // we don't know that input_lengths and target_lengths have the same size
-    // (they should, but we didn't check yet)
+    // The two length lists should be the same size, but nothing has compared
+    // them by the time this runs; see the note in the cuDNN copy.
+    use_miopen = use_miopen && (input_lengths.size() == target_lengths.size());
     int64_t max_input_length = log_probs.size(0);
     for (const auto input_length : input_lengths) {
       use_miopen = use_miopen && ((input_length == max_input_length) ? 1 : 0);
@@ -129,6 +132,7 @@ bool _use_miopen_ctc_loss_tensor(
     Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
     IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
     IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
+    use_miopen = use_miopen && (il.size() == tl.size());
     for (const auto b : c10::irange(tl.size())) {
       // target length < 256 is documented, but we see illegal memory accesses
       // when target lengths > input lengths for MIOpen (same as cuDNN)
@@ -207,35 +211,16 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   Tensor costs = at::empty({batch_size}, log_probs->options());
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  // MIOpen requires labels and lengths on GPU
-  Tensor labels_gpu = targets_t.to(Device(at::kCUDA), at::kInt);
-  Tensor label_lengths_gpu = at::empty(
-      {static_cast<int64_t>(target_lengths.size())},
-      at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
-  Tensor input_lengths_gpu = at::empty(
-      {static_cast<int64_t>(input_lengths.size())},
-      at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
-
-  C10_CUDA_CHECK(hipMemcpy(
-      label_lengths_gpu.data_ptr<int>(),
-      target_lengths.data(),
-      target_lengths.size() * sizeof(int),
-      hipMemcpyHostToDevice));
-  C10_CUDA_CHECK(hipMemcpy(
-      input_lengths_gpu.data_ptr<int>(),
-      input_lengths.data(),
-      input_lengths.size() * sizeof(int),
-      hipMemcpyHostToDevice));
-
+  // MIOpen reads labels/lengths on the host.
   size_t workspace_size;
   (void)deterministic; // MIOpen only supports deterministic algorithm
   MIOPEN_CHECK(miopenGetCTCLossWorkspaceSize(
       handle,
       probs_desc,
       grads_desc,
-      labels_gpu.data_ptr<int>(),
-      label_lengths_gpu.data_ptr<int>(),
-      input_lengths_gpu.data_ptr<int>(),
+      targets_t.const_data_ptr<int>(),
+      target_lengths.data(),
+      input_lengths.data(),
       MIOPEN_CTC_LOSS_ALGO_DETERMINISTIC,
       ctc_desc,
       &workspace_size));
@@ -246,9 +231,9 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       handle,
       probs_desc,
       log_probs_t.data_ptr(),
-      labels_gpu.data_ptr<int>(),
-      label_lengths_gpu.data_ptr<int>(),
-      input_lengths_gpu.data_ptr<int>(),
+      targets_t.const_data_ptr<int>(),
+      target_lengths.data(),
+      input_lengths.data(),
       costs.data_ptr(),
       grads_desc,
       grad.data_ptr(),
@@ -261,7 +246,7 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
   MIOPEN_CHECK(miopenDestroyTensorDescriptor(grads_desc));
   MIOPEN_CHECK(miopenDestroyCTCLossDescriptor(ctc_desc));
 
-  return std::make_tuple(costs, grad);
+  return std::make_tuple(std::move(costs), std::move(grad));
 }
 
 std::tuple<Tensor, Tensor> miopen_ctc_loss_tensor(

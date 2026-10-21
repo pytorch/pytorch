@@ -9,13 +9,22 @@
 .. automodule:: torch.profiler
 ```
 
+```{eval-rst}
+.. currentmodule:: torch.profiler.profiler
+
+.. autofunction:: schedule
+
+.. autofunction:: supported_activities
+
+.. autofunction:: tensorboard_trace_handler
+```
+
 ## API Reference
 ```{eval-rst}
-.. autoclass:: torch.profiler._KinetoProfile
-  :members:
 
 .. autoclass:: torch.profiler.profile
   :members:
+  :inherited-members:
 
 .. autoclass:: torch.profiler.ProfilerAction
   :members:
@@ -23,11 +32,11 @@
 .. autoclass:: torch.profiler.ProfilerActivity
   :members:
 
-.. autofunction:: torch.profiler.schedule
+.. autoclass:: torch.profiler.CuspyConfig
 
-.. autofunction:: torch.profiler.tensorboard_trace_handler
+.. autoclass:: torch.profiler.ProfilerActivityConfig
 
-.. autofunction:: torch.profiler.supported_activities
+.. autoclass:: torch.profiler.PerformanceMetricsConfig
 ```
 
 ## Intel Instrumentation and Tracing Technology APIs

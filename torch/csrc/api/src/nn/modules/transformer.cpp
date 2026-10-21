@@ -44,7 +44,7 @@ void TransformerEncoderLayerImpl::reset() {
 }
 
 void TransformerEncoderLayerImpl::reset_parameters() {
-  // TODO xinyu: standardrize reset_parameters virtual funcs
+  // TODO xinyu: standardize reset_parameters virtual funcs
   self_attn->_reset_parameters();
 
   linear1->reset_parameters();
@@ -105,7 +105,7 @@ void TransformerDecoderLayerImpl::reset() {
           MultiheadAttentionOptions(options.d_model(), options.nhead())
               .dropout(options.dropout())));
 
-  // initialize multihed attention
+  // initialize multihead attention
   multihead_attn = this->register_module(
       "multihead_attn",
       MultiheadAttention(
@@ -140,7 +140,7 @@ void TransformerDecoderLayerImpl::reset() {
 }
 
 void TransformerDecoderLayerImpl::reset_parameters() {
-  // TODO xinyu: standardrize reset_parameters virtual funcs
+  // TODO xinyu: standardize reset_parameters virtual funcs
   self_attn->_reset_parameters();
   multihead_attn->_reset_parameters();
 

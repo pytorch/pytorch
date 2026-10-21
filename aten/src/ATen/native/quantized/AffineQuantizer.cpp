@@ -73,7 +73,7 @@ void checkZeroPoint(const char* fn_name, int64_t zero_point) {
 
 template <typename T>
 void checkZeroPoints(const char* fn_name, const Tensor& zero_points) {
-  auto zero_points_data = zero_points.data_ptr<int64_t>();
+  auto zero_points_data = zero_points.const_data_ptr<int64_t>();
   for (const auto i : c10::irange(zero_points.numel())) {
     checkZeroPoint<T>(fn_name, zero_points_data[i]);
   }

@@ -27,9 +27,9 @@ and without it:
 
 `TorchInductor` is one of the backends
 supported by [Dynamo Graph](https://pytorch.org/docs/stable/fx.html)
-into [Triton](https://github.com/openai/triton) for GPUs or
+into [Triton](https://github.com/triton-lang/triton) for GPUs or
 [C++/OpenMP](https://www.openmp.org/) for CPUs. We have a
-[training performance dashboard](https://github.com/pytorch/torchdynamo/issues/681#issuecomment-1233828468)
+[training performance dashboard](https://hud.pytorch.org/benchmark/compilers)
 that provides performance comparison for different training backends. You can read
 more in the [TorchInductor post on PyTorch
 dev-discuss](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747).
@@ -50,19 +50,18 @@ demonstrate how Dynamo works under the hood.
 
 Dynamo operates just-in-time and specializes graphs based on
 dynamic properties. Below is a basic example of how to use Dynamo.
-One can decorate a function or a method using `torchdynamo.optimize` to enable
+One can decorate a function or a method using `torch.compile` to enable
 Dynamo optimization:
 
 ```python
 from typing import List
 import torch
-from torch import _dynamo as torchdynamo
 def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
     print("my_compiler() called with FX graph:")
     gm.graph.print_tabular()
     return gm.forward  # return a python callable
 
-@torchdynamo.optimize(my_compiler)
+@torch.compile(backend=my_compiler)
 def toy_example(a, b):
     x = a / (torch.abs(a) + 1)
     if b.sum() < 0:

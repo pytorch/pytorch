@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import itertools
 import logging
@@ -10,6 +11,7 @@ from sympy import Expr
 
 from torch import SymInt
 from torch.fx.experimental._size_hinting import (
+    _current_consistent_hints,
     _guarding_hint_or_throw_base,
     _maybe_realize_expr,
     _optimization_hint_base,
@@ -22,7 +24,16 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    Max,
+    Min,
+    Mod,
+    ModularIndexing,
+    safe_gcd,
+    simple_floordiv_gcd,
+)
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
@@ -39,6 +50,77 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+
+Width = int | IntInfinity
+
+
+_RANGE_BOUND_OPS = (
+    sympy.StrictLessThan,
+    sympy.LessThan,
+    sympy.StrictGreaterThan,
+    sympy.GreaterThan,
+)
+
+
+def is_range_bound(expr: sympy.Basic) -> bool:
+    """Whether expr bounds a quantity against a constant, e.g. "u0 >= 4".
+
+    Eq/Ne and relations with symbols on both sides are shape contracts, not
+    sampled ranges. Compound And/Or are not inspected.
+
+    Sound only because canonicalize_bool_expr sign-splits, leaving "u0 <= u1"
+    two-sided. Its docstring claims it moves every non-constant term to the
+    rhs, which would make this match contracts too; it does not do that.
+    """
+    return isinstance(expr, _RANGE_BOUND_OPS) and (
+        not expr.lhs.free_symbols or not expr.rhs.free_symbols
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class LaneContiguity:
+    """How an index expression varies across lanes.
+
+    This describes only the per-lane relationship, not full memory safety.
+    Callers still need to prove the relevant tensor dimension, stride, and base
+    alignment make a vector load valid. ``int_oo`` means the expression does not
+    impose a finite limit on that width.
+    """
+
+    contiguous_width: Width | None = None
+    uniform_width: Width | None = None
+    stride: int | Expr | None = None
+    unknown: bool = False
+
+    @property
+    def uniform(self) -> bool:
+        return self.uniform_width is not None
+
+    def is_contiguous_for(self, width: int) -> bool:
+        return _width_covers(self.contiguous_width, width)
+
+    def is_uniform_for(self, width: int) -> bool:
+        return _width_covers(self.uniform_width, width)
+
+
+def _width_covers(max_width: Width | None, width: int) -> bool:
+    return max_width is not None and (max_width == int_oo or max_width >= width)
+
+
+def _min_width(lhs: Width | None, rhs: Width | None) -> Width | None:
+    if lhs is None or rhs is None:
+        return None
+    if lhs == int_oo:
+        return rhs
+    if rhs == int_oo:
+        return lhs
+    return min(lhs, rhs)
+
+
+def _largest_power_of_2_factor(n: int) -> int:
+    return n & -n
+
 
 # Symbols created by CppTemplateKernel.slice_nd → parse_expr_with_index_symbols
 # and are internal to C++ GEMM codegen (not tracked by ShapeEnv).
@@ -60,6 +142,101 @@ _GEMM_TEMPLATE_SYMBOL_NAMES = OrderedSet(
 )
 
 
+# Threshold above which we skip sympy reasoning that scales poorly in the
+# number of symbols. Past this point, polynomial-domain conversions inside
+# sympy (e.g. gcd, Mod) dominate compile time on wide concat/sum expressions
+# (see https://github.com/sympy/sympy/issues/28200). Chosen empirically from
+# AOT-partitioned bwd graphs with ~60-variable shape expressions.
+_MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS = 20
+
+
+@functools.lru_cache
+def stride_at(index: sympy.Expr, var: sympy.Symbol):
+    if not index.has(var):
+        # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
+        # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
+        # in this case, there is no dependencies between index and var.
+        return sympy.S.Zero
+    replacement = {var: var + 1}
+    new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
+    return sympy.simplify(new_index - index)
+
+
+@functools.lru_cache
+def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: int):
+    """
+    Simplifies the index expression within the range of a vectorized loop.
+    Given a vectorized loop variable `var` in the range of a loop with `vec_length`,
+    this function transforms the `index` into an equivalent form. It handles
+    simplifications for cases where `var` can be expressed as `vec_length * a + b`,
+    where `b` ranges from 0 to `vec_length - 1`. The function reduces occurrences
+    of `FloorDiv` and `ModularIndexing` in the `index` with best-effort optimizations.
+
+    NOTE:
+    The simplified index expression is intended for analysis purposes only, not
+    for code generation. It replaces `FloorDiv` and `ModularIndexing` with free variables
+    which are not dependent on the loop variable `var` in the vectorized range. Check
+    https://github.com/pytorch/pytorch/pull/117221#discussion_r1449746217 for more details.
+
+    Examples:
+    1. If `var` is `x3` and `vec_length` is 16, and `x3 = 16*a + b`, then
+       `FloorDiv(x3, div)` or `ModularIndexing(x3, div, mod)` becomes a free variable
+       when `div` is divisible by 16.
+    2. `ModularIndexing(x3, 1, mod)` can be simplified to `x3 + c` where `c` is a free
+       variable when `mod` is divisible by 16.
+    """
+
+    div_freevar_id = 0
+    mod_freevar_id = 0
+
+    def visit_indexing_div(divisor):
+        nonlocal div_freevar_id
+        result = FloorDiv(var, divisor)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_div_c{div_freevar_id}")
+            div_freevar_id += 1
+        return result
+
+    def visit_modular_indexing(divisor, modulus):
+        nonlocal mod_freevar_id
+        result = ModularIndexing(var, divisor, modulus)
+        if sympy.gcd(divisor, vec_length) == vec_length:
+            result = sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        elif divisor == 1 and sympy.gcd(modulus, vec_length) == vec_length:
+            result = var + sympy.Symbol(f"{var}_mod_c{mod_freevar_id}")
+            mod_freevar_id += 1
+        return result
+
+    original_index = index
+
+    div = sympy.Wild("divisor", integer=True)
+    if index.has(FloorDiv):
+        index = index.replace(FloorDiv(var, div), visit_indexing_div)
+
+    mod = sympy.Wild("modulus", integer=True)
+    if index.has(ModularIndexing):
+        index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
+
+    # Avoid full-expression sympy.simplify here.  This helper only needs to
+    # expose lane-uniform FloorDiv/ModularIndexing terms for later stride
+    # analysis, and sympy's general simplifier can be superlinear on the large
+    # dynamic-shape index expressions produced by real models.
+    if index != original_index:
+        return simplify_index_in_vec_range(index, var, vec_length)
+
+    return index
+
+
+@functools.lru_cache
+def stride_at_vec_range(
+    index: sympy.Expr, var: sympy.Symbol, vec_length: int | None = None
+):
+    if vec_length:
+        index = simplify_index_in_vec_range(index, var, vec_length)
+    return stride_at(index, var)
+
+
 def statically_known_true(
     shape_env: ShapeEnv,
     expr: sympy.Basic | bool,
@@ -68,6 +245,17 @@ def statically_known_true(
 ) -> bool:
     if expr in (True, False):
         return bool(expr)
+
+    # Hint fast-path: if the current concrete hints make `expr` evaluate to
+    # False, it cannot be universally True, so bail out without running the
+    # much more expensive `_maybe_evaluate_static`. (A True hint doesn't let
+    # us conclude universal truth, so we still fall through in that case.)
+    try:
+        hinted = expr.xreplace(shape_env.backed_var_to_val)
+        if hinted is sympy.S.false:
+            return False
+    except Exception:
+        pass
 
     try:
         simplified = shape_env._maybe_evaluate_static(
@@ -119,6 +307,14 @@ class SizeVarAllocator:
         # (inv_precomputed_replacements).
         self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
+        # optimization_hint is called with the same expression repeatedly
+        # while lowering (on one model, 76k calls over 388 distinct
+        # expressions) and each miss runs sympy substitution plus heuristics,
+        # none of which sympy caches. _lru_cache drops the cache whenever
+        # replacements change.
+        self._optimization_hint_cache = self._lru_cache(
+            self._optimization_hint_uncached
+        )
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -224,12 +420,7 @@ class SizeVarAllocator:
                     rest = sympy.Wild("_rest", exclude=[v])
                     m = base.match(v + rest)
                     if m and v not in m[rest].free_symbols:
-                        # v can be removed if it doesn't affect the FloorDiv.
-                        # rest is always a multiple of gcd(rest, divisor), so
-                        # rest % divisor is also a multiple of that gcd. The
-                        # worst case is rest % divisor == divisor - gcd, so
-                        # adding v is safe when v < gcd.
-                        gcd = sympy.gcd(m[rest], divisor)
+                        gcd = safe_gcd(m[rest], divisor)
                         if statically_known(v < gcd):
                             base = m[rest]
             return base
@@ -247,6 +438,16 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
+
+            if isinstance(base, ModularIndexing):
+                inner_base, inner_divisor, inner_modulus = base.args
+                period = divisor * modulus
+                # Target use cases have constant indices; avoid symbolic compile-time analysis.
+                if all(
+                    isinstance(value, sympy.Integer) and value > 0
+                    for value in (inner_modulus, divisor, modulus)
+                ) and self.statically_known_multiple_of(inner_modulus, period):
+                    return ModularIndexing(inner_base, inner_divisor * divisor, modulus)
 
             can_remove_mod = statically_known(base >= 0) and statically_known(
                 base < modulus * divisor
@@ -302,7 +503,8 @@ class SizeVarAllocator:
             )
             for x in index_formulas
         ]
-        assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
+        if len(sizes) != len(strides[0]):
+            raise AssertionError((len(sizes), len(strides[0])))
 
         for i in range(len(sizes)):
             if sizes[i] == 1:
@@ -349,11 +551,15 @@ class SizeVarAllocator:
                     new_index.append(sympy.S.Zero)
                 else:
                     new_index.append(it.pop())
-            assert not it
+            if it:
+                raise AssertionError(f"expected all entries consumed, got {it}")
             return new_index
 
         def prune(index):
-            assert len(index) == len(sizes)
+            if len(index) != len(sizes):
+                raise AssertionError(
+                    f"expected len(index) == len(sizes), got {len(index)} != {len(sizes)}"
+                )
             return [i for i, s in zip(index, sizes) if s is not None]
 
         return [x for x in sizes if x is not None], reindex, prune
@@ -429,7 +635,6 @@ class SizeVarAllocator:
             for factor in numerator.args:
                 if self._is_multiple_of(factor, denominator):
                     return True
-            # Also check if combined constant factors are divisible
             const = 1
             for factor in numerator.args:
                 if isinstance(factor, (int, sympy.Integer)):
@@ -458,7 +663,14 @@ class SizeVarAllocator:
             ):
                 return True
 
-        # Rule 6 — axiom fallback: ask ShapeEnv
+        # Rule 6 — cheap gcd check before expensive sympy fallback.
+        gcd = simple_floordiv_gcd(numerator, sympy.Integer(denominator))
+        if isinstance(gcd, (int, sympy.Integer)) and int(gcd) % denominator == 0:
+            return True
+
+        # Rule 7 — full sympy fallback (expensive on many-variable exprs).
+        if len(free_symbols(numerator)) > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS:
+            return False
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)
 
@@ -468,16 +680,40 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
-        # see https://github.com/sympy/sympy/issues/28200
-
-        if len(free_symbols(numerator)) > 20:
-            return False
+        # Use cheap structural equality, not statically_known_equals —
+        # the latter constructs sympy.Eq(wide, wide) which has measurable
+        # overhead (~30s on 64-variable expressions).
+        if numerator is denominator or numerator == denominator:
+            return True
 
         if isinstance(denominator, (int, sympy.Integer)):
             return self._is_multiple_of(numerator, int(denominator))
 
-        # For symbolic denominators, fall back to direct sympy check
+        if numerator == 0:
+            return True
+
+        # Symbolic denominator: Mod-based reasoning can miss factorable Add
+        # denominators even for small expressions, so prove cancellation
+        # directly under the same limit used for the sympy fallback below.
+        if (
+            len(free_symbols([numerator, denominator]))
+            > _MAX_SYMBOLS_FOR_EXPENSIVE_SYMPY_OPS
+        ):
+            return False
+
+        def gcd_covers_denominator(gcd: sympy.Basic) -> bool:
+            return gcd != 1 and (
+                gcd == denominator or self.simplify(gcd - denominator) == 0
+            )
+
+        try:
+            if gcd_covers_denominator(simple_floordiv_gcd(numerator, denominator)):
+                return True
+            if gcd_covers_denominator(safe_gcd(numerator, denominator)):
+                return True
+        except sympy.PolynomialError:
+            pass
+
         expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
@@ -486,6 +722,163 @@ class SizeVarAllocator:
         Returns a bool indicating if x is known to be a power of 2.
         """
         return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
+
+    def analyze_lane_contiguity(
+        self, expr: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Analyze whether `expr` is uniform or contiguous over vector lanes.
+
+        The analysis is conservative: unknown cases must fall back to scalar or
+        gather-style lowering. It only describes the lane pattern of the index
+        expression; callers must still prove tensor stride, offset, dtype, and
+        alignment before emitting a vector memory load.
+        """
+        expr = self.simplify(expr)
+        if lane_var not in expr.free_symbols:
+            return LaneContiguity(stride=0, uniform_width=int_oo)
+        stride = stride_at(expr, lane_var)
+        match expr:
+            case _ if self.statically_known_equals(stride, 1):
+                return LaneContiguity(contiguous_width=int_oo, stride=1)
+            case _ if self.statically_known_equals(stride, 0):
+                return LaneContiguity(stride=0, uniform_width=int_oo)
+            case sympy.Add():
+                return self._analyze_lane_contiguity_add(expr.args, lane_var)
+            case sympy.Mul():
+                return self._analyze_lane_contiguity_mul(expr.args, lane_var)
+            case FloorDiv():
+                return self._analyze_lane_contiguity_floor_div(
+                    expr.args[0], expr.args[1], lane_var
+                )
+            case ModularIndexing():
+                return self._analyze_lane_contiguity_modular_indexing(expr, lane_var)
+            case _ if isinstance(expr, (Mod, sympy.Mod)):
+                return self._analyze_lane_contiguity_mod(
+                    expr.args[0], expr.args[1], lane_var
+                )
+            case _:
+                return LaneContiguity(unknown=True)
+
+    def _analyze_lane_contiguity_add(
+        self, args: tuple[Expr, ...], lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Combine additive terms when at most one term varies across lanes."""
+        uniform_width: Width | None = int_oo
+        varying_result: LaneContiguity | None = None
+        for arg in args:
+            arg_result = self.analyze_lane_contiguity(arg, lane_var)
+            if arg_result.unknown:
+                return LaneContiguity(unknown=True)
+            if arg_result.uniform:
+                uniform_width = _min_width(uniform_width, arg_result.uniform_width)
+            elif varying_result is None:
+                varying_result = arg_result
+            else:
+                return LaneContiguity(unknown=True)
+        if varying_result is None:
+            return LaneContiguity(stride=0, uniform_width=uniform_width)
+        return LaneContiguity(
+            contiguous_width=_min_width(varying_result.contiguous_width, uniform_width),
+            stride=varying_result.stride,
+        )
+
+    def _analyze_lane_contiguity_mul(
+        self, args: tuple[Expr, ...], lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Propagate lane stride through lane-uniform multiplication."""
+        uniform_factor: Expr = sympy.S.One
+        lane_factors = []
+        for arg in args:
+            if lane_var in arg.free_symbols:
+                lane_factors.append(arg)
+            else:
+                uniform_factor *= arg
+        if len(lane_factors) != 1:
+            return LaneContiguity(unknown=True)
+        child_result = self.analyze_lane_contiguity(lane_factors[0], lane_var)
+        if child_result.unknown or child_result.stride is None:
+            return LaneContiguity(unknown=True)
+        stride = self.simplify(uniform_factor * child_result.stride)
+        if self.statically_known_equals(stride, 0):
+            return LaneContiguity(
+                stride=0,
+                uniform_width=child_result.uniform_width,
+            )
+        return LaneContiguity(
+            contiguous_width=child_result.contiguous_width
+            if self.statically_known_equals(stride, 1)
+            else None,
+            stride=stride,
+        )
+
+    def _analyze_lane_contiguity_modular_indexing(
+        self, expr: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Analyze ModularIndexing(base, divisor, modulus)."""
+        base, divisor, modulus = expr.args
+        if not isinstance(divisor, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        if int(divisor) != 1:
+            return self._analyze_lane_contiguity_floor_div(base, divisor, lane_var)
+        return self._analyze_lane_contiguity_mod(base, modulus, lane_var)
+
+    def _analyze_lane_contiguity_floor_div(
+        self, base: Expr, divisor: Expr, lane_var: sympy.Symbol
+    ) -> LaneContiguity:
+        """Return the largest width where ``base // divisor`` is lane-uniform."""
+        if not isinstance(divisor, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        divisor_int = int(divisor)
+        if divisor_int <= 0:
+            return LaneContiguity(unknown=True)
+        base_result = self.analyze_lane_contiguity(base, lane_var)
+        if not base_result.is_contiguous_for(2) or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
+            return LaneContiguity(unknown=True)
+        group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
+        width = _min_width(
+            base_result.contiguous_width,
+            _largest_power_of_2_factor(divisor_int),
+        )
+        while isinstance(width, int) and width >= 2:
+            if self.statically_known_multiple_of(group_start, width):
+                return LaneContiguity(stride=0, uniform_width=width)
+            width //= 2
+        return LaneContiguity(unknown=True)
+
+    def _analyze_lane_contiguity_mod(
+        self,
+        base: Expr,
+        modulus: Expr,
+        lane_var: sympy.Symbol,
+    ) -> LaneContiguity:
+        """Return the largest aligned no-wrap modulo span.
+
+        `base % modulus` is contiguous for a vector group only when both the
+        group start and modulus are multiples of the chosen width. For example,
+        lanes 0..3 under `% 4` are contiguous, but lanes 2..5 wrap to 2,3,0,1.
+        """
+        if not isinstance(modulus, (int, sympy.Integer)):
+            return LaneContiguity(unknown=True)
+        modulus_int = int(modulus)
+        if modulus_int <= 0:
+            return LaneContiguity(unknown=True)
+        base_result = self.analyze_lane_contiguity(base, lane_var)
+        if not base_result.is_contiguous_for(2) or not self.statically_known_equals(
+            base_result.stride, 1
+        ):
+            return LaneContiguity(unknown=True)
+        group_start = self.simplify(base.xreplace({lane_var: sympy.Integer(0)}))
+        width = _min_width(
+            base_result.contiguous_width,
+            _largest_power_of_2_factor(modulus_int),
+        )
+        while isinstance(width, int) and width >= 2:
+            if self.statically_known_multiple_of(group_start, width):
+                return LaneContiguity(contiguous_width=width, stride=1)
+            width //= 2
+        return LaneContiguity(unknown=True)
 
     # The expect/check functions require you to ALREADY KNOW that a particular
     # condition holds. They are similar to expect_true in symbolic_shapes.py and
@@ -511,7 +904,8 @@ class SizeVarAllocator:
         check Note [expect_true].
         """
         expr = sympy_subs(expr, self.inv_precomputed_replacements)
-        assert self.expect_true(expr)
+        if not self.expect_true(expr):
+            raise AssertionError(f"expect_true failed for {expr}")
 
     def check_equals(self, left: Expr, right: Expr) -> None:
         """
@@ -571,7 +965,8 @@ class SizeVarAllocator:
         size_oblivious: bool = False,
         fallback_value: bool | None = None,
     ) -> bool:
-        assert isinstance(left, (Expr, sympy.logic.boolalg.Boolean)), type(left)
+        if not isinstance(left, (Expr, sympy.logic.boolalg.Boolean)):
+            raise AssertionError(type(left))
         return self.shape_env.evaluate_expr(
             sympy.sympify(left),
             size_oblivious=size_oblivious,
@@ -619,10 +1014,10 @@ class SizeVarAllocator:
                 return self.guard_or_false(sympy.Le(a, rhs))
 
             # Min(Min(a, b), c) ==> Min(a, b) if (a <= c) or (b <= c).
-            if isinstance(lhs, sympy.Min) and any(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Min, Min)) and any(le_rhs(a) for a in lhs.args):
                 return lhs
             # Min(Max(a, b), c) ==> Max(a, b) if (a <= c) and (b <= c).
-            if isinstance(lhs, sympy.Max) and all(le_rhs(a) for a in lhs.args):
+            if isinstance(lhs, (sympy.Max, Max)) and all(le_rhs(a) for a in lhs.args):
                 return lhs
 
         raise TypeError(
@@ -677,7 +1072,8 @@ class SizeVarAllocator:
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
         if not isinstance(expr, Expr):
-            assert isinstance(expr, int)
+            if not isinstance(expr, int):
+                raise AssertionError(f"expected int, got {type(expr)}")
             return expr
 
         expr = self.remove_precomputed_replacements(expr)
@@ -764,12 +1160,27 @@ class SizeVarAllocator:
         hints. If not provided, fallback will be used along with some heuristics
         that try to maximize consistency with the shape environment.
 
+        Inside torch.fx.experimental._size_hinting.consistent_hints(), hints
+        are computed from one shared per-symbol assignment; see
+        ConsistentHintState.
+
         Special cases:
         - Complex numbers (containing sympy.I): raises an error since tensor
           dimensions cannot be complex.
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
+        state = _current_consistent_hints()
+        if state is not None and state.shape_env is self.shape_env:
+            # Hints differ inside this ShapeEnv's context, so skip the cache.
+            return _optimization_hint_base(
+                self.shape_env, expr, self.inv_precomputed_replacements, fallback
+            )
+        return self._optimization_hint_cache(expr, fallback)
+
+    def _optimization_hint_uncached(
+        self, expr: Expr | int, fallback: int | None
+    ) -> int:
         return _optimization_hint_base(
             self.shape_env, expr, self.inv_precomputed_replacements, fallback
         )
@@ -1022,7 +1433,9 @@ class SizeVarAllocator:
         return index
 
     def expand_floor_div(
-        self, index: sympy.Expr
+        self,
+        index: sympy.Expr,
+        candidate_vars: Iterable[sympy.Symbol] | None = None,
     ) -> bool | tuple[sympy.Expr, sympy.Expr]:
         """
         Expand the FloorDiv to the entire expression so that the expression may
@@ -1035,10 +1448,73 @@ class SizeVarAllocator:
         '(x1 * 2b + x2) // 2'. This transformation allows us to merge loops
         for the numerator!
 
-        Return false if this optimization can be applied;
+        Return false if this optimization cannot be applied;
         Return the new expression and the denominator otherwise.
         The original expression will be equivalent to 'new_expression // denominator'
         """
+        candidate_vars_set = (
+            OrderedSet(candidate_vars) if candidate_vars is not None else None
+        )
+
+        def parse_static_term(
+            term: sympy.Expr,
+        ) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if not isinstance(term, sympy.Mul):
+                return None
+            # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
+            # Without candidate loop vars we cannot tell shape and loop
+            # symbols apart, so preserve the historical conservative path.
+            if len(term.args) != 2:
+                return None
+            factor, var = term.args
+            if not isinstance(factor, sympy.Integer) or not isinstance(
+                var, sympy.Symbol
+            ):
+                return None
+            return factor, var
+
+        def parse_term(term: sympy.Expr) -> tuple[sympy.Expr, sympy.Symbol] | None:
+            if candidate_vars_set is None:
+                parsed = parse_static_term(term)
+                if parsed is None:
+                    return None
+                factor, var = parsed
+            else:
+                if isinstance(term, sympy.Symbol):
+                    factor = sympy.S.One
+                    var = term
+                elif isinstance(term, sympy.Mul):
+                    vars_in_term = [
+                        symbol
+                        for symbol in term.free_symbols
+                        if symbol in candidate_vars_set
+                    ]
+                    if len(vars_in_term) == 0:
+                        parsed = parse_static_term(term)
+                        if parsed is None:
+                            return None
+                        factor, var = parsed
+                    elif len(vars_in_term) == 1:
+                        var = vars_in_term[0]
+                        factor = sympy.cancel(term / var)
+                        if factor.has(*candidate_vars_set):
+                            return None
+                        if factor.is_integer is not True:
+                            return None
+                    else:
+                        return None
+                else:
+                    return None
+
+                if var not in candidate_vars_set:
+                    return None
+
+            # It's easier to reason about the correctness of the transformation
+            # for non-negative integers.
+            if not self.statically_known_geq(var, 0):
+                return None
+            return factor, var
+
         if not isinstance(index, sympy.Add):
             return False
         terms = index.args
@@ -1049,30 +1525,17 @@ class SizeVarAllocator:
         varlist = []
         factorlist = []
         for idx, term in enumerate(terms):
-            if isinstance(term, sympy.Mul):
-                # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
-                # - A integer for 2
-                # - A symbol for s1
-                # - A symbol for x1
-                # Skip for now.
-                if len(term.args) != 2:
-                    return False
-                factor, var = term.args
+            if parsed := parse_term(term):
+                factor, var = parsed
                 varlist.append(var)
                 factorlist.append(factor)
-                if not isinstance(factor, sympy.Integer) or not isinstance(
-                    var, sympy.Symbol
-                ):
-                    return False
-                # It's easier to reason about the correceness of the transformation
-                # for non-negative integers.
-                if not self.statically_known_geq(var, 0):
-                    return False
             elif isinstance(term, FloorDiv):
                 var, factor = term.args
                 if not isinstance(factor, sympy.Integer) or not isinstance(
                     var, sympy.Symbol
                 ):
+                    return False
+                if candidate_vars_set is not None and var not in candidate_vars_set:
                     return False
                 if not self.statically_known_geq(var, 0):
                     return False
@@ -1121,22 +1584,30 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
     This type of pattern can come from view operations
     """
-    assert isinstance(expr, sympy.Add)
+    if not isinstance(expr, sympy.Add):
+        raise AssertionError(f"expected sympy.Add, got {type(expr)}")
 
     scale = sympy.Wild("scale", exclude=[0], integer=True)
     base = sympy.Wild("base", integer=True)
     divisor = sympy.Wild("divisor", integer=True)
     mod1 = sympy.Wild("modulus", integer=True)
     mod2 = sympy.Wild("modulus2", integer=True)
-    for term1 in expr.args:
+    # sympy matching is slow, and a term can only match a pattern containing
+    # ModularIndexing or FloorDiv if it contains that function. Substituting a
+    # match can simplify the function away (FloorDiv(64 * x, 64) is x), in
+    # which case every term is still tried.
+    modular_terms = [term for term in expr.args if term.has(ModularIndexing)]
+    floordiv_terms = [term for term in expr.args if term.has(FloorDiv)]
+    for term1 in modular_terms:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:
-            for term2 in expr.args:
-                m2 = term2.match(
-                    m1[scale]
-                    * m1[mod1]
-                    * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
-                )
+            pattern = (
+                m1[scale]
+                * m1[mod1]
+                * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
+            )
+            for term2 in modular_terms if pattern.has(ModularIndexing) else expr.args:
+                m2 = term2.match(pattern)
                 if m2 and term1 != term2:
                     expr = join_dimensions(
                         expr
@@ -1146,13 +1617,12 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
                         * ModularIndexing(m1[base], m1[divisor], m1[mod1] * m2[mod2])
                     )
                     return expr
-    for term1 in expr.args:
+    for term1 in modular_terms:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:
-            for term2 in expr.args:
-                m2 = term2.match(
-                    m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
-                )
+            pattern = m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
+            for term2 in floordiv_terms if pattern.has(FloorDiv) else expr.args:
+                m2 = term2.match(pattern)
                 if m2 is not None:  # in case of success we get an empty dict here
                     expr = join_dimensions(
                         expr
@@ -1188,6 +1658,9 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
 
     def index_expr(self, index, dtype):
         return self._inner.index_expr(self._simplify(index), dtype)
+
+    def value_expr(self, index, dtype):
+        return self._inner.value_expr(self._simplify(index), dtype)
 
     def check_bounds(self, index, size, lower, upper):
         return self._inner.check_bounds(self._simplify(index), size, lower, upper)

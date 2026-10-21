@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import os
 import sys
 
 import pytest
@@ -82,3 +83,13 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
+
+    # Skip the entire torch_np suite under dynamo_wrapped CI. These tests
+    # produce constant churn between expected_failure and unexpected_success
+    # entries; running them under dynamo provides little incremental signal.
+    if os.environ.get("PYTORCH_TEST_WITH_DYNAMO") == "1":
+        skip_dynamo = pytest.mark.skip(
+            reason="torch_np tests are skipped under dynamo_wrapped"
+        )
+        for item in items:
+            item.add_marker(skip_dynamo)

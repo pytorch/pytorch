@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/hip/HIPCachingAllocator.h>
+#include <c10/macros/Macros.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 
 namespace c10 {
@@ -9,8 +10,8 @@ class DataPtr;
 namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
-C10_CUDA_API c10::cuda::CUDACachingAllocator::CUDAAllocator* get();
-C10_CUDA_API void recordStreamMasqueradingAsCUDA(const DataPtr& ptr, HIPStreamMasqueradingAsCUDA stream);
+TORCH_CUDA_CPP_API c10::cuda::CUDACachingAllocator::CUDAAllocator* get();
+TORCH_CUDA_CPP_API void recordStreamMasqueradingAsCUDA(const DataPtr& ptr, HIPStreamMasqueradingAsCUDA stream);
 
 using c10::cuda::CUDACachingAllocator::raw_alloc;
 using c10::cuda::CUDACachingAllocator::raw_alloc_with_stream;

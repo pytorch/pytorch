@@ -177,11 +177,6 @@ mkldnn_supported = [
 # arguments are already in MKLDNN.
 # TODO: Determine whether this can be removed after type inference.
 mkldnn_supported_unknown = [operator.add, operator.mul]
-mkldnn_map = {
-    nn.Conv2d: th_mkldnn.MkldnnConv2d,
-    nn.Linear: th_mkldnn.MkldnnLinear,
-    nn.BatchNorm2d: lambda a, _: th_mkldnn.MkldnnBatchNorm(a),
-}
 
 
 def modules_to_mkldnn(
@@ -192,6 +187,13 @@ def modules_to_mkldnn(
     then we do so and create a mapping to allow us to convert from the MKLDNN
     version of the module to the original.
     """
+    # Built lazily so importing this module does not compile any TorchScript
+    # ScriptModule via torch.utils.mkldnn.
+    mkldnn_map = {
+        nn.Conv2d: th_mkldnn.MkldnnConv2d,
+        nn.Linear: th_mkldnn.MkldnnLinear,
+        nn.BatchNorm2d: lambda a, _: th_mkldnn.MkldnnBatchNorm(a),
+    }
     old_modules: dict[nn.Module, nn.Module] = {}
     for node in nodes:
         if node.op == "call_module":
@@ -253,10 +255,14 @@ def gen_mkl_autotuner(
         input_nodes = graph.start_nodes
         if fx_model is None:
             fx_model = graph.fx_graph.owning_module
+            if fx_model is None:
+                raise AssertionError("fx_graph.owning_module must not be None")
             old_modules = graph.fx_graph.old_modules  # type: ignore[attr-defined]
             ShapeProp(fx_model).propagate(example_inputs)
         sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore[attr-defined]
         output_args = cast(list[fx.Node], [node.args[0] for node in graph.end_nodes])
+        if fx_model is None:
+            raise AssertionError("fx_model must not be None")
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, output_args)
 
         def benchmark(f: Callable[[], object]) -> float:

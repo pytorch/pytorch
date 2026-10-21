@@ -7,8 +7,8 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/autograd/node.h>
 
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
@@ -48,8 +48,6 @@ namespace torch::autograd {
 inline bool isDifferentiableType(at::ScalarType t) {
   return isFloatingType(t) || isComplexType(t);
 }
-
-struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -124,19 +122,19 @@ TORCH_API AutogradMeta* materialize_autograd_meta(
 /// leaf variables. Interior variables should call `set_gradient_edge()`.
 TORCH_API void set_grad_accumulator(
     const Variable& /*self*/,
-    std::weak_ptr<Node> grad_accumulator);
+    c10::weak_intrusive_ptr<Node> grad_accumulator);
 
 /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
 /// if it still exists. If the gradient accumulator function has been
 /// destroyed, returns a `nullptr`.
-TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(
+TORCH_API c10::intrusive_ptr<Node> try_get_grad_accumulator(
     const Variable& /*self*/);
-TORCH_API std::shared_ptr<Node> try_get_grad_accumulator(
+TORCH_API c10::intrusive_ptr<Node> try_get_grad_accumulator(
     const at::TensorBase& /*self*/);
 
 /// Gets the gradient accumulator of the `Variable` if it has one, or else
 /// create one on the fly and return it.
-TORCH_API std::shared_ptr<Node> grad_accumulator(const Variable& /*self*/);
+TORCH_API c10::intrusive_ptr<Node> grad_accumulator(const Variable& /*self*/);
 
 /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
 /// gradient function if this is an interior `Variable`, or the gradient
@@ -165,7 +163,13 @@ TORCH_API void set_gradient_edge(const Variable& /*self*/, Edge edge);
 /// For View Variables:
 /// Called after in-place modifications. Modifies the grad_fn of the base
 /// Variable.
-TORCH_API void rebase_history(const Variable& /*self*/, Edge gradient_edge);
+///
+/// Returns the node that was actually attached as the new history: the
+/// CopySlices node for views, otherwise the passed-in function. Callers use
+/// it to fire node creation hooks on the composed node.
+TORCH_API c10::intrusive_ptr<Node> rebase_history(
+    const Variable& /*self*/,
+    Edge gradient_edge);
 
 /// Gets the raw gradient function pointer, whatever it currently is.
 TORCH_API Node* grad_fn_unsafe(const Variable& /*self*/);
@@ -228,8 +232,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
   Variable grad_;
-  std::shared_ptr<Node> grad_fn_;
-  std::weak_ptr<Node> grad_accumulator_;
+  c10::intrusive_ptr<Node> grad_fn_;
+  c10::weak_intrusive_ptr<Node> grad_accumulator_;
 
   // This field is used to store all the forward AD gradients
   // associated with this AutogradMeta (and the Tensor it corresponds to)
@@ -333,7 +337,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
       bool requires_grad = false,
       Edge gradient_edge = Edge())
       : grad_fn_(std::move(gradient_edge.function)),
-
+        grad_accumulator_(c10::intrusive_ptr<Node>()),
         output_nr_(gradient_edge.input_nr) {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
@@ -488,7 +492,7 @@ struct TORCH_API ViewInfo {
   /// The "base" and "tensor" are respectively the input and output of the
   /// differentiable view function that happened. They are required to properly
   /// set the optional view_fn_ when it is not provided. The "view_func", if
-  /// provided, should be a function that allows to re-do the view between
+  /// provided, should be a function that allows re-doing the view between
   /// "base" and "tensor".
   ViewInfo chain(
       const Variable& base,
@@ -525,7 +529,7 @@ struct TORCH_API ViewInfo {
 ///
 /// Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// This class allows to track both forward and backward AD differentiable
+/// This class allows tracking both forward and backward AD differentiable
 /// views. These views can have different base as non-differentiable view for
 /// forward and backward mode AD are not the same.
 ///
@@ -654,7 +658,7 @@ struct TORCH_API ViewInfo {
 /// Such views include:
 ///   1. Views created from .detach()
 ///   2. Views that are non-differentiable by its nature.
-///      E.g., `sparse_tensor.indices()` is a integral view on a (possibly)
+///      E.g., `sparse_tensor.indices()` is an integral view on a (possibly)
 ///      floating point tensor.
 ///      See top of `derivatives.yaml` on how to specify that outputs of a
 ///      function are non-differentiable.
@@ -961,7 +965,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
       const at::TensorBase& /*self*/ /*unused*/) const override;
   at::TensorBase variable_data(
       const at::TensorBase& /*self*/ /*unused*/) const override;
-  const std::shared_ptr<torch::autograd::Node>& grad_fn(
+  const c10::intrusive_ptr<torch::autograd::Node>& grad_fn(
       const at::TensorBase& /*self*/ /*unused*/) const override;
   unsigned _register_hook(
       const at::TensorBase& /*self*/ /*unused*/,

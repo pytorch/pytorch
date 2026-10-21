@@ -10,10 +10,11 @@ from pathlib import Path
 
 import torch
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    IS_S390X,
     run_tests,
     set_cwd,
     TestCase,
-    xfailIfS390X,
 )
 
 
@@ -96,8 +97,8 @@ def get_all_examples():
 
 
 class TestTypeHints(TestCase):
-    # when this test fails on s390x, it also leads to OOM on test reruns
-    @xfailIfS390X
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/98259")
+    @unittest.skipIf(IS_S390X, "flaky on s390x")
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_doc_examples(self):
         """

@@ -102,9 +102,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   HANDLE_TH_ERRORS
   auto type = THPStreamClass;
   THPObjectPtr ptr(type->tp_alloc(type, 0));
-  if (!ptr) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(ptr);
 
   THPStream* self = reinterpret_cast<THPStream*>(ptr.get());
   self->stream_id = stream.id();
@@ -117,10 +115,14 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static void THPStream_dealloc(THPStream* self) {
+void THPStream_dealloc_common(THPStream* self) {
   PyObject_ClearWeakRefs((PyObject*)self);
   Py_CLEAR(self->context);
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+}
+
+static void THPStream_dealloc(THPStream* self) {
+  THPStream_dealloc_common(self);
 }
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
@@ -237,7 +239,7 @@ static PyObject* THPStream_record_event(
           &_event)) {
     TORCH_CHECK(false, "parse record_event arg fails");
   }
-  if (_event != Py_None) {
+  if (!Py_IsNone(_event)) {
     // We expect it to be an explicit torch.Event instance.
     TORCH_CHECK(
         Py_TYPE(_event) == THPEventClass,
@@ -294,8 +296,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
-    Py_INCREF(_self);
-    return _self;
+    return Py_NewRef(_self);
   }
 
   // Note [Reentrant Stream Context Manager]
@@ -311,9 +312,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // self->context is initialized lazily as a PyList on first __enter__.
   if (!self->context) {
     auto list = THPObjectPtr(PyList_New(0));
-    if (!list) {
-      throw python_error();
-    }
+    TORCH_CHECK_PYTHON(list);
     self->context = list.release();
   }
 
@@ -325,11 +324,8 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   // If the stream is already current, push None as a no-op sentinel.
   if (cur_stream.id() == self->stream_id &&
       cur_stream.device_index() == stream_device_idx) {
-    if (PyList_Append(self->context, Py_None) < 0) {
-      throw python_error();
-    }
-    Py_INCREF(_self);
-    return _self;
+    TORCH_CHECK_PYTHON(PyList_Append(self->context, Py_None) >= 0);
+    return Py_NewRef(_self);
   }
 
   // If the stream is not on the current device, switch the current device to
@@ -345,21 +341,14 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
   auto ctx_stream = THPObjectPtr(THPStream_Wrap(cur_stream));
   auto dict = THPObjectPtr(PyDict_New());
-  if (!dict) {
-    throw python_error();
-  }
-  if (PyDict_SetItemString(
-          dict.get(), "_ctx_device_index", ctx_device_index.get()) < 0) {
-    throw python_error();
-  }
-  if (PyDict_SetItemString(dict.get(), "_ctx_stream", ctx_stream.get()) < 0) {
-    throw python_error();
-  }
-  if (PyList_Append(self->context, dict.get()) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(_self);
-  return _self;
+  TORCH_CHECK_PYTHON(dict);
+  TORCH_CHECK_PYTHON(
+      PyDict_SetItemString(
+          dict.get(), "_ctx_device_index", ctx_device_index.get()) >= 0);
+  TORCH_CHECK_PYTHON(
+      PyDict_SetItemString(dict.get(), "_ctx_stream", ctx_stream.get()) >= 0);
+  TORCH_CHECK_PYTHON(PyList_Append(self->context, dict.get()) >= 0);
+  return Py_NewRef(_self);
   END_HANDLE_TH_ERRORS
 }
 
@@ -379,23 +368,20 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   PyObject* top = PyList_GET_ITEM(self->context, stack_size - 1);
 
   // Sentinel: this __enter__ was a no-op, nothing to restore.
-  if (top == Py_None) {
-    if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) <
-        0) {
-      throw python_error();
-    }
+  if (Py_IsNone(top)) {
+    TORCH_CHECK_PYTHON(
+        PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) >=
+        0);
     Py_RETURN_NONE;
   }
 
   PyObject* py_stream = nullptr;
-  if (PyDict_GetItemStringRef(top, "_ctx_stream", &py_stream) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemStringRef(top, "_ctx_stream", &py_stream) >= 0);
   auto ctx_stream = THPObjectPtr(py_stream);
   PyObject* py_device_index = nullptr;
-  if (PyDict_GetItemStringRef(top, "_ctx_device_index", &py_device_index) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyDict_GetItemStringRef(top, "_ctx_device_index", &py_device_index) >= 0);
   auto ctx_device_index = THPObjectPtr(py_device_index);
   TORCH_INTERNAL_ASSERT(
       ctx_stream.get(), "ctx_stream should be present on the context dict.");
@@ -413,9 +399,8 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
-  if (PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyList_SetSlice(self->context, stack_size - 1, stack_size, nullptr) >= 0);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -433,28 +418,21 @@ static PyObject* THPStream_richcompare(
     PyObject* self,
     PyObject* other,
     int op) {
-  PyObject* result = nullptr;
-  if (other == Py_None) {
-    result = Py_False;
-  } else {
-    switch (op) {
-      case Py_EQ:
-        result = THPStream_eq(
-            reinterpret_cast<THPStream*>(self),
-            reinterpret_cast<THPStream*>(other));
-        break;
-      case Py_NE:
-        result = THPStream_ne(
-            reinterpret_cast<THPStream*>(self),
-            reinterpret_cast<THPStream*>(other));
-        break;
-      default:
-        result = Py_False;
-        break;
-    }
+  if (!THPStream_Check(other)) {
+    Py_RETURN_NOTIMPLEMENTED;
   }
-  Py_XINCREF(result);
-  return result;
+  switch (op) {
+    case Py_EQ:
+      return THPStream_eq(
+          reinterpret_cast<THPStream*>(self),
+          reinterpret_cast<THPStream*>(other));
+    case Py_NE:
+      return THPStream_ne(
+          reinterpret_cast<THPStream*>(self),
+          reinterpret_cast<THPStream*>(other));
+    default:
+      Py_RETURN_NOTIMPLEMENTED;
+  }
 }
 
 static const std::initializer_list<PyMemberDef> THPStream_members = {
@@ -551,12 +529,5 @@ static PyTypeObject THPStreamType = {
 void THPStream_init(PyObject* module) {
   THPStreamClass = &THPStreamType;
   Py_SET_TYPE(&THPStreamType, &PyType_Type);
-  if (PyType_Ready(&THPStreamType) < 0) {
-    throw python_error();
-  }
-  Py_INCREF(&THPStreamType);
-  if (PyModule_AddObject(
-          module, "Stream", reinterpret_cast<PyObject*>(&THPStreamType)) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPStreamType) >= 0);
 }

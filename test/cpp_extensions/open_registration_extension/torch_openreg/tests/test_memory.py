@@ -13,6 +13,7 @@ class TestDeviceAllocator(TestCase):
 
     def setUp(self):
         """Reset memory state before each test."""
+        super().setUp()
         # Force garbage collection to ensure clean state
         gc.collect()
         # Note: We can't directly reset allocator stats without C++ API,
@@ -224,6 +225,7 @@ class TestMemoryLeaks(TestCase):
 
     def setUp(self):
         """Reset memory state before each test."""
+        super().setUp()
         gc.collect()
         time.sleep(0.1)  # Allow time for cleanup
 
@@ -470,6 +472,7 @@ class TestMultiDeviceAllocation(TestCase):
     """Test basic multi-device allocation functionality."""
 
     def setUp(self):
+        super().setUp()
         self.device_count = torch.openreg.device_count()
         self.assertEqual(self.device_count, 2, "This test requires 2 OpenReg devices")
         gc.collect()
@@ -534,6 +537,7 @@ class TestCrossDeviceOperations(TestCase):
     """Test cross-device tensor operations."""
 
     def setUp(self):
+        super().setUp()
         self.device_count = torch.openreg.device_count()
         self.assertEqual(self.device_count, 2)
         gc.collect()

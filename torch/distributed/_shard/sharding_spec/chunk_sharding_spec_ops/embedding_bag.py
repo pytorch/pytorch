@@ -60,11 +60,11 @@ def sharded_embedding_bag(types, args, kwargs, pg):
                [4, 0, 4, 4, 4, 4],
                [4, 4, 4, 4, 4, 1]])
     3. If ``max_norm`` is specified, the extra row guarantees that the mask ID will
-       not affect the behavior of weigh re-norm.
+       not affect the behavior of weight re-norm.
     4. The example above only happens in one rank and each rank does a very similar thing.
        For "Mean" mode we need to divide by either column size (2D) or the interval length
        defined by the offset (excluding the row specified in ``padding_idx``).
-       We also need to mask the unexisting row to neg Inf so that negative value does not
+       We also need to mask the nonexistent row to neg Inf so that negative value does not
        gets wiped out in the "Max" mode.
 
     COLWISE SHARDING

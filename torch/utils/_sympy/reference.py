@@ -310,6 +310,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a / b
 
     @staticmethod
+    def int_truediv(a, b):
+        return a / b
+
+    @staticmethod
     def pow(a, b):
         return a**b
 
@@ -361,6 +365,24 @@ class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
     @staticmethod
     def sym_sum(args):
         return torch.sym_sum(args)
+
+    @staticmethod
+    def floor_to_int(x, dtype):
+        if isinstance(x, (int, float)):
+            return math.floor(x)
+        return x
+
+    @staticmethod
+    def ceil_to_int(x, dtype):
+        if isinstance(x, (int, float)):
+            return math.ceil(x)
+        return x
+
+    @staticmethod
+    def trunc_to_int(x, dtype):
+        if isinstance(x, (int, float)):
+            return math.trunc(x)
+        return x
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:

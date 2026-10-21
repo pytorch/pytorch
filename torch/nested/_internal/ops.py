@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import math
 import operator
 from typing import *  # noqa: F403
 
@@ -9,7 +8,7 @@ import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
-from .nested_tensor import NestedTensor
+from .nested_tensor import _jagged_numel, NestedTensor
 
 
 __all__: list[Any] = []
@@ -433,7 +432,7 @@ def jagged_torch_function(func, *args, **kwargs):
     if func.__name__ == "share_memory_":
         nt = args[0]
 
-        if nt.is_cuda:
+        if not nt.is_cpu and not nt.is_meta:
             return nt
 
         names, _ = nt.__tensor_flatten__()
@@ -448,8 +447,8 @@ def jagged_torch_function(func, *args, **kwargs):
     if func.__name__ == "is_shared":
         nt = args[0]
 
-        if nt.is_cuda:
-            return False
+        if not nt.is_cpu and not nt.is_meta:
+            return True
 
         names, _ = nt.__tensor_flatten__()
         if not names:
@@ -508,9 +507,7 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return len(args[0]._size)
 
     if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
-        if args[0]._lengths is not None:
-            return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
-        return args[0]._values.numel()
+        return _jagged_numel(args[0], func)
 
     if func is torch.ops.aten.sym_stride.default:
         return args[0]._strides
@@ -695,7 +692,7 @@ def to_copy_default(func, *args, **kwargs):
     if inp._lengths is not None:
         new_lengths = inp._lengths.to(device=new_values.device)
 
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
     from torch._subclasses.functional_tensor import (
         FunctionalTensor,
         mb_unwrap_functional_tensor,
@@ -703,7 +700,7 @@ def to_copy_default(func, *args, **kwargs):
 
     ragged_source = inp._offsets if inp._lengths is None else inp._lengths
     new_thing = new_offsets if new_lengths is None else new_lengths
-    if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+    if is_fake_tensor(new_thing) or isinstance(new_thing, FunctionalTensor):
         # Temporary hack until we have the union find
         tgt = mb_unwrap_functional_tensor(new_thing)
         src = mb_unwrap_functional_tensor(ragged_source)
@@ -767,6 +764,8 @@ register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
     "self: jt_all",
 )
 def like_factory_default(func, *args, **kwargs):
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -792,7 +791,6 @@ def like_factory_default(func, *args, **kwargs):
     if inp.device != new_values.device:
         # Update the nested int registry to indicate that the ragged structure is the same
         # between the two offsets / lengths on different devices.
-        from torch._subclasses.fake_tensor import FakeTensor
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             mb_unwrap_functional_tensor,
@@ -802,7 +800,7 @@ def like_factory_default(func, *args, **kwargs):
 
         ragged_source = inp._offsets if inp._lengths is None else inp._lengths
         new_thing = new_offsets if new_lengths is None else new_lengths
-        if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+        if is_fake_tensor(new_thing) or isinstance(new_thing, FunctionalTensor):
             # Temporary hack until we have the union find
             tgt = mb_unwrap_functional_tensor(new_thing)
             src = mb_unwrap_functional_tensor(ragged_source)

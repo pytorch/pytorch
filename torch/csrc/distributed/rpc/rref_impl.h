@@ -327,7 +327,7 @@ class TORCH_API UserRRef final : public RRef {
   // Will be called when both refcount and weakcount reach 0. See
   // https://github.com/pytorch/pytorch/blob/9116f02bebf3a5260feef5732d36c54ecb3b4033/c10/util/intrusive_ptr.h#L204
   // This is called on destructing the wrapping intrusive_ptr_target instance
-  // and it's data members.
+  // and its data members.
   ~UserRRef() override;
 
  private:
@@ -340,7 +340,7 @@ class TORCH_API UserRRef final : public RRef {
 
   const ForkId forkId_;
 
-  // Indicates if this user has sent delete message to it's owner.
+  // Indicates if this user has sent delete message to its owner.
   // Note, thread safety is needed because delete message could be sent by
   // either the destructor called by Python garbage collection or RRefContext
   // proactive cleanup on RPC graceful shutdown.

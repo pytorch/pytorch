@@ -4,8 +4,11 @@
 
 import copy
 import itertools
+import multiprocessing
+import os
 import operator
 import random
+import traceback
 import unittest
 from typing import NamedTuple, TYPE_CHECKING
 
@@ -194,6 +197,180 @@ def _dequantize_fp8e4m3(qt: torch.Tensor, scale: torch.Tensor):
         dqt = dqt * scale_reshape
     return dqt
 
+
+def _test_qlinear_pt2e_fast_path_helper(error_conn=None):
+    try:
+        os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        x_scale, x_zp = 1.2, 1
+        w_scale, w_zp = 0.8, 0
+        y_scale, y_zp = 4.7, 2
+
+        x = torch.rand(1, 4) * 10
+        w = torch.rand(16, 4) * 10
+        b = torch.rand(16) * 10
+
+        qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
+        qw = torch.quantize_per_tensor(w, w_scale, w_zp, torch.qint8)
+        w_scales = torch.tensor([w_scale])
+        w_zps = torch.tensor([w_zp], dtype=torch.int)
+
+        qx_cpu = qx.int_repr()
+        w_ref = qw.dequantize()
+
+        with override_quantized_engine("onednn"):
+            # Warm up once to initialize the fast-path cache.
+            qw_packed = qlinear_prepack(qw.int_repr(), qx_cpu.shape)
+            qlinear_op(
+                qx_cpu,
+                x_scale,
+                x_zp,
+                qw_packed,
+                w_scales,
+                w_zps,
+                b,
+                y_scale,
+                y_zp,
+                None,
+                "none",
+                (),
+                "none",
+            )
+
+            for qx_cpu_iter in (qx_cpu, qx_cpu.repeat(2, 1)):
+                qy_cpu = qlinear_op(
+                    qx_cpu_iter,
+                    x_scale,
+                    x_zp,
+                    qw_packed,
+                    w_scales,
+                    w_zps,
+                    b,
+                    y_scale,
+                    y_zp,
+                    None,
+                    "none",
+                    (),
+                    "none",
+                )
+
+                x_ref = x_scale * (qx_cpu_iter.float() - x_zp)
+                y_ref = F.linear(x_ref, w_ref, b)
+                qy_ref = torch.quantize_per_tensor(y_ref, y_scale, y_zp, torch.quint8)
+
+                np.testing.assert_equal(
+                    qy_ref.dim(),
+                    qy_cpu.dim(),
+                    err_msg="Quantized qlinear pt2e output dims do not match.",
+                )
+                np.testing.assert_array_almost_equal(
+                    qy_ref.int_repr().cpu().numpy(),
+                    qy_cpu.cpu().numpy(),
+                    decimal=0,
+                )
+        if error_conn is not None:
+            error_conn.send("")
+    except Exception:
+        if error_conn is not None:
+            error_conn.send(traceback.format_exc())
+        raise
+    finally:
+        if error_conn is not None:
+            error_conn.close()
+
+
+def _test_qlinear_fp8_fast_path_helper(error_conn=None):
+    try:
+        os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+
+        def _quantize_fp8_for_process(tensor, scale):
+            return (tensor / scale).clamp(-448, 448).half().to(torch.float8_e4m3fn)
+
+        def _dequantize_fp8_for_process(qtensor, scale):
+            return qtensor.float() * scale
+
+        qlinear_op = torch.ops.onednn.qlinear_pointwise
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        y_scale = 0.3
+        x_zp = 0
+
+        x = torch.rand(1, 4) * 10
+        w = torch.rand(16, 4) * 10
+        b = torch.rand(16) * 10
+
+        eps = torch.tensor([torch.finfo(torch.float32).eps])
+        quant_max = torch.finfo(torch.float8_e4m3fn).max
+        x_scale = torch.max(x.abs().max().reshape([1]) / quant_max, eps)
+        w_scales = torch.max(w.abs().max().reshape([1]) / quant_max, eps)
+        qx = _quantize_fp8_for_process(x, x_scale)
+        qw = _quantize_fp8_for_process(w, w_scales)
+        w_zps = torch.zeros_like(w_scales, dtype=torch.int)
+
+        with override_quantized_engine("onednn"):
+            # Warm up once to initialize the fast-path cache.
+            qw_packed = qlinear_prepack(qw, qx.shape)
+            qlinear_op(
+                qx,
+                x_scale,
+                x_zp,
+                qw_packed,
+                w_scales,
+                w_zps,
+                b,
+                y_scale,
+                0,
+                None,
+                "none",
+                (),
+                "none",
+            )
+
+            for qx_iter in (qx, qx.repeat(2, 1)):
+                qy = qlinear_op(
+                    qx_iter,
+                    x_scale,
+                    x_zp,
+                    qw_packed,
+                    w_scales,
+                    w_zps,
+                    b,
+                    y_scale,
+                    0,
+                    None,
+                    "none",
+                    (),
+                    "none",
+                )
+
+                x_ref = _dequantize_fp8_for_process(qx_iter, x_scale)
+                w_ref = _dequantize_fp8_for_process(qw, w_scales)
+                y_ref = F.linear(x_ref, w_ref, b)
+                y_ref = _quantize_fp8_for_process(y_ref, torch.tensor([y_scale]))
+
+                np.testing.assert_equal(
+                    y_ref.dim(),
+                    qy.dim(),
+                    err_msg="Quantized qlinear fp8 output dims do not match.",
+                )
+                np.testing.assert_equal(
+                    y_ref.float().cpu().numpy(),
+                    qy.float().cpu().numpy(),
+                    err_msg="Quantized qlinear fp8 outputs do not match.",
+                )
+                if torch.isnan(qy).any():
+                    raise AssertionError("Output qy contains NaN values")
+        if error_conn is not None:
+            error_conn.send("")
+    except Exception:
+        if error_conn is not None:
+            error_conn.send(traceback.format_exc())
+        raise
+    finally:
+        if error_conn is not None:
+            error_conn.close()
+
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -288,7 +465,7 @@ class TestQuantizedOps(TestCase):
                     # Finds qY using in-place or non-in-place quantized operators.
                     qY = q_op(qX, **extra_kwargs)
 
-                    self.assertEqual(qY, qY_hat, msg=f'{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
+                    self.assertEqual(qY, qY_hat, msg=lambda msg: f'{msg}\n{fn_name} - {q_op} failed: ({qY} vs. {qY_hat})')
 
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
@@ -476,7 +653,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             qY_hat = op(qX, negative_slope=alpha)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg=f"F.leaky_relu failed ({qY} vs {qY_hat})")
+                             msg=lambda msg: f"{msg}\nF.leaky_relu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::elu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -494,14 +671,13 @@ class TestQuantizedOps(TestCase):
 
         # calculate ELU(dqX) and quantize
         dqX = qX.dequantize()
-        dqY_hat = dqX.clone()
         dqY_hat = torch.nn.functional.elu(dqX, alpha)
         qY_hat = torch.quantize_per_tensor(dqY_hat, scale=output_scale, zero_point=output_zero_point,
                                            dtype=torch_type)
 
         qY = torch.ao.nn.quantized.functional.elu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-                         msg=f"F.elu failed ({qY} vs {qY_hat})")
+                         msg=lambda msg: f"{msg}\nF.elu failed ({qY} vs {qY_hat})")
 
 
     """Tests the correctness of the quantized::celu op."""
@@ -527,7 +703,7 @@ class TestQuantizedOps(TestCase):
         # test regular
         qY = torch.ops.quantized.celu(qX, output_scale, output_zero_point, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-                         msg=f"F.celu failed ({qY} vs {qY_hat})")
+                         msg=lambda msg: f"{msg}\nF.celu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::gelu op."""
     def test_qgelu(self):
@@ -556,7 +732,7 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
                 qY_hat = op(qX)
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                                 msg=f"F.gelu failed ({qY} vs {qY_hat})")
+                                 msg=lambda msg: f"{msg}\nF.gelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::prelu op."""
     def test_qprelu(self):
@@ -590,7 +766,7 @@ class TestQuantizedOps(TestCase):
                                            dtype=torch_type)
             qY_hat = qop(qX, qW, scale, zero_point)
             self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-                             msg=f"F.prelu failed ({qY} vs {qY_hat})")
+                             msg=lambda msg: f"{msg}\nF.prelu failed ({qY} vs {qY_hat})")
 
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
@@ -714,7 +890,7 @@ class TestQuantizedOps(TestCase):
                                        dtype=torch_type)
         qY_hat = torch.tanh(qX)
         self.assertEqual(qY, qY_hat,
-                         msg=f"TanH failed: {qY} vs. {qY_hat}")
+                         msg=lambda msg: f"{msg}\nTanH failed: {qY} vs. {qY_hat}")
 
     """Tests the correctness of the quantized::threshold op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -743,7 +919,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY = op(qX, threshold, value)
-            self.assertEqual(qY, qY_hat, msg=f"{name} qthreshold failed")
+            self.assertEqual(qY, qY_hat, msg=lambda msg: f"{msg}\n{name} qthreshold failed")
 
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8, max_numel=10**5),
@@ -768,7 +944,7 @@ class TestQuantizedOps(TestCase):
 
         for name, op in ops_under_test.items():
             qY_clamp_hat = op(qX, min=min_val, max=max_val)
-            self.assertEqual(qY_clamp, qY_clamp_hat, msg=f"{name} qclamp failed")
+            self.assertEqual(qY_clamp, qY_clamp_hat, msg=lambda msg: f"{msg}\n{name} qclamp failed")
 
         if torch.backends.quantized.engine == 'fbgemm':
             with override_quantized_engine('fbgemm'):
@@ -783,9 +959,9 @@ class TestQuantizedOps(TestCase):
 
                 for name, op in ops_under_test.items():
                     qY_min_clamp_hat = op(qX, min=min_val)
-                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg=f"{name} qclamp failed")
+                    self.assertEqual(qY_min_clamp, qY_min_clamp_hat, msg=lambda msg: f"{msg}\n{name} qclamp failed")
                     qY_max_clamp_hat = op(qX, max=max_val)
-                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg=f"{name} qclamp failed")
+                    self.assertEqual(qY_max_clamp, qY_max_clamp_hat, msg=lambda msg: f"{msg}\n{name} qclamp failed")
 
     """Tests the correctness of the quantized::hardtanh op."""
     @skipIfNoFBGEMM
@@ -815,7 +991,7 @@ class TestQuantizedOps(TestCase):
 
             for name, op in ops_under_test.items():
                 qY_hat = op(qX, min_val, max_val)
-                self.assertEqual(qY, qY_hat, msg=f"{name} hardtanh failed")
+                self.assertEqual(qY, qY_hat, msg=lambda msg: f"{msg}\n{name} hardtanh failed")
 
             ops_under_test_inplace = {
                 'inplace ao.nn.quantized.functional.hardtanh':
@@ -825,7 +1001,7 @@ class TestQuantizedOps(TestCase):
             for name, op_ in ops_under_test_inplace.items():
                 qY_hat = qX.clone()
                 op_(qY_hat, min_val, max_val, inplace=True)
-                self.assertEqual(qY, qY_hat, msg=f"{name} hardtanh failed")
+                self.assertEqual(qY, qY_hat, msg=lambda msg: f"{msg}\n{name} hardtanh failed")
 
     """Tests the correctness of the quantized::hardswish op."""
     @override_qengines
@@ -862,7 +1038,7 @@ class TestQuantizedOps(TestCase):
                     qX, scale=Y_scale, zero_point=Y_zero_point)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"Hardswish failed: {qY} vs {qY_hat}, {torch.backends.quantized.engine}")
+                    msg=lambda msg: f"{msg}\nHardswish failed: {qY} vs {qY_hat}, {torch.backends.quantized.engine}")
 
     """Tests the correctness of the binary op + scalar."""
     def _test_binary_op_scalar_relu(self, A, b, binary_op_name, binary_op, quantized_op, quantized_op_relu):
@@ -888,10 +1064,10 @@ class TestQuantizedOps(TestCase):
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
         self.assertEqual(C_ref.dequantize(), C_hat.dequantize(),
-                         msg=f"{binary_op_name}_scalar results don't match: "
+                         msg=lambda msg: f"{msg}\n{binary_op_name}_scalar results don't match: "
                          f"{C_ref.dequantize()} vs {C_hat.dequantize()}")
         self.assertEqual(C_relu_ref.dequantize(), C_relu_hat.dequantize(),
-                         msg=f"{binary_op_name}_scalar_relu results don't match: "
+                         msg=lambda msg: f"{msg}\n{binary_op_name}_scalar_relu results don't match: "
                          f"{C_relu_ref.dequantize()} vs {C_relu_hat.dequantize()}")
 
     @unittest.skipIf(IS_MACOS, "skipping macos test")
@@ -1425,7 +1601,7 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg=f"{name} results are off")
+                             msg=lambda msg: f"{msg}\n{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool1d(
             qa, kernel_size=_single(kernel),
@@ -1519,7 +1695,7 @@ class TestQuantizedOps(TestCase):
             a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg=f"{name} results are off")
+                             msg=lambda msg: f"{msg}\n{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
@@ -1601,7 +1777,7 @@ class TestQuantizedOps(TestCase):
                 a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                            dilation=dilation, ceil_mode=ceil_mode)
                 self.assertEqual(a_ref, a_hat.dequantize(),
-                                 msg=f"{name} results are off")
+                                 msg=lambda msg: f"{msg}\n{name} results are off")
 
     """Tests max pool operation on NHWC quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -1653,7 +1829,7 @@ class TestQuantizedOps(TestCase):
                        dilation=dilation, ceil_mode=ceil_mode)
             self.assertTrue(a_hat.stride() != sorted(a_hat.stride()))
             self.assertEqual(a_ref, a_hat.dequantize(),
-                             msg=f"{name} results are off")
+                             msg=lambda msg: f"{msg}\n{name} results are off")
         # Test the ops.quantized separately, because None is not treated.
         a_hat = torch.ops.quantized.max_pool2d(
             qa, kernel_size=_pair(kernel),
@@ -1709,7 +1885,7 @@ class TestQuantizedOps(TestCase):
                 a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
                            dilation=dilation, ceil_mode=ceil_mode)
                 self.assertEqual(a_ref, a_hat.dequantize(),
-                                 msg=f"{name} results are off")
+                                 msg=lambda msg: f"{msg}\n{name} results are off")
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
@@ -1753,12 +1929,12 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr())))
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
@@ -1815,12 +1991,12 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), X_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), X_hat.int_repr())))
             self.assertEqual(scale, X_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                             X_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
@@ -1867,12 +2043,12 @@ class TestQuantizedOps(TestCase):
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
             self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), qX_hat.int_repr())))
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
@@ -1931,12 +2107,12 @@ class TestQuantizedOps(TestCase):
                                                dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), atol=1.0, rtol=0,
-                             msg=error_message.format(name, qX_ref.int_repr(), X_hat.int_repr()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name, qX_ref.int_repr(), X_hat.int_repr())))
             self.assertEqual(scale, X_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                             X_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point())))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool2d_nhwc(self):
@@ -1996,13 +2172,13 @@ class TestQuantizedOps(TestCase):
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
                 self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, X_hat.int_repr())),
                                  exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
-                                 msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
-                                 msg=error_message.format(name + '.zero_point', scale,
-                                 X_hat.q_zero_point()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                 X_hat.q_zero_point())))
 
     @unittest.skip("not currently working and feature isn't used")
     def test_adaptive_avg_pool(self):
@@ -2074,15 +2250,15 @@ class TestQuantizedOps(TestCase):
                         qX_hat = op(qX.to(device=device), output_size=output_size)
                         self.assertEqual(
                             X_ref, qX_hat.int_repr(), atol=1.0,
-                            rtol=0, msg=error_message.format(name, X_ref, qX_hat), exact_dtype=False)
+                            rtol=0, msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, qX_hat)), exact_dtype=False)
                         self.assertEqual(
                             scale, qX_hat.q_scale(),
-                            msg=error_message.format(name + '.scale', scale,
-                                                     qX_hat.q_scale()))
+                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale,
+                                                     qX_hat.q_scale())))
                         self.assertEqual(
                             zero_point, qX_hat.q_zero_point(),
-                            msg=error_message.format(name + '.zero_point', scale,
-                                                     qX_hat.q_zero_point()))
+                            msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                     qX_hat.q_zero_point())))
 
     """Tests adaptive average pool operation on NHWC quantized tensors."""
     def test_adaptive_avg_pool3d_ndhwc(self):
@@ -2145,13 +2321,13 @@ class TestQuantizedOps(TestCase):
                 X_hat = op(qX, output_size=output_size)
                 self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
                 self.assertEqual(X_ref, X_hat.int_repr(), atol=1.0, rtol=0,
-                                 msg=error_message.format(name, X_ref, X_hat.int_repr()),
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name, X_ref, X_hat.int_repr())),
                                  exact_dtype=False)
                 self.assertEqual(scale, X_hat.q_scale(),
-                                 msg=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, X_hat.q_scale())))
                 self.assertEqual(zero_point, X_hat.q_zero_point(),
-                                 msg=error_message.format(name + '.zero_point', scale,
-                                 X_hat.q_zero_point()))
+                                 msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                 X_hat.q_zero_point())))
 
     def test_qtopk(self):
         x_dims = [3, 4]  # Num elements in the shape
@@ -2295,13 +2471,13 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()} X_ref={X_ref}",
+                             msg=lambda msg: f"{msg}\n{name} results are off: qX_hat={qX_hat.int_repr()} X_ref={X_ref}",
                              exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=5, max_dims=5,
                                               min_side=5, max_side=10),
@@ -2348,12 +2524,12 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, size=size, scale_factor=scale_factor,
                         mode=mode, align_corners=align_corners)
             self.assertEqual(X_ref, qX_hat.int_repr(), atol=1.0, rtol=0,
-                             msg=f"{name} results are off: qX_hat={qX_hat.int_repr()}, X_ref={X_ref}", exact_dtype=False)
+                             msg=lambda msg: f"{msg}\n{name} results are off: qX_hat={qX_hat.int_repr()}, X_ref={X_ref}", exact_dtype=False)
             self.assertEqual(scale, qX_hat.q_scale(),
-                             msg=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.scale', scale, qX_hat.q_scale())))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                             msg=error_message.format(name + '.zero_point', scale,
-                                                      qX_hat.q_zero_point()))
+                             msg=lambda msg: f"{msg}\n" + (error_message.format(name + '.zero_point', scale,
+                                                      qX_hat.q_zero_point())))
 
     """Tests quantize concatenation (both fused and not)."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
@@ -2771,7 +2947,7 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(
                     qy.int_repr().numpy(),
                     quantize_ref.int_repr().numpy(),
-                    msg=f"{qy} vs {quantize_ref}")
+                    msg=lambda msg: f"{msg}\n{qy} vs {quantize_ref}")
 
     @skipIfNoFBGEMM
     def test_batch_norm(self):
@@ -2816,7 +2992,7 @@ class TestQuantizedOps(TestCase):
                 quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
                 self.assertEqual(
                     qy.int_repr().numpy(), quantize_ref.int_repr().numpy(),
-                    msg=f"{qy} vs {quantize_ref}")
+                    msg=lambda msg: f"{msg}\n{qy} vs {quantize_ref}")
 
     @override_qengines
     def test_empty_batch(self):
@@ -3094,7 +3270,7 @@ class TestQuantizedOps(TestCase):
                 for signal, mse, power in snr:
                     self.assertTrue(
                         power > min_power or mse < max_mse,
-                        msg=(f"Error is too high: SNR(dB): {power}, "
+                        msg=(lambda msg: f"{msg}\nError is too high: SNR(dB): {power}, "
                              f"Signal: {signal}, MSE: {mse}"))
 
                 # Trace
@@ -3207,7 +3383,7 @@ class TestQuantizedOps(TestCase):
                     for signal, mse, power in snr:
                         self.assertTrue(
                             power > min_power or mse < max_mse,
-                            msg=(f"Error is too high: SNR(dB): {power}, "
+                            msg=(lambda msg: f"{msg}\nError is too high: SNR(dB): {power}, "
                                  f"Signal: {signal}, MSE: {mse}; "
                                  f"Run with bias={bias}, "
                                  f"add_bias_kv={add_bias_kv}, "
@@ -3313,7 +3489,7 @@ class TestQuantizedOps(TestCase):
                     y_ref, y_scale, y_zero_point, 0, 255, torch.uint8
                 )
             y_ref = y_ref.to(out_dtype)
-            self.assertEqual(y, y_ref, msg=f"{y} vs {y_ref}")
+            self.assertEqual(y, y_ref, msg=lambda msg: f"{msg}\n{y} vs {y_ref}")
 
 
 class TestDynamicQuantizedOps(TestCase):
@@ -3672,7 +3848,7 @@ class TestDynamicQuantizedOps(TestCase):
         return Xq, Hq, Cq
 
     def _get_rnn_weights_and_bias(self, input_size, hidden_size, num_directions, per_channel_quant, rnn_type):
-        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 2, 'RNNReLU': 2}
+        hidden_mult_map = {'LSTM': 4, 'LSTMCell': 4, 'GRU': 3, 'GRUCell': 3, 'RNNTanh': 1, 'RNNReLU': 1}
         hidden_mult = hidden_mult_map[rnn_type]
         weights1 = torch.randn(hidden_mult * hidden_size, input_size)
         weights2 = torch.randn(hidden_mult * hidden_size, hidden_size)
@@ -4597,8 +4773,6 @@ class TestQuantizedLinear(TestCase):
         unary_post_op_args=(),
         post_op_algorithms=("none",),
     ):
-        import os
-        test_fast_path = os.getenv("ONEDNN_CACHE_CONTEXT_UNSAFE", "0") == "1"
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
         in_channels_list = [4, 8]
@@ -4650,14 +4824,12 @@ class TestQuantizedLinear(TestCase):
                 qw_cpu = qw.int_repr()
                 qw_packed = qlinear_prepack(qw_cpu, x.shape)
 
-                num_iter = 2 if test_fast_path else 1  # rerun to use cache
                 if post_op in ("none", "relu", "gelu"):
-                    for _ in range(num_iter):
-                        qy_cpu = qlinear_op(
-                            qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            b, used_y_scale, used_y_zp, output_dtype,
-                            post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        b, used_y_scale, used_y_zp, output_dtype,
+                        post_op, unary_post_op_args, post_op_algo
+                    )
                     if post_op == "relu":
                         y_ref = F.relu(y_ref)
                     elif post_op == "gelu":
@@ -4674,14 +4846,13 @@ class TestQuantizedLinear(TestCase):
                     accum = qx2.int_repr() if output_dtype is None else qx2.dequantize()
                     if bfloat16_out:
                         accum = accum.bfloat16()
-                    for _ in range(num_iter):
-                        # clone accum otherwise it gets accumulated multiple times
-                        qy_cpu = qlinear_op(
-                            qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
-                            x2_scale, x2_zp, "sum", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    # clone accum otherwise it gets accumulated multiple times
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
+                        x2_scale, x2_zp, "sum", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4694,13 +4865,12 @@ class TestQuantizedLinear(TestCase):
                     x2 = torch.randn(y_ref.size()) * 10
                     unary_post_op = "relu" if post_op == "add_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
-                    for _ in range(num_iter):
-                        qy_cpu = qlinear_op(
-                            qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            x2, b, used_y_scale, used_y_zp, output_dtype,
-                            1.0, 0, "add", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy_cpu = qlinear_op(
+                        qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        x2, b, used_y_scale, used_y_zp, output_dtype,
+                        1.0, 0, "add", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4731,6 +4901,18 @@ class TestQuantizedLinear(TestCase):
     def test_qlinear_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "none")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_prepack_meta(self):
+        qlinear_prepack = torch.ops.onednn.qlinear_prepack
+        N, K = 16, 8
+
+        w = torch.empty(N, K, dtype=torch.int8, device="meta")
+        packed = qlinear_prepack(w, [3, K])
+        self.assertEqual(packed.shape, torch.Size([K, N]))
+        self.assertEqual(packed.dtype, torch.int8)
+        self.assertEqual(packed.device.type, "meta")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -4769,6 +4951,29 @@ class TestQuantizedLinear(TestCase):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "add_relu")
 
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_fast_path_pt2e(self):
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_test_qlinear_pt2e_fast_path_helper,
+            args=(child_conn,),
+        )
+        process.start()
+        child_conn.close()
+        process.join()
+        error = parent_conn.recv() if parent_conn.poll() else ""
+        parent_conn.close()
+        self.assertEqual(
+            process.exitcode,
+            0,
+            msg=(
+                lambda msg: f"{msg}\nSpawned fast-path validation failed.\n"
+                f"traceback:\n{error}"
+            ),
+        )
+
     def _test_qlinear_fp8_helper(
         self,
         qlinear_op,
@@ -4776,8 +4981,6 @@ class TestQuantizedLinear(TestCase):
         unary_post_op_args=(),
         post_op_algorithms=("none",),
     ):
-        import os
-        test_fast_path = os.getenv("ONEDNN_CACHE_CONTEXT_UNSAFE", "0") == "1"
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
         in_channels_list = [4, 8]
@@ -4826,14 +5029,12 @@ class TestQuantizedLinear(TestCase):
                 x_zp = 0
                 w_zps = torch.zeros_like(w_scales, dtype=torch.int)
 
-                num_iter = 2 if test_fast_path else 1  # rerun to use cache
                 if post_op in ("none", "relu", "gelu"):
-                    for _ in range(num_iter):
-                        qy = qlinear_op(
-                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            b, used_y_scale, used_y_zp, output_dtype,
-                            post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy = qlinear_op(
+                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        b, used_y_scale, used_y_zp, output_dtype,
+                        post_op, unary_post_op_args, post_op_algo
+                    )
                     if post_op == "relu":
                         y_ref = F.relu(y_ref)
                     elif post_op == "gelu":
@@ -4852,13 +5053,12 @@ class TestQuantizedLinear(TestCase):
                     if bfloat16_out:
                         accum = accum.bfloat16()
                         accum_ref = accum_ref.bfloat16()
-                    for _ in range(num_iter):
-                        qy = qlinear_op(
-                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
-                            x2_scale, x2_zp, "sum", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy = qlinear_op(
+                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
+                        x2_scale, x2_zp, "sum", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + accum_ref * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4869,13 +5069,12 @@ class TestQuantizedLinear(TestCase):
                     x2 = torch.rand_like(y_ref)
                     unary_post_op = "relu" if post_op == "add_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
-                    for _ in range(num_iter):
-                        qy = qlinear_op(
-                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                            x2, b, used_y_scale, used_y_zp, output_dtype,
-                            1.0, 0, "add", binary_alpha,
-                            unary_post_op, unary_post_op_args, post_op_algo
-                        )
+                    qy = qlinear_op(
+                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                        x2, b, used_y_scale, used_y_zp, output_dtype,
+                        1.0, 0, "add", binary_alpha,
+                        unary_post_op, unary_post_op_args, post_op_algo
+                    )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4933,6 +5132,29 @@ class TestQuantizedLinear(TestCase):
     def test_qlinear_add_relu_fp8(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_fp8_helper(qlinear, "add_relu")
+
+    @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
+    @skipIfNoONEDNN
+    def test_qlinear_fast_path_fp8(self):
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        process = ctx.Process(
+            target=_test_qlinear_fp8_fast_path_helper,
+            args=(child_conn,),
+        )
+        process.start()
+        child_conn.close()
+        process.join()
+        error = parent_conn.recv() if parent_conn.poll() else ""
+        parent_conn.close()
+        self.assertEqual(
+            process.exitcode,
+            0,
+            msg=(
+                lambda msg: f"{msg}\nSpawned fp8 fast-path validation failed.\n"
+                f"traceback:\n{error}"
+            ),
+        )
 
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
@@ -5147,6 +5369,119 @@ class TestQuantizedEmbeddingOps(TestCase):
             fallback_to_no_sparse,
             sparsity=sparsity, atol=0.005, rtol=1e-3)
 
+    @skipIfNoFBGEMM
+    def test_embedding_bag_byte_kernel_cache_rekeys(self):
+        # Regression coverage for the FBGEMM byte-kernel handle caches in
+        # embedding_bag_byte_impl, keyed by embedding dimension and weight mode.
+        def run_case(
+                embedding_dim, has_weight, sparse,
+                index_dtype, offset_dtype, fallback_to_no_sparse=False):
+            num_embeddings = 6
+            weights = torch.arange(
+                num_embeddings * embedding_dim, dtype=torch.float32
+            ).reshape(num_embeddings, embedding_dim) / 100.0
+            reference_weights = weights.clone()
+
+            if sparse:
+                kept_rows = torch.tensor([0, 2, 3, 5], dtype=torch.long)
+                packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(
+                    weights[kept_rows].contiguous()
+                )
+                mapping = torch.tensor([0, -1, 1, 2, -1, 3], dtype=torch.int32)
+                reference_weights[[1, 4]] = 0
+                pruned_weights = True
+            else:
+                packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(
+                    weights
+                )
+                mapping = (
+                    torch.tensor([0], dtype=torch.int32)
+                    if fallback_to_no_sparse else None
+                )
+                pruned_weights = fallback_to_no_sparse
+
+            indices = torch.tensor(
+                [0, 1, 2, 3, 4, 5, 5, 1, 0], dtype=index_dtype
+            )
+            offsets = torch.tensor([0, 3, 6, 9], dtype=offset_dtype)
+            per_sample_weights = (
+                torch.linspace(0.25, 1.0, indices.numel())
+                if has_weight else None
+            )
+
+            reference = torch.nn.EmbeddingBag(
+                num_embeddings=num_embeddings,
+                embedding_dim=embedding_dim,
+                include_last_offset=True,
+                _weight=reference_weights,
+                scale_grad_by_freq=False,
+                mode="sum",
+            )(
+                indices.long(),
+                offsets.long(),
+                per_sample_weights=per_sample_weights,
+            )
+            result = torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                packed_weights,
+                indices,
+                offsets,
+                mode=0,
+                pruned_weights=pruned_weights,
+                per_sample_weights=per_sample_weights,
+                compressed_indices_mapping=mapping,
+                include_last_offset=True,
+            )
+            torch.testing.assert_close(reference, result, atol=0.005, rtol=1e-3)
+
+        # Guard against incorrect kernel reuse across repeated keys, dimension
+        # changes in both directions, and weight-key changes. This checks
+        # numerics, not whether a cache hit occurred.
+        cache_key_sequence = (
+            (8, False),
+            (8, False),
+            (12, False),
+            (12, True),
+            (12, False),
+            (8, False),
+        )
+        previous_num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(2)
+            for index_dtype, offset_dtype in itertools.product(
+                    (torch.int32, torch.int64), repeat=2):
+                for sparse in (False, True):
+                    for embedding_dim, has_weight in cache_key_sequence:
+                        with self.subTest(
+                                index_dtype=index_dtype,
+                                offset_dtype=offset_dtype,
+                                sparse=sparse,
+                                embedding_dim=embedding_dim,
+                                has_weight=has_weight):
+                            run_case(
+                                embedding_dim,
+                                has_weight,
+                                sparse,
+                                index_dtype,
+                                offset_dtype,
+                            )
+
+                # The one-entry mapping takes the dense fallback after sparse
+                # calls and must rebuild the last dense key.
+                with self.subTest(
+                        index_dtype=index_dtype,
+                        offset_dtype=offset_dtype,
+                        fallback_to_no_sparse=True):
+                    run_case(
+                        16,
+                        False,
+                        False,
+                        index_dtype,
+                        offset_dtype,
+                        fallback_to_no_sparse=True,
+                    )
+        finally:
+            torch.set_num_threads(previous_num_threads)
+
     """ Tests the correctness of the embedding_bag_4bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
@@ -5200,6 +5535,355 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                fallback_to_no_sparse,
                                                sparsity=sparsity,
                                                atol=1.0, rtol=1e-1)
+
+    """ Tests that the CUDA quantized embedding_bag operators agree with their
+        CPU counterparts. This covers the bit-field extraction the dequantization
+        path is built on, which is shared by both bit widths. """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_rowwise_offsets_cuda(self):
+        # 24 satisfies both ops: the byte op requires D % 4 == 0, the 4-bit op
+        # requires D % 8 == 0.
+        num_embeddings, embedding_dim = 32, 24
+        weights = torch.from_numpy((np.random.random_sample(
+            (num_embeddings, embedding_dim)) + 1).astype(np.float32))
+        indices = torch.tensor([3, 1, 4, 1, 5, 9, 2, 6], dtype=torch.int)
+        offsets = torch.tensor([0, 3, 5], dtype=torch.int)
+
+        for bit_rate, prepack_op, op, atol in (
+            (8, torch.ops.quantized.embedding_bag_byte_prepack,
+             torch.ops.quantized.embedding_bag_byte_rowwise_offsets, 0.005),
+            (4, torch.ops.quantized.embedding_bag_4bit_prepack,
+             torch.ops.quantized.embedding_bag_4bit_rowwise_offsets, 0.1),
+        ):
+            q_weights = prepack_op(weights)
+
+            def run(device, q_weights=q_weights, op=op):
+                return op(q_weights.to(device), indices.to(device),
+                          offsets.to(device), mode=0, pruned_weights=False,
+                          include_last_offset=False)
+
+            cuda_result = run("cuda").cpu()
+            self.assertTrue(
+                torch.isfinite(cuda_result).all(),
+                f"{bit_rate}-bit CUDA output is not finite: {cuda_result}")
+            torch.testing.assert_close(
+                run("cpu"), cuda_result, atol=atol, rtol=1e-2)
+
+    # Fixtures and helpers shared by the pruned-lookup tests below.
+    _PRUNED_ROWS, _PRUNED_DIM = 32, 16
+
+    def _pruned_byte_table(self):
+        """A byte-quantized table with every third row pruned away.
+
+        Returns the float weights, the packed full table, the packed table with
+        the pruned rows removed, and the mapping from a row of the full table
+        onto a row of the pruned one (-1 marking a pruned row).
+        """
+        weights = torch.from_numpy(np.random.uniform(
+            low=-1, high=1,
+            size=[self._PRUNED_ROWS, self._PRUNED_DIM]).astype(np.float32))
+        q_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
+        mapping = torch.empty(self._PRUNED_ROWS, dtype=torch.int32)
+        kept_rows = []
+        for i in range(self._PRUNED_ROWS):
+            if i % 3 == 0:
+                mapping[i] = -1
+            else:
+                mapping[i] = len(kept_rows)
+                kept_rows.append(i)
+        return weights, q_weights, q_weights[kept_rows].contiguous(), mapping
+
+    @staticmethod
+    def _pruned_bags(include_last_offset=False):
+        """Five bags mixing kept and pruned ids; bag 2 is entirely pruned."""
+        indices = torch.tensor(
+            [1, 2, 0, 4, 5, 3, 6, 9, 7, 8, 31, 30], dtype=torch.int)
+        offsets = [0, 3, 6, 8, 10]
+        if include_last_offset:
+            offsets.append(indices.numel())
+        return indices, torch.tensor(offsets, dtype=torch.int)
+
+    @staticmethod
+    def _byte_rowwise_offsets(weight, indices, offsets, device, mapping=None,
+                              per_sample_weights=None, pruned_weights=None,
+                              include_last_offset=False):
+        if pruned_weights is None:
+            # pruned_weights with no mapping is bad_optional_access on CPU.
+            pruned_weights = mapping is not None
+        return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+            weight.to(device), indices.to(device), offsets.to(device), mode=0,
+            pruned_weights=pruned_weights,
+            per_sample_weights=(None if per_sample_weights is None
+                                else per_sample_weights.to(device)),
+            compressed_indices_mapping=(None if mapping is None
+                                        else mapping.to(device)),
+            include_last_offset=include_last_offset)
+
+    @staticmethod
+    def _sample_weights(n):
+        return torch.from_numpy(np.random.uniform(
+            low=0.01, high=0.5, size=[n]).astype(np.float32))
+
+    @staticmethod
+    def _drop_pruned(indices, offsets, mapping, per_sample_weights=None):
+        """Rewrite the lookup with the pruned ids removed and the kept ids
+        translated into compressed row space -- the dense lookup that the remap
+        must reproduce."""
+        bounds = offsets.tolist() + [indices.numel()]
+        new_indices, new_offsets, new_weights = [], [], []
+        for bag in range(offsets.numel()):
+            new_offsets.append(len(new_indices))
+            for pos in range(bounds[bag], bounds[bag + 1]):
+                row = int(mapping[int(indices[pos])])
+                if row != -1:
+                    new_indices.append(row)
+                    if per_sample_weights is not None:
+                        new_weights.append(float(per_sample_weights[pos]))
+        return (torch.tensor(new_indices, dtype=indices.dtype),
+                torch.tensor(new_offsets, dtype=offsets.dtype),
+                (None if per_sample_weights is None
+                 else torch.tensor(new_weights, dtype=torch.float)))
+
+    def _pruned_table_of(self, kind):
+        """Either a partially or a fully pruned table, with its mapping."""
+        _, q_weights, q_pruned, mapping = self._pruned_byte_table()
+        if kind == "all_pruned":
+            return (q_weights[[]].contiguous(),
+                    torch.full((self._PRUNED_ROWS,), -1, dtype=torch.int32))
+        return q_pruned, mapping
+
+    """ Tests that CUDA embedding_bag_byte matches CPU on a pruned table """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_pruned(self):
+        for include_last_offset in (False, True):
+            for use_weights in (False, True):
+                with self.subTest(include_last_offset=include_last_offset, use_weights=use_weights):
+                    _, _, q_pruned, mapping = self._pruned_byte_table()
+                    # CPU and CUDA factor the dequantization and the per-sample-weight
+                    # multiply differently, so these agree to float32 rounding rather than
+                    # bitwise; the measured worst case is 8.9e-08, below one float32 ulp at
+                    # these magnitudes. That the remap adds no error of its own is a
+                    # separate, stronger claim, asserted on-device in
+                    # test_embedding_bag_byte_cuda_pruned_remap_is_exact.
+                    indices, offsets = self._pruned_bags(include_last_offset)
+                    weights = self._sample_weights(indices.numel()) if use_weights else None
+                    self.assertEqual(
+                        self._byte_rowwise_offsets(
+                            q_pruned, indices, offsets, "cuda", mapping, weights,
+                            include_last_offset=include_last_offset).cpu(),
+                        self._byte_rowwise_offsets(
+                            q_pruned, indices, offsets, "cpu", mapping, weights,
+                            include_last_offset=include_last_offset),
+                        rtol=0, atol=1e-6)
+
+                    # Bag 2 is ids [6, 9], both pruned, so it must come out as zeros -- the
+                    # case the zero-weight trick exists for, asserted directly.
+                    indices, offsets = self._pruned_bags()
+                    all_pruned_bag = self._byte_rowwise_offsets(
+                        q_pruned, indices, offsets, "cuda", mapping)[2]
+                    self.assertEqual(all_pruned_bag, torch.zeros_like(all_pruned_bag),
+                                     rtol=0, atol=0)
+
+    """ Tests that translating the indices adds no numeric error of its own """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_pruned_remap_is_exact(self):
+        for use_weights in (False, True):
+            with self.subTest(use_weights=use_weights):
+                # Compared against the same kernel on the same device, fed the pruned
+                # ids dropped and the kept ids already translated. A CPU reference could
+                # not make this point: it would additionally assert that FBGEMM and the
+                # CUDA kernel contract their multiply-adds identically, which is a
+                # property of the build and the GPU architecture, not of this remap.
+                _, _, q_pruned, mapping = self._pruned_byte_table()
+                indices, offsets = self._pruned_bags()
+                weights = self._sample_weights(indices.numel()) if use_weights else None
+                ref_indices, ref_offsets, ref_weights = self._drop_pruned(
+                    indices, offsets, mapping, weights)
+                self.assertEqual(
+                    self._byte_rowwise_offsets(
+                        q_pruned, indices, offsets, "cuda", mapping, weights),
+                    self._byte_rowwise_offsets(
+                        q_pruned, ref_indices, ref_offsets, "cuda",
+                        per_sample_weights=ref_weights, pruned_weights=False),
+                    rtol=0, atol=0)
+
+    """ Tests the single-entry "table is not pruned" sentinel mapping """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_pruned_sentinel(self):
+        for use_weights in (False, True):
+            with self.subTest(use_weights=use_weights):
+                _, q_weights, _, _ = self._pruned_byte_table()
+                indices, offsets = self._pruned_bags()
+                zero = torch.tensor([0], dtype=torch.int32)
+                minus_one = torch.tensor([-1], dtype=torch.int32)
+                weights = self._sample_weights(indices.numel()) if use_weights else None
+
+                # {0} means "not pruned", so the ids address the full table.
+                self.assertEqual(
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cuda", zero, weights).cpu(),
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cpu", zero, weights),
+                    rtol=0, atol=1e-6)
+
+                # {-1} is a single entry too, so it takes the same sentinel path here.
+                # CPU honours only {0} and reads {-1} as a real one-row mapping,
+                # rejecting these ids against its length. Telling the two apart on CUDA
+                # needs a device read, i.e. a synchronization on every call, so every
+                # single-entry mapping is taken as the sentinel. Pinned on both sides so
+                # the divergence cannot change unnoticed.
+                self.assertEqual(
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cuda", minus_one, weights),
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cuda", zero, weights),
+                    rtol=0, atol=0)
+                # FBGEMM and the non-FBGEMM fallback word the rejection differently.
+                with self.assertRaisesRegex(
+                        RuntimeError, "out of bounds|Invalid indices data"):
+                    self._byte_rowwise_offsets(
+                        q_weights, indices, offsets, "cpu", minus_one, weights)
+
+    """ Tests a mapping that prunes away every row of the table """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_pruned_all_rows(self):
+        for include_last_offset in (False, True):
+            with self.subTest(include_last_offset=include_last_offset):
+                # Both backends must return zeros rather than index the empty table.
+                empty, mapping = self._pruned_table_of("all_pruned")
+                indices, offsets = self._pruned_bags(include_last_offset)
+                cuda = self._byte_rowwise_offsets(
+                    empty, indices, offsets, "cuda", mapping,
+                    include_last_offset=include_last_offset)
+                self.assertEqual(
+                    cuda.cpu(),
+                    self._byte_rowwise_offsets(
+                        empty, indices, offsets, "cpu", mapping,
+                        include_last_offset=include_last_offset),
+                    rtol=0, atol=0)
+                self.assertEqual(cuda, torch.zeros_like(cuda), rtol=0, atol=0)
+
+    """ Tests the inputs a lookup carrying a mapping must reject """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_pruned_input_checks(self):
+        for table in ("populated", "all_pruned"):
+            with self.subTest(table=table):
+                # Run against both table shapes: returning early for a fully pruned
+                # table must not let anything through that a populated one rejects.
+                weight, mapping = self._pruned_table_of(table)
+                indices, offsets = self._pruned_bags()
+
+                def call(mapping_tensor=None, idx=None, off=None, psw=None):
+                    # Overrides are passed through untouched: a .to() here would make
+                    # the sliced case contiguous again and move the CPU mapping case.
+                    return torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                        weight.cuda(),
+                        indices.cuda() if idx is None else idx,
+                        offsets.cuda() if off is None else off, mode=0,
+                        pruned_weights=True, per_sample_weights=psw,
+                        compressed_indices_mapping=(mapping.cuda()
+                                                    if mapping_tensor is None
+                                                    else mapping_tensor),
+                        include_last_offset=False)
+
+                with self.assertRaisesRegex(TypeError, "must have dtype Int"):
+                    call(mapping.long().cuda())
+                with self.assertRaisesRegex(RuntimeError, "same device as weight"):
+                    call(mapping)  # left on CPU
+                with self.assertRaisesRegex(ValueError, "must not be empty"):
+                    call(torch.empty(0, dtype=torch.int32, device="cuda"))
+                with self.assertRaisesRegex(RuntimeError, "1D indices"):
+                    call(idx=indices.reshape(2, 6).cuda())
+                with self.assertRaisesRegex(RuntimeError, "contiguous"):
+                    # Sliced after the transfer on purpose: slicing first would hand the
+                    # op a contiguous copy and the check would never fire.
+                    call(idx=indices.cuda().repeat_interleave(2)[::2])
+                with self.assertRaisesRegex(RuntimeError, "Per sample weights"):
+                    call(psw=torch.ones(indices.numel(), dtype=torch.half,
+                                        device="cuda"))
+                with self.assertRaisesRegex(RuntimeError, "32 or 64 bit indices"):
+                    call(idx=indices.float().cuda())
+                with self.assertRaisesRegex(RuntimeError, "32 or 64 bit offsets"):
+                    call(off=offsets.float().cuda())
+                with self.assertRaisesRegex(RuntimeError, "1D offsets"):
+                    call(off=offsets.reshape(1, -1).cuda())
+                # A row narrower than the scale and bias satisfies the remainder check
+                # -- (4 - 8) % 4 is 0 -- so the lower bound has to be its own condition.
+                with self.assertRaisesRegex(RuntimeError, r"weight\.size\(1\) >= 8"):
+                    torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                        torch.zeros((2, 4), dtype=torch.uint8, device="cuda"),
+                        indices.cuda(), offsets.cuda(), mode=0, pruned_weights=False,
+                        per_sample_weights=None, compressed_indices_mapping=None,
+                        include_last_offset=False)
+
+    """ Tests that a mapping is ignored unless pruned_weights is set """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_byte_cuda_mapping_ignored_when_not_pruned(self):
+        # CPU reads the mapping only under `if (pruned_weights)`, so a mapping
+        # passed with pruned_weights=False is a plain dense lookup on the full
+        # table. Match that rather than translating the ids anyway.
+        _, q_weights, _, mapping = self._pruned_byte_table()
+        indices, offsets = self._pruned_bags()
+        with_mapping = self._byte_rowwise_offsets(
+            q_weights, indices, offsets, "cuda", mapping, pruned_weights=False)
+        self.assertEqual(
+            with_mapping,
+            self._byte_rowwise_offsets(q_weights, indices, offsets, "cuda"),
+            rtol=0, atol=0)
+        self.assertEqual(
+            with_mapping.cpu(),
+            self._byte_rowwise_offsets(q_weights, indices, offsets, "cpu",
+                                       mapping, pruned_weights=False),
+            rtol=0, atol=1e-6)
+
+    """ Tests that indices and offsets are allowed to differ in dtype """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_cuda_mixed_index_offset_dtypes(self):
+        for indices_dtype, offsets_dtype in (
+                (torch.int64, torch.int), (torch.int, torch.int64)):
+            with self.subTest(indices_dtype=indices_dtype, offsets_dtype=offsets_dtype):
+                # Both are read through the same index_t accessor, but the dispatch keys
+                # only on indices, so the op casts offsets to the index dtype; without
+                # the cast a mismatched pair throws from the accessor. How the pair was
+                # spelled must not change the answer, so compare against the matched
+                # call on the same device -- bitwise, and free of any CPU reference.
+                weights, _, q_pruned, mapping = self._pruned_byte_table()
+                indices, offsets = self._pruned_bags()
+                q_4bit = torch.ops.quantized.embedding_bag_4bit_prepack(weights)
+
+                def run_4bit(idx, off):
+                    return torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(
+                        q_4bit.cuda(), idx.cuda(), off.cuda(), mode=0,
+                        pruned_weights=False, per_sample_weights=None,
+                        compressed_indices_mapping=None, include_last_offset=False)
+
+                # The 4-bit op has no mapping support, so it is only reachable as a
+                # dense lookup; the 8-bit call goes through the remap.
+                byte_matched = self._byte_rowwise_offsets(
+                    q_pruned, indices, offsets, "cuda", mapping)
+                bit4_matched = run_4bit(indices, offsets)
+                idx = indices.to(indices_dtype)
+                off = offsets.to(offsets_dtype)
+                self.assertEqual(
+                    self._byte_rowwise_offsets(q_pruned, idx, off, "cuda", mapping),
+                    byte_matched, rtol=0, atol=0)
+                self.assertEqual(run_4bit(idx, off), bit4_matched, rtol=0, atol=0)
+
+    """ Tests that the 4-bit CUDA op still rejects a compressed mapping """
+    @unittest.skipIf(not TEST_CUDA, "CUDA is not available")
+    def test_embedding_bag_4bit_cuda_rejects_mapping(self):
+        weights, _, _, mapping = self._pruned_byte_table()
+        indices, offsets = self._pruned_bags()
+        q_4bit = torch.ops.quantized.embedding_bag_4bit_prepack(weights)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "not yet implemented for "
+                "embedding_bag_4bit_rowwise_offsets_cuda"):
+            torch.ops.quantized.embedding_bag_4bit_rowwise_offsets(
+                q_4bit.cuda(), indices.cuda(), offsets.cuda(), mode=0,
+                pruned_weights=True, per_sample_weights=None,
+                compressed_indices_mapping=mapping.cuda(),
+                include_last_offset=False)
 
     """ Tests the correctness of the quantized 8 bit embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
@@ -8499,10 +9183,10 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.tanh(qX)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"QNNPACK TanH failed (FP ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK TanH failed (FP ref), memory_format {memory_format}")
                 self.assertEqual(
                     qYserver, qY_hat,
-                    msg=f"QNNPACK TanH failed (FBGEMM ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK TanH failed (FBGEMM ref), memory_format {memory_format}")
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @skipIfNoFBGEMM
@@ -8531,10 +9215,10 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.sigmoid(qX)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"QNNPACK Sigmoid failed (FP ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK Sigmoid failed (FP ref), memory_format {memory_format}")
                 self.assertEqual(
                     qYserver, qY_hat,
-                    msg=f"QNNPACK Sigmoid failed (FBGEMM ref), memory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nQNNPACK Sigmoid failed (FBGEMM ref), memory_format {memory_format}")
 
     @skipIfNoFBGEMM
     def test_qnnpack_sigmoid_sweep(self):
@@ -8926,7 +9610,7 @@ class TestQNNPackOps(TestCase):
                 qY_hat = torch.ao.nn.quantized.functional.hardtanh(qX, min_val, max_val)
                 self.assertEqual(
                     qY, qY_hat,
-                    msg=f"hardtanh failed:\nactual {qY_hat}\nexpected {qY}\nmemory_format {memory_format}")
+                    msg=lambda msg: f"{msg}\nhardtanh failed:\nactual {qY_hat}\nexpected {qY}\nmemory_format {memory_format}")
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
@@ -8955,12 +9639,12 @@ class TestComparatorOps(TestCase):
             result_ref = getattr(dqA, op)(dqB)
             result = getattr(qA, op)(qB)
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(tensor)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(tensor)'' failed")
             # Reversed broadcasting.
             result_ref = getattr(dqB, op)(dqA)
             result = getattr(qB, op)(qA)
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(tensor)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(tensor)'' failed")
 
     @given(A=hu.tensor(shapes=((3, 4, 5),),
                        qparams=hu.qparams()),
@@ -8983,14 +9667,14 @@ class TestComparatorOps(TestCase):
             note(f"result_ref 1: {result_ref}")
             note(f"result 1: {result}")
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(scalar)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(scalar)'' failed")
             # Reversed broadcasting.
             result_ref = getattr(b, op)(dqA)
             result = getattr(b, op)(qA)
             note(f"result_ref 2: {result_ref}")
             note(f"result 2: {result}")
             self.assertEqual(result_ref, result,
-                             msg=f"'scalar.{op}(tensor)'' failed")
+                             msg=lambda msg: f"{msg}\n'scalar.{op}(tensor)'' failed")
 
         for op in ops_under_test_nonreversible:
             result_ref = getattr(dqA, op)(b)
@@ -8998,7 +9682,7 @@ class TestComparatorOps(TestCase):
             note(f"result_ref 3: {result_ref}")
             note(f"result 3: {result}")
             self.assertEqual(result_ref, result,
-                             msg=f"'tensor.{op}(scalar)'' failed")
+                             msg=lambda msg: f"{msg}\n'tensor.{op}(scalar)'' failed")
 
 """Tests the correctness of the quantized::embedding_bag_(byte|4bit|2bit)_prepack_with_rowwise_min_max ops."""
 class TestQuantizedWithMinMax(TestCase):

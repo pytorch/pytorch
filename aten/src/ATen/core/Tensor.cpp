@@ -158,7 +158,7 @@ const std::string& TensorBase::name() const {
   return impl::GetVariableHooks()->name(*this);
 }
 
-const std::shared_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
+const c10::intrusive_ptr<torch::autograd::Node>& TensorBase::grad_fn() const {
   return impl::GetVariableHooks()->grad_fn(*this);
 }
 
@@ -175,7 +175,7 @@ std::optional<ScalarType> TensorBase::grad_dtype() const {
 }
 
 void TensorBase::set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const {
-  return impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
+  impl::GetVariableHooks()->set_grad_dtype(*this, grad_dtype);
 }
 
 } // namespace at

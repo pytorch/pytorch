@@ -1,6 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
+import linecache
+import os
+import pickle
+import re
 import sys
+import tempfile
+import traceback
 import unittest
 from typing import cast
 
@@ -10,6 +16,11 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import (
+    BackendCompilerFailed,
+    format_user_stack,
+    InvalidBackend,
+    ResetRequired,
+    ShortenTraceback,
     TorchDynamoException,
     Unsupported,
     UserError,
@@ -18,6 +29,7 @@ from torch._dynamo.exc import (
 from torch._dynamo.variables.base import SourceLocation
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_FBCODE,
     munge_exc,
     skipIfWindows,
@@ -37,29 +49,29 @@ def _capture_y_source_location(ctx) -> None:
         _source_location_capture["source_location"] = y_vt.source_location
 
 
-def _unsupported_error_source_attribution() -> str:
-    if sys.version_info < (3, 11):
-        return """\
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-"""
+def _format_multiline_source_location() -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as source_file:
+        source_file.write("value = (\n    foo\n    + bar\n)\n")
+        source_path = source_file.name
 
-    return """\
-Stack variable source attribution:
-  ConstantVariable(int: 1) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-^
-  ConstantVariable(int: 2) originated from:
-  File "test_exc.py", line N
-                return {1, 2}
-^
-"""
+    try:
+        source_location = SourceLocation(
+            filename=source_path,
+            lineno=1,
+            end_lineno=4,
+            # Span covers the parenthesized expression `( ... )`.
+            col_offset=8,
+            end_col_offset=1,
+        )
+        return source_location.format().replace(source_path, "<source_path>")
+    finally:
+        os.unlink(source_path)
+        linecache.clearcache()
 
 
 class ExcTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     maxDiff = None
 
     @torch._dynamo.config.patch(suppress_errors=True)
@@ -82,6 +94,57 @@ class ExcTests(LoggingTestCase):
         self.assertEqual(err.msg, "bad input")
         self.assertEqual(err.message, "bad input")
         self.assertEqual(str(err), "bad input")
+
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_backend_compiler_failed_pickles_without_frame(self):
+        def backend_fn(gm, example_inputs):
+            exc = RuntimeError("backend exploded")
+            exc.frame = sys._getframe()
+            raise exc
+
+        def fn(x):
+            return x + 1
+
+        with self.assertRaises(BackendCompilerFailed) as cm:
+            torch.compile(fn, backend=backend_fn)(torch.ones(1))
+
+        err = cm.exception
+
+        restored = pickle.loads(pickle.dumps(err))
+
+        self.assertIsInstance(restored, BackendCompilerFailed)
+        self.assertEqual(restored.args, err.args)
+        self.assertEqual(str(restored), str(err))
+        self.assertEqual(restored.backend_name, "backend_fn")
+        self.assertIsInstance(restored.inner_exception, RuntimeError)
+        self.assertEqual(str(restored.inner_exception), "backend exploded")
+        self.assertEqual(
+            restored.inner_exception._dynamo_original_exception_type,
+            "builtins.RuntimeError",
+        )
+        self.assertIsNone(restored.first_useful_frame)
+
+    def test_dynamo_exceptions_pickle_without_rerunning_init(self):
+        cases = [
+            InvalidBackend("bad_backend"),
+            ResetRequired(),
+            ShortenTraceback("shortened", first_useful_frame=sys._getframe()),
+            UserError(UserErrorType.INVALID_INPUT, "bad input"),
+        ]
+
+        for err in cases:
+            with self.subTest(exc_type=type(err).__name__):
+                restored = pickle.loads(pickle.dumps(err))
+
+                self.assertIsInstance(restored, type(err))
+                self.assertEqual(restored.args, err.args)
+                self.assertEqual(str(restored), str(err))
+
+        self.assertIsNone(pickle.loads(pickle.dumps(cases[2])).first_useful_frame)
+        self.assertEqual(
+            pickle.loads(pickle.dumps(cases[3])).error_type,
+            UserErrorType.INVALID_INPUT,
+        )
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
@@ -190,31 +253,28 @@ from user code:
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
         record = self.getRecord(records, "missing BUILD_SET handler")
-        expected = (
-            "Graph break in user code at test_exc.py:N\n"
-            "Graph Break Reason: Failed to handle graph break gracefully. "
-            "Skipping the function and falling back to eager. Graph break "
-            "encountered:\n"
-            "\n"
-            "missing BUILD_SET handler\n"
-            "  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).\n"
-            "\n"
-            "\n"
-            "  Developer debug context:\n"
-            "\n"
-            " For more details about this graph break, please visit: "
-            "https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html\n"
-            "\n" + _unsupported_error_source_attribution() + "\n"
-            "User code traceback:\n"
-            '  File "test_exc.py", line N, in test_unsupported_error\n'
-            '    torch.compile(fn001, backend="eager")(torch.randn(1))\n'
-            '  File "test_exc.py", line N, in fn001\n'
-            "    return {1, 2}\n"
-        )
-
         self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            expected,
+            munge_exc(record.getMessage(), suppress_suffix=True, skip=0),
+            """\
+Graph break in user code at test_exc.py:N
+Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
+
+missing BUILD_SET handler
+  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
+
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
+
+Stack variable source attribution:
+
+User code traceback:
+  File "test_exc.py", line N, in test_unsupported_error
+    torch.compile(fn001, backend="eager")(torch.randn(1))
+  File "test_exc.py", line N, in fn001
+    return {1, 2}
+""",
         )
 
     @torch._dynamo.config.patch(suppress_errors=False)
@@ -294,6 +354,32 @@ User code traceback:
         # check for record existence
         self.getRecord(records, "Graph break in user code")
 
+    @make_logging_test(graph_breaks=True)
+    def test_reraised_observed_exception_graph_break_log(self, records):
+        def inner(d):
+            return d["abc"]
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(d):
+            try:
+                inner(d)
+            except Exception:  # noqa: TRY203
+                raise
+
+        with self.assertRaisesRegex(KeyError, "abc"):
+            fn({"def": torch.randn(3, 4)})
+
+        full_records = [
+            r for r in records if "Graph break in user code" in r.getMessage()
+        ]
+        self.assertEqual(len(full_records), 1)
+
+        msg = full_records[0].getMessage()
+        self.assertIn('return d["abc"]', msg)
+        self.assertNotIn("\n    raise\n", msg)
+        self.assertNotIn("During handling of the above exception", msg)
+        self.assertFalse(any(record.exc_info is not None for record in records))
+
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_backend_suppress_line(self):
         def fn001(x):
@@ -309,6 +395,20 @@ User code traceback:
             """\
 backend='relu_compile_error_TESTING_ONLY' raised:
 ReluCompileError:""",
+        )
+
+    @skipIf(not TEST_Z3, "z3 not installed")
+    def test_z3op_sym_not(self):
+        import z3
+
+        from torch.fx.experimental.validator import TranslationValidator, z3op
+
+        validator = TranslationValidator()
+        b = z3.Bool("b")
+
+        self.assertTrue(z3op(torch.sym_not, validator)(b).eq(z3.Not(b)))
+        self.assertTrue(
+            z3.simplify(z3op(torch.sym_not, validator)(1)).eq(z3.BoolVal(False))
         )
 
     @skipIf(not TEST_Z3, "z3 not installed")
@@ -328,7 +428,7 @@ ReluCompileError:""",
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 
@@ -339,16 +439,16 @@ ReluCompileError:""",
 translation validation failed.
 
 Model:
-  ==> L['shape'][0]: 0
-  ==> L['shape'][1]: 0
-  ==> L['shape'][2]: 0
+  ==> L['shape'][0]: 3
+  ==> L['shape'][1]: 3
+  ==> L['shape'][2]: 3
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
-  ==> s3: 0
-  ==> s52: 0
+  ==> s3: 3
+  ==> s52: 3
   ==> s77: 3
-  ==> s86: 0
+  ==> s86: 3
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -361,10 +461,10 @@ Assertions:
 
 Target Expressions:
   ==> (!= (+ s3 s52 s86) s77)
-  ==> (<= 0 s3)
-  ==> (<= 0 s52)
-  ==> (<= 0 s86)
+  ==> (<= 2 s3)
+  ==> (<= 2 s52)
   ==> (<= 2 s77)
+  ==> (<= 2 s86)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
   ==> (== L['shape'][0] s86)
@@ -372,7 +472,6 @@ Target Expressions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s77)
   ==> (> s77 0)
-  ==> (>= 0 s86)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
@@ -390,7 +489,7 @@ Failed Source Expressions:
     def test_trigger_bisect_on_error(self):
         from torch.fx.experimental.validator import BisectValidationException
 
-        @torch.compile
+        @torch.compile  # noqa: UNSPECIFIED_BACKEND
         def fn(x, shape):
             return x.split(shape)
 
@@ -470,6 +569,246 @@ Failed Source Expressions:
         )
         result = source_location.format()
         self.assertEqual(result, '  File "<string>", line 1\n')
+
+    def test_source_location_format_multiline(self):
+        result = _format_multiline_source_location()
+
+        self.assertExpectedInline(
+            re.sub(r"(?m)^[ ]*[~^]+\n?", "", result),
+            """\
+  File "<source_path>", line 1
+    value = (
+        foo
+        + bar
+    )
+""",
+        )
+
+        if sys.version_info >= (3, 11):
+            self.assertExpectedInline(
+                result,
+                """\
+  File "<source_path>", line 1
+    value = (
+            ~
+        foo
+        ~~~
+        + bar
+        ^~~~~
+    )
+    ~
+""",
+            )
+
+    def test_user_stack_repeated_frames_are_compacted(self):
+        frame = traceback.FrameSummary("recursive.py", 1, "fn", line="return fn()")
+
+        result = format_user_stack([frame] * 10)
+
+        self.assertEqual(result.count('File "recursive.py", line 1, in fn'), 3)
+        self.assertIn("[Previous line repeated 7 more times]", result)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_tabbed_source_caret_alignment(self):
+        filename = f"{__file__}.tabbed"
+        source = "return\tgn()\n"
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source.splitlines(True),
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=1,
+            colno=7,
+            end_colno=11,
+        )
+
+        result = format_user_stack([frame])
+        source_line, marker_line = result.splitlines()[1:]
+
+        self.assertNotIn("\t", result)
+        self.assertEqual(
+            len(marker_line) - len(marker_line.lstrip()), source_line.index("gn()")
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_wide_unicode_source_caret_alignment(self):
+        filename = f"{__file__}.wide"
+        source = '    return "\U0001f600" + gn()\n'
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source.splitlines(True),
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        start = len(source[: source.index("gn()")].encode())
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=1,
+            colno=start,
+            end_colno=start + len("gn()"),
+        )
+
+        result = format_user_stack([frame])
+        source_line, marker_line = result.splitlines()[1:]
+
+        self.assertEqual(
+            len(marker_line) - len(marker_line.lstrip()),
+            source_line.index("gn()") + 1,
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_zero_width_unicode_source_caret_alignment(self):
+        # (source, display columns minus code points before "gn()")
+        cases = [
+            # wide emoji (2 columns) followed by a zero-width variation selector
+            ('    return "\U0001f600\ufe0f" + gn()\n', 0),
+            # base letter followed by a zero-width combining accent
+            ('    return "e\u0301" + gn()\n', -1),
+        ]
+        for i, (source, column_delta) in enumerate(cases):
+            with self.subTest(source=source):
+                filename = f"{__file__}.zero_width{i}"
+                linecache.cache[filename] = (
+                    len(source),
+                    None,
+                    source.splitlines(True),
+                    filename,
+                )
+                self.addCleanup(linecache.cache.pop, filename, None)
+                start = len(source[: source.index("gn()")].encode())
+                frame = traceback.FrameSummary(
+                    filename,
+                    1,
+                    "fn",
+                    lookup_line=False,
+                    end_lineno=1,
+                    colno=start,
+                    end_colno=start + len("gn()"),
+                )
+
+                result = format_user_stack([frame])
+                source_line, marker_line = result.splitlines()[1:]
+
+                self.assertEqual(
+                    len(marker_line) - len(marker_line.lstrip()),
+                    source_line.index("gn()") + column_delta,
+                )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_multiline_variable_width_source(self):
+        filename = f"{__file__}.multiline"
+        source_lines = [
+            "    value = (\n",
+            '        "\U0001f600"\n',
+            "        +\tgn()\n",
+            "    )\n",
+        ]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=len("    value = "),
+            end_colno=len("    )"),
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertIn('"\U0001f600"', result)
+        self.assertIn("gn()", result)
+        self.assertNotIn("\t", result)
+        self.assertGreater(result.count("^"), 0)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_multiline_statement_range_shows_first_line(self):
+        # Python 3.11 gives FOR_ITER a range spanning the whole loop body.
+        filename = f"{__file__}.statement"
+        source_lines = ["    for i in s:\n", "        z += i\n"]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=2,
+            colno=len("    "),
+            end_colno=len("        z += i"),
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertIn("for i in s:", result)
+        self.assertNotIn("z += i", result)
+        self.assertNotIn("~", result)
+        self.assertNotIn("^", result)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_long_multiline_range_is_bounded(self):
+        filename = f"{__file__}.long"
+        source_lines = ["class Foo:\n"] + [
+            f"    sentinel_{index} = {index}\n" for index in range(30)
+        ]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (
+            len(source),
+            None,
+            source_lines,
+            filename,
+        )
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=0,
+            end_colno=len(source_lines[-1].rstrip()),
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertNotIn("sentinel_15", result)
+        self.assertLessEqual(len(result.splitlines()), 10)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires column metadata")
+    def test_user_stack_long_tabbed_range_omits_misaligned_marker(self):
+        filename = f"{__file__}.long_tabbed"
+        source_lines = ["value\t= (\n"] + ["    0,\n"] * 5 + [")\n"]
+        source = "".join(source_lines)
+        linecache.cache[filename] = (len(source), None, source_lines, filename)
+        self.addCleanup(linecache.cache.pop, filename, None)
+        frame = traceback.FrameSummary(
+            filename,
+            1,
+            "fn",
+            lookup_line=False,
+            end_lineno=len(source_lines),
+            colno=len("value\t"),
+            end_colno=1,
+        )
+
+        result = format_user_stack([frame])
+
+        self.assertNotIn("^", result)
+        self.assertNotIn("~", result)
 
     def test_vt_source_location_set_during_tracing(self):
         _source_location_capture.clear()

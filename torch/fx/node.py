@@ -50,7 +50,7 @@ base_types = typing.get_args(BaseArgumentTypes)
 Target: TypeAlias = Callable[..., Any] | str
 
 Argument = Optional[  # noqa: UP045
-    Union[  # noqa: UP007
+    Union[
         tuple["Argument", ...],
         Sequence["Argument"],
         Mapping[str, "Argument"],
@@ -112,11 +112,31 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
+    torch.autograd.grad_mode._enter_inference_mode,
+    torch.autograd.grad_mode._exit_inference_mode,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
 }
 
 if hasattr(_ops.inductor, "resize_storage_bytes_"):
     _side_effectful_functions.add(_ops.inductor.resize_storage_bytes_.default)
+
+
+def _device_annotation(device: torch.device) -> str:
+    # Render a tensor's device for graph printing. Under compile-on-one-rank the device
+    # index is rank-specific; drop it when it is the current default device for the
+    # accelerator (e.g. "cuda:3" -> "cuda") so the printed graph is byte-identical across
+    # ranks. A non-current index keeps its index, preserving debuggability.
+    import torch.compiler.config as compiler_config
+
+    if compiler_config.compile_on_one_rank and device.index is not None:
+        acc = torch.accelerator.current_accelerator()
+        if (
+            acc is not None
+            and device.type == acc.type
+            and device.index == torch.accelerator.current_device_index()
+        ):
+            return device.type
+    return str(device)
 
 
 @compatibility(is_backward_compatible=False)
@@ -230,6 +250,8 @@ def _format_arg(arg: object, max_list_len: float = float("inf")) -> str:
 
     if isinstance(arg, Node):
         return "%" + str(arg)
+    elif isinstance(arg, torch.device):
+        return _device_annotation(arg)
     else:
         return str(arg)
 
@@ -280,7 +302,7 @@ class Node(_NodeBase):
     # All of the nodes that use the value produced by this Node
     # Note one user may correspond to several uses, e.g. the node for ``x + x``
     # would appear once here, but represents two uses.
-    # Is a dict to act as an "ordered set". Keys are significant, value dont-care
+    # Is a dict to act as an "ordered set". Keys are significant, value don't-care
     users: dict["Node", None]
     # Type expression representing the output value of this node.
     # This should contain the same class of Type objects that would appear
@@ -507,7 +529,7 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def insert_arg(self, idx: int, arg: Argument) -> None:
         """
-        Insert an positional argument to the argument list with given index.
+        Insert a positional argument to the argument list with given index.
 
         Args:
 
@@ -655,6 +677,7 @@ class Node(_NodeBase):
                 maybe_return_typename[0] = f" -> {_type_repr(self.type)}"
             return f"return {self.args[0]}"
         else:
+            from torch._subclasses.meta_utils import is_sparse_compressed_layout
 
             def stringify_shape(shape: Iterable[Any]) -> str:
                 return f"[{', '.join([str(x) for x in shape])}]"
@@ -664,17 +687,13 @@ class Node(_NodeBase):
                 self.meta.get("tensor_meta", self.meta.get("example_value", None)),
             )
             type_annotation = ""
-            if (
-                include_tensor_metadata
-                and isinstance(meta_val, torch.Tensor)
-                and meta_val.layout
-                not in (
-                    torch.sparse_csc,
-                    torch.sparse_csr,
+            if include_tensor_metadata and isinstance(meta_val, torch.Tensor):
+                stride_annotation = (
+                    ""
+                    if is_sparse_compressed_layout(meta_val.layout)
+                    else stringify_shape(meta_val.stride())
                 )
-            ):
-                stride_annotation = f"{stringify_shape(meta_val.stride())}"
-                device_annotation = f"{meta_val.device}"
+                device_annotation = _device_annotation(meta_val.device)
                 type_annotation = (
                     f'Tensor "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
                     f'{stride_annotation}{device_annotation}"'
@@ -758,6 +777,10 @@ class Node(_NodeBase):
             if self.graph.owning_module is None:
                 raise AssertionError(
                     "self.graph.owning_module not set for purity check"
+                )
+            if not isinstance(self.target, str):
+                raise AssertionError(
+                    f"Expected str target for call_module, got {type(self.target)}"
                 )
             target_mod = self.graph.owning_module.get_submodule(self.target)
             if target_mod is None:

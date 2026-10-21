@@ -46,7 +46,7 @@ CUDA graphs help eliminate the overhead from launching individual
 kernels from a Python program which is especially relevant for newer GPUs.
 
 TorchDynamo supports many different backends, but TorchInductor specifically works
-by generating [Triton](https://github.com/openai/triton) kernels. Let's save
+by generating [Triton](https://github.com/triton-lang/triton) kernels. Let's save
 our example above into a file called `example.py`. We can inspect the code
 generated Triton kernels by running `TORCH_COMPILE_DEBUG=1 python example.py`.
 As the script executes, you should see `DEBUG` messages printed to the
@@ -80,7 +80,7 @@ because the `cos` and `sin` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
 Read more on Triton's performance
-[here](https://openai.com/blog/triton/). Because the code is written
+[here](https://triton-lang.org/). Because the code is written
 in Python, it's fairly easy to understand even if you have not written all that
 many CUDA kernels.
 

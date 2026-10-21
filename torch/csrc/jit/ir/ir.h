@@ -492,19 +492,43 @@ struct TORCH_API Node {
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_CHECK(
+        inputs_.size() == 1,
+        "Tried to access a single input on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        inputs_.size(),
+        " outputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   Value* output() {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_CHECK(
+        outputs_.size() == 1,
+        "Tried to access a single output on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        outputs_.size(),
+        " outputs. You may consider using node.outputs() instead.");
     return outputs_.at(0);
   }
   const Value* output() const {
-    AT_ASSERT(outputs_.size() == 1);
+    TORCH_CHECK(
+        outputs_.size() == 1,
+        "Tried to access a single output on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        outputs_.size(),
+        " outputs. You may consider using node.outputs() instead.");
     return outputs_.at(0);
   }
   const Value* input() const {
-    AT_ASSERT(inputs_.size() == 1);
+    TORCH_CHECK(
+        inputs_.size() == 1,
+        "Tried to access a single input on node '",
+        kind().toDisplayString(),
+        "' which has ",
+        inputs_.size(),
+        " outputs. You may consider using node.inputs() instead.");
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
@@ -936,9 +960,11 @@ struct TORCH_API Node {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
-    if (child == nullptr) {
-      throw IRAttributeError(name, true);
-    }
+    TORCH_CHECK(
+        child != nullptr,
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' has the wrong type");
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
@@ -951,9 +977,11 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    if (required && it == values_.end()) {
-      throw IRAttributeError(name, false);
-    }
+    TORCH_CHECK(
+        !required || it != values_.end(),
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' is undefined");
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -963,9 +991,11 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    if (required && it == values_.end()) {
-      throw IRAttributeError(name, false);
-    }
+    TORCH_CHECK(
+        !required || it != values_.end(),
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' is undefined");
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -1226,6 +1256,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
     const Block& block = *block_;
     return block.nodes();
   }
+  size_t numNodes() const {
+    return all_nodes.size();
+  }
   Node* param_node() {
     return block_->param_node();
   }
@@ -1441,7 +1474,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   void cloneFrom(Graph& src);
 };
 
-/** \brief An utility class for setting temporary insertion points.
+/** \brief A utility class for setting temporary insertion points.
  *
  * When an object of this class is created, it stores the current insertion
  * point, sets the new one, and restores the original insertion point when the
@@ -1461,7 +1494,7 @@ struct WithInsertPoint {
   Node* prev_;
 };
 
-/** \brief An utility class for setting temporary scopes.
+/** \brief A utility class for setting temporary scopes.
  *
  * When an object of this class is created, it stores the current scope, sets
  * the new one, and restores the original scope when the object is destroyed.

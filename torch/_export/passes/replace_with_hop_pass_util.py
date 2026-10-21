@@ -118,7 +118,7 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
     maybe_inline_or_replace_with_hop: Callable[[torch.fx.Node], None],
 ) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
-    Helper function for replacing graph nodse with higher order nodes.
+    Helper function for replacing graph nodes with higher order nodes.
     For each subgraph in `new_gm`, decides whether to construct a HOO subgraph, or inline the calls
     back into the parent graph module, depending on `maybe_inline_or_replace_with_hop`.
     """

@@ -208,7 +208,6 @@ void initSingleStream(int p, DeviceIndex device_index, int i) {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_creation(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
-    priority_counters[p][device_index] = 0;
   }
 }
 
@@ -224,15 +223,17 @@ void initDeviceStreamState(DeviceIndex device_index) {
 
 // Init front-end to ensure initialization only occurs once
 void initCUDAStreamsOnce() {
+  // Quick return if streams have been initialized. current_streams
+  // is thread_local, we don't need to worry about a data race.
+  if (current_streams) {
+    return;
+  }
+
   // Inits default streams (once, globally)
   auto static init_flag [[maybe_unused]] = [] {
     initGlobalStreamState();
     return true;
   }();
-
-  if (current_streams) {
-    return;
-  }
 
   // Inits current streams (thread local) to default streams
   // NOLINTNEXTLINE(*-arrays)
@@ -298,6 +299,8 @@ cudaStream_t CUDAStream::stream() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
+  initCUDAStreamsOnce();
+  check_gpu(device_index);
   if (st.isDefault()) {
     TORCH_CHECK(
         si == 0,
@@ -393,7 +396,9 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
 
 void setCurrentCUDAStream(CUDAStream stream) {
   initCUDAStreamsOnce();
-  current_streams[stream.device_index()] = stream.id();
+  auto device_index = stream.device_index();
+  check_gpu(device_index);
+  current_streams[device_index] = stream.id();
 }
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {

@@ -7,11 +7,13 @@
 
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 #endif
 
 #include <ATen/ScalarOps.h>
 
 #include <c10/util/irange.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
@@ -74,20 +76,19 @@ static IValue listToIValue(py::handle obj) {
 IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
-      if (obj.ptr() == Py_None) {
+      if (Py_IsNone(obj.ptr())) {
         // None gets converted to undefined Tensors
         return autograd::Variable();
       }
       if (THPVariable_Check(obj.ptr())) {
         auto var = py::cast<autograd::Variable>(obj);
-        guardAgainstNamedTensor<autograd::Variable>(var);
         return var;
       } else {
         if (!allow_numbers_as_tensors) {
           throw py::cast_error(
               c10::str("Unable to cast ", py::str(obj), " to Tensor"));
         }
-        bool save_symint = false;
+        c10::SymNode symbolic_node;
         at::Scalar scalar;
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
@@ -98,13 +99,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         } else if (THPUtils_checkDouble(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackDouble(obj.ptr()));
         } else if (torch::is_symint(py::handle(obj))) {
-          save_symint = true;
+          symbolic_node = obj.cast<c10::SymInt>().toSymNode();
           scalar = at::Scalar(7777777);
         } else if (torch::is_symfloat(py::handle(obj))) {
-          save_symint = true;
+          symbolic_node = obj.cast<c10::SymFloat>().toSymNodeImpl();
           scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
         } else if (torch::is_symbool(py::handle(obj))) {
-          save_symint = true;
+          symbolic_node = obj.cast<c10::SymBool>().toSymNodeImpl();
           scalar = at::Scalar(true);
         } else {
           throw py::cast_error(
@@ -113,12 +114,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         at::Tensor tensor = at::scalar_to_tensor(scalar);
         tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
 
-        if (save_symint) {
+        if (symbolic_node) {
+          tensor.unsafeGetTensorImpl()->set_symbolic_wrapped_number(
+              std::move(symbolic_node));
           auto py_tensor = py::cast(tensor);
-          if (PyObject_SetAttrString(
-                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) < 0) {
-            throw python_error();
-          }
+          TORCH_CHECK_PYTHON(
+              PyObject_SetAttrString(
+                  py_tensor.ptr(), "_wrapped_number", obj.ptr()) >= 0);
         }
 
         return tensor;
@@ -456,7 +458,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
-      // When converting an pyobj to an interface, we check if rhs
+      // When converting a pyobj to an interface, we check if rhs
       // is module or normal torchscript class, get the type and ivalue
       // from them correspondingly.
       c10::ClassTypePtr classType = nullptr;
@@ -476,12 +478,14 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
-          throw std::runtime_error(c10::str(
-              "Assigning the object ",
-              py::str(obj),
-              " to an interface fails because the value is not "
-              "a TorchScript compatible type, did you forget to",
-              "turn it into a user defined TorchScript class?"));
+          TORCH_CHECK(
+              false,
+              c10::str(
+                  "Assigning the object ",
+                  py::str(obj),
+                  " to an interface fails because the value is not "
+                  "a TorchScript compatible type, did you forget to",
+                  "turn it into a user defined TorchScript class?"));
         }
         res = toIValue(obj, classType);
       }
@@ -494,7 +498,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
             " is not compatible with interface ",
             interfaceType->repr_str(),
             "\n",
-            why_not.str()));
+            std::move(why_not).str()));
       }
       return res;
     }
@@ -545,14 +549,19 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_DISTRIBUTED
       // Handle ProcessGroup custom class as a capsule.  FakeScriptObject
       // (used during Dynamo tracing with CooR) passes py::isinstance via
-      // OpaqueBaseMeta but cannot be cast directly; unwrap real_obj first.
+      // CustomClassBaseMeta but cannot be cast directly; unwrap real_obj first.
       if (py::isinstance<c10d::ProcessGroup>(obj)) {
         py::handle target = obj;
         if (py::hasattr(obj, "real_obj")) {
           target = obj.attr("real_obj");
         }
         auto cpp_obj = target.cast<c10::intrusive_ptr<c10d::ProcessGroup>>();
-        return IValue::make_capsule(cpp_obj);
+        return IValue::make_capsule(std::move(cpp_obj));
+      }
+      if (py::isinstance<c10d::ReduceOp>(obj)) {
+        const auto& op = obj.cast<const c10d::ReduceOp&>();
+        auto cpp_obj = c10::make_intrusive<c10d::ReduceOp>(op);
+        return IValue::make_capsule(std::move(cpp_obj));
       }
 #endif
 
@@ -643,7 +652,6 @@ py::object toPyObject(IValue ivalue) {
               " to a Python object");
       }
     } else {
-      guardAgainstNamedTensor<at::Tensor>(tensor);
       return py::cast(std::move(tensor));
     }
   } else if (ivalue.isStorage()) {
@@ -705,8 +713,9 @@ py::object toPyObject(IValue ivalue) {
           std::back_inserter(defaults),
           [](const Argument& arg) { return toPyObject(*arg.default_value()); });
 
-      std::vector<std::string> fieldNames =
-          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+      std::vector<std::string> fieldNames = fmap(
+          std::move(tuple_args),
+          [](const Argument& arg) { return arg.name(); });
 
       return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(
@@ -750,7 +759,7 @@ py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    if (obj->name().find("__torch__.torch.classes") == 0) {
+    if (obj->name().starts_with("__torch__.torch.classes")) {
       return py::cast(Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
@@ -773,6 +782,11 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isCapsule()) {
     auto capsule = ivalue.toCapsule();
 #ifdef USE_DISTRIBUTED
+    if (dynamic_cast<c10d::ReduceOp*>(capsule.get())) {
+      auto op = c10::static_intrusive_pointer_cast<c10d::ReduceOp>(
+          std::move(capsule));
+      return py::cast(*op);
+    }
     {
       auto pg = c10::static_intrusive_pointer_cast<c10d::ProcessGroup>(capsule);
       if (pg != nullptr) {
@@ -852,7 +866,12 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
-      throw std::runtime_error(ss.str());
+      // rpc/python_functions.cpp catches std::runtime_error around
+      // getOpWithStack by name, to retry against the non-c10 overload set.
+      // c10::Error does not derive from it, so a check macro here silently
+      // disables RPC's overload fallback.
+      // @allow-raw-throw: rpc's overload fallback catches this base by name
+      throw std::runtime_error(std::move(ss).str());
     }
 
     return std::make_pair(std::move(found_op), std::move(stack));
@@ -871,7 +890,7 @@ bool checkSchemaAllowFakeScriptObject(
   try {
     match = matchSchemaAllowFakeScriptObject(schema, args, kwargs);
   } catch (schema_match_error& error) {
-    throw std::runtime_error(error.what());
+    TORCH_CHECK(false, error.what());
   }
   return match;
 }
@@ -890,6 +909,7 @@ py::object invokeOperatorFromPython(
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
+  HANDLE_TH_ERRORS
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -901,6 +921,7 @@ py::object invokeOperatorFromPython(
   }
 
   return createPyObjectForStack(std::move(stack));
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 std::optional<py::object> _maybe_handle_torch_function(
@@ -996,6 +1017,10 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     std::optional<c10::DispatchKey> dk) {
+  if (consume_should_skip_torch_function()) {
+    return invokeOperatorFromPython(operations, args, kwargs, dk);
+  }
+
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();
@@ -1012,10 +1037,13 @@ std::optional<InferredType> detail::_tryToInferTypeImpl(py::handle input) {
   if (py::isinstance<c10d::ProcessGroup>(input)) {
     return InferredType(CapsuleType::get());
   }
+  if (py::isinstance<c10d::ReduceOp>(input)) {
+    return InferredType(CapsuleType::get());
+  }
   // During Dynamo tracing with compile-on-one-rank (CooR), opaque reference
   // types like ProcessGroup are wrapped in FakeScriptObject.  Python-level
-  // isinstance() sees through the wrapper (via OpaqueBaseMeta), but the C++
-  // py::isinstance above does too — yet the subsequent pybind11 cast would
+  // isinstance() sees through the wrapper (via CustomClassBaseMeta), but the
+  // C++ py::isinstance above does too -- yet the subsequent pybind11 cast would
   // fail because FakeScriptObject is not a C++ bound object.  Detect this
   // case by checking for the wrapped real_obj attribute.
   if (py::hasattr(input, "real_obj")) {

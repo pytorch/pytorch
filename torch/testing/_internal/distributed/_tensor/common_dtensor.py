@@ -20,8 +20,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import (
-    all_gather_tensor_autograd,
-    reduce_scatter_tensor_autograd,
+    all_gather_single_autograd,
+    reduce_scatter_single_autograd,
 )
 from torch.distributed._local_tensor import (
     LocalIntNode,
@@ -61,6 +61,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
@@ -187,7 +188,7 @@ class Attention(nn.Module):
             self.dropout_p if self.training else 0,
             self.use_attn_mask,
         )
-        output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
+        output = output.transpose(1, 2).reshape(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
 
 
@@ -312,7 +313,7 @@ class ExpertParallel(ParallelStyle):
         self, mod: nn.Module, inputs: tuple, device_mesh: DeviceMesh
     ) -> tuple[torch.Tensor]:
         (x,) = inputs
-        x_gathered = all_gather_tensor_autograd(
+        x_gathered = all_gather_single_autograd(
             x,
             gather_dim=0,
             group=device_mesh.get_group(),
@@ -323,7 +324,7 @@ class ExpertParallel(ParallelStyle):
     def _token_combine(
         self, mod: nn.Module, output: torch.Tensor, device_mesh: DeviceMesh
     ) -> torch.Tensor:
-        result = reduce_scatter_tensor_autograd(
+        result = reduce_scatter_single_autograd(
             output,
             "sum",
             scatter_dim=0,
@@ -381,11 +382,11 @@ class ExpertParallelWithTP(ParallelStyle):
 
         def ep_dispatch(mod, inputs):
             (x,) = inputs
-            x = all_gather_tensor_autograd(x, gather_dim=0, group=ep_mesh.get_group())
+            x = all_gather_single_autograd(x, gather_dim=0, group=ep_mesh.get_group())
             return (torch.ops._c10d_functional.wait_tensor(x),)
 
         def ep_combine(mod, inputs, output):
-            out = reduce_scatter_tensor_autograd(
+            out = reduce_scatter_single_autograd(
                 output, "sum", scatter_dim=0, group=ep_mesh.get_group()
             )
             return torch.ops._c10d_functional.wait_tensor(out)
@@ -629,7 +630,22 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>>   ...
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
+    # Runtime skip stays skip_if_lt_x_gpu(NUM_DEVICES), which scales with the
+    # machine. Pytest collects the object this decorator returns, so stamp that
+    # object with 2. A capacity-scaled stamp would look like a 4-GPU requirement
+    # to --multigpu-min-gpus.
+    wrapped = skip_if_lt_x_gpu(NUM_DEVICES)(method)
+    wrapped._min_gpus_required = 2
+    return cast(T, wrapped)
+
+
+def _get_device_type(world_size: int) -> str:
+    if (
+        not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+        or DEVICE_COUNT < world_size
+    ):
+        return "cpu"
+    return DEVICE_TYPE
 
 
 class DTensorTestMixin:
@@ -641,13 +657,7 @@ class DTensorTestMixin:
 
     @property
     def device_type(self) -> str:
-        if (
-            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
-            or DEVICE_COUNT < self.world_size
-        ):
-            return "cpu"
-        else:
-            return DEVICE_TYPE
+        return _get_device_type(self.world_size)
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
@@ -697,17 +707,16 @@ class DTensorTestMixin:
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        device_type = _get_device_type(cls.world_size)
+        backend = dist.get_default_backend_for_device(device_type)
         return backend
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU. However, if world_size > device_count,
-        # we skip the test.
-        if torch.accelerator.is_available():
+        # Bind accelerator ranks unless the test falls back to CPU.
+        if _get_device_type(world_size) != "cpu" and torch.accelerator.is_available():
             if world_size > torch.accelerator.device_count():
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
                 torch.accelerator.set_device_index(rank)
 
@@ -719,9 +728,6 @@ class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -754,6 +760,8 @@ class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     def setUp(self):
         unittest.TestCase.setUp(self)
         self.__class__._ensure_processes_spawned()
+        # Match MultiProcContinuousTest, which reseeds before every test.
+        set_rng_seed()
         torch.autograd._enable_record_function(False)
 
     def tearDown(self):
@@ -802,12 +810,13 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
         )
         if requires_gpu and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
         if backend not in [
             "nccl",
+            "nccl-legacy",
             "gloo",
             "mpi",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
@@ -821,8 +830,8 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if "nccl" in backend or "xccl" in backend:
-            # set device for nccl pg for collectives
+        if requires_gpu:
+            # set device for accelerator pg for collectives (nccl/xccl/hccl)
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
             torch.accelerator.set_device_index(self.rank)
@@ -855,7 +864,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
 
         if self.device_type == "cpu":
             # NOTE: when `device_id` is not None, barrier() will choose the accelerator
-            # of the most pripority, which means if the test specifies to use CPU for
+            # of the most priority, which means if the test specifies to use CPU for
             # testing while CUDA is available on the host, the barrier() will use CUDA.
             # To avoid this and better respect `self.device_type`, we add this branch to
             # enforce barrier() to use CPU when `self.device_type` is CPU and other
@@ -1104,9 +1113,6 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
     def is_local_tensor_enabled(self) -> bool:
         return True
 
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
-
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
 
@@ -1165,9 +1171,6 @@ class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
@@ -1462,6 +1465,108 @@ def validate_sharding_rule_sample(
         full = dt.redistribute(device_mesh, (Replicate(),)).to_local()
         if ref.shape != full.shape or not torch.allclose(
             ref, full, atol=1e-5, rtol=1e-5, equal_nan=True
+        ):
+            return False
+    return True
+
+
+def validate_sharding_rule_sample_backward(
+    op, full_args, full_kwargs, input_placements, device_mesh
+):
+    """Verify backward gradient correctness for a sharding strategy.
+
+    Returns None if the op is not differentiable or lacks backward DTensor
+    support (skip), True if gradients match, False if they differ.
+    """
+    from torch.utils import _pytree as pytree
+
+    full_tensors = [
+        a for a in pytree.tree_leaves(full_args) if isinstance(a, torch.Tensor)
+    ]
+    full_tensors += [
+        a for a in pytree.tree_leaves(full_kwargs) if isinstance(a, torch.Tensor)
+    ]
+
+    if not any(t.is_floating_point() for t in full_tensors):
+        return None
+
+    def _clone_with_grad(tensors):
+        out = []
+        for t in tensors:
+            c = t.detach().clone()
+            if c.is_floating_point():
+                c.requires_grad_(True)
+            out.append(c)
+        return out
+
+    def _replace_tensors(args, kwargs, replacements):
+        idx = 0
+
+        def _replace(a):
+            nonlocal idx
+            if isinstance(a, torch.Tensor):
+                r = replacements[idx]
+                idx += 1
+                return r
+            return a
+
+        return pytree.tree_map(_replace, (args, kwargs))
+
+    def _run_backward(output):
+        out_tensors = [
+            t
+            for t in pytree.tree_leaves(output)
+            if isinstance(t, torch.Tensor) and t.is_floating_point() and t.requires_grad
+        ]
+        if not out_tensors:
+            return False
+        sum(t.sum() for t in out_tensors).backward()
+        return True
+
+    # Reference backward
+    ref_tensors = _clone_with_grad(full_tensors)
+    ref_args, ref_kwargs = _replace_tensors(full_args, full_kwargs, ref_tensors)
+    try:
+        if not _run_backward(op(*ref_args, **ref_kwargs)):
+            return None
+    except RuntimeError:
+        return None
+
+    # DTensor backward
+    if len(input_placements) != len(full_tensors):
+        raise AssertionError(
+            f"placement/tensor count mismatch: {len(input_placements)} vs {len(full_tensors)}"
+        )
+    dt_tensors = [
+        distribute_tensor(c, device_mesh, (p,))
+        for c, p in zip(_clone_with_grad(full_tensors), input_placements, strict=True)
+    ]
+    dt_args, dt_kwargs = _replace_tensors(full_args, full_kwargs, dt_tensors)
+    try:
+        if not _run_backward(op(*dt_args, **dt_kwargs)):
+            return None
+    except Exception as e:
+        msg = str(e)
+        if (
+            "does not have a sharding strategy registered" in msg
+            or "got mixed torch.Tensor and DTensor" in msg
+        ):
+            return None
+        raise
+
+    # Compare gradients
+    for ref_t, dt_t in zip(ref_tensors, dt_tensors, strict=True):
+        if not ref_t.is_floating_point() or ref_t.grad is None:
+            continue
+        if dt_t.grad is None:
+            return False
+        dt_grad = (
+            dt_t.grad.full_tensor() if isinstance(dt_t.grad, DTensor) else dt_t.grad
+        )
+        if ref_t.grad.shape != dt_grad.shape:
+            return False
+        if not torch.allclose(
+            ref_t.grad, dt_grad, atol=1e-5, rtol=1.3e-6, equal_nan=True
         ):
             return False
     return True

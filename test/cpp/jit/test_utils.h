@@ -1,9 +1,26 @@
 #pragma once
 
+#include <filesystem>
+
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
+
+// Resolve a test data file relative to the test source directory.
+// Tries the source-relative path first (for development builds), then
+// falls back to the executable-relative path (for install trees where
+// __FILE__ may contain a stale build-time path).
+inline std::string resolveTestDataFile(
+    const char* sourceFile,
+    const std::string& relativePath) {
+  auto candidate =
+      std::filesystem::path(sourceFile).parent_path() / relativePath;
+  if (std::filesystem::exists(candidate))
+    return candidate.string();
+  auto exeDir = std::filesystem::read_symlink("/proc/self/exe").parent_path();
+  return (exeDir / relativePath).string();
+}
 
 namespace {
 static inline void trim(std::string& s) {

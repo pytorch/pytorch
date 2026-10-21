@@ -6,7 +6,7 @@ The main input file that drives which operators get codegen support for torchscr
 The code generator lives at `torchgen/gen_lazy_tensor.py`.
 
 It is called automatically by the torch autograd codegen (`tools/setup_helpers/generate_code.py`)
-as a part of the build process in OSS builds (CMake/Bazel) and Buck.
+as a part of the build process in OSS builds (CMake) and Buck.
 
 External backends (e.g. torch/xla) call `gen_lazy_tensor.py` directly,
 and feed it command line args indicating where the output files should go.

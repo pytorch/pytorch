@@ -15,7 +15,6 @@ import types
 import unittest
 import warnings
 from collections import namedtuple, OrderedDict
-from unittest.case import skipIf
 
 from common_utils import (
     check_vmap_fallback,
@@ -28,7 +27,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     opsToleranceOverride,
     skip,
-    skipOps,
+    skipIf,
     tol1,
     xfail,
     xfailIf,
@@ -56,14 +55,17 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
+    onlyCPU,
     OpDTypes,
     ops,
+    skipOps,
     tol,
     toleranceOverride,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     markDynamoStrictTest,
@@ -108,6 +110,8 @@ class EnableVmapFallbackWarnings:
 
 @markDynamoStrictTest
 class TestVmapAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
             vmap(lambda x: 3.14)(torch.ones(3))
@@ -1147,7 +1151,94 @@ class TestVmapAPI(TestCase):
                 o = torch.vmap(torch.square)(t)
         self.assertEqual(o, torch.square(t))
 
-    def _test_vmap_autocast(self, device):
+    def test_restore_vmap_pytree_input_output(self):
+        def f(x, y):
+            output0 = x[0] + x[1]
+            output1 = y
+            return {"a": output0, "b": output1}
+
+        B = 2
+        x0 = torch.randn(B, 3)
+        x1 = torch.randn(B)
+        y = torch.randn(4, B)
+
+        out, out_dims = restore_vmap(f, ((0, 0), 1), B, "error")((x0, x1), y)
+        expected = vmap(f, in_dims=((0, 0), 1), out_dims={"a": 0, "b": 1})((x0, x1), y)
+        self.assertEqual(out, expected)
+        self.assertEqual(out_dims, {"a": 0, "b": 1})
+
+    def test_restore_vmap_no_vmapped_inputs(self):
+        def f(x, y, z):
+            return x, y * z, z
+
+        B = 2
+        # Mix of tensor and non-tensor inputs
+        x = torch.randn(3)
+        y = torch.randn(4)
+        z = 5
+        out, out_dims = restore_vmap(f, (None, None, None), B, "error")(x, y, z)
+        self.assertEqual(out, f(x, y, z))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_restore_vmap_unexpanded_outputs(self):
+        def f(x, y):
+            # Mix of tensor and non-tensor outputs
+            return 3 * y, y.sum(), None
+
+        B = 2
+        x = torch.randn(B, 3)
+        y = torch.randn(4)
+        out, out_dims = restore_vmap(f, (0, None), B, "error")(x, y)
+        self.assertEqual(out, f(None, y))
+        self.assertEqual(out_dims, (None, None, None))
+
+    def test_data_attribute(self):
+        def foo(x):
+            y = x.data  # noqa: F841
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "accessing `data` under vmap transform"
+        ):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+        def foo(x):
+            x.data = torch.ones(3, 3)
+            return x
+
+        with self.assertRaisesRegex(
+            RuntimeError, "mutating directly with `.data` under vmap"
+        ):
+            torch.func.vmap(foo)(torch.randn(3, 3))
+
+    def test_vmap_out_dims_negative_one_independent_output(self):
+        t = torch.randn(2, 3)
+        t_scalar = torch.randn([])
+
+        def f_dep(x):
+            return x
+
+        def f_ind(x):
+            return t
+
+        def f_ind_scalar(x):
+            return t_scalar
+
+        res_dep_neg1 = vmap(f_dep, in_dims=0, out_dims=-1)(t)
+        self.assertEqual(res_dep_neg1.shape, torch.Size([3, 2]))
+
+        res_ind_neg1 = vmap(f_ind, in_dims=0, out_dims=-1)(torch.zeros(1))
+        self.assertEqual(res_ind_neg1.shape, torch.Size([2, 3, 1]))
+
+        res_ind_scalar_neg1 = vmap(f_ind_scalar, in_dims=0, out_dims=-1)(torch.zeros(5))
+        self.assertEqual(res_ind_scalar_neg1.shape, torch.Size([5]))
+
+
+@markDynamoStrictTest
+class TestVmapAPIDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_vmap_autocast(self, device):
         if torch.device(device).type == "cpu":
             amp_dtype = torch.bfloat16
         else:
@@ -1218,74 +1309,6 @@ class TestVmapAPI(TestCase):
 
         if not expected.allclose(out):
             raise AssertionError("Expected func3 output to be close to vmap output")
-
-    @unittest.skip("Somehow, vmap and autocast do not work on CPU")
-    def test_vmap_autocast_cpu(self):
-        self._test_vmap_autocast("cpu")
-
-    @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_vmap_autocast_cuda(self):
-        self._test_vmap_autocast("cuda")
-
-    def test_restore_vmap_pytree_input_output(self):
-        def f(x, y):
-            output0 = x[0] + x[1]
-            output1 = y
-            return {"a": output0, "b": output1}
-
-        B = 2
-        x0 = torch.randn(B, 3)
-        x1 = torch.randn(B)
-        y = torch.randn(4, B)
-
-        out, out_dims = restore_vmap(f, ((0, 0), 1), B, "error")((x0, x1), y)
-        expected = vmap(f, in_dims=((0, 0), 1), out_dims={"a": 0, "b": 1})((x0, x1), y)
-        self.assertEqual(out, expected)
-        self.assertEqual(out_dims, {"a": 0, "b": 1})
-
-    def test_restore_vmap_no_vmapped_inputs(self):
-        def f(x, y, z):
-            return x, y * z, z
-
-        B = 2
-        # Mix of tensor and non-tensor inputs
-        x = torch.randn(3)
-        y = torch.randn(4)
-        z = 5
-        out, out_dims = restore_vmap(f, (None, None, None), B, "error")(x, y, z)
-        self.assertEqual(out, f(x, y, z))
-        self.assertEqual(out_dims, (None, None, None))
-
-    def test_restore_vmap_unexpanded_outputs(self):
-        def f(x, y):
-            # Mix of tensor and non-tensor outputs
-            return 3 * y, y.sum(), None
-
-        B = 2
-        x = torch.randn(B, 3)
-        y = torch.randn(4)
-        out, out_dims = restore_vmap(f, (0, None), B, "error")(x, y)
-        self.assertEqual(out, f(None, y))
-        self.assertEqual(out_dims, (None, None, None))
-
-    def test_data_attribute(self):
-        def foo(x):
-            y = x.data  # noqa: F841
-            return x
-
-        with self.assertRaisesRegex(
-            RuntimeError, "accessing `data` under vmap transform"
-        ):
-            torch.func.vmap(foo)(torch.randn(3, 3))
-
-        def foo(x):
-            x.data = torch.ones(3, 3)
-            return x
-
-        with self.assertRaisesRegex(
-            RuntimeError, "mutating directly with `.data` under vmap"
-        ):
-            torch.func.vmap(foo)(torch.randn(3, 3))
 
 
 def slice_inputs(inputs, bdims, i):
@@ -1496,11 +1519,23 @@ def _make_case(op, input_getter=TensorFactory.randn):
 
 @markDynamoStrictTest
 class TestVmapOperators(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
+
+    def test_grid_sample_different_in_dims(self):
+        batch_size, image_batch_size = 3, 2
+        input = torch.randn(batch_size, image_batch_size, 2, 5, 6)
+        grid = torch.randn(image_batch_size, batch_size, 3, 4, 2)
+
+        def sample(input, grid):
+            return F.grid_sample(input, grid, align_corners=False)
+
+        self._vmap_test(sample, (input, grid), in_dims=(0, 1))
 
     def _test_unary(self, op, getter, device, *args, **kwargs):
         test = functools.partial(self._vmap_test, *args, **kwargs)
@@ -1819,7 +1854,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([B0, 2], device), getter([B0], device, torch.double)))
         test(op, (getter([B0], device, torch.double), getter([B0, 2], device)))
 
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             return
 
         # TODO(rzou): fix the following
@@ -2913,6 +2948,48 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
         test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
 
+    def test_repeat_interleave(self):
+        # https://github.com/pytorch/pytorch/issues/135424
+        # Vmapping over the `repeats` tensor requires `output_size` because the
+        # output length (the sum of `repeats`) is data-dependent.
+        repeats = torch.tensor([[4, 0, 8], [2, 2, 8], [4, 2, 6], [2, 4, 6], [0, 4, 8]])
+        output_size = 12  # every row sums to 12
+
+        # repeat_interleave.Tensor: the base overload returning gather indices.
+        def index_op(rep):
+            return torch.repeat_interleave(rep, output_size=output_size)
+
+        expected = torch.stack([index_op(r) for r in repeats])
+        self.assertEqual(vmap(index_op)(repeats), expected)
+
+        # repeat_interleave.self_Tensor: torch.repeat_interleave(input, repeats).
+        def op(rep):
+            values = torch.arange(1, rep.shape[0] + 1)
+            return torch.repeat_interleave(values, rep, output_size=output_size)
+
+        expected = torch.stack([op(r) for r in repeats])
+        self.assertEqual(vmap(op)(repeats), expected)
+
+        # Batching `values` while leaving `repeats` an unbatched constant keeps
+        # the output length the same per sample, so `output_size` is optional.
+        values = torch.randn(5, 3)
+        const_repeats = torch.tensor([2, 1, 3])
+
+        def op2(v):
+            return torch.repeat_interleave(v, const_repeats)
+
+        expected = torch.stack([op2(v) for v in values])
+        self.assertEqual(vmap(op2)(values), expected)
+
+        # Omitting `output_size` while vmapping over `repeats` is data-dependent
+        # and must raise a clear error.
+        def bad(rep):
+            values = torch.arange(1, rep.shape[0] + 1)
+            return torch.repeat_interleave(values, rep)
+
+        with self.assertRaisesRegex(RuntimeError, "output_size"):
+            vmap(bad)(repeats)
+
     @skipIfTorchDynamo()
     def test_slogdet(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
@@ -3284,6 +3361,17 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(2, 0),
         )
 
+    def test_view_dtype(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+        op = torch.ops.aten.view.dtype
+
+        test(op, (torch.rand(2, 3, 4), torch.uint8), in_dims=(1, None), out_dims=1)
+        test(op, (torch.rand(5), torch.int32), in_dims=(0, None), out_dims=0)
+        with self.assertRaisesRegex(
+            RuntimeError, r"dim\(\) cannot be 0 to view Float as Byte"
+        ):
+            vmap(op, in_dims=(0, None))(torch.rand(6), torch.uint8)
+
     def test_conv2d(self):
         conv_setups = [
             (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
@@ -3602,9 +3690,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 self.assertEqual(actual, expected)
 
 
-instantiate_parametrized_tests(TestVmapOperators)
-
-
 def construct_v(output, batch_size, contig=False):
     if contig:
         return torch.randn(
@@ -3642,7 +3727,9 @@ def _get_rand_no_zeros(*args, **kwargs):
 
 
 @markDynamoStrictTest
-class TestVmapBatchedGradient(Namespace.TestVmapBase):
+class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -3905,11 +3992,9 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
 
+    @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     def test_sdpa(self, device, backend):
-        if device == "cpu":
-            raise unittest.SkipTest("This test is only for CUDA for now")
-
         def T(*args):
             return torch.randn(*args, dtype=torch.float16, device=device)
 
@@ -3959,14 +4044,99 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 in_dims=(2, 1, None),
             )
 
+    @onlyAccelerator
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    def test_sdpa_unbatched_inputs(self, device, backend):
+        query = torch.randn(
+            3, 4, 32, 64, dtype=torch.float16, device=device, requires_grad=True
+        )
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+
+        def loss(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v).sum()
+
+        loss_grad = grad(loss, argnums=(0, 1, 2))
+        with sdpa_kernel([backend]):
+            expected = F.scaled_dot_product_attention(query, key, value)
+            actual = vmap(F.scaled_dot_product_attention)(query, key, value)
+            grad_output = torch.randn_like(expected)
+            expected_backward_grads = torch.autograd.grad(
+                expected, (query, key, value), grad_output
+            )
+            actual_backward_grads = torch.autograd.grad(
+                actual, (query, key, value), grad_output
+            )
+            expected_grads = loss_grad(query, key, value)
+            actual_grads = vmap(loss_grad)(query, key, value)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_backward_grads, expected_backward_grads)
+        self.assertEqual(actual_grads, expected_grads)
+
+    @onlyCPU
+    def test_sdpa_unbatched_inputs_cpu(self, device):
+        query = torch.randn(3, 4, 32, 64, device=device, requires_grad=True)
+        key = torch.randn_like(query, requires_grad=True)
+        value = torch.randn_like(query, requires_grad=True)
+
+        def loss(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v).sum()
+
+        loss_grad = grad(loss, argnums=(0, 1, 2))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=FALLBACK_REGEX)
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                expected = F.scaled_dot_product_attention(query, key, value)
+                actual = vmap(F.scaled_dot_product_attention)(query, key, value)
+                grad_output = torch.randn_like(expected)
+                expected_backward_grads = torch.autograd.grad(
+                    expected, (query, key, value), grad_output
+                )
+                actual_backward_grads = torch.autograd.grad(
+                    actual, (query, key, value), grad_output
+                )
+                expected_grads = loss_grad(query, key, value)
+                actual_grads = vmap(loss_grad)(query, key, value)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_backward_grads, expected_backward_grads)
+        self.assertEqual(actual_grads, expected_grads)
+
+    @onlyAccelerator
+    @parametrize(
+        "backend",
+        [
+            backend
+            for backend in PLATFORM_SPECIFIC_SDPA
+            if backend != SDPBackend.FLASH_ATTENTION
+        ],
+    )
+    def test_sdpa_unbatched_inputs_with_mask(self, device, backend):
+        query = torch.randn(3, 4, 32, 64, dtype=torch.float16, device=device)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+        attn_mask = torch.randn(3, 1, 32, 32, dtype=torch.float16, device=device)
+
+        with sdpa_kernel([backend]):
+            expected = F.scaled_dot_product_attention(query, key, value, attn_mask)
+            actual = vmap(F.scaled_dot_product_attention)(
+                query, key, value, attn_mask[:, 0]
+            )
+
+        self.assertEqual(actual, expected)
+
+    @onlyAccelerator
     @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
     @parametrize("randomness", ["error", "same", "different"])
     def test_randomness(self, device, randomness, backend):
-        if device == "cpu":
-            raise unittest.SkipTest("This test is only for CUDA for now")
-
+        device_type = torch.device(device).type
         # xfail for cuDNN version between 9.10 and 9.13
-        if backend == SDPBackend.CUDNN_ATTENTION and randomness == "different":
+        if (
+            backend == SDPBackend.CUDNN_ATTENTION
+            and randomness == "different"
+            and device_type == "cuda"
+        ):
             if 91100 <= TEST_CUDNN_VERSION <= 91300:
                 raise unittest.SkipTest(
                     "xfail on cuDNN 9.10-9.13 with CUDNN backend and randomness='different'"
@@ -3989,9 +4159,23 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 randomness=randomness,
             )(query, key, value)
 
+            if device_type == "xpu" and backend == SDPBackend.FLASH_ATTENTION:
+                # can_use_flash_attention rejects any non-zero dropout on XPU, so the
+                # call below would fail on the missing kernel, not on vmap randomness.
+                self.skipTest("XPU flash attention does not support dropout")
+
             fail_with_randomness = randomness == "error"
             if backend != SDPBackend.MATH:
                 fail_with_randomness |= randomness == "same"
+
+            # XPU has no mem-efficient kernel, so this dispatches to MATH.
+            if (
+                device_type == "xpu"
+                and backend == SDPBackend.EFFICIENT_ATTENTION
+                and randomness == "same"
+            ):
+                fail_with_randomness = False
+
             context = (
                 self.assertRaises(RuntimeError)
                 # We currently don't support randomness == "same", and "error" should always error with randomness
@@ -4091,7 +4275,9 @@ def discover_variants(opinfo):
 # TODO: enable this when we get a bit closer to getting torch.vmap x torch.compile working.
 # @markDynamoStrictTest
 @unMarkDynamoStrictTest
-class TestVmapOperatorsOpInfo(TestCase):
+class TestVmapOperatorsOpInfoDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def vmap_outplace_test(
         self,
         func,
@@ -4328,22 +4514,22 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("cdouble"),
         xfail("cfloat"),
         xfail(
-            "jiterator_binary", device_type="cuda"
+            "jiterator_binary", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
-            "jiterator_binary_return_by_ref", device_type="cuda"
+            "jiterator_binary_return_by_ref", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
-            "jiterator_4inputs_with_extra_args", device_type="cuda"
+            "jiterator_4inputs_with_extra_args", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
             "equal", ""
         ),  # TypeError: object of type 'bool' has no len(); likely testrunner problem
         xfail(
-            "jiterator_unary", device_type="cuda"
+            "jiterator_unary", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         xfail(
-            "jiterator_2inputs_2outputs", device_type="cuda"
+            "jiterator_2inputs_2outputs", device_type=("cuda", "xpu")
         ),  # NYI: querying is_contiguous inside of vmap
         # ---------------------------------------------------------------------
         # TypeError: expected Tensor as element 0 in argument 0, but got NotImplementedType
@@ -4360,14 +4546,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: When vmap-ing torch.nn.functional.one_hot,
         # please provide an explicit positive num_classes argument.
         xfail("nn.functional.one_hot"),
-        # RuntimeError: Expected all tensors to be on the same device,
-        # but found at least two devices, cuda:0 and cpu!
-        xfail("eq", device_type="cuda"),
-        xfail("ge", device_type="cuda"),
-        xfail("gt", device_type="cuda"),
-        xfail("le", device_type="cuda"),
-        xfail("lt", device_type="cuda"),
-        xfail("ne", device_type="cuda"),
         # RuntimeError: aten::_flash_attention_forward hit the vmap fallback which is currently disabled
         xfail("torch.ops.aten._flash_attention_forward"),
     }
@@ -4378,20 +4556,20 @@ class TestVmapOperatorsOpInfo(TestCase):
         dtypes=OpDTypes.any_one,
     )
     @opsToleranceOverride(
-        "TestVmapOperatorsOpInfo",
+        "TestVmapOperatorsOpInfoDevice",
         "test_vmap_exhaustive",
         (
             tol1(
                 "linalg.det",
                 {torch.float32: tol(atol=1e-04, rtol=1e-04)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
             # The following is often flaky, but just on windows.
             # We should investigate if it's actually a problem or not.
             tol1(
                 "nn.functional.conv_transpose3d",
                 {torch.float32: tol(atol=1e-04, rtol=1e-02)},
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
         ),
     )
@@ -4402,8 +4580,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_vmap_exhaustive",
         vmap_fail.union(
             {
                 # RuntimeError: Batch norm got a batched tensor as input while the running_mean or running_var,
@@ -4422,9 +4598,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 # RuntimeError: required rank 4 tensor to use channels_last format
                 xfailIf(
                     "to",
@@ -4432,6 +4605,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
+                # https://github.com/pytorch/pytorch/issues/164556
+                skipIf("cholesky_solve", lambda *args: TEST_WITH_ROCM),
             }
         ),
     )
@@ -4452,7 +4627,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         dtypes=OpDTypes.any_one,
     )
     @opsToleranceOverride(
-        "TestVmapOperatorsOpInfo",
+        "TestVmapOperatorsOpInfoDevice",
         "test_op_has_batch_rule",
         (
             tol1(
@@ -4469,15 +4644,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         }
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_op_has_batch_rule",
         vmap_fail.union(
             {
                 xfail("as_strided", "partial_views"),
                 skip(
                     "to"
                 ),  # RuntimeError: required rank 4 tensor to use channels_last format
-                xfail("fill"),
                 # Batch norm got a batched tensor as input while the running_mean or running_var,
                 # which will be updated in place, were not batched.
                 xfail("native_batch_norm"),
@@ -4489,7 +4661,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # masked index as input which is not supported
                 xfail("index_put", ""),
                 xfail("isin"),
-                xfail("masked_fill"),
                 xfail("masked_scatter"),
                 xfail("masked_select"),
                 xfail("nanquantile"),
@@ -4497,21 +4668,15 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),
-                xfail("squeeze_copy"),
                 xfail("resize_as_"),
                 xfail("take"),
                 xfail("tensor_split"),
-                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
                 xfail("tril"),  # Exception not raised on error input
                 xfail("triu"),  # Exception not raised on error input
-                xfail(
-                    "unbind_copy"
-                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("__getitem__", ""),
-                xfail("count_nonzero"),
                 xfail(
                     "nn.functional.dropout"
                 ),  # works, can't check against for loop because of randomness inconsistency
@@ -4531,9 +4696,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
-                xfail("permute_copy"),
-                xfail("t_copy"),
-                xfail("unsqueeze_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),
@@ -4572,9 +4734,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("linalg.ldl_solve", "", device_type="cpu"),
                 xfail("chalf", ""),
                 xfail("clamp_max", ""),
-                xfail("jiterator_binary_return_by_ref", device_type="cuda"),
-                xfail("jiterator_unary", device_type="cuda"),
-                xfail("jiterator_2inputs_2outputs", device_type="cuda"),
+                xfail("jiterator_binary_return_by_ref", device_type=("cuda", "xpu")),
+                xfail("jiterator_unary", device_type=("cuda", "xpu")),
+                xfail("jiterator_2inputs_2outputs", device_type=("cuda", "xpu")),
                 xfail("special.airy_ai"),
                 xfail("clamp_min", ""),
                 xfail("sparse.sampled_addmm"),
@@ -4595,8 +4757,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("special.laguerre_polynomial_l"),
                 xfail("special.legendre_polynomial_p"),
                 xfail("special.hermite_polynomial_h"),
-                xfail("jiterator_binary", device_type="cuda"),
-                xfail("jiterator_4inputs_with_extra_args", device_type="cuda"),
+                xfail("jiterator_binary", device_type=("cuda", "xpu")),
+                xfail("jiterator_4inputs_with_extra_args", device_type=("cuda", "xpu")),
                 xfail("_segment_reduce", "lengths"),
                 xfail("lu_solve", ""),
                 xfail("special.hermite_polynomial_he"),
@@ -4608,12 +4770,12 @@ class TestVmapOperatorsOpInfo(TestCase):
                 skip("_softmax_backward_data"),
                 # One or more of the overload doesn't have a Batch rule.
                 xfail("bincount"),
-                # RuntimeError: Expected all tensors to be on the same device,
-                # but found at least two devices, cuda:0 and cpu!
-                xfail("ge", device_type="cuda"),
-                xfail(
-                    "searchsorted"
-                ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                xfail("torch.ops.aten._scaled_dot_product_flash_attention_for_cpu"),
+                # The vectorized CPU kernels return NaN when the divisor is
+                # FLT_MIN, since Sleef_fmodf8 is only valid for |a / b| <= 2**24.
+                # The scalar CPU path and other backends return the correct value.
+                xfail("fmod", device_type="cpu"),
+                xfail("remainder", device_type="cpu"),
             }
         ),
     )
@@ -4880,6 +5042,79 @@ class TestVmapOperatorsOpInfo(TestCase):
                 torch.randn(2, device=device),
             )
 
+    def test_masked_fill__Tensor(self, device):
+        def test():
+            B = 2
+            # Both self, mask, and value batched
+            args = (
+                torch.randn(B, 3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (0, 0, 0))
+
+            # self and mask batched, value not batched
+            args = (
+                torch.randn(B, 3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.tensor(1.0, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (0, 0, None))
+
+            # self batched, mask and value not batched
+            args = (
+                torch.randn(B, 3, device=device),
+                torch.randn(3, device=device) > 0,
+                torch.tensor(1.0, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (0, None, None))
+
+            # self not batched (should error)
+            args = (
+                torch.randn(3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            )
+            self.vmap_inplace_test(Tensor.masked_fill_, args, {}, (None, 0, 0))
+
+        check_vmap_fallback(self, test, Tensor.masked_fill_)
+
+    def test_masked_fill_Tensor_broadcast(self, device):
+        B = 2
+        # self rank > mask rank, both batched
+        self.vmap_outplace_test(
+            torch.masked_fill,
+            (
+                torch.randn(B, 2, 3, device=device),
+                torch.randn(B, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            ),
+            {},
+            (0, 0, 0),
+        )
+        # mask rank > self rank, both batched
+        self.vmap_outplace_test(
+            torch.masked_fill,
+            (
+                torch.randn(B, 3, device=device),
+                torch.randn(B, 2, 3, device=device) > 0,
+                torch.randn(B, device=device),
+            ),
+            {},
+            (0, 0, 0),
+        )
+        # self batched, mask unbatched with different rank
+        self.vmap_outplace_test(
+            torch.masked_fill,
+            (
+                torch.randn(B, 2, 3, device=device),
+                torch.randn(3, device=device) > 0,
+                torch.randn(B, device=device),
+            ),
+            {},
+            (0, None, 0),
+        )
+
     @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
@@ -4920,7 +5155,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(
             0
         ) == (8, 6)
-        atol, rtol = (1e-3, 1e-3) if is_cuda_sm86 else (1e-4, 1e-4)
+        atol, rtol = (
+            (1e-3, 1e-3) if is_cuda_sm86 or device.startswith("xpu") else (1e-4, 1e-4)
+        )
 
         def test():
             for loop_out, batched_out in generator:
@@ -5096,7 +5333,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
 
-    @onlyCUDA
+    @onlyAccelerator
     @parametrize("inplace", [True, False])
     def test_0d_tensor_index_put(self, device, inplace):
         def f(t, idx, v):
@@ -5104,7 +5341,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             return fn(t, idx, v)
 
         N = 2
-        t = torch.zeros((N, 5), device="cuda")
+        t = torch.zeros((N, 5), device=device)
         idx = torch.tensor([1, 3])
         v = torch.tensor(1, dtype=t.dtype, device="cpu")
 
@@ -5279,8 +5516,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         allowed_dtypes=(torch.float,),
     )
     @skipOps(
-        "TestVmapOperatorsOpInfo",
-        "test_vmap_linalg_failure_1D_input",
         {
             xfail("linalg.vector_norm"),  # can accept vector inputs
             xfail("linalg.norm"),  # can accept vector inputs
@@ -5424,7 +5659,9 @@ class TestVmapOperatorsOpInfo(TestCase):
 
 
 @markDynamoStrictTest
-class TestRandomness(TestCase):
+class TestRandomnessDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _reset_random(self, generator, orig_state, use_generator, seed):
         return (
             generator.set_state(orig_state)
@@ -5575,15 +5812,15 @@ class TestRandomness(TestCase):
         if randomness == "different":
             for i in range(B0):
                 expected = torch.randperm(10, **kwargs)
-                # RNG differs between eager and via dynamo trace on CUDA
-                if TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda":
+                # RNG differs between eager and via dynamo trace on CUDA/XPU
+                if TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu":
                     self._assert_all_slices_unique(vmap_result)
                 else:
                     self.assertEqual(vmap_result[i], expected)
         else:
             expected = torch.randperm(10, **kwargs)
-            # RNG differs between eager and via dynamo trace on CUDA
-            if TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda":
+            # RNG differs between eager and via dynamo trace on CUDA/XPU
+            if TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu":
                 self._assert_all_slices_equal(vmap_result)
             else:
                 for i in range(B0):
@@ -5801,8 +6038,8 @@ class TestRandomness(TestCase):
                 expected = op(passed, 0)
 
                 self._assert_all_slices_unique(vmap_result)
-                # RNG differs between eager and via dynamo trace on CUDA
-                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda"):
+                # RNG differs between eager and via dynamo trace on CUDA/XPU
+                if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu"):
                     self.assertEqual(expected, vmap_result)
                 return
 
@@ -5814,8 +6051,8 @@ class TestRandomness(TestCase):
                 passed = passed[0]
             expected = op(passed, 0)
             self._assert_all_slices_equal(vmap_result)
-            # RNG differs between eager and via dynamo trace on CUDA
-            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type == "cuda"):
+            # RNG differs between eager and via dynamo trace on CUDA/XPU
+            if not (TEST_WITH_TORCHDYNAMO and torch.device(device).type != "cpu"):
                 for i in range(B0):
                     self.assertEqual(expected, vmap_result[i])
 
@@ -6252,7 +6489,9 @@ class TestRandomness(TestCase):
 
 
 @markDynamoStrictTest
-class TestTransformFailure(TestCase):
+class TestTransformFailureDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfTorchDynamo()
     @parametrize(
         "transform",
@@ -6303,7 +6542,9 @@ class TestTransformFailure(TestCase):
 
 
 @markDynamoStrictTest
-class TestVmapDeviceType(Namespace.TestVmapBase):
+class TestVmapDevice(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -6401,7 +6642,9 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
 
 @markDynamoStrictTest
-class TestVmapNestedTensor(Namespace.TestVmapBase):
+class TestVmapNestedTensorDevice(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -6573,18 +6816,42 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             vmap(vmap(vmap(f)))(x)
 
 
-only_for = ("cpu", "cuda")
-instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
+instantiate_parametrized_tests(TestVmapOperators)
 
+
+only_for = ("cpu", "cuda", "xpu")
 instantiate_device_type_tests(
-    TestVmapBatchedGradient,
+    TestVmapAPIDevice,
+    globals(),
+    only_for=only_for + ("mps",),
+    allow_mps=True,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestVmapBatchedGradientDevice,
     globals(),
     only_for=only_for,
+    allow_xpu=True,
 )
-instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
-instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
-instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
-instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
+instantiate_device_type_tests(
+    TestVmapOperatorsOpInfoDevice,
+    globals(),
+    only_for=only_for,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestRandomnessDevice, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestTransformFailureDevice, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestVmapDevice, globals(), only_for=only_for, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestVmapNestedTensorDevice, globals(), only_for=only_for, allow_xpu=True
+)
+
 
 if __name__ == "__main__":
     run_tests()

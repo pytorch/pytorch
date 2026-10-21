@@ -1,0 +1,41 @@
+diff --git a/test/cpython/v3_13/test_graphlib.py b/test/cpython/v3_13/test_graphlib.py
+index 5f38af4024c5b07f6191a3b146e449d546561f73..0543aa8b7500d6e46cbf89f1f437fc043e926c7a 100644
+--- a/test/cpython/v3_13/test_graphlib.py
++++ b/test/cpython/v3_13/test_graphlib.py
+@@ -1,10 +1,29 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_graphlib.py
++
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++# ======= END DYNAMO PATCH =======
++
+ import graphlib
+ import os
+ import unittest
+ 
+ from test.support.script_helper import assert_python_ok
+ 
+-class TestTopologicalSort(unittest.TestCase):
++class TestTopologicalSort(CPythonTestCase):
+     def _test_graph(self, graph, expected):
+         def static_order_with_groups(ts):
+             ts.prepare()
+@@ -249,4 +268,4 @@ class TestTopologicalSort(unittest.TestCase):
+         self.assertEqual(run1, run2)
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

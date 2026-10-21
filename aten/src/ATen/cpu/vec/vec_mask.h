@@ -124,6 +124,16 @@ class VecMask {
  private:
   VectorizedN<T, N> mask_;
 
+  template <typename U>
+  constexpr static T value_to_mask(U b) {
+    if constexpr (std::is_same_v<T, bool>) {
+      return static_cast<bool>(b);
+    } else {
+      using int_t = int_same_size_t<T>;
+      return b ? c10::bit_cast<T>(static_cast<int_t>(-1)) : static_cast<T>(0);
+    }
+  }
+
  public:
   VecMask() : mask_(static_cast<T>(0)) {}
   VecMask(const VectorizedN<T, N>& mask) : mask_(mask) {}
@@ -147,33 +157,29 @@ class VecMask {
 
   template <typename U>
   static VecMask<T, N> from(U b) {
-    using int_t = int_same_size_t<T>;
-    T mask = b ? c10::bit_cast<T>((int_t)(~(int_t)0)) : (T)0;
-    return VectorizedN<T, N>(mask);
+    return VectorizedN<T, N>(value_to_mask(b));
   }
 
   template <typename U>
   static VecMask<T, N> from(U* b) {
-    using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
     for (int i = 0; i < size(); i++) {
-      *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
+      mask[i] = value_to_mask(b[i]);
     }
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask));
   }
 
   template <typename U>
   static VecMask<T, N> from(U* b, int count) {
-    using int_t = int_same_size_t<T>;
     __at_align__ T mask[size()];
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
     for (int i = 0; i < count; i++) {
-      *(int_t*)(mask + i) = b[i] ? ~(int_t)0 : (int_t)0;
+      mask[i] = value_to_mask(b[i]);
     }
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask, count));
   }

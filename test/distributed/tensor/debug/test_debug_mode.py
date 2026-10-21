@@ -1,10 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import json
+import math
 import os
+import tempfile
 import unittest
 
 import torch
+import torch._dynamo.config
 import torch.distributed as dist
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -25,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
@@ -45,8 +50,171 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
 
 
+class TestDebugModeLogSerialization(TestCase):
+    def _run_hashed_debug_mode(self, x):
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            x.sin().sum()
+        return debug_mode.logs
+
+    def test_save_load_empty_logs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "empty.json")
+            DebugMode.save_logs([], path)
+            self.assertEqual(DebugMode.load_logs(path), [])
+
+    def test_save_load_redistribute_outer_call(self):
+        call = _RedistributeCall(1, "S(0)", "R", None, 0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "redistribute.json")
+            DebugMode.save_logs([call], path)
+            loaded_call = DebugMode.load_logs(path)[0]
+
+        self.assertIsInstance(loaded_call, _RedistributeCall)
+        self.assertTrue(loaded_call.is_outer_call)
+        self.assertEqual(loaded_call.render([]), call.render([]))
+
+    def test_save_load_logs_for_hash_mismatch(self):
+        x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+        x_different = x + 1
+
+        logs1 = self._run_hashed_debug_mode(x)
+        logs2 = self._run_hashed_debug_mode(x_different)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path1 = os.path.join(tmpdir, "run1.json")
+            path2 = os.path.join(tmpdir, "run2.json")
+            DebugMode.save_logs(logs1, path1)
+            DebugMode.save_logs(logs2, path2)
+
+            loaded1 = DebugMode.load_logs(path1)
+            loaded2 = DebugMode.load_logs(path2)
+
+        self.assertEqual(
+            [log.render([]) for log in loaded1],
+            [log.render([]) for log in logs1],
+        )
+        self.assertEqual(
+            DebugMode.check_hash_mismatches(logs1, loaded1, compare_inputs=True),
+            [],
+        )
+        self.assertTrue(
+            any(
+                isinstance(log, _OpCall)
+                and log.log is not None
+                and isinstance(log.log.get("input_hash"), tuple)
+                for log in loaded1
+            )
+        )
+
+        mismatches = DebugMode.check_hash_mismatches(
+            loaded1, loaded2, compare_inputs=True
+        )
+        self.assertGreater(len(mismatches), 0)
+        self.assertIn("aten::sin", {mismatch["call"] for mismatch in mismatches})
+
+    def test_save_load_logs_with_record_outputs(self):
+        x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.record_outputs(),
+            DebugMode.log_tensor_hashes(),
+        ):
+            x.sin().sum()
+        logs = debug_mode.logs
+
+        self.assertTrue(
+            any(
+                isinstance(log, _OpCall)
+                and log.record is not None
+                and "output" in log.record
+                for log in logs
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "logs.json")
+            DebugMode.save_logs(logs, path)
+            loaded_logs = DebugMode.load_logs(path)
+
+        self.assertTrue(all(log.record is None for log in loaded_logs))
+        self.assertEqual(DebugMode.check_hash_mismatches(logs, loaded_logs), [])
+
+    def test_save_load_logs_with_nonfinite_hashes(self):
+        def reject_nonstandard_json_constant(value):
+            raise AssertionError(f"nonstandard JSON constant: {value}")
+
+        def run_with_hash(hash_value):
+            x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
+            with (
+                DebugMode() as debug_mode,
+                DebugMode.log_tensor_hashes(
+                    hash_fn=lambda t: hash_value, hash_inputs=True
+                ),
+            ):
+                x.sin().sum()
+            return debug_mode.logs
+
+        logs_nan = run_with_hash(float("nan"))
+        logs_inf = run_with_hash(float("inf"))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path_nan = os.path.join(tmpdir, "nan.json")
+            path_inf = os.path.join(tmpdir, "inf.json")
+            DebugMode.save_logs(logs_nan, path_nan)
+            DebugMode.save_logs(logs_inf, path_inf)
+
+            with open(path_nan, encoding="utf-8") as f:
+                nan_json = f.read()
+            with open(path_inf, encoding="utf-8") as f:
+                inf_json = f.read()
+
+            json.loads(nan_json, parse_constant=reject_nonstandard_json_constant)
+            json.loads(inf_json, parse_constant=reject_nonstandard_json_constant)
+            self.assertNotIn("NaN", nan_json)
+            self.assertNotIn("Infinity", inf_json)
+
+            loaded_nan = DebugMode.load_logs(path_nan)
+            loaded_inf = DebugMode.load_logs(path_inf)
+
+        self.assertTrue(
+            any(
+                isinstance(log, _OpCall)
+                and log.log is not None
+                and math.isnan(log.log["hash"])
+                for log in loaded_nan
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(log, _OpCall)
+                and log.log is not None
+                and math.isinf(log.log["hash"])
+                for log in loaded_inf
+            )
+        )
+
+        mismatches = DebugMode.check_hash_mismatches(
+            loaded_nan, loaded_inf, compare_inputs=True
+        )
+        self.assertGreater(len(mismatches), 0)
+        self.assertTrue(any(math.isnan(mismatch["hash1"]) for mismatch in mismatches))
+        self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
+
+
 @requires_cuda
 class TestDTensorDebugMode(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
+        super().tearDownClass()
+
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
@@ -73,7 +241,26 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$10: f32[8, 32]| S(0)
+    aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+      aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$2: f32[8, 8]
+      aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$3: f32[8, 32]
+      aten::mm(ft$2: f32[8, 8], ft$3: f32[8, 32])  ->  ft$4: f32[8, 32]
+      -> output: S(0)
+      redistribute_input [implicit] (1, S(0) -> R)
+        redistribute_input(t$5: f32[1, 32], trace: S(0)->R)
+          _c10d_functional::all_gather_into_tensor(t$5: f32[1, 32], 8, 0)  ->  t$6: f32[8, 32]
+          _c10d_functional::_wrap_tensor_autograd(t$6: f32[8, 32])  ->  t$7: f32[8, 32]
+          _c10d_functional::wait_tensor(t$6: f32[8, 32])  ->  t$6: f32[8, 32]
+      aten::mm(t$8: f32[1, 8], t$6: f32[8, 32])  ->  t$9: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$10: f32[8, 32]| S(0))  ->  dt$14: f32[]| P(sum)
+    aten::sum(dt$10: f32[8, 32]| S(0))
+      aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$11: f32[8, 32]
+      aten::sum(ft$11: f32[8, 32])  ->  ft$12: f32[]
+      aten::sum(t$9: f32[1, 32])  ->  t$13: f32[]""",
+                """\
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       -> output: S(0)
@@ -86,10 +273,14 @@ class TestDTensorDebugMode(TestCase):
   <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
     aten::sum(dt$7: f32[8, 32]| S(0))
       aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
+            ),
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[3], _RedistributeCall))
+        redistribute_idx = expectedIfCppFakeTensor(6, 3)
+        self.assertTrue(
+            isinstance(debug_mode.operators[redistribute_idx], _RedistributeCall)
+        )
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -298,7 +489,30 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+  aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
+    aten::empty_strided([128, 8], [8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+    aten::empty_strided([8, 128], [128, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+    aten::mm(ft: f32[128, 8], ft: f32[8, 128])
+    redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
+        _c10d_functional::wait_tensor(t: f32[16, 16])
+        aten::chunk(t: f32[16, 16], 2)
+        aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
+        _c10d_functional::wait_tensor(t: f32[32, 32])
+        aten::chunk(t: f32[32, 32], 4)
+        aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::empty_strided([128, 128], [128, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+    aten::sum(ft: f32[128, 128])
+    aten::sum(t: f32[16, 128])""",
+                """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
     redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
@@ -315,6 +529,7 @@ class TestDTensorDebugMode(TestCase):
     aten::mm(t: f32[16, 8], t: f32[8, 128])
   aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
     aten::sum(t: f32[16, 128])""",
+            ),
         )
 
     def test_debug_mode_explicit_redistribute(self):
@@ -364,7 +579,21 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+  aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    aten::empty_strided([8, 16], [16, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft: f32[8, 16]
+    aten::topk(ft: f32[8, 16], 4, 1)  ->  ('ft: f32[8, 4]', 'ft: i64[8, 4]')
+    -> output: ('R', 'R')
+    redistribute_input [implicit] (0, S(1) -> R)
+      redistribute_input(t: f32[8, 2], trace: S(1)->R)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
+        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
+        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+                """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
     -> output: ('R', 'R')
     redistribute_input [implicit] (0, S(1) -> R)
@@ -375,6 +604,7 @@ class TestDTensorDebugMode(TestCase):
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+            ),
         )
 
     def test_debug_mode_einsum(self):
@@ -394,38 +624,73 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
+        cpp_expected = """\
   torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| P(sum)R, dt: f32[8, 4, 4]| RP(sum))
     aten::unsqueeze(dt: f32[16, 6, 8]| P(sum)R, 3)
+      aten::empty_strided([16, 6, 8], [48, 8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[16, 6, 8], 3)
       aten::unsqueeze(t: f32[16, 6, 8], 3)
     aten::unsqueeze(dt: f32[16, 6, 8, 1]| P(sum)R, 4)
+      aten::empty_strided([16, 6, 8, 1], [48, 8, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[16, 6, 8, 1], 4)
       aten::unsqueeze(t: f32[16, 6, 8, 1], 4)
     aten::permute(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [0, 1, 3, 4, 2])
+      aten::empty_strided([16, 6, 8, 1, 1], [48, 8, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
     aten::unsqueeze(dt: f32[8, 4, 4]| RP(sum), 3)
+      aten::empty_strided([8, 4, 4], [16, 4, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[8, 4, 4], 3)
       aten::unsqueeze(t: f32[8, 4, 4], 3)
     aten::unsqueeze(dt: f32[8, 4, 4, 1]| RP(sum), 4)
+      aten::empty_strided([8, 4, 4, 1], [16, 4, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::unsqueeze(ft: f32[8, 4, 4, 1], 4)
       aten::unsqueeze(t: f32[8, 4, 4, 1], 4)
     aten::permute(dt: f32[8, 4, 4, 1, 1]| RP(sum), [3, 4, 1, 2, 0])
+      aten::empty_strided([8, 4, 4, 1, 1], [16, 4, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
       aten::permute(t: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
     aten::permute(dt: f32[16, 6, 1, 1, 8]| P(sum)R, [0, 1, 4, 2, 3])
+      aten::empty_strided([16, 6, 1, 1, 8], [48, 8, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
       aten::permute(t: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
     aten::view(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [1, 96, 8])
+      aten::empty_strided([16, 6, 8, 1, 1], [48, 8, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[16, 6, 8, 1, 1], [1, 96, 8])
       aten::view(t: f32[16, 6, 8, 1, 1], [1, 96, 8])
     aten::permute(dt: f32[1, 1, 4, 4, 8]| RP(sum), [4, 2, 3, 0, 1])
+      aten::empty_strided([1, 1, 4, 4, 8], [1, 1, 4, 1, 16], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
       aten::permute(t: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
+      aten::empty_strided([8, 4, 4, 1, 1], [16, 4, 1, 1, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[8, 4, 4, 1, 1], [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
+      aten::empty_strided([1, 96, 8], [768, 8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::empty_strided([1, 8, 16], [128, 16, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::bmm(ft: f32[1, 96, 8], ft: f32[1, 8, 16])
       aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
+      aten::empty_strided([1, 96, 16], [1536, 16, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[1, 96, 16], [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
+      aten::empty_strided([16, 6, 1, 4, 4], [96, 16, 16, 4, 1], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::permute(ft: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
     aten::view(dt: f32[16, 6, 4, 4, 1]| P(sum)P(sum), [16, 6, 4, 4])
-      aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
+      aten::empty_strided([16, 6, 4, 4, 1], [96, 16, 4, 1, 16], dtype=torch.float32, device=cuda, pin_memory=False)
+      aten::view(ft: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])
+      aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])"""
+        python_expected = "\n".join(
+            line
+            for line in cpp_expected.splitlines()
+            if "aten::empty_strided" not in line and "(ft:" not in line
+        )
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            expectedIfCppFakeTensor(cpp_expected, python_expected),
         )
 
     def test_real_tensor(self):
@@ -442,7 +707,7 @@ class TestDTensorDebugMode(TestCase):
       aten::view(t: f32[8, 8, 8], [64, 8])
       aten::t(t: f32[8, 8])
       aten::addmm(t: f32[8], t: f32[64, 8], t: f32[8, 8])
-      aten::view(t: f32[64, 8], [8, 8, 8])
+      aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])
   <method 'sum' of 'torch._C.TensorBase' objects>(t: f32[8, 8, 8])
       aten::sum(t: f32[8, 8, 8])""",
         )
@@ -790,12 +1055,12 @@ class TestDTensorDebugMode(TestCase):
         aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
   [aot_eager region (compile)] exit
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
     aten::detach(t: f32[4])  ->  t: f32[4]
-    aten::detach(t: f32[4])  ->  t: f32[4]""",
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]""",
         )
 
     def test_record_function(self):
@@ -1077,6 +1342,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_nested_invoke_subgraph(self):
         # Test that DebugMode can trace the operations inside
         # invoke_subgraph HOP
@@ -1179,7 +1445,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         )
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
-            dist.all_gather_into_tensor(output_tensor, tensor)
+            dist.all_gather_single(output_tensor, tensor)
 
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
 
@@ -1207,7 +1473,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
             # Call with async_op=True returns a work handle
-            work = dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
+            work = dist.all_gather_single(output_tensor, tensor, async_op=True)
             # Wait for the async operation to complete
             work.wait()
 
@@ -1237,7 +1503,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         # Use functional collectives which return AsyncCollectiveTensor
         with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-            result = _functional_collectives.all_gather_tensor(
+            result = _functional_collectives.all_gather_single(
                 tensor, gather_dim=0, group=dist.group.WORLD
             )
 

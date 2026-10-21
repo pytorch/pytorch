@@ -25,6 +25,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     IntLike,
+    make_channels_last_strides_for,
     make_contiguous_strides_for,
     Number,
     NumberType,
@@ -41,7 +42,6 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
-from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 
 
@@ -189,9 +189,59 @@ def meta_take(self, index):
     return self.new_empty(index.shape)
 
 
+@register_meta([aten._standard_gamma.default, aten._standard_gamma.out])
+@out_wrapper()
+def meta__standard_gamma(self, generator=None):
+    return torch.empty_like(self)
+
+
+@register_meta(
+    [
+        aten._transformer_encoder_layer_fwd.default,
+        aten._transformer_encoder_layer_fwd.out,
+    ]
+)
+@out_wrapper()
+def meta__transformer_encoder_layer_fwd(
+    src: Tensor,
+    embed_dim: int,
+    num_heads: int,
+    qkv_weight: Tensor,
+    qkv_bias: Tensor,
+    proj_weight: Tensor,
+    proj_bias: Tensor,
+    use_gelu: bool,
+    norm_first: bool,
+    eps: float,
+    norm_weight_1: Tensor,
+    norm_bias_1: Tensor,
+    norm_weight_2: Tensor,
+    norm_bias_2: Tensor,
+    ffn_weight_1: Tensor,
+    ffn_bias_1: Tensor,
+    ffn_weight_2: Tensor,
+    ffn_bias_2: Tensor,
+    mask: torch.Tensor | None = None,
+    mask_type: int | None = None,
+) -> Tensor:
+    if src.is_nested:
+        raise NotImplementedError(
+            "_transformer_encoder_layer_fwd fake implementation does not support nested tensors"
+        )
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(src.numel() == 0):
+        return src.clone()
+    return torch.empty_like(src)
+
+
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     x_d = self.ndim
     y_d = other.ndim
     torch._check(
@@ -199,7 +249,7 @@ def linalg_cross(self, other, *, dim=-1):
         lambda: "linalg.cross: inputs must have the same number of dimensions.",
     )
     torch._check(
-        self.size(dim) == 3 and other.size(dim) == 3,
+        sym_and(self.size(dim) == 3, other.size(dim) == 3),
         lambda: (
             f"linalg.cross: inputs dimension {dim} must have length 3. "
             f"Got {self.size(dim)} and {other.size(dim)}"
@@ -214,6 +264,16 @@ def linalg_cross(self, other, *, dim=-1):
 def linalg_matrix_exp(self):
     squareCheckInputs(self, "linalg.matrix_exp")
     checkFloatingOrComplex(self, "linalg.matrix_exp")
+    return torch.empty_like(self, memory_format=torch.contiguous_format)
+
+
+@register_meta(aten.linalg_matrix_sqrth)
+@out_wrapper()
+def linalg_matrix_sqrth(self):
+    squareCheckInputs(self, "linalg.matrix_sqrth")
+    checkFloatingOrComplex(
+        self, "linalg.matrix_sqrth", allow_low_precision_dtypes=False
+    )
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
@@ -233,6 +293,15 @@ def cummaxmin(self, dim):
 @register_meta([aten.logcumsumexp.default, aten.logcumsumexp.out])
 @out_wrapper()
 def logcumsumexp(self, dim):
+    # torch._check rather than _check_not_implemented: a NotImplementedError
+    # from a meta kernel means "no meta implementation", which makes FakeTensor
+    # fall back to the real kernel and Dynamo graph break, so the input would
+    # only be rejected by running it eagerly. This rejects it while tracing.
+    torch._check(
+        self.dtype.is_floating_point or self.dtype.is_complex,
+        lambda: "logcumsumexp(): input dtype should be either floating point or "
+        f"complex. Got {self.dtype} instead.",
+    )
     # Checks that dim is within bounds
     maybe_wrap_dim(dim, self.ndim)
     return torch.empty_like(self, memory_format=torch.contiguous_format)
@@ -244,6 +313,13 @@ def logcumsumexp(self, dim):
 # Although the actual FFT launch is different, all the permuting code appears
 # to be the same
 def _exec_fft(out, self, out_sizes, dim, *, forward):
+    # Empty batches are short-circuited by the eager kernels (cuFFT/MKL/MPS all
+    # reject zero-element transforms); mirror that here so tracing does not call
+    # resize_ on a functionalized tensor.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(out.numel() == 0):
+        return out.new_empty(out_sizes)
     ndim = self.ndim
     signal_ndim = len(dim)
     batch_dims = ndim - signal_ndim
@@ -311,7 +387,10 @@ def meta_fft_c2c(self, dim, normalization, forward):
     if not dim:
         return self.clone()
 
-    if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
+    # MPS and PocketFFT (CPU without MKL) return contiguous outputs
+    if device_hint(self) == "mps" or (
+        device_hint(self) == "cpu" and not torch.backends.mkl.is_available()
+    ):
         return self.new_empty(self.size())
 
     out_sizes = self.size()
@@ -367,11 +446,20 @@ def meta_fft_r2c(self, dim, normalization, onesided):
     if onesided:
         out_sizes[last_dim] = last_dim_halfsize
 
+    # Determine output dtype based on input dtype and device
+    # bfloat16 FFT always produces complex64 output (not bcomplex32):
+    # - On CUDA: cuFFT CUDA_C_16BF is upcast to ComplexFloat (see SpectralOps.cpp line 376-379)
+    # - On ROCm/XPU: bfloat16 is promoted to float32 before FFT, yielding complex64
+    # See promote_type_fft() and _fft_r2c_cufft() in aten/src/ATen/native/SpectralOps.cpp
+    output_dtype = self.dtype
+    if output_dtype == torch.bfloat16 and (device_hint(self) in ("cuda", "xpu")):
+        output_dtype = torch.float32
+
     if device_hint(self) == "cuda" or device_hint(self) == "xpu":
         # _fft_r2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
         # _fft_r2c_xpu in torch-xpu-ops/src/ATen/native/xpu/SpectralOps.cpp
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
         working_tensor = self
@@ -383,7 +471,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
             _exec_fft(output, working_tensor, target_sizes, [last_dim], forward=True)
             if len(dim) > 1:
                 working_tensor = self.new_empty(
-                    out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+                    out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
                 )
 
             # Then any remaining C2C transforms
@@ -408,17 +496,17 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif torch.backends.mkl.is_available():
+    elif device_hint(self) != "mps" and torch.backends.mkl.is_available():
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
         return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
         return self.new_empty(
-            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+            out_sizes, dtype=utils.corresponding_complex_dtype(output_dtype)
         )
 
 
@@ -522,11 +610,40 @@ def meta_philox_key_fold_in(key, data):
     return torch.empty_like(key)
 
 
-def _check_philox_distribution_args(op_name, self, key):
+@register_meta(aten._philox_key_fold_in.Tensor)
+def meta_philox_key_fold_in_tensor(key, data):
     torch._check(
-        self.dtype.is_floating_point,
-        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
+        key.dim() >= 1 and key.shape[-1] == 2,
+        lambda: f"_philox_key_fold_in: key must have shape (*batch, 2), got shape {key.shape}",
     )
+    torch._check(
+        key.dtype == torch.uint64,
+        lambda: f"_philox_key_fold_in: key must have dtype uint64, got {key.dtype}",
+    )
+    torch._check(
+        data.dtype == torch.uint64,
+        lambda: f"_philox_key_fold_in: data must have dtype uint64, got {data.dtype}",
+    )
+    torch._check(
+        data.numel() == 1,
+        lambda: f"_philox_key_fold_in: data must be a single value, got {data.numel()} elements",
+    )
+    return torch.empty_like(key)
+
+
+_PHILOX_RANDINT_DTYPES = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
+
+
+def _check_philox_gen_args(op_name, self, key):
     torch._check(
         key.dtype == torch.uint64,
         lambda: f"{op_name}: key must have dtype uint64, got {key.dtype}",
@@ -562,6 +679,14 @@ def _check_philox_distribution_args(op_name, self, key):
         )
 
 
+def _check_philox_distribution_args(op_name, self, key):
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: f"{op_name}: self must be a floating point tensor, got {self.dtype}",
+    )
+    _check_philox_gen_args(op_name, self, key)
+
+
 @register_meta(aten._philox_normal_.default)
 def meta_philox_normal_(self, key, mean=0.0, std=1.0):
     _check_philox_distribution_args("_philox_normal_", self, key)
@@ -571,6 +696,32 @@ def meta_philox_normal_(self, key, mean=0.0, std=1.0):
 @register_meta(aten._philox_uniform_.default)
 def meta_philox_uniform_(self, key, low=0.0, high=1.0):
     _check_philox_distribution_args("_philox_uniform_", self, key)
+    return self
+
+
+@register_meta(aten._philox_randint_.default)
+def meta_philox_randint_(self, key, low=None, high=None):
+    torch._check(
+        self.dtype in _PHILOX_RANDINT_DTYPES,
+        lambda: f"_philox_randint_: self must have an integer dtype, got {self.dtype}",
+    )
+    if self.dtype.itemsize == 4 and (low is not None or high is not None):
+        # Must match the kernels' 32-bit sample range limit; see kMaxRange32.
+        # A range dividing 2**32 evenly is exact at any size, so only guard the
+        # ranges that actually skew.
+        dtype_low = -(2**31) if self.dtype.is_signed else 0
+        lo = dtype_low if low is None else low
+        hi = (dtype_low + 2**32) if high is None else high
+        rng = (hi - lo) % 2**32
+        torch._check(
+            rng == 0 or 2**32 % rng == 0 or rng < 2**28,
+            lambda: f"_philox_randint_: range (high - low = {rng}) does not divide 2^32 "
+            f"evenly and is too large for the output dtype {self.dtype}. Each element draws "
+            "only 32 random bits, so a non-dividing range >= 2^28 gives a significantly biased "
+            "distribution. Use a range that divides 2^32 (a power of two), or a 64-bit dtype "
+            "(torch.int64 or torch.uint64).",
+        )
+    _check_philox_gen_args("_philox_randint_", self, key)
     return self
 
 
@@ -602,7 +753,7 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
                 temp = self.clone(memory_format=torch.contiguous_format)
             return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
 
-    elif torch.backends.mkl.is_available():
+    elif device_hint(self) != "mps" and torch.backends.mkl.is_available():
         # _fft_c2r_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         input = self
         if len(dim) > 1:
@@ -811,9 +962,10 @@ def meta__cslt_sparse_mm(
         torch.bfloat16,
         torch.int8,
         torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
     }:
         raise AssertionError(
-            f"_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3, got {dense_B.dtype}"
+            f"_cslt_sparse_mm only supports fp16, bf16, int8, fp8e4m3, and fp8e4m3fnuz, got {dense_B.dtype}"
         )
     if compressed_A.dtype != dense_B.dtype:
         raise AssertionError(
@@ -824,11 +976,11 @@ def meta__cslt_sparse_mm(
             f"_cslt_sparse_mm only supports 2d inputs, got {len(dense_B.shape)}D"
         )
 
-    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
-
-    if is_8bit_input_type:
-        if dense_B.is_contiguous():
-            raise AssertionError("dense input must be transposed for 8bit dtypes")
+    is_fp8_input_type = compressed_A.dtype in [
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+    ]
+    is_8bit_input_type = compressed_A.dtype == torch.int8 or is_fp8_input_type
 
     n = dense_B.size(1)
     m = compressed_A.size(0)
@@ -845,6 +997,7 @@ def meta__cslt_sparse_mm(
             in {
                 torch.float16,
                 torch.bfloat16,
+                torch.float32,
                 torch.int32,
                 torch.float8_e4m3fn,
             }
@@ -852,6 +1005,16 @@ def meta__cslt_sparse_mm(
             raise AssertionError(
                 f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
             )
+        if is_fp8_input_type and torch.version.hip and out_dtype != torch.float32:
+            # Match the eager TORCH_CHECK in _cslt_sparse_mm_impl so compile
+            # rejects at trace time what eager rejects at call time.
+            raise AssertionError(
+                f"out_dtype must be float32 for fp8 inputs on ROCm, got {out_dtype}"
+            )
+    if out_dtype is None and is_fp8_input_type and torch.version.hip:
+        # hipSparseLt only produces fp32 for fp8 inputs, so _cslt_sparse_mm
+        # forces the result dtype to fp32 when out_dtype is omitted.
+        out_dtype = torch.float32
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
@@ -909,22 +1072,22 @@ def meta_segment_reduce(
             "segment_reduce(): indices based reduction is not supported yet."
         )
 
-    def segment_reduce_lengths_tensor(lengths_shape):
+    def segment_reduce_output(segment_count):
+        output_shape = list(data.shape)
+        output_shape[axis] = segment_count
         return torch.empty(
-            lengths_shape + data.shape[axis + 1 :],
+            output_shape,
             dtype=data.dtype,
             device="meta",
             memory_format=torch.contiguous_format,
         )
 
     if lengths is not None:
-        return segment_reduce_lengths_tensor(lengths.shape)
+        return segment_reduce_output(lengths.shape[axis])
     # FIXME should probably check that lengths and offset aren't both set, but
     # the ATen implementation neglects this too
     if offsets is not None:
-        # lengths == torch.diff(offsets)
-        lengths_shape = offsets.shape[:-1] + (offsets.shape[-1] - 1,)
-        return segment_reduce_lengths_tensor(lengths_shape)
+        return segment_reduce_output(offsets.shape[axis] - 1)
     raise RuntimeError("segment_reduce(): Either lengths or offsets must be defined.")
 
 
@@ -934,7 +1097,8 @@ def meta_max(self):
     return self.new_empty(())
 
 
-@register_meta(aten.max.dim)
+@register_meta([aten.max.dim, aten.max.dim_max])
+@out_wrapper("max", "max_values", exact_dtype=True)
 def meta_max_dim(self, dim, keepdim=False):
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -950,7 +1114,8 @@ def meta_min(self):
     return self.new_empty(())
 
 
-@register_meta(aten.min.dim)
+@register_meta([aten.min.dim, aten.min.dim_min])
+@out_wrapper("min", "min_indices", exact_dtype=True)
 def meta_min_dim(self, dim, keepdim=False):
     dim = utils.reduction_dims(self.shape, (dim,))
     output_shape = _compute_reduction_shape(self, dim, keepdim)
@@ -1208,6 +1373,9 @@ def meta_linalg_eig(input: Tensor):
     )
     values = input.new_empty(input.shape[:-1], dtype=complex_dtype)
     vectors = input.new_empty(input.shape, dtype=complex_dtype)
+    # On CPU, linalg_eig_out_info produces column-major (Fortran) layout via
+    # resize_ + transpose_(-2, -1). On CUDA, vectors_tmp_needed is always true
+    # so the result goes through resize_output, yielding row-major (C) layout.
     is_cuda = device_hint(input) == "cuda"
     vectors.as_strided_(
         input.shape, make_contiguous_strides_for(input.shape, row_major=is_cuda)
@@ -1240,15 +1408,6 @@ def cholesky_solve(self: Tensor, A: Tensor, upper: bool = False) -> Tensor:
         self, A, "cholesky_solve"
     )
     return _cholesky_solve_helper(self_broadcasted, A_broadcasted, upper)
-
-
-@register_meta(aten.cholesky)
-@out_wrapper()
-def cholesky(self: Tensor, upper: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
-    squareCheckInputs(self, "cholesky")
-    return cloneBatchedColumnMajor(self)
 
 
 @register_meta(aten.cholesky_inverse)
@@ -1428,10 +1587,10 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Te
     else:
         P = A.new_empty([0])
 
-    sizes[-1] = k
+    sizes[-1] = k  # type: ignore[call-overload]
     L = A.new_empty(sizes)
 
-    sizes[-2] = k
+    sizes[-2] = k  # type: ignore[call-overload]
     sizes[-1] = n
     U = A.new_empty(sizes)
     return P, L, U
@@ -1464,7 +1623,7 @@ def linalg_lu_factor_ex_meta(
     # Sets sizes to the size of pivots
     sizes.pop()
     # Use sym_min to handle unbacked symbolic dimensions
-    sizes[-1] = sym_min(m, n)
+    sizes[-1] = sym_min(m, n)  # type: ignore[call-overload]
     pivots = A.new_empty(sizes, dtype=torch.int)
 
     # Sets sizes to the size of info
@@ -1554,16 +1713,16 @@ def lu_unpack_meta(
     sizes = list(LU.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)
     else:
         P = LU.new_empty([0])
     if unpack_data:
-        sizes[-1] = k
+        sizes[-1] = k  # type: ignore[call-overload]
         L = LU.new_empty(sizes)
-        sizes[-2] = k
+        sizes[-2] = k  # type: ignore[call-overload]
         sizes[-1] = n
         U = LU.new_empty(sizes)
     else:
@@ -1604,11 +1763,11 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = sym_min(m, n)
 
     if compute_q:
         Q_shape = list(A.shape)
-        Q_shape[-1] = k if reduced_mode else m
+        Q_shape[-1] = k if reduced_mode else m  # type: ignore[call-overload]
         Q = A.new_empty(Q_shape)
         Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
     else:
@@ -1616,10 +1775,38 @@ def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
 
     # For readability
     R_shape = list(A.shape)
-    R_shape[-2] = k if reduced_mode or not compute_q else m
+    R_shape[-2] = k if reduced_mode or not compute_q else m  # type: ignore[call-overload]
     R = A.new_empty(R_shape)
     R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
     return Q, R
+
+
+@register_meta([aten.linalg_polar.default, aten.linalg_polar.out])
+@out_wrapper("U", "H")
+def linalg_polar_meta(A: Tensor) -> tuple[Tensor, Tensor]:
+    checkIsMatrix(A, "linalg.polar")
+    checkFloatingOrComplex(A, "linalg.polar")
+
+    m = A.shape[-2]
+    n = A.shape[-1]
+    # Symbolic-safe comparison so a dynamic row dimension is not specialized.
+    torch._check(
+        m >= n,
+        lambda: f"linalg.polar: input must have at least as many rows as "
+        f"columns, but got {m} by {n} matrices",
+    )
+
+    # U matches A's shape; H is (n, n). Both row-major contiguous, matching the
+    # SVD-based C++ kernel and the CUDA override.
+    U_shape = list(A.shape)
+    U = A.new_empty(U_shape)
+    U.as_strided_(U_shape, make_contiguous_strides_for(U_shape))
+
+    H_shape = list(A.shape)
+    H_shape[-2] = n
+    H = A.new_empty(H_shape)
+    H.as_strided_(H_shape, make_contiguous_strides_for(H_shape))
+    return U, H
 
 
 @register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
@@ -1660,7 +1847,7 @@ def _linalg_svd_meta(
     if compute_uv:
         U_shape = batch_dims + [m, m if full_matrices else k]
         U = A.new_empty(U_shape)
-        U.as_strided_(U_shape, make_contiguous_strides_for(U_shape, row_major=False))
+        U.as_strided_(U_shape, make_contiguous_strides_for(U_shape, row_major=False))  # type: ignore[arg-type]
 
         V_shape = batch_dims + [n if full_matrices else k, n]
         V = A.new_empty(V_shape)
@@ -1669,7 +1856,7 @@ def _linalg_svd_meta(
         # available as device_hint just defaults to CUDA in that case. See
         # _linalg_svd meta in core.
         is_cuda = device_hint(A) == "cuda"
-        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))  # type: ignore[arg-type]
     else:
         # doesn't matter
         U = A.new_empty([0])
@@ -1979,17 +2166,19 @@ def _padding_check_valid_input(input, padding, *, dim):
     valid_batch_mode = is_batch_mode
     valid_non_batch_mode = not is_batch_mode
 
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     if is_batch_mode:
         # allow batch size of 0-dim.
         for d in range(1, input_dim):
-            valid_batch_mode = valid_batch_mode and input.size(d) != 0
+            valid_batch_mode = sym_and(valid_batch_mode, input.size(d) != 0)
     else:
         for d in range(input_dim):
-            valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
+            valid_non_batch_mode = sym_and(valid_non_batch_mode, input.size(d) != 0)
 
     # allow empty batch size but not other dimensions.
     torch._check(
-        valid_batch_mode or valid_non_batch_mode,
+        sym_or(valid_batch_mode, valid_non_batch_mode),
         lambda: (
             f"Expected {dim + 1}D or {dim + 2}D (batch mode) tensor with possibly 0 batch size "
             f"and other non-zero dimensions for input, but got: {input.shape}"
@@ -1998,6 +2187,8 @@ def _padding_check_valid_input(input, padding, *, dim):
 
 
 def _pad1d_common(input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_plane = 0
     dim_w = 1
     nbatch = 1
@@ -2017,7 +2208,7 @@ def _pad1d_common(input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
@@ -2052,6 +2243,8 @@ def meta_replication_pad1d(input, padding):
 
 
 def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_w = 1
     if not is_reflection:
         torch._check(len(padding) == 2, lambda: "padding size is expected to be 2")
@@ -2066,13 +2259,18 @@ def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
             ),
         )
 
+    dim_c = dim_w - 1
+    torch._check(
+        input.size(dim_c) == grad_output.size(dim_c),
+        lambda: f"grad_output channel unexpected. Expected: {input.size(dim_c)}, Got: {grad_output.size(dim_c)}",
+    )
     torch._check(
         output_w == grad_output.size(dim_w),
         lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
@@ -2094,6 +2292,8 @@ def meta_replication_pad1d_backward(grad_output, input, padding):
 
 
 def _pad2d_common(input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_w = 2
     dim_h = 1
     dim_slices = 0
@@ -2118,14 +2318,14 @@ def _pad2d_common(input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
             ),
         )
         torch._check(
-            pad_t < input_h and pad_b < input_h,
+            sym_and(pad_t < input_h, pad_b < input_h),
             lambda: (
                 f"Argument #6: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_t}, {pad_b}) at dimension {dim_h} of input {input.shape}"
@@ -2133,17 +2333,25 @@ def _pad2d_common(input, padding, *, is_reflection):
         )
 
     torch._check(
-        output_w >= 1 or output_h >= 1,
+        sym_and(output_w >= 1, output_h >= 1),
         lambda: (
-            f"input (H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output H: {output_h} W: {output_w}"
+            f"Calculated output H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input H: {input_h}, W: {input_w})"
         ),
     )
 
     if input.ndim == 3:
         return input.new_empty((nplane, output_h, output_w))
     else:
-        return input.new_empty((nbatch, nplane, output_h, output_w))
+        output = input.new_empty((nbatch, nplane, output_h, output_w))
+        # CPU kernels preserve channels_last via suggest_memory_format(),
+        # but CUDA kernels always produce contiguous output.
+        if (
+            device_hint(input) != "cuda"
+            and utils.suggest_memory_format(input) == torch.channels_last
+        ):
+            output = output.to(memory_format=torch.channels_last)
+        return output
 
 
 @register_meta(aten.reflection_pad2d)
@@ -2199,6 +2407,10 @@ def meta_pad2d_backward(grad_output, self, padding):
     output_w = input_w + pad_l + pad_r
 
     torch._check(
+        self_shape[dim_plane] == grad_output.size(dim_plane),
+        lambda: f"grad_output channel unexpected. Expected: {self_shape[dim_plane]}, Got: {grad_output.size(dim_plane)}",
+    )
+    torch._check(
         output_w == grad_output.size(dim_w),
         lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
     )
@@ -2210,6 +2422,8 @@ def meta_pad2d_backward(grad_output, self, padding):
 
 
 def _pad3d_common(input, padding, *, is_reflection):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     dim_w = 3
     dim_h = 2
     dim_d = 1
@@ -2237,21 +2451,21 @@ def _pad3d_common(input, padding, *, is_reflection):
 
     if is_reflection:
         torch._check(
-            pad_l < input_w and pad_r < input_w,
+            sym_and(pad_l < input_w, pad_r < input_w),
             lambda: (
                 f"Argument #4: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
             ),
         )
         torch._check(
-            pad_t < input_h and pad_b < input_h,
+            sym_and(pad_t < input_h, pad_b < input_h),
             lambda: (
                 f"Argument #6: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_t}, {pad_b}) at dimension {dim_h} of input {input.shape}"
             ),
         )
         torch._check(
-            pad_f < input_d and pad_bk < input_d,
+            sym_and(pad_f < input_d, pad_bk < input_d),
             lambda: (
                 f"Argument #8: Padding size should be less than the corresponding input dimension, "
                 f"but got: padding ({pad_f}, {pad_bk}) at dimension {dim_d} of input {input.shape}"
@@ -2259,10 +2473,10 @@ def _pad3d_common(input, padding, *, is_reflection):
         )
 
     torch._check(
-        output_w >= 1 or output_h >= 1 or output_d >= 1,
+        sym_and(output_w >= 1, output_h >= 1, output_d >= 1),
         lambda: (
-            f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
-            f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
+            f"Calculated output D: {output_d} H: {output_h} W: {output_w} must be >= 1 "
+            f"in every dimension (input D: {input_d}, H: {input_h}, W: {input_w})"
         ),
     )
 
@@ -2324,6 +2538,11 @@ def meta_pad3d_backward(grad_output, input, padding):
     output_h = input_h + pad_t + pad_b
     output_w = input_w + pad_l + pad_r
 
+    dim_c = dim_d - 1
+    torch._check(
+        input.size(dim_c) == grad_output.size(dim_c),
+        lambda: f"grad_output channel unexpected. Expected: {input.size(dim_c)}, Got: {grad_output.size(dim_c)}",
+    )
     torch._check(
         output_w == grad_output.size(dim_w),
         lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
@@ -2347,17 +2566,16 @@ def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
         self.is_contiguous(), lambda: "_pdist_forward requires contiguous input"
     )
     n = self.size(0)
-    if n <= 1:
-        return self.new_empty([0]).to(memory_format=torch.legacy_contiguous_format)  # type: ignore[call-overload]
-    else:
-        return self.new_empty((n * (n - 1) // 2,)).to(
-            memory_format=torch.legacy_contiguous_format
-        )  # type: ignore[call-overload]
+    return self.new_empty((n * (n - 1) // 2,)).to(
+        memory_format=torch.legacy_contiguous_format
+    )  # type: ignore[call-overload]
 
 
 @register_meta(aten._pdist_backward)
 @out_wrapper()
-def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) -> Tensor:
+def meta__pdist_backward(
+    grad_output: Tensor, self: Tensor, p: float, pdist: Tensor
+) -> Tensor:
     torch._check(
         self.is_contiguous(), lambda: "_pdist_backward requires self to be contiguous"
     )
@@ -2458,14 +2676,21 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
         lambda: f"a and b must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
     )
     if out_dtype is not None:
-        torch._check(
-            out_dtype == a.dtype
-            or (
-                out_dtype == torch.float32
-                and a.dtype in (torch.float16, torch.bfloat16)
-            ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(a) in ("cuda", "xpu"):
+            torch._check(
+                out_dtype == a.dtype
+                or (
+                    out_dtype == torch.float32
+                    and a.dtype in (torch.float16, torch.bfloat16)
+                ),
+                lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+            )
     result_dtype = a.dtype if out_dtype is None else out_dtype
     return a.new_empty((N, P), dtype=result_dtype)
 
@@ -2482,8 +2707,9 @@ def _compute_reduction_shape(self, dims, keepdim):
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
 def device_hint(tensor) -> "str":
-    if isinstance(tensor, torch._subclasses.FakeTensor):
-        return tensor.fake_device.type
+    fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
+    if fake_device is not None:
+        return fake_device.type
     elif (
         hasattr(tensor, "device")
         and hasattr(tensor.device, "type")
@@ -2580,6 +2806,45 @@ def calc_conv_nd_return_shape(
         else:
             output_padding_list = output_padding
 
+    # Validate output_padding < stride or dilation in each dim (mirrors C++
+    # NaiveConvolutionTransposeNd check).
+    if is_transposed and output_padding_list:
+        torch._check(
+            all(
+                op < s or op < d
+                for op, s, d in zip(output_padding_list, stride, dilation, strict=True)
+            ),
+            lambda: (
+                f"output padding must be smaller than either stride or dilation, "
+                f"but got output_padding={output_padding_list}, "
+                f"stride={stride}, dilation={dilation}"
+            ),
+        )
+
+    # Validate kernel size fits within padded input (mirrors C++ check_shape_forward
+    # in aten/src/ATen/native/Convolution.cpp).
+    if not is_transposed:
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        # pyrefly: ignore [bad-index, index-error]
+        padded_input = [dims[i] + 2 * padding[i] for i in range(len(dims))]
+        effective_kernel = [
+            # pyrefly: ignore [bad-index, index-error]
+            dilation[i] * (kernel_size[i] - 1) + 1
+            for i in range(len(dims))
+        ]
+        torch._check(
+            sym_and(
+                *[p >= k for p, k in zip(padded_input, effective_kernel, strict=True)]
+            ),
+            lambda: (
+                f"Calculated padded input size per channel: "
+                f"({' x '.join(str(x) for x in padded_input)}). "
+                f"Kernel size: ({' x '.join(str(x) for x in effective_kernel)}). "
+                f"Kernel size can't be greater than actual input size"
+            ),
+        )
+
     for i in range(len(dims)):
         # If output_padding is present, we are dealing with a transposed convolution
         if output_padding_list:
@@ -2603,22 +2868,26 @@ def calc_conv_nd_return_shape(
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
     # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
-    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
-    # but other backends fail: CPU rejects it, ROCm/miopen returns
-    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
-    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch.fx.experimental.symbolic_shapes import sym_or
+    # CUDA (cuDNN) and HIP handle zero-sized conv_transpose outputs by short-circuiting,
+    # but other backends fail: CPU rejects it and MPS asserts "Placeholder tensor is empty".
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
 
-    device = (
-        input_tensor.fake_device
-        if isinstance(input_tensor, FakeTensor)
-        else input_tensor.device
-    )
+    fake_device = maybe_get_fake_device(input_tensor)
+    device = fake_device if fake_device is not None else input_tensor.device
 
-    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    # ROCm reports device.type as "cuda"; keep the existing NVIDIA CUDA behavior
+    # unchanged and only apply the new check to HIP.
     is_cudnn = device.type == "cuda" and torch.version.hip is None
-    if not is_cudnn:
+    is_hip = device.type == "cuda" and torch.version.hip is not None
+    if is_hip:
+        torch._check(
+            sym_and(*[x >= 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
+    elif not is_cudnn:
         torch._check(
             sym_or(*[x > 0 for x in ret_shape[2:]]),
             lambda: f"Given input size per channel: {list(dims)}. "
@@ -2644,29 +2913,31 @@ def meta_miopen_batch_norm(
     exponential_average_factor: float,
     epsilon: float,
 ):
-    # In batch norm the output is of the same shape as the input
-    out_shape = input_tensor.shape
-
     # If tensor is provided for running_mean and running_var then use this. If these are not
     # provided then we return the shape of weight tensor. Similar to how this is handled in the decomposition
     save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
     save_var_shape = running_var.shape if running_var is not None else weight.shape
 
-    def pick_memory_format():
-        if is_channels_last(input_tensor):
-            return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        return torch.contiguous_format
+    # Pick the output memory format the same way eager does (suggest_memory_format),
+    # but in a DDE-safe way for unbacked symbolic strides: if we can't decide whether
+    # the input is channels_last contiguous, fall back to plain contiguous.
+    fmt = suggest_memory_format(input_tensor)
 
-    out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
+    # Mirror eager's TORCH_CHECK so the compiled graph fails fast at runtime
+    # instead of silently producing an output with the wrong strides.
+    torch._check(
+        torch.ops.aten.sym_is_contiguous.default(input_tensor, memory_format=fmt),
+        lambda: f"miopen_batch_norm: input must be contiguous in {fmt}",
+    )
+
+    out = torch.empty_like(input_tensor, memory_format=fmt)
 
     if training:
-        save_mean = input_tensor.new_empty(save_mean_shape)
-        save_var = input_tensor.new_empty(save_var_shape)
+        save_mean = weight.new_empty(save_mean_shape)
+        save_var = weight.new_empty(save_var_shape)
     else:
-        save_mean = input_tensor.new_empty((0,))
-        save_var = input_tensor.new_empty((0,))
+        save_mean = weight.new_empty((0,))
+        save_var = weight.new_empty((0,))
 
     return out, save_mean, save_var
 
@@ -2675,7 +2946,7 @@ def meta_miopen_batch_norm(
 def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: torch.Tensor | None,
     stride: list[int],
     padding: list[int],
     dilation: list[int],
@@ -2694,6 +2965,17 @@ def meta_conv(
         output_padding if is_transposed else None,
     )
 
+    if is_transposed and bias is not None:
+        expected = weight.shape[1] * groups
+        torch._check(
+            bias.ndim == 1 and bias.shape[0] == expected,
+            lambda: (
+                f"Given transposed=1, weight of size {list(weight.shape)}, "
+                f"expected bias to be 1-dimensional with {expected} elements, "
+                f"but got bias of size {list(bias.shape)} instead"
+            ),
+        )
+
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     input_channels_dim = 1
@@ -2708,6 +2990,35 @@ def meta_conv(
     # kernel and uses FakeTensor.fake_device for an accurate answer.
     out = input_tensor.new_empty(shape_out)
     return out
+
+
+@register_meta(aten._convolution.default)
+def meta__conv(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    transposed: bool,
+    output_padding: list[int],
+    groups: int,
+    benchmark: bool,
+    deterministic: bool,
+    cudnn_enabled: bool,
+    allow_tf32: bool = True,
+):
+    return meta_conv(
+        input_tensor,
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+    )
 
 
 if torch._C._has_mkldnn:
@@ -2933,6 +3244,31 @@ if torch._C._has_mkldnn:
         output_shape[-1] = w.shape[1]
         out = x.new_empty(output_shape)
         return out
+
+    @register_meta(torch.ops.onednn.qlinear_prepack.default)
+    def meta_qlinear_prepack(weight, x_shape):
+        # Mirror the real C++ kernel pack_weight_to_onednn_tensor in
+        # aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp
+        torch._check(
+            weight.dim() == 2,
+            lambda: f"qlinear_prepack expects a 2D weight, got {weight.dim()}D",
+        )
+        torch._check(
+            weight.dtype in (torch.int8, torch.float8_e4m3fn),
+            lambda: (
+                "qlinear_prepack expects int8 or float8_e4m3fn weight, "
+                f"got {weight.dtype}"
+            ),
+        )
+        N, K = weight.shape
+        torch._check(
+            x_shape is None or x_shape[-1] == K,
+            lambda: (
+                f"qlinear_prepack: x_shape[-1] ({x_shape[-1]}) must match "
+                f"weight in_features ({K})"
+            ),
+        )
+        return weight.new_empty((K, N))
 
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
@@ -3249,7 +3585,7 @@ def meta_avg_pool3d(
     )
 
     torch._check(
-        not divisor_override or divisor_override != 0,
+        divisor_override is None or divisor_override != 0,
         lambda: "divisor must be not zero",
     )
 
@@ -3336,7 +3672,7 @@ def meta_avg_pool3d_backward(
     )
 
     torch._check(
-        not divisor_override or divisor_override != 0,
+        divisor_override is None or divisor_override != 0,
         lambda: "divisor must be not zero",
     )
 
@@ -3829,10 +4165,23 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
 
 @register_meta([aten.randint_like.Tensor])
 def meta_randint_like(self, high, **kwargs):
-    return self.new_empty(self.size())
+    return aten.empty_like.default(
+        self,
+        dtype=kwargs.get("dtype"),
+        layout=kwargs.get("layout"),
+        device=kwargs.get("device"),
+        pin_memory=kwargs.get("pin_memory"),
+        memory_format=kwargs.get("memory_format"),
+    )
 
 
-@register_meta([aten._fused_adam_.default, aten._fused_adamw_.default])
+@register_meta(
+    [
+        aten._fused_adam_.default,
+        aten._fused_adamw_.default,
+        aten._fused_adamw_.tensor_lr,
+    ]
+)
 def meta__fused_adam_(
     self,
     grads,
@@ -4143,13 +4492,18 @@ def meta__dyn_quant_pack_4bit_weight(
         weights.dtype is torch.uint8,
         lambda: f"expected w to be uint8, got {weights.dtype}",
     )
-    if torch.backends.kleidiai.is_available() and (
-        (block_size == in_features and scales_zeros.dtype == torch.float)
-        or (
-            block_size < in_features
-            and block_size % 32 == 0
-            and in_features % block_size == 0
-            and scales_zeros.dtype == torch.bfloat16
+    # Mirror can_use_kleidiai
+    if (
+        torch.backends.kleidiai.is_available()
+        and torch.cpu.get_capabilities().get("dot")
+        and (
+            (block_size == in_features and scales_zeros.dtype == torch.float)
+            or (
+                block_size < in_features
+                and block_size % 32 == 0
+                and in_features % block_size == 0
+                and scales_zeros.dtype == torch.bfloat16
+            )
         )
     ):
         packed_weight_size = get_kai_packed_weight_size(
@@ -4195,6 +4549,14 @@ def meta__weight_int8pack_mm(x, w, q_scales):
         w.dtype is torch.int8,
         lambda: f"expected w to be int8, got {w.dtype}",
     )
+    torch._check(
+        w.size(1) == x.size(1),
+        lambda: f"expected w.size(1) ({w.size(1)}) == x.size(1) ({x.size(1)})",
+    )
+    torch._check(
+        q_scales.dim() == 1 and q_scales.size(0) == w.size(0),
+        lambda: f"expected q_scales to be 1D with size {w.size(0)}, got shape {q_scales.shape}",
+    )
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
@@ -4236,7 +4598,7 @@ def meta_cdist_forward(x1, x2, p, compute_mode):
 
 @register_meta(aten._cdist_backward)
 @out_wrapper()
-def meta_cdist_backward(grad, x1, x2, p, cdist):
+def meta_cdist_backward(grad_output, x1, x2, p, cdist):
     c1 = x1.shape[-1]
     r1 = x1.shape[-2]
     r2 = x2.shape[-2]
@@ -4384,6 +4746,9 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 @out_wrapper()
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
+    # reduces over all dimensions if dims=() is passed
+    if dims == () or dims == []:
+        dims = None
     dims = utils.reduction_dims(input.shape, dims)
     output_shape = _compute_reduction_shape(input, dims, keepdim)
     return input.new_empty(output_shape, dtype=output_dtype)
@@ -4409,8 +4774,6 @@ def meta_median(input):
 )
 @out_wrapper("values", "indices")
 def meta_median_mode_dim(input, dim=-1, keepdim=False):
-    if device_hint(input) == "cuda":
-        utils.alert_not_deterministic("median CUDA with indices output")
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
     return (
@@ -4452,15 +4815,33 @@ def meta_zero_(self):
 @register_meta(
     [
         aten.mul_.Scalar,
-        aten.div_.Scalar,
         aten.mul_.Tensor,
-        aten.div_.Tensor,
         aten.logical_and_.default,
         aten.logical_or_.default,
         aten.logical_xor_.default,
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
+    return self
+
+
+@register_meta([aten.div_.Scalar, aten.div_.Tensor])
+def meta_div_inplace(self, other):
+    _, result_dtype = elementwise_dtypes(
+        self,
+        other,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    torch._check(
+        utils.can_safe_cast_to(cast_from=result_dtype, cast_to=self.dtype),
+        lambda: (
+            f"result type {result_dtype} can't be cast to the desired "
+            f"output type {self.dtype}"
+        ),
+    )
+
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
@@ -4511,7 +4892,7 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     # Do not allow bool+other->bool in-place
     if is_booleanic(self) and not is_booleanic(other):
         raise RuntimeError(
-            "Promotion of book.add/sub_(others) in in-place ops are not possible due to element size change."
+            "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change."
         )
 
     if isinstance(other, torch.Tensor):
@@ -4555,7 +4936,15 @@ def shift_dtype_check(fn_name, self, val):
         )
 
 
-@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+@register_meta(
+    [
+        aten.__rshift__.Tensor,
+        aten.__rshift__.Scalar,
+        aten.__rshift__.Scalar_out,
+        aten.__rshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_rshifts(self, other):
     shift_dtype_check("rshift", self, other)
     return elementwise_meta(
@@ -4563,7 +4952,15 @@ def meta_rshifts(self, other):
     )
 
 
-@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+@register_meta(
+    [
+        aten.__lshift__.Tensor,
+        aten.__lshift__.Scalar,
+        aten.__lshift__.Scalar_out,
+        aten.__lshift__.Tensor_out,
+    ]
+)
+@out_wrapper(exact_dtype=True)
 def meta_lshifts(self, other):
     shift_dtype_check("lshift", self, other)
     return elementwise_meta(
@@ -4573,16 +4970,26 @@ def meta_lshifts(self, other):
 
 @register_meta(aten.zero.default)
 def meta_zero(self):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
+    if isinstance(val, torch.Tensor):
+        torch._check(
+            val.dim() == 0,
+            lambda: f"fill_ only supports 0-dimension value tensor but got tensor with {val.dim()} dimensions.",
+        )
     return self
 
 
 @register_meta([aten.fill.Tensor, aten.fill.Scalar])
 def meta_fill(self, val):
+    if isinstance(val, torch.Tensor):
+        torch._check(
+            val.dim() == 0,
+            lambda: f"fill_ only supports 0-dimension value tensor but got tensor with {val.dim()} dimensions.",
+        )
     return torch.empty_like(self)
 
 
@@ -4696,13 +5103,20 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
     if out_dtype:
-        supported_out_dtype = (
-            batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
-        ) and out_dtype == torch.float32
-        torch._check(
-            out_dtype == batch1.dtype or supported_out_dtype,
-            lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
-        )
+        # The out_dtype restriction below is a property of the in-tree CUDA/XPU
+        # backends (see aten/src/ATen/native/cuda/Blas.cpp and
+        # aten/src/ATen/native/mkldnn/xpu/Blas.cpp). Out-of-tree backends (e.g.
+        # accelerators registered via PrivateUse1) may support arbitrary
+        # out_dtype combinations, so only enforce it for the backends that have
+        # the restriction.
+        if device_hint(batch1) in ("cuda", "xpu"):
+            supported_out_dtype = (
+                batch1.dtype == torch.float16 or batch1.dtype == torch.bfloat16
+            ) and out_dtype == torch.float32
+            torch._check(
+                out_dtype == batch1.dtype or supported_out_dtype,
+                lambda: "out_dtype only supported for torch.float32 output with float16/bfloat16 inputs or same as input dtypes",
+            )
         output = batch2.new_empty(output_size).to(out_dtype)
     else:
         # TODO: handle out
@@ -4731,13 +5145,9 @@ def meta_bmm_dtype(self, mat2, out_dtype):
 
 
 def div_rtn(x, y):
-    q = x // y
-    r = x % y
-    # WARNING: explicit bool conversion here is necessary;
-    # would be fixed by SymBool
-    if r != 0 and (bool(r < 0) != bool(y < 0)):
-        q -= 1
-    return q
+    # Python // already floors toward negative infinity, so the
+    # remainder-sign adjustment from the original C++ port is unnecessary.
+    return x // y
 
 
 def pooling_output_shape_pad_lr(
@@ -4799,6 +5209,8 @@ def pool2d_shape_check(
     outputWidth,
     memory_format,
 ):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_or
+
     ndim = input.dim()
     nOutputPlane = nInputPlane
 
@@ -4815,29 +5227,31 @@ def pool2d_shape_check(
         lambda: f"dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
     )
 
-    valid_dims = input.size(1) != 0 and input.size(2) != 0
+    valid_dims = sym_and(input.size(1) != 0, input.size(2) != 0)
 
     if memory_format == torch.channels_last:
         torch._check(
-            ndim == 4 and valid_dims and input.size(3) != 0,
+            ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
             lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
             f" with optional 0 dim batch size for input, but got: {input.size()}",
         )
     else:
         torch._check(
-            (ndim == 3 and input.size(0) != 0 and valid_dims)
-            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            sym_or(
+                ndim == 3 and sym_and(input.size(0) != 0, valid_dims),
+                ndim == 4 and sym_and(valid_dims, input.size(3) != 0),
+            ),
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
     torch._check(
-        kW // 2 >= padW and kH // 2 >= padH,
+        sym_and(kW // 2 >= padW, kH // 2 >= padH),
         lambda: "pad should be smaller than or equal to half of kernel size, but got "
         f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
     )
 
     torch._check(
-        outputWidth >= 1 and outputHeight >= 1,
+        sym_and(outputWidth >= 1, outputHeight >= 1),
         lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
@@ -4903,15 +5317,16 @@ def pool3d_shape_check(
         torch._check(
             input.size(i) > 0,
             lambda: (
-                f"{fn_name}: Expected input's non-batch dimensions to have positive length,"
-                f" but input has a shape of {input.shape}"
-                f" and non-batch dimension {input.size(i)} has length zero!"
+                f"{fn_name}: Expected input to have non-zero size for non-batch dimensions,"
+                f" but input has sizes {input.shape} with dimension {i} being empty"
             ),
         )
 
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     if check_input_size:  # AveragePool3d
         torch._check(
-            itime >= kT and iheight >= kH and iwidth >= kW,
+            sym_and(itime >= kT, iheight >= kH, iwidth >= kW),
             lambda: (
                 f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
                 f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
@@ -4919,7 +5334,7 @@ def pool3d_shape_check(
         )
 
     torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        sym_and(kT / 2 >= pT, kW / 2 >= pW, kH / 2 >= pH),
         lambda: (
             f"pad should be smaller than or equal to half of kernel size, but got "
             f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
@@ -4927,7 +5342,7 @@ def pool3d_shape_check(
     )
 
     torch._check(
-        otime >= 1 and owidth >= 1 and oheight >= 1,
+        sym_and(otime >= 1, owidth >= 1, oheight >= 1),
         lambda: (
             f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
             f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
@@ -5261,7 +5676,7 @@ def meta_fractional_max_pool2d(self, kernel_size, output_size, random_samples):
     d = random_samples.size(2)
     torch._check(
         n >= input_batch,
-        lambda: "Expect _random_samples.size(0) no less then input batch size.",
+        lambda: "Expect _random_samples.size(0) no less than input batch size.",
     )
     torch._check(
         c == input_channels,
@@ -5540,6 +5955,17 @@ class GridSamplerInterpolation(Enum):
     BICUBIC = 2
 
 
+def check_grid_sampler_2d(input: Tensor, grid: Tensor):
+    torch._check(
+        input.ndim == 4 and input.ndim == grid.ndim,
+        lambda: (
+            f"grid_sampler(): expected 4D input and grid with same number of "
+            f"dimensions, but got input with sizes {input.shape}"
+            f" and grid with sizes {grid.shape}"
+        ),
+    )
+
+
 def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
     torch._check(
         input.ndim == 5 and input.ndim == grid.ndim,
@@ -5549,13 +5975,55 @@ def check_grid_sampler_3d(input: Tensor, grid: Tensor, interpolation_mode: int):
             f" and grid with sizes {grid.shape}"
         ),
     )
+    # Only CPU and CUDA sample 5D bicubic; the trace refuses it elsewhere, as eager
+    # does. device_hint: a FakeTensor reports meta while a meta kernel runs.
     torch._check(
-        not (
-            input.ndim == 5
-            and interpolation_mode == GridSamplerInterpolation.BICUBIC.value
-        ),
-        lambda: "grid_sampler(): bicubic interpolation only supports 4D input",
+        interpolation_mode != GridSamplerInterpolation.BICUBIC.value
+        or device_hint(input) in ("cpu", "cuda"),
+        lambda: "grid_sampler(): bicubic interpolation with 5D input is not supported "
+        f"on {device_hint(input)}",
     )
+
+
+# torch._grid_sampler_2d_cpu_fallback is CompositeExplicitAutograd, so without a
+# meta kernel the real CPU kernel runs under FakeTensorMode and fails on
+# unallocated data ("the tensor has a non-zero number of elements, but its data is
+# not allocated yet"), making the op uncapturable. These mirror both the checks the
+# C++ impls run (they call check_grid_sampler_common/_2d themselves, since they can
+# be called instead of grid_sampler) and the shapes they allocate --
+# aten/src/ATen/native/GridSampler.cpp.
+@register_meta(aten._grid_sampler_2d_cpu_fallback)
+@out_wrapper()
+def _grid_sampler_2d_cpu_fallback_meta(
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    N = input.shape[0]
+    C = input.shape[1]
+    out_H = grid.shape[1]
+    out_W = grid.shape[2]
+    return input.new_empty((N, C, out_H, out_W))
+
+
+@register_meta(aten._grid_sampler_2d_cpu_fallback_backward)
+def _grid_sampler_2d_cpu_fallback_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+):
+    check_grid_sampler_common(input, grid)
+    check_grid_sampler_2d(input, grid)
+    grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
 
 
 @register_meta(aten.grid_sampler_2d_backward.default)
@@ -5626,6 +6094,24 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
+
+    # Only check direct symbols. A compound expression may overflow before its
+    # generated C++ check.
+    if (
+        isinstance(fill_value, (torch.SymInt, torch.SymFloat))
+        and fill_value.node.expr.is_Symbol
+        and utils.is_integer_dtype(dtype)
+    ):
+        info = torch.iinfo(dtype)
+
+        def error_msg():
+            return f"value cannot be converted to type {dtype} without overflow"
+
+        is_int = isinstance(fill_value, torch.SymInt)
+        if not (is_int and dtype in (torch.int64, torch.uint64)):
+            lower = -info.max if is_int and not dtype.is_signed else info.min
+            torch._check(lower <= fill_value, error_msg)
+            torch._check(fill_value < info.max + 1, error_msg)
 
     return torch.empty(size, *args, **kwargs)
 
@@ -5730,6 +6216,11 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return _scatter_meta_output(self)
 
 
+@register_meta(aten.diagonal_scatter.default)
+def meta_diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
+    return _scatter_meta_output(self)
+
+
 def _scatter_meta_output(self):
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
@@ -5752,7 +6243,9 @@ def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     min = -dim_post_expr
     max = dim_post_expr - 1
     if dim < min or dim > max:
-        raise AssertionError(f"dim {dim} out of bounds ({min}, {max})")
+        raise IndexError(
+            f"Dimension out of range (expected to be in range of [{min}, {max}], but got {dim})"
+        )
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -5934,6 +6427,28 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
+def alloc_with_matching_layout(
+    query: Tensor,
+    res_shape: tuple[int, ...],
+):
+    """Allocate a result with the query's dimension order."""
+    if tuple(query.shape) == res_shape:
+        return torch.empty_like(query)
+
+    fill_order = sorted(
+        range(query.dim()),
+        key=lambda idx: query.stride()[idx] if query.stride()[idx] else math.inf,
+    )
+    strides = [0] * len(fill_order)
+    stride = 1
+    for idx in fill_order:
+        strides[idx] = stride
+        stride *= res_shape[idx]
+    return torch.empty_strided(
+        res_shape, strides, dtype=query.dtype, device=query.device
+    )
+
+
 @register_meta([aten._scaled_dot_product_flash_attention.default])
 def meta__scaled_dot_product_flash_attention(
     query: Tensor,
@@ -5950,7 +6465,7 @@ def meta__scaled_dot_product_flash_attention(
     head_dim = query.size(3)
     max_seqlen_batch_k = key.size(2)
 
-    attention = torch.empty_like(query)
+    attention = alloc_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
@@ -6025,25 +6540,6 @@ def meta__scaled_dot_product_flash_attention_quantized(
     )
 
 
-def alloc_with_matching_layout(
-    query: Tensor,
-    res_shape: tuple[int, ...],
-):
-    if tuple(query.shape) == res_shape:
-        res = torch.empty_like(query)
-    else:
-        dim_order = sorted(
-            [0, 1, 2, 3], key=lambda idx: query.stride()[idx], reverse=True
-        )
-        permuted_shape = [res_shape[idx] for idx in dim_order]
-        final_permute = [dim_order.index(i) for i in range(len(dim_order))]
-        res = torch.empty(
-            permuted_shape, dtype=query.dtype, device=query.device
-        ).permute(final_permute)
-
-    return res
-
-
 @register_meta([aten._scaled_dot_product_cudnn_attention])
 def meta__scaled_dot_product_cudnn_attention(
     query: Tensor,
@@ -6111,6 +6607,21 @@ def meta__scaled_dot_product_fused_attention_overrideable(
         raise RuntimeError("query must be 3D or 4D")
     S_KV = key.size(-2)
     D_V = value.size(-1)
+
+    torch._check(
+        S_KV == value.size(-2),
+        lambda: f"key sequence length ({S_KV}) must match "
+        f"value sequence length ({value.size(-2)})",
+    )
+
+    if attn_bias is not None:
+        bias_s_kv = attn_bias.size(-1)
+        if bias_s_kv != 1:
+            torch._check(
+                bias_s_kv == S_KV,
+                lambda: f"attn_bias last dimension must match S_KV ({S_KV}) "
+                f"or be 1 for broadcasting, but got {bias_s_kv}",
+            )
 
     # Preserve input dimensionality for the output shape
     out_shape = list(query.shape)
@@ -6221,7 +6732,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
             max_seqlen_batch_q,
             num_heads,
         ),
-        dtype=torch.float,
+        dtype=utils.get_computation_dtype(query.dtype),
         device=query.device,
     ).transpose(1, 2)
     return (
@@ -6281,6 +6792,7 @@ def meta__scaled_dot_product_attention_math_for_mps(
     is_causal: bool = False,
     dropout_mask: Tensor | None = None,
     scale: float | None = None,
+    enable_gqa: bool = False,
 ) -> tuple[Tensor, Tensor]:
     def ensure_4d(x):
         if x.dim() == 3:
@@ -6289,10 +6801,12 @@ def meta__scaled_dot_product_attention_math_for_mps(
             batch_size = 1
             for i in range(x.dim() - 3):
                 batch_size *= x.shape[i]
-            return x.view(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
+            return x.reshape(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
         else:
             return x, False
 
+    batch_shape = torch.broadcast_shapes(*(t.shape[:-3] for t in (query, key, value)))
+    query = query.expand(*batch_shape, *query.shape[-3:])
     q_, unsqueezed = ensure_4d(query)
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
@@ -6343,7 +6857,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     if torch.version.hip and torch.cuda.is_available():
         """Please see: https://github.com/pytorch/pytorch/issues/146848
-        longsumexp last dim should be seq length
+        logsumexp last dim should be seq length
         """
         logsumexp_dim = M if compute_log_sumexp else 0
     else:
@@ -6385,7 +6899,9 @@ def meta__scaled_dot_product_efficient_backward(
     scale: float | None = None,
 ):
     batch_size = query.size(0)
-    num_heads = query.size(1)
+    num_heads_q = query.size(1)
+    num_heads_k = key.size(1)
+    num_heads_v = value.size(1)
     max_q = query.size(2)
     head_dim = query.size(3)
     head_dim_v = value.size(3)
@@ -6393,19 +6909,19 @@ def meta__scaled_dot_product_efficient_backward(
     max_k = key.size(2)
 
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
+        (batch_size, num_heads_q, max_q, head_dim),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads_k, max_k, head_dim),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim_v),
+        (batch_size, num_heads_v, max_k, head_dim_v),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
@@ -6488,7 +7004,7 @@ def meta__flash_attention_forward(
     head_dim = query.size(-1)
 
     # Cuda Path
-    attention = torch.empty_like(query)
+    attention = alloc_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
     if cum_seq_q is None:
         logsumexp = torch.empty(
             (batch_size, num_heads, max_seqlen_batch_q),
@@ -6690,9 +7206,16 @@ def meta__efficient_attention_forward(
             )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
-    logsumexp_dim = (
-        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
-    )
+
+    if torch.version.hip is not None:
+        # ROCm efficient-attention backends return compact LSE. CUDA's
+        # memory-efficient attention kernel pads LSE to its kernel alignment.
+        logsumexp_dim = actual_max_seqlen_q if compute_log_sumexp else 0
+    else:
+        logsumexp_dim = (
+            math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+        )
+
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
@@ -6717,6 +7240,7 @@ def meta__efficient_attention_backward(
     key: Tensor,
     value: Tensor,
     bias: Tensor | None,
+    out: Tensor,
     cu_seqlens_q: Tensor | None,
     cu_seqlens_k: Tensor | None,
     max_seqlen_q: torch.SymInt,
@@ -6729,6 +7253,7 @@ def meta__efficient_attention_backward(
     bias_requires_grad: bool,
     scale: float | None = None,
     num_splits_key: int | None = None,
+    window_size: int | None = None,
     shared_storage_dqdkdv: bool = False,
 ):
     if shared_storage_dqdkdv:
@@ -6737,8 +7262,12 @@ def meta__efficient_attention_backward(
             lambda: "seqlen must match for `shared_storage_dqdkdv",
         )
         torch._check(
-            query.shape[3] == key.shape[3],
+            query.shape[3] == key.shape[3] == value.shape[3],
             lambda: "embedding dim must match for `shared_storage_dqdkdv",
+        )
+        torch._check(
+            query.shape[2] == key.shape[2],
+            lambda: "num heads must match for `shared_storage_dqdkdv",
         )
         chunk = torch.empty(
             (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
@@ -6843,6 +7372,20 @@ def _check_scaled_mm_sizes(
             )
         )  # note: this applies to blockwise scaling for non-FP8 types (FP8 accepts FP32 scales)
 
+        # On XPU, e8m0fnu scales are used for *both* MXFP8 (1x32 blocks) and
+        # DeepSeek-style (1x128/128x128 blocks) blockwise recipes.
+        if (
+            scale_a.dtype == torch.float8_e8m0fnu
+            and scale_b.dtype == torch.float8_e8m0fnu
+            and self.dtype != torch.float4_e2m1fn_x2
+            and device_hint(self) == "xpu"
+        ):
+            num_k_blocks_check = ceil_div(_k, 32)
+            is_blockwise_scaling = (
+                scale_a.numel() == m * num_k_blocks_check
+                or scale_b.numel() == n * num_k_blocks_check
+            )
+
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
             torch._check(
@@ -6866,27 +7409,50 @@ def _check_scaled_mm_sizes(
             block_size_mn = 128
 
             num_k_blocks = ceil_div(_k, block_size_k)
-            padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
 
-            expected_a_size = (
-                block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
-            )
-            expected_b_size = (
-                block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
-            )
+            if device_hint(self) == "xpu":
+                # XPU (oneDNN) uses unswizzled, unpadded blockwise scale shapes,
+                # unlike the L4-padded SWIZZLE_32_4_4 layout CUDA expects.
+                expected_a_size = num_k_blocks * m
+                expected_b_size = num_k_blocks * n
+            else:
+                # v1 has no swizzle argument, so it accepts only this layout,
+                # matching `blockwise_1x32_numel` in cuda/ScaledBlas.cpp. At
+                # shapes where the padding coincides (e.g. m=128, _k=256) a
+                # gfx950 32x8-tiled buffer has the same element count and is
+                # accepted here but read as unswizzled; such callers must use
+                # `_scaled_mm_v2` with an explicit swizzle.
+                padded_num_k_blocks = ceil_div(num_k_blocks, 4) * 4
+
+                expected_a_size = (
+                    block_size_mn * ceil_div(m, block_size_mn) * padded_num_k_blocks
+                )
+                expected_b_size = (
+                    block_size_mn * ceil_div(n, block_size_mn) * padded_num_k_blocks
+                )
 
             if (
                 scale_a.numel() == expected_a_size
                 and scale_b.numel() == expected_b_size
             ):
-                torch._check(
-                    scale_a.is_contiguous(),
-                    lambda: "scale_a must be contiguous",
-                )
-                torch._check(
-                    scale_b.is_contiguous(),
-                    lambda: "scale_b must be contiguous",
-                )
+                if device_hint(self) == "xpu":
+                    torch._check(
+                        scale_a.is_contiguous() or scale_a.t().is_contiguous(),
+                        lambda: "scale_a must be contiguous or column-major contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous() or scale_b.t().is_contiguous(),
+                        lambda: "scale_b must be contiguous or column-major contiguous",
+                    )
+                else:
+                    torch._check(
+                        scale_a.is_contiguous(),
+                        lambda: "scale_a must be contiguous",
+                    )
+                    torch._check(
+                        scale_b.is_contiguous(),
+                        lambda: "scale_b must be contiguous",
+                    )
             else:
                 torch._check(
                     False,
@@ -6898,9 +7464,15 @@ def _check_scaled_mm_sizes(
                 )
         else:
             torch._check(
-                scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
-                lambda: "For rowwise scaling, both scale_a and scale_b must be float (fp32) tensors.",
+                (scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32)
+                or (
+                    device_hint(self) == "xpu"
+                    and scale_a.dtype == torch.float8_e8m0fnu
+                    and scale_b.dtype == torch.float8_e8m0fnu
+                ),
+                lambda: "For rowwise scaling, both scales must be float32. For blockwise scaling, both scales must be float32, or (XPU only) float8_e8m0fnu.",
             )
+            is_e8m0fnu_scale = scale_a.dtype == torch.float8_e8m0fnu
             # for rowwise scaling, enforce 2D input tensors
             torch._check(
                 scale_a.dim() == 2 and scale_b.dim() == 2,
@@ -6908,12 +7480,12 @@ def _check_scaled_mm_sizes(
             )
 
             if (
-                scale_a.size(0) == m
+                not is_e8m0fnu_scale
+                and scale_a.size(0) == m
                 and scale_a.size(1) == 1
                 and scale_b.size(0) == 1
                 and scale_b.size(1) == n
             ):
-                # rowwise scaling
                 torch._check(
                     scale_a.is_contiguous() and scale_b.is_contiguous(),
                     lambda: "Both scale_a and scale_b must be contiguous for rowwise scaling.",
@@ -6978,398 +7550,116 @@ def meta_scaled_mm(
     )
 
 
-def _check_scaled_mm_sizes_v2(
-    self: torch.Tensor,
-    mat2: torch.Tensor,
-    scale_a: list[torch.Tensor],
-    scale_recipe_a: list[ScalingType],
-    scale_b: list[torch.Tensor],
-    scale_recipe_b: list[ScalingType],
-    bias: torch.Tensor | None = None,
-    out_dtype: torch.dtype | None = None,
-    swizzle_a: list[SwizzleType] | None = None,
-    swizzle_b: list[SwizzleType] | None = None,
-    use_fast_accum: bool = False,
-):
-    def is_fp8_or_fp4_type(dtype):
-        return dtype in (
-            torch.float8_e4m3fn,
-            torch.float8_e5m2,
-            torch.float8_e4m3fnuz,
-            torch.float8_e5m2fnuz,
-            torch.float4_e2m1fn_x2,
-        )
-
-    def is_fp4_type(dtype):
-        return dtype == torch.float4_e2m1fn_x2
-
-    torch._check(
-        self.dim() == 2 and mat2.dim() == 2,
-        lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
-    )
-    torch._check(
-        is_fp8_or_fp4_type(self.dtype) and is_fp8_or_fp4_type(mat2.dtype),
-        lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
-    )
-
-    # Passed tensors:
-    # self: [M, K]
-    # mat2: [K, N]
-    M = self.shape[0]
-    K = self.shape[1]
-    N = mat2.shape[1]
-
-    # If we're using fp4, using fp4x2 packed format - adjust K appropriately
-    if is_fp4_type(self.dtype) and is_fp4_type(mat2.dtype):
-        K_packed_multiplier = 2
-        K *= K_packed_multiplier
-
-    scale_recipe_a = [ScalingType(si) for si in scale_recipe_a]
-    scale_recipe_b = [ScalingType(si) for si in scale_recipe_b]
-
-    if swizzle_a:
-        swizzle_a = [SwizzleType(si) for si in swizzle_a]
-    else:
-        swizzle_a = [
-            SwizzleType.NO_SWIZZLE,
-        ]
-    if swizzle_b:
-        swizzle_b = [SwizzleType(si) for si in swizzle_b]
-    else:
-        swizzle_b = [
-            SwizzleType.NO_SWIZZLE,
-        ]
-
-    if (
-        device_hint(self) == "cuda"
-        or device_hint(self) == "xpu"
-        or device_hint(self) == "cpu"
-    ):
-
-        def is_row_major(stride):
-            return stride[0] > stride[1] and stride[1] == 1
-
-        def is_col_major(stride):
-            return stride[0] == 1 and stride[1] > 1
-
-        def has_zero_dim(tensor_2d):
-            return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
-
-        if device_hint(self) != "cpu":
-            torch._check(
-                is_row_major(self.stride()) or has_zero_dim(self),
-                lambda: f"self must be row_major, got stride {self.stride()}",
-            )
-            torch._check(
-                is_col_major(mat2.stride()) or has_zero_dim(mat2),
-                lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
-            )
-            torch._check(
-                self.size(1) % 16 == 0,
-                lambda: f"Expected self.size(1) to be divisible by 16, but got self.size(1)={self.size(1)}",
-            )
-            torch._check(
-                mat2.size(0) % 16 == 0 and mat2.size(1) % 16 == 0,
-                lambda: f"Expected both dimensions of mat2 to be divisible by 16 but got {mat2.shape}",
-            )
-
-        def is_tensorwise(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.TensorWise
-                and recipe_b[0] == ScalingType.TensorWise
-            )
-
-        def is_rowwise(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.RowWise
-                and recipe_b[0] == ScalingType.RowWise
-            )
-
-        def is_mx(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.BlockWise1x32
-                and recipe_b[0] == ScalingType.BlockWise1x32
-            )
-
-        def is_nv_single_level(
-            recipe_a: list[ScalingType], recipe_b: list[ScalingType]
-        ):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.BlockWise1x16
-                and recipe_b[0] == ScalingType.BlockWise1x16
-            )
-
-        def is_nv(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 2
-                and len(recipe_b) == 2
-                and recipe_a[0] == ScalingType.BlockWise1x16
-                and recipe_a[1] == ScalingType.TensorWise
-                and recipe_b[0] == ScalingType.BlockWise1x16
-                and recipe_b[1] == ScalingType.TensorWise
-            )
-
-        def is_1x128_1x128(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.BlockWise1x128
-                and recipe_b[0] == ScalingType.BlockWise1x128
-            )
-
-        def is_1x128_128x128(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.BlockWise1x128
-                and recipe_b[0] == ScalingType.BlockWise128x128
-            )
-
-        def is_128x128_1x128(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
-            return (
-                len(recipe_a) == 1
-                and len(recipe_b) == 1
-                and recipe_a[0] == ScalingType.BlockWise128x128
-                and recipe_b[0] == ScalingType.BlockWise1x128
-            )
-
-        # Given scaling types, check input dimensions
-
-        if is_tensorwise(scale_recipe_a, scale_recipe_b):
-            # TensorWise
-            torch._check(
-                scale_a[0].numel() == 1
-                and scale_b[0].numel() == 1
-                and scale_a[0].dtype == torch.float32
-                and scale_b[0].dtype == torch.float32,
-                lambda: "For Tensorwise scaling, both scale_a and scale_b must be single element float (fp32) tensors",
-            )
-        elif is_rowwise(scale_recipe_a, scale_recipe_b):
-            torch._check(
-                scale_a[0].shape[0] == M
-                and scale_a[0].numel() == M
-                and scale_a[0].dtype == torch.float32
-                and scale_b[0].numel() == N
-                and scale_b[0].dtype == torch.float32,
-                lambda: (
-                    f"For Rowwise scaling, scale_a must have {self.shape[0]} elements (got: {scale_a[0].numel()})"
-                    f", and scale_b must have {mat2.shape[1]} elements (got: {scale_b[0].numel()})"
-                ),
-            )
-        elif is_1x128_1x128(scale_recipe_a, scale_recipe_b):
-            # A, B are fp8, scales are fp32
-            # As: [M x K // 128], stride: [1, M]
-            # Bs: [N x K // 128], stride: [1, N]
-            types_ok = (
-                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
-            )
-            sa = scale_a[0]
-            scale_a_ok = (
-                sa.shape[0] == M
-                and sa.shape[1] == K // 128
-                and sa.stride(0) == 1
-                and (sa.stride(1) == M or (sa.shape[1] == 1 and sa.stride(1) == 1))
-            )
-            sb = scale_b[0]
-            scale_b_ok = (
-                sb.shape[0] == N
-                and sb.shape[1] == K // 128
-                and sb.stride(0) == 1
-                and (sb.stride(1) == N or (sb.shape[1] == 1 and sb.stride(1) == 1))
-            )
-
-            torch._check(
-                types_ok and scale_a_ok and scale_b_ok,
-                lambda: (
-                    "For 1x128 x 1x128 blockwise scaling, "
-                    f"scale a must have shape [{M}, {K // 128}] (got: {sa.shape}) and stride [1, {M}] (got: {sa.stride})"
-                    f"scale b must have shape [{N}, {K // 128}] (got: {sb.shape}) and stride [1, {N}] (got: {sb.stride})"
-                ),
-            )
-        elif is_128x128_1x128(scale_recipe_a, scale_recipe_b):
-            # A, B are fp8, scales are fp32
-            # L4 = round_up(K // 128, 4)
-            # As: [L4 x M // 128], stride: [1, L4]
-            # Bs: [N x K // 128], stride: [1, N]
-            types_ok = (
-                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
-            )
-            L4 = round_up(K / 128, 4)
-            sa = scale_a[0]
-            scale_a_ok = (
-                sa.shape[0] == L4
-                and sa.shape[1] == M // 128
-                and sa.stride(0) == 1
-                and (sa.stride(1) == L4 or (sa.shape[1] == 1 and sa.stride(1) == 1))
-            )
-            sb = scale_b[0]
-            scale_b_ok = (
-                sb.shape[0] == N
-                and sb.shape[1] == K // 128
-                and sb.stride(0) == 1
-                and (sb.stride(1) == N or (sb.shape[1] == 1 and sb.stride(1) == 1))
-            )
-            torch._check(
-                types_ok and scale_a_ok and scale_b_ok,
-                lambda: (
-                    "For 128x128 x 1x128 blockwise scaling, L4 = {round_up(K / 128, 4)}, "
-                    f"scale a must have shape [{L4}, {M // 128}] (got: {sa.shape}) and stride [1, {L4}] (got: {sa.stride})"
-                    f"scale b must have shape [{N}, {K // 128}] (got: {sb.shape}) and stride [1, {N}] (got: {sb.stride})"
-                ),
-            )
-        elif is_1x128_128x128(scale_recipe_a, scale_recipe_b):
-            # A, B are fp8, scales are fp32
-            # L4 = round_up(K // 128, 4)
-            # As: [M x K // 128], stride: [1, M]
-            # Bs: [L4 x N // 128], stride: [1, L4]
-            types_ok = (
-                scale_a[0].dtype == torch.float32 and scale_b[0].dtype == torch.float32
-            )
-            L4 = round_up(K / 128, 4)
-            sa = scale_a[0]
-            scale_a_ok = (
-                sa.shape[0] == M
-                and sa.shape[1] == K // 128
-                and sa.stride(0) == 1
-                and (sa.stride(1) == M or (sa.shape[1] == 1 and sa.stride(1) == 1))
-            )
-            sb = scale_b[0]
-            scale_b_ok = (
-                sb.shape[0] == L4
-                and sb.shape[1] == N // 128
-                and sb.stride(0) == 1
-                and (sb.stride(1) == L4 or (sb.shape[1] == 1 and sb.stride(1) == 1))
-            )
-            torch._check(
-                types_ok and scale_a_ok and scale_b_ok,
-                lambda: (
-                    "For 1x128 x 128x128 blockwise scaling, L4 = {round_up(K / 128, 4)}, "
-                    f"scale a must have shape [{M}, {K // 128}] (got: {sa.shape}) and stride [1, {M}] (got: {sa.stride})"
-                    f"scale b must have shape [{L4}, {N // 128}] (got: {sb.shape}) and stride [1, {L4}] (got: {sb.stride})"
-                ),
-            )
-        elif is_mx(scale_recipe_a, scale_recipe_b):
-            if torch.version.hip:
-                # Note(slayton58): These mirror ROCm in ScaledBlas.cpp, but I think they're wrong..
-                expected_scale_a_elems = ceil_div(self.shape[0], 32) * self.shape[1]
-                expected_scale_b_elems = ceil_div(self.shape[1], 32) * self.shape[0]
-                expected_swizzle = SwizzleType.NO_SWIZZLE
-            else:
-                expected_scale_a_elems = round_up(self.shape[0], 128) * round_up(
-                    ceil_div(self.shape[1], 32), 4
-                )
-                expected_scale_b_elems = round_up(mat2.shape[1], 128) * round_up(
-                    ceil_div(self.shape[1], 32), 4
-                )
-                expected_swizzle = SwizzleType.SWIZZLE_32_4_4
-            torch._check(
-                scale_a[0].numel() == expected_scale_a_elems
-                and scale_a[0].dtype == torch.float8_e8m0fnu
-                and scale_b[0].numel() == expected_scale_b_elems
-                and scale_b[0].dtype == torch.float8_e8m0fnu
-                and swizzle_a[0] == expected_swizzle
-                and swizzle_b[0] == expected_swizzle,
-                lambda: (
-                    f"for MX scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
-                    f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Scales must "
-                    f"have types {torch.float8_e8m0fnu} (for self: {scale_a[0].dtype}, mat_b: {scale_b[0].dtype}) "
-                    f"Must have swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
-                ),
-            )
-        elif is_nv_single_level(scale_recipe_a, scale_recipe_b):
-            expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
-            expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
-            expected_swizzle = SwizzleType.SWIZZLE_32_4_4
-            torch._check(
-                scale_a[0].numel() == expected_scale_a_elems
-                and scale_a[0].dtype == torch.float8_e4m3fn
-                and scale_b[0].numel() == expected_scale_b_elems
-                and scale_b[0].dtype == torch.float8_e4m3fn
-                and swizzle_a[0] == expected_swizzle
-                and swizzle_b[0] == expected_swizzle,
-                lambda: (
-                    f"for single-level NV scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
-                    f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Must have "
-                    f"swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
-                ),
-            )
-        elif is_nv(scale_recipe_a, scale_recipe_b):
-            expected_scale_a_elems = round_up(M, 128) * round_up(ceil_div(K, 16), 4)
-            expected_scale_b_elems = round_up(N, 128) * round_up(ceil_div(K, 16), 4)
-            expected_swizzle = SwizzleType.SWIZZLE_32_4_4
-            torch._check(
-                scale_a[0].numel() == expected_scale_a_elems
-                and scale_a[0].dtype == torch.float8_e4m3fn
-                and scale_a[1].numel() == 1
-                and scale_a[1].dtype == torch.float32
-                and scale_b[0].numel() == expected_scale_b_elems
-                and scale_b[0].dtype == torch.float8_e4m3fn
-                and scale_b[1].numel() == 1
-                and scale_b[1].dtype == torch.float32
-                and swizzle_a[0] == expected_swizzle
-                and swizzle_b[0] == expected_swizzle,
-                lambda: (
-                    f"for NV scaling scale_a must have {expected_scale_a_elems} (got: {scale_a[0].numel()}) "
-                    f"and scale_b must have {expected_scale_b_elems} (got: {scale_b[0].numel()}). Must have "
-                    f"swizzle type {expected_swizzle} (got self: {swizzle_a[0]}, mat_b: {swizzle_b[0]})"
-                ),
-            )
-        else:
-            torch._check(
-                False,
-                lambda: (
-                    "Invalid scaling configuration. "
-                    "For tensorwise scaling, both scales should be scalar. "
-                    f"For rowwise scaling, scale_a should be ({M}, 1), scale_b should be (1, {N}). "
-                    f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({M}, {ceil_div(K, 128)}), "
-                    + f"scale_b should be ({ceil_div(K, 128)}, {ceil_div(N, 128)}). "
-                    f"For (BlockWise1x128, BlockWise1x128), scale_a should be ({M}, {ceil_div(K, 128)}), "
-                    + f"scale_b should be ({ceil_div(K, 128)}, {N}). "
-                    f"Got scale_a.size()=({scale_a[0].size(0)}, {scale_a[0].size(1)}) "
-                    f"and scale_b.size()=({scale_b[0].size(0)}, {scale_b[0].size(1)})"
-                ),
-            )
-
-    _out_dtype = out_dtype if out_dtype is not None else self.dtype
-    return torch.empty(M, N, dtype=_out_dtype, device=self.device)
-
-
 @register_meta([aten._scaled_mm_v2.default])
 def meta_scaled_mm_v2(
     self: torch.Tensor,
     mat2: torch.Tensor,
     scale_a: list[torch.Tensor],
-    scale_recipe_a: list[ScalingType],
-    swizzle_a: list[SwizzleType],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
     scale_b: list[torch.Tensor],
-    scale_recipe_b: list[ScalingType],
-    swizzle_b: list[SwizzleType],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
     bias: torch.Tensor | None = None,
-    output_dtype: torch.dtype | None = None,
-    contraction_dims: list[int] | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
     use_fast_accum: bool = False,
 ):
-    return _check_scaled_mm_sizes_v2(
-        self,
+    # Per-recipe scale validation lives in the C++ TORCH_META_FUNC
+    # (validate_scaled_mm_v2_inputs) and runs in eager. This
+    # Python meta exists because the structured C++ meta sizes its output via
+    # IntArrayRef, which specializes symbolic dims under fake-tensor tracing
+    # (breaking mark_dynamic and unbacked symints). Same pattern as meta_mm.
+    torch._check(
+        self.dim() == 2 and mat2.dim() == 2,
+        lambda: f"Inputs must be 2D but got self.dim()={self.dim()} and mat2.dim()={mat2.dim()}",
+    )
+    torch._check(
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        ),
+        lambda: "torch._scaled_mm_v2 only supports contraction_dim=(1, 0)",
+    )
+    torch._check(
+        self.size(1) == mat2.size(0),
+        lambda: f"mat_a and mat_b shapes cannot be multiplied ({self.shape} and {mat2.shape})",
+    )
+    torch._check(
+        bias is None or bias.numel() == mat2.size(1),
+        lambda: f"Bias must be size {mat2.size(1)} but got {bias.numel()}",  # type: ignore[union-attr]
+    )
+
+    _out_dtype = out_dtype if out_dtype is not None else self.dtype
+    return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
+
+
+@register_meta([aten._scaled_addmm.default])
+def meta_scaled_addmm(
+    self: torch.Tensor,
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    contraction_dim: list[int] | None = None,
+    *,
+    beta=1,
+    alpha=1,
+    use_fast_accum: bool = False,
+):
+    torch._check(
+        not isinstance(alpha, complex) and not isinstance(beta, complex),
+        lambda: "torch._scaled_addmm only supports real alpha and beta values",
+    )
+    torch._check(
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
+        ),
+        lambda: "torch._scaled_addmm only supports contraction_dim=(1, 0)",
+    )
+    result = meta_scaled_mm_v2(
+        mat1,
         mat2,
         scale_a,
         scale_recipe_a,
+        swizzle_a,
         scale_b,
         scale_recipe_b,
-        bias=bias,
-        out_dtype=output_dtype,
-        swizzle_a=swizzle_a,
-        swizzle_b=swizzle_b,
+        swizzle_b,
+        out_dtype=self.dtype,
+        contraction_dim=contraction_dim,
         use_fast_accum=use_fast_accum,
     )
+    torch._check(
+        self.dim() == 2,
+        lambda: f"input must be a matrix, but got {self.dim()} dimensions",
+    )
+    torch._check(
+        self.size(0) == result.size(0),
+        lambda: f"input dim 0 must be {result.size(0)}, but got {self.size(0)}",
+    )
+    torch._check(
+        self.size(1) == result.size(1),
+        lambda: f"input dim 1 must be {result.size(1)}, but got {self.size(1)}",
+    )
+    torch._check(
+        self.dtype in (torch.bfloat16, torch.float16, torch.float32),
+        lambda: f"input must have dtype BFloat16, Half, or Float, but got {self.dtype}",
+    )
+    torch._check(
+        self.stride(1) == 1 and self.stride(0) == torch.sym_max(1, self.size(1)),
+        lambda: "input must have canonical contiguous row-major strides",
+    )
+    return result
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
@@ -7581,7 +7871,7 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            x.device == input_gates.device
+            x is None or x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
         lambda: "expected all inputs to be same device",
@@ -7601,6 +7891,20 @@ def _thnn_fused_lstm_cell_meta(
     hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
     cy = torch.empty_like(cx, memory_format=torch.contiguous_format)
     return (hy, cy, workspace)
+
+
+@register_meta(aten._thnn_fused_gru_cell.default)
+def _thnn_fused_gru_cell_meta(
+    input_gates,
+    hidden_gates,
+    hx,
+    input_bias=None,
+    hidden_bias=None,
+):
+    rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 3, hx)
+    workspace = hx.new_empty((hx.size(0), hx.size(1) * 5))
+    hy = torch.empty_like(hx, memory_format=torch.contiguous_format)
+    return (hy, workspace)
 
 
 @register_meta(aten._cudnn_rnn.default)
@@ -7789,7 +8093,8 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     )
 
 
-@register_meta(aten.topk.default)
+@register_meta([aten.topk.default, aten.topk.values])
+@out_wrapper("values", "indices", exact_dtype=True)
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
@@ -7872,6 +8177,50 @@ def _thnn_fused_lstm_cell_backward_impl(grad_hy, grad_cy, cx, cy, workspace, has
     return grad_gates, grad_cx, grad_bias
 
 
+def checkGRUBackwardSizes(grad_hy, workspace):
+    torch._check(
+        grad_hy.dim() == 2,
+        lambda: f"Expected grad_hy to be 2-D, but got {grad_hy.dim()}-D",
+    )
+    torch._check(
+        workspace.dim() == 2,
+        lambda: f"Expected workspace to be 2-D, but got {workspace.dim()}-D",
+    )
+    torch._check(
+        workspace.size(0) == grad_hy.size(0),
+        lambda: (
+            f"Expected workspace batch size ({workspace.size(0)}) to match "
+            f"grad_hy batch size ({grad_hy.size(0)})"
+        ),
+    )
+    torch._check(
+        workspace.size(1) == grad_hy.size(1) * 5,
+        lambda: (
+            "Expected workspace.size(1) to equal grad_hy.size(1) * 5, but got "
+            f"workspace.size(1)={workspace.size(1)} and "
+            f"grad_hy.size(1)={grad_hy.size(1)}"
+        ),
+    )
+
+
+@register_meta(aten._thnn_fused_gru_cell_backward.default)
+def _thnn_fused_gru_cell_backward(grad_hy, workspace, has_bias):
+    checkGRUBackwardSizes(grad_hy, workspace)
+    gates_shape = (grad_hy.size(0), grad_hy.size(1) * 3)
+    grad_input_gates = workspace.new_empty(gates_shape)
+    grad_hidden_gates = workspace.new_empty(gates_shape)
+    grad_hx = torch.empty_like(grad_hy, memory_format=legacy_contiguous_memory_format)
+    grad_input_bias = grad_input_gates.sum(0, keepdim=False) if has_bias else None
+    grad_hidden_bias = grad_hidden_gates.sum(0, keepdim=False) if has_bias else None
+    return (
+        grad_input_gates,
+        grad_hidden_gates,
+        grad_hx,
+        grad_input_bias,
+        grad_hidden_bias,
+    )
+
+
 # From aten/src/ATen/native/mps/operations/Linear.mm
 @register_meta(aten.linear_backward.default)
 def linear_backward(input_, grad_output_, weight_, output_mask):
@@ -7888,35 +8237,66 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    if not (
-        len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ):
-        raise AssertionError(
-            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-        )
-
-    def is_channels_last(ten):
-        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+    # Guard the factor before it is squared and used as a divisor. Eager rejects
+    # a non-positive factor in native_functions; without the same check here the
+    # divisibility test below raises ZeroDivisionError for upscale_factor=0.
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Eager guards the square against int64 overflow with TORCH_CHECK_VALUE, i.e. a
+    # ValueError, and phrases the bound as a division so the product is never formed.
+    # Mirror both: a torch._check here would raise RuntimeError and swap one
+    # eager/meta divergence for another.
+    torch._check_value(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: f"upscale factor is too large, (upscale_factor)^2 overflowed: "
+        f"upscale_factor={upscale_factor}",
+    )
+    upscale_factor_squared = upscale_factor * upscale_factor
+    torch._check(
+        len(self.shape) > 2,
+        lambda: f"Invalid input shape for pixel_shuffle: {self.shape}",
+    )
+    torch._check(
+        self.shape[-3] % upscale_factor_squared == 0,
+        lambda: f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}",
+    )
 
     def pick_memory_format():
-        if is_channels_last(self):
-            if device_hint(self) == "cuda":
-                return torch.contiguous_format
-            else:
-                return torch.channels_last
-        elif self.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif self.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
+        # DDE-safe variant of the original eager-style picker.
+        # Eager dispatch for pixel_shuffle (native_functions.yaml:4720):
+        #   CPU  -> pixel_shuffle_cpu: at::empty({0}, self.options()).resize_(
+        #           out_sizes, self.suggest_memory_format())  -> preserves NHWC/NDHWC
+        #   MPS  -> pixel_shuffle_mps: at::empty(out_shape, self.options())
+        #           self.options() does NOT carry a memory_format, so this is
+        #           always plain contiguous regardless of input layout.
+        #   else -> math_pixel_shuffle: clone(MemoryFormat::Contiguous) -> contiguous
+        # So only CPU preserves channels_last; everything else is contiguous.
+        fmt = suggest_memory_format(self)
+        if (
+            fmt is torch.channels_last or fmt is torch.channels_last_3d
+        ) and device_hint(self) == "cpu":
+            return fmt
+        return torch.contiguous_format
 
-    C = self.shape[-3] // (upscale_factor * upscale_factor)
+    C = self.shape[-3] // upscale_factor_squared
     Hr = self.shape[-2] * upscale_factor
     Wr = self.shape[-1] * upscale_factor
     out_shape = (*self.shape[:-3], C, Hr, Wr)
 
-    out = self.new_empty(out_shape)
-    out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
-    return out
+    # Build the output tensor with the right strides directly. We avoid
+    # `new_empty(...).to(memory_format=...)` because `Tensor.to(memory_format=...)`
+    # internally calls the eager `is_contiguous(memory_format=...)` predicate to
+    # decide whether to no-op, and that predicate can DDE on unbacked sizes.
+    fmt = pick_memory_format()
+    if fmt is torch.channels_last or fmt is torch.channels_last_3d:
+        out_strides = make_channels_last_strides_for(out_shape)
+    else:
+        out_strides = make_contiguous_strides_for(out_shape)
+    return torch.empty_strided(
+        out_shape, out_strides, dtype=self.dtype, device=self.device
+    )
 
 
 @register_meta(aten.mkldnn_rnn_layer_backward.default)
@@ -7945,12 +8325,22 @@ def mkldnn_rnn_layer_backward(
     batch_first,
     workspace,
 ):
-    diff_x = input.new_empty(input.shape)
-    diff_hx = hx_.new_empty(hx_.shape)
-    diff_cx = cx_tmp.new_empty(cx_tmp.shape)
-    diff_w1 = weight0.new_empty(weight0.shape)
-    diff_w2 = weight1.new_empty(weight1.shape)
-    diff_b = weight2.new_empty(weight2.shape)
+    diff_x = input.new_empty(input.shape, dtype=torch.float)
+    diff_hx = hx_.new_empty(hx_.shape, dtype=torch.float)
+    diff_cx = cx_tmp.new_empty(cx_tmp.shape, dtype=torch.float)
+    diff_w1 = weight0.new_empty(weight0.shape, dtype=torch.float)
+    diff_w2 = weight1.new_empty(weight1.shape, dtype=torch.float)
+    # C++ computes bias = _shuffle_bias(weight2, weight3, mode) before
+    # creating diff_b. num_bias_gates: LSTM=4, GRU=4, RNN_RELU/TANH=1.
+    # GRU _shuffle_bias produces [4*hidden] from two [3*hidden] inputs.
+    # LSTM: bias_ih + bias_hh preserves [4*hidden].
+    # RNN: bias_ih + bias_hh preserves [hidden].
+    _GRU_MODE = 3
+    if mode == _GRU_MODE:
+        bias_size = 4 * hidden_size
+    else:
+        bias_size = weight2.shape[0]
+    diff_b = weight2.new_empty([bias_size], dtype=torch.float)
     return diff_x, diff_w1, diff_w2, diff_b, diff_b, diff_hx, diff_cx
 
 
@@ -7978,8 +8368,44 @@ def meta_bucketize_scalar(
     )
 
 
+@register_meta([aten._histogramdd_bin_edges.default])
+def meta_histogramdd_bin_edges(self, bins, range=None, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return [self.new_empty((bin_count + 1,)) for bin_count in bins]
+
+
+@register_meta([aten._histogramdd_from_bin_cts.default])
+def meta_histogramdd_from_bin_cts(self, bins, range=None, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return self.new_empty(bins)
+
+
+@register_meta([aten._histogramdd_from_bin_tensors.default])
+def meta_histogramdd_from_bin_tensors(self, bins, weight=None, density=False):
+    torch._check(
+        self.shape[-1] == len(bins),
+        lambda: (
+            "histogramdd: The size of bins must be equal to the innermost "
+            "dimension of the input."
+        ),
+    )
+    return self.new_empty([edges.numel() - 1 for edges in bins])
+
+
 @register_meta([aten.histc])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_histc(input, bins=100, min=0, max=0):
     fn_name = "histc()"
     if device_hint(input) == "cpu":
@@ -8086,7 +8512,7 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 
 # From aten/src/ATen/native/UnaryOps.cpp
 @register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return torch.empty_like(self)
 
@@ -8378,7 +8804,7 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda:
+    if torch.version.cuda or device_hint(mat1) == "mps":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
         if mat1_is_2d == mat2_is_2d:
@@ -8411,8 +8837,8 @@ def _meta_grouped_mm_common(
     scaled = scale_a is not None and scale_b is not None
 
     # Implementing all the checks from
-    # _grouped_mm_cuda()/_scaled_grouped_mm_cuda() code in
-    # aten/src/ATen/native/cuda/Blas.cpp.
+    # _grouped_mm_validate_inputs() in aten/src/ATen/native/GroupedMMUtils.h and
+    # _scaled_grouped_mm_cuda() in aten/src/ATen/native/cuda/GroupedBlas.cpp.
 
     if scaled:
         fp8_dtype = torch.float8_e4m3fn
@@ -8428,8 +8854,12 @@ def _meta_grouped_mm_common(
         )
     else:
         torch._check(
-            mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
-            lambda: f"Expected inputs of BF16 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",
+            mat_a.dtype in (torch.bfloat16, torch.float32, torch.float16),
+            lambda: f"Expected mat_a to be Float32, BFloat16 or Float16 matrix, got {mat_a.dtype}.",
+        )
+        torch._check(
+            mat_b.dtype in (torch.bfloat16, torch.float32, torch.float16),
+            lambda: f"Expected mat_b to be Float32, BFloat16 or Float16 matrix, got {mat_b.dtype}.",
         )
 
     torch._check(
@@ -8591,6 +9021,10 @@ def _meta_grouped_mm_common(
                 offs.dtype == torch.int32,
                 lambda: f"Offsets tensor must be integer (int32) tensor, but got {offs.dtype}.",
             )
+            torch._check(
+                offs.stride() == (1,),
+                lambda: f"Offsets tensor must have stride (1,), but got {offs.stride()}.",
+            )
     else:
         torch._check(
             offs is None,
@@ -8602,10 +9036,17 @@ def _meta_grouped_mm_common(
         lambda: "Bias tensor provided, but it is not supported yet.",
     )
 
-    torch._check(
-        out_dtype is None or out_dtype == torch.bfloat16,
-        lambda: "If output dtype provided, it must be torch.bfloat16.",
-    )
+    if scaled:
+        torch._check(
+            out_dtype is None or out_dtype == torch.bfloat16,
+            lambda: "If output dtype provided, it must be torch.bfloat16.",
+        )
+    else:
+        out_dtype = out_dtype or mat_a.dtype
+        torch._check(
+            out_dtype == mat_a.dtype,
+            lambda: "Grouped gemm output dtype must match `mat_a` dtype.",
+        )
 
     return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, out_dtype)
 
@@ -8657,6 +9098,29 @@ def meta_scaled_grouped_mm(
         out_dtype=out_dtype,
         use_fast_accum=use_fast_accum,
     )
+
+
+@register_meta([aten._scaled_grouped_mm_v2.default])
+def meta_scaled_grouped_mm_v2(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: list[torch.Tensor],
+    scale_recipe_a: list[int],
+    swizzle_a: list[int],
+    scale_b: list[torch.Tensor],
+    scale_recipe_b: list[int],
+    swizzle_b: list[int],
+    offs: torch.Tensor | None = None,
+    bias: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    contraction_dim: list[int] | None = None,
+    use_fast_accum: bool = False,
+):
+    """Shape inference only, since the structured C++ meta doesn't support
+    dynamic shapes. Input validation lives there; same pattern as meta_mm.
+    """
+    _out_dtype = out_dtype or torch.bfloat16
+    return _create_grouped_mm_output_tensor(mat_a, mat_b, offs, _out_dtype)
 
 
 @register_meta(aten._foreach_norm.Scalar)
@@ -8838,7 +9302,11 @@ def native_multi_head_attention_fake(
             "_native_multi_head_attention fake implementation does not support nested tensors"
         )
 
-    if query.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    # Unbacked-safe: known-empty takes the empty path; if the size is symbolic
+    # and can't be decided, assume non-empty (the common case) instead of DDE-ing.
+    if guard_or_false(query.numel() == 0):
         return (query.new_empty(query.shape), query.new_empty(0))
 
     B = query.size(0)  # B: batch size
@@ -8980,6 +9448,28 @@ import torch._refs.nn.functional
 import torch._refs.special
 
 
+# Ops whose C++ Meta kernels are SymInt-aware and faithful to their Python
+# decomps. activate_meta doesn't register the Python version as their Meta
+# kernel, and FakeTensorMode doesn't run their decomps.
+cpp_meta_supports_symint_ops = {
+    aten.empty.memory_format,
+    aten.empty_strided.default,
+    aten.as_strided_scatter.default,
+    aten.as_strided.default,
+    aten.as_strided_.default,
+    aten.zeros.default,
+    aten.detach.default,
+    aten.view_as_real.default,
+    aten.view_as_complex.default,
+    aten.set_.source_Storage_storage_offset,
+    aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    aten.stack.default,
+    aten.arange.default,
+    aten.arange.start,
+    aten.arange.start_step,
+}
+
+
 def activate_meta():
     activate_meta_table = {}
 
@@ -9004,6 +9494,11 @@ def activate_meta():
                 f"op_overload must be OpOverload, got {type(op_overload)}"
             )
 
+        # Use the symint-aware C++ meta kernels; a Python Meta kernel would
+        # shadow them under the Python dispatcher.
+        if op_overload in cpp_meta_supports_symint_ops:
+            continue
+
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -9027,13 +9522,11 @@ def activate_meta():
         elif (
             op_overload.name()
             in {
-                "aten::empty_strided",  # causing infinite recursion, test_meta.py
                 "aten::clone",  # causing infinite recursion
                 "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite
                 "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
-                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
             }
         ):
             pass

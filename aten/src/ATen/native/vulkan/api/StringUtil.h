@@ -62,7 +62,7 @@ struct _str_wrapper final {
   static std::string call(const Args&... args) {
     std::ostringstream ss;
     _str(ss, args...);
-    return ss.str();
+    return std::move(ss).str();
   }
 };
 

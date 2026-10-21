@@ -1,17 +1,20 @@
 # mypy: allow-untyped-defs
 
 import copy
+import io
 import itertools
 import json
 import math
 import operator
 import os
+import pickle
 import random
 import re
 import sys
 import tempfile
 import time
 import unittest
+import warnings
 from collections import defaultdict, namedtuple, OrderedDict
 from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
@@ -69,7 +72,6 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     initialize_temp_directories,
     MultiProcessTestCase,
-    nccl_skip_if_lt_x_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
     simple_sparse_reduce_tests,
@@ -84,15 +86,18 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     FILE_SCHEMA,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_LINUX,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     TemporaryFileName,
+    TEST_WITH_ROCM,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -165,7 +170,11 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.UCC,
 ]
 
-# Allowlist of distributed backends where profiling is supported with use_cuda=True
+# Allowlist of distributed backends where profiling collectives with a CUDA
+# device is supported. This filters nothing today. The one branch that consults
+# it is reachable only from the three CUDA all_reduce tests, and all three skip
+# unless the backend is Gloo or NCCL, so the MPI and UCC entries below are
+# unreachable and the membership test always passes.
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
@@ -476,23 +485,6 @@ def _lock():
             lf.close()
 
 
-@contextmanager
-def _rank_temp_file():
-    if dist.get_rank() == 0:
-        fd, name = tempfile.mkstemp()
-        os.close(fd)
-    else:
-        name = None
-    object_list = [name]
-    dist.broadcast_object_list(object_list)
-    name = object_list[0]
-    try:
-        yield name
-    finally:
-        if dist.get_rank() == 0:
-            os.remove(name)
-
-
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if value is None:
         value = size
@@ -557,7 +549,7 @@ class Barrier:
 
             if time.time() - start_time > timeout:
                 raise RuntimeError("barrier timeout")
-            time.sleep(0.1)
+            time.sleep(0.01)
 
 
 class TestDistBackend(MultiProcessTestCase):
@@ -568,6 +560,12 @@ class TestDistBackend(MultiProcessTestCase):
         super().setUpClass()
 
     def setUp(self):
+        # Decorators set `_skipped_reason` when every rank would skip; skip here
+        # to avoid spawning ranks. Sandcastle reports rank skips as passes, so
+        # leave those to the ranks.
+        reason = getattr(getattr(self, self._testMethodName), "_skipped_reason", None)
+        if reason is not None and not IS_SANDCASTLE:
+            self.skipTest(reason)
         super().setUp()
         # initialize temp directories
         initialize_temp_directories()
@@ -601,7 +599,7 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(
             self.world_size
         ):
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
         try:
             pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(test_name, default_pg_timeout)
             timeout = timedelta(seconds=pg_timeout_seconds)
@@ -875,6 +873,7 @@ class DistributedTest:
             )
             self._test_barrier_timeout(dist.group.WORLD, timeout)
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70755")
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
@@ -894,6 +893,7 @@ class DistributedTest:
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179691")
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
         )
@@ -912,6 +912,7 @@ class DistributedTest:
 
             dist.destroy_process_group(pg)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/164195")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
@@ -986,6 +987,7 @@ class DistributedTest:
             ):
                 dist.new_subgroups(3)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162584")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
@@ -2088,7 +2090,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl",
-            "Only Gloo and Nccl backend supports CUDA allReduce",
+            "Only Gloo and Nccl backends support CUDA allReduce",
         )
         @skip_if_no_gpu
         def test_broadcast_cuda(self):
@@ -2378,6 +2380,7 @@ class DistributedTest:
                 group, group_id, rank, dist.ReduceOp.MIN, 1010, 1, 1
             )
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/75168")
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "nccl", "Nccl does not support CPU tensors"
         )
@@ -2539,7 +2542,7 @@ class DistributedTest:
             self.call_dist_op(
                 ":reduce_scatter_tensor",
                 False,
-                dist.reduce_scatter_tensor,
+                dist.reduce_scatter_single,
                 tensor_out,
                 tensor_in,
                 dist.ReduceOp.SUM,
@@ -2597,7 +2600,7 @@ class DistributedTest:
                 op_calls.append(secondary_op_call)
 
             autograd_profiler_ctx = torch.autograd.profiler.profile(
-                use_cuda=profile_cuda, record_shapes=True
+                use_device="cuda" if profile_cuda else None, record_shapes=True
             )
 
             # TODO: move this test to use torch.profiler once kineto issues are
@@ -2669,7 +2672,8 @@ class DistributedTest:
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
                 )
-                # Currently, only Gloo backend has profiling tested with CUDA enabled.
+                # Gloo and NCCL are the only backends that reach here; every other
+                # backend skips the enclosing tests.
                 # Only run cuda profiling test for one rank to speed up since
                 # running with different src_rank does not affect the correctness.
                 if (
@@ -2968,13 +2972,13 @@ class DistributedTest:
                 self.assertEqual(tensors[0], outputs[0])
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "gloo", "Only Gloo backend support sparse all reduce"
+            BACKEND != "gloo", "Only Gloo backend supports sparse all reduce"
         )
         def test_sparse_all_reduce_sum(self):
             self._test_sparse_all_reduce_sum(lambda t: t)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "gloo", "Only Gloo backend support sparse all reduce"
+            BACKEND != "gloo", "Only Gloo backend supports sparse all reduce"
         )
         @skip_if_no_gpu
         def test_sparse_all_reduce_sum_cuda(self):
@@ -3148,6 +3152,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
+        @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/70754")
         @skip_if_small_worldsize
         @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_min(self):
@@ -3561,7 +3566,7 @@ class DistributedTest:
             self.call_dist_op(
                 ":all_gather_into_tensor",
                 False,
-                dist.all_gather_into_tensor,
+                dist.all_gather_single,
                 tensor_out,
                 tensor_in,
                 group_id,
@@ -4127,7 +4132,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -4140,7 +4145,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         def test_barrier_group_cuda(self):
             group, group_id, rank = self._init_group_test()
@@ -4150,7 +4155,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "mpi", "MPI doesn't supports GPU barrier"
+            BACKEND == "mpi", "MPI doesn't support GPU barrier"
         )
         def test_barrier_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
@@ -4451,6 +4456,10 @@ class DistributedTest:
                     all(param.requires_grad for param in ddp_model.parameters())
                 )
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/76428",
+        )
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -4852,9 +4861,15 @@ class DistributedTest:
                     model.parameters(), model_optim_in_bwd.parameters(), strict=True
                 ):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
-                # Enable determinism in cudnn operators
-                with torch.backends.cudnn.flags(
-                    enabled=True, deterministic=True, benchmark=False
+                # The loss diverges quickly, so any run-to-run nondeterminism
+                # (e.g. rocBLAS GEMMs using atomics) is amplified past the
+                # default tolerances. Enable determinism in cudnn and BLAS.
+                # ResNet50's adaptive average pool backward has no deterministic path.
+                with (
+                    torch.backends.cudnn.flags(
+                        enabled=True, deterministic=True, benchmark=False
+                    ),
+                    DeterministicGuard(True, warn_only=j == 2),
                 ):
                     for i in range(8):
                         inp = (
@@ -5011,7 +5026,7 @@ class DistributedTest:
                     self.register_buffer("buffer", torch.randn(1, 2))
                     self.p = torch.nn.Parameter(torch.randn(10, 5), requires_grad=False)
 
-                def forward(self_, x):  # noqa: B902
+                def forward(self_, x):
                     params = self_.m.parameters()
                     for p in params:
                         self.assertEqual(mp_config.param_dtype, p.dtype)
@@ -5366,7 +5381,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync(self):
             """
             Runs _test_accumulate_gradients_no_sync using default inputs
@@ -5377,7 +5392,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync_grad_is_view(self):
             """
             Runs _test_accumulate_gradients_no_sync using default inputs
@@ -5388,7 +5403,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
             """
             Runs multiple iterations on _test_accumulate_gradients_no_sync
@@ -5416,7 +5431,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
             """
             Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
@@ -5450,7 +5465,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_get_future(self):
             def mult(fut):
                 return [t * 3 for t in fut.wait()]
@@ -5470,6 +5485,7 @@ class DistributedTest:
 
             self.assertEqual(res[0], expected)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/77317")
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
@@ -5720,9 +5736,7 @@ class DistributedTest:
             loss.backward()
             optimizer.step()
 
-        def _test_post_localSGD_optimizer_step_reload(
-            self, create_averager, chkpt_file
-        ):
+        def _test_post_localSGD_optimizer_step_reload(self, create_averager):
             learning_rate = 0.03
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
@@ -5752,14 +5766,22 @@ class DistributedTest:
                     target,
                 )
 
+            # Broadcast the serialized checkpoint instead of sharing a file, so
+            # that no rank owns a resource whose lifetime the other ranks depend on.
             if self.rank == 0:
+                buffer = io.BytesIO()
                 torch.save(
-                    {"optimizer_state_dict": post_localSGD_opt.state_dict()}, chkpt_file
+                    {"optimizer_state_dict": post_localSGD_opt.state_dict()}, buffer
                 )
+                object_list = [buffer.getvalue()]
+            else:
+                object_list = [None]
+            dist.broadcast_object_list(object_list)
 
-            dist.barrier()
             map_location = {"cuda:0": f"cuda:{self.rank:d}"}
-            checkpoint = torch.load(chkpt_file, map_location=map_location)
+            checkpoint = torch.load(
+                io.BytesIO(object_list[0]), map_location=map_location
+            )
             dummy_post_localSGD_opt.load_state_dict(checkpoint["optimizer_state_dict"])
 
             # Check that we didn't hit the trivial case
@@ -5849,10 +5871,9 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_step_reload(self):
             torch.cuda.set_device(self.rank)
-            with _rank_temp_file() as tmp_file:
-                self._test_post_localSGD_optimizer_step_reload(
-                    self._create_periodic_model_averager, tmp_file
-                )
+            self._test_post_localSGD_optimizer_step_reload(
+                self._create_periodic_model_averager
+            )
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -6105,7 +6126,7 @@ class DistributedTest:
 
             all_input_var = torch.cat(
                 [
-                    x.permute(1, 0, 2).contiguous().view(ONLY_SBN_NET.num_features, -1)
+                    x.permute(1, 0, 2).reshape(ONLY_SBN_NET.num_features, -1)
                     for x in input_var
                 ],
                 dim=1,
@@ -6202,7 +6223,7 @@ class DistributedTest:
                 self._model_step_with_zero_grad(model_DDP)
 
                 # Verify DDP logging data is sampled as expected
-                # If it has ran more than 10 iterations and this is
+                # If it has run more than 10 iterations and this is
                 # the sampled iteration for measuring run time stats,
                 # the run time stats for this idx-th iteration will not
                 # be zeros.
@@ -6532,7 +6553,7 @@ class DistributedTest:
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
             # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,
-            # it need to recursively pass the `process_group` in the module when the `SyncBatchNorm`
+            # it needs to recursively pass the `process_group` in the module when the `SyncBatchNorm`
             # is nested in a sub-module or sub-sub-module (e.g. resnet50 in torchvision.models).
 
             process_ids = 0
@@ -6824,7 +6845,10 @@ class DistributedTest:
 
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
-            with self.assertRaises(AttributeError):
+            # Pickling a local class fails; the exception type depends on the
+            # Python version: AttributeError on <=3.13, PicklingError on >=3.14
+            # (CPython gh-139806). pickle.PickleError covers PicklingError.
+            with self.assertRaises((AttributeError, pickle.PickleError)):
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
@@ -7052,6 +7076,7 @@ class DistributedTest:
 
             return prof
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/77342")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle("Currently failing in NVIDIA internal CI")
@@ -7147,6 +7172,7 @@ class DistributedTest:
             self.assertEqual(a1["out_msg_nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 
+        @unittest.skip("https://github.com/pytorch/pytorch/issues/137765")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
@@ -7449,7 +7475,7 @@ class DistributedTest:
                 DDPUnevenTestInput(
                     name="large_conv_model",
                     model=large_model,
-                    inp=torch.ones(batch, batch, dim, dim, device=rank),
+                    inp=torch.ones(batch, batch, 64, 64, device=rank),
                     sync_interval=1,
                 ),
                 DDPUnevenTestInput(
@@ -7690,7 +7716,7 @@ class DistributedTest:
 
             # Single object test with device specified. Backend="gloo", device=current_device+1
             # The test is gated by the fact GPU count is the same as world size to avoid the case
-            # when backend is gloo but there is no multiple GPU devices.
+            # when backend is gloo but there are no multiple GPU devices.
             if backend != "nccl" and torch.cuda.device_count() == int(self.world_size):
                 single_obj_list = [objects[0]]
                 if self.rank != src_rank:
@@ -7982,11 +8008,11 @@ class DistributedTest:
             }
 
             class ToyModel(torch.nn.Module):
-                def __init__(self_):  # noqa: B902
+                def __init__(self_):
                     super().__init__()
                     self_.lin = nn.Linear(10, 10, bias=False)
 
-                def forward(self_, x, expected_type):  # noqa: B902
+                def forward(self_, x, expected_type):
                     # Similar to scatter, the recursive to in the single-device
                     # case does not move tensors if they are in a custom type.
                     self.assertTrue(isinstance(x, expected_type))
@@ -8045,11 +8071,11 @@ class DistributedTest:
             b = torch.rand(batch, dim, device=self.rank)
 
             class NamedTupleModule(torch.nn.Module):
-                def __init__(self_):  # noqa: B902
+                def __init__(self_):
                     super().__init__()
                     self_.lin = nn.Linear(10, 1)
 
-                def forward(self_, input, expected_type):  # noqa: B902
+                def forward(self_, input, expected_type):
                     # Without NamedTuple support, this would be of type tuple.
                     self.assertTrue(
                         isinstance(input, expected_type),
@@ -8468,6 +8494,10 @@ class DistributedTest:
         def test_compute_bucket_assignment_by_size_sparse_error_without_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=False)
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/85012",
+        )
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
@@ -8546,6 +8576,7 @@ class DistributedTest:
             dist.all_reduce(t, group=group_gloo)
             self.assertGreater(t, 0)
 
+        @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/162676")
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -8904,6 +8935,11 @@ class DistributedTest:
                         monitored_barrier_timeout_seconds, wait_all_ranks=wait_all_ranks
                     )
 
+            # The timed-out wait aborted nccl_pg's communicator on ranks != 0,
+            # so abort it on every rank. Finalizing it on rank 0 in
+            # destroy_process_group() runs an intra-node barrier with the
+            # aborted peers (NCCL >= 2.31), which fails.
+            dist.distributed_c10d._abort_process_group(nccl_pg)
             self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
@@ -9565,7 +9601,7 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
 
             def buffer_comm_hook(ddp, named_buffers):
-                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                buffers = list(named_buffers.values())
                 futs = [
                     dist.all_reduce(
                         buffer, group=ddp.process_group, async_op=True
@@ -9667,7 +9703,7 @@ class DistributedTest:
             def buffer_comm_hook(ddp, named_buffers):
                 # named_buffers is a Dict[str, Tensor] representing a mapping
                 # from buffer name to buffer.
-                buffers = [buffer for (_, buffer) in named_buffers.items()]
+                buffers = list(named_buffers.values())
                 ddp._default_broadcast_coalesced(buffers)
 
             model = NetWithBuffers().cuda(rank)
@@ -9739,6 +9775,10 @@ class DistributedTest:
             )
             model_ddp2(input).sum().backward()
 
+        @unittest.skipIf(
+            IS_LINUX or TEST_WITH_ROCM,
+            "https://github.com/pytorch/pytorch/issues/102751",
+        )
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -10033,6 +10073,152 @@ class DistributedTest:
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_join_respects_forward_sync_buffers_false(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank + 42)
+            torch.cuda.manual_seed(rank + 42)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc = nn.Linear(10, 10, bias=False)
+                    self.register_buffer("rank_local", torch.randn(10))
+
+                def forward(self, x):
+                    return self.fc(x) + self.rank_local
+
+            model = NetWithBuffers().cuda(rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+                forward_sync_buffers=False,
+            )
+
+            buf_before = ddp.module.rank_local.detach().clone()
+
+            # Uneven inputs: rank 0 finishes first.
+            num_iters = rank + 1
+            with ddp.join():
+                for _ in range(num_iters):
+                    inp = torch.randn(2, 10, device=rank)
+                    ddp(inp).sum().backward()
+
+            buf_after = ddp.module.rank_local.detach().clone()
+            # _sync_final_model must respect forward_sync_buffers=False.
+            self.assertEqual(buf_before, buf_after)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_init_sync_buffers_with_forward_sync_buffers_false(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+            torch.manual_seed(rank)
+            torch.cuda.manual_seed(rank)
+
+            class NetWithBuffers(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.a = nn.Linear(10, 10, bias=False)
+                    self.register_buffer("frozen_coeff", torch.randn(10))
+
+                def forward(self, x):
+                    return self.a(x) + self.frozen_coeff
+
+            model = NetWithBuffers().cuda(rank)
+            model_ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[rank],
+                forward_sync_buffers=False,
+            )
+            self.assertFalse(model_ddp.forward_sync_buffers)
+
+            bufs = [
+                torch.empty_like(model_ddp.module.frozen_coeff)
+                for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(bufs, model_ddp.module.frozen_coeff)
+            for buf in bufs[1:]:
+                self.assertEqual(bufs[0], buf)
+
+            if rank == 0:
+                model_ddp.module.frozen_coeff += 1
+            inp = torch.randn(2, 10, device=rank)
+            model_ddp(inp).sum().backward()
+
+            bufs = [
+                torch.empty_like(model_ddp.module.frozen_coeff)
+                for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(bufs, model_ddp.module.frozen_coeff)
+            if dist.get_world_size() > 1:
+                self.assertNotEqual(bufs[0], bufs[1])
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_broadcast_buffers_deprecation_warning(self):
+            rank = self.rank
+            torch.cuda.set_device(rank)
+
+            def _count_broadcast_buffers_warnings(caught):
+                return len(
+                    [
+                        w
+                        for w in caught
+                        if issubclass(w.category, FutureWarning)
+                        and "broadcast_buffers" in str(w.message)
+                    ]
+                )
+
+            # Passing broadcast_buffers (True or False) should warn.
+            for val in (True, False):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        broadcast_buffers=val,
+                    )
+                self.assertGreater(_count_broadcast_buffers_warnings(caught), 0)
+
+            # Both specified: forward_sync_buffers takes precedence, warning fires.
+            for bb, fsb in ((False, True), (True, False)):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    ddp = torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        broadcast_buffers=bb,
+                        forward_sync_buffers=fsb,
+                    )
+                self.assertGreater(_count_broadcast_buffers_warnings(caught), 0)
+                self.assertEqual(ddp.forward_sync_buffers, fsb)
+
+            # Default (no broadcast_buffers) and forward_sync_buffers only: no warning.
+            for kwargs in ({}, {"forward_sync_buffers": False}):
+                model = nn.Linear(10, 10).cuda(rank)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    torch.nn.parallel.DistributedDataParallel(
+                        model,
+                        device_ids=[rank],
+                        **kwargs,
+                    )
+                self.assertEqual(_count_broadcast_buffers_warnings(caught), 0)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
@@ -10206,7 +10392,6 @@ class DistributedTest:
         def _test_hook_pickling(self, hook, hook_state):
             torch.manual_seed(0)
             learning_rate = 0.01
-            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
             rank = self.rank
 
             input = torch.randn(7, 1, device=rank)
@@ -10233,9 +10418,12 @@ class DistributedTest:
                 "comm_hook_state": hook_state,
             }
 
+            # Broadcast the serialized checkpoint instead of sharing a file, so
+            # that no rank owns a resource whose lifetime the other ranks depend on.
             if rank == 0:
+                buffer = io.BytesIO()
                 with self.assertLogs("torch.distributed") as captured:
-                    torch.save(state, chkpt_file)
+                    torch.save(state, buffer)
 
                 # Check that the logger has only one entry
                 self.assertEqual(len(captured.records), 1)
@@ -10244,11 +10432,23 @@ class DistributedTest:
                     captured.records[0].getMessage(),
                     "NOTE: Process group is not serializable and excluded from a saved state.",
                 )
+                object_list = [buffer.getvalue()]
+            else:
+                object_list = [None]
+            # This test never calls set_device, so the collective device has to be
+            # named explicitly or every rank would broadcast on cuda:0.
+            coll_device = torch.device(f"cuda:{rank:d}")
+            dist.broadcast_object_list(object_list, device=coll_device)
 
-            dist.barrier()
             map_location = {"cuda:0": f"cuda:{rank:d}"}
             with self.assertLogs("torch.distributed") as captured:
-                checkpoint = torch.load(chkpt_file, map_location=map_location)
+                # The checkpoint holds the hook function and its state, not just
+                # tensors, so it cannot be loaded with weights_only.
+                checkpoint = torch.load(
+                    io.BytesIO(object_list[0]),
+                    map_location=map_location,
+                    weights_only=False,
+                )
 
             # Check that the logger has only one entry
             self.assertEqual(len(captured.records), 1)
@@ -10320,16 +10520,11 @@ class DistributedTest:
             ):
                 self.assertEqual(orig_param.grad, dummy_param.grad)
 
-            dist.barrier()
-            if rank == 0:
-                os.remove(chkpt_file)
-
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices",
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_but_pass_in_sandcastle_if(True, "Skipped due to flakiness")
         def test_ddp_hook_pickling_powerSGD(self):
             hook = powerSGD.powerSGD_hook
             powersgd_state = powerSGD.PowerSGDState(

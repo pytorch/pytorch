@@ -24,6 +24,7 @@ from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
+    allow_c_slot,
     allow_in_graph,
     assume_constant_result,
     disable,
@@ -40,6 +41,7 @@ from .decorators import (
     maybe_mark_dynamic,
     nonstrict_trace,
     override_cudagraphs,
+    override_optimization_hint,
     patch_dynamo_config,
     run,
     set_stance,
@@ -79,6 +81,7 @@ from .polyfills import loader as _  # usort: skip
 
 
 __all__ = [
+    "allow_c_slot",
     "allow_in_graph",
     "assume_constant_result",
     "bytecode_debugger",
@@ -100,6 +103,7 @@ __all__ = [
     "mark_static",
     "mark_static_address",
     "nonstrict_trace",
+    "override_optimization_hint",
     "optimize",
     "optimize_assert",
     "OptimizedModule",
@@ -174,7 +178,18 @@ def reset() -> None:
         kernel_side_table.reset_table()
         inductor_code_side_table.reset_table()
 
-        if torch.cuda.is_available():
+        # The fake tensor dispatch cache is process-global (shared across
+        # FakeTensorMode instances), so it survives into later compiles. That
+        # is normally fine since it caches pure metadata propagation, but if a
+        # meta kernel errantly mutates input metadata (a bug, e.g. #191283),
+        # the mutation happens only on cache miss: a compile that failed cold
+        # can then "succeed" when retried in the same process, which test
+        # harness reruns misclassify as flakiness.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        FakeTensorMode.cache_clear()
+
+        if torch.cuda.is_initialized():
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
             reset_cudagraph_trees()

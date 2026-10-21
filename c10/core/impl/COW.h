@@ -26,7 +26,18 @@ C10_API bool has_simple_data_ptr(const c10::StorageImpl& storage);
 // Check if a DataPtr is COW
 C10_API bool is_cow_data_ptr(const c10::DataPtr& data_ptr);
 
-// Eagerly copies a COW storage's data, turning it into a non-COW storage.
-C10_API void materialize_cow_storage(StorageImpl& storage);
+// MaterializeFn for COW storages. Copies shared data on write.
+C10_API void materialize_cow(StorageImpl* storage);
+
+// Called on CUDA COW data-pointer access. Rejects completed references and
+// access from a different graph capture.
+C10_API void check_cow_read(const StorageImpl* storage);
+
+// Record completion of this storage's current and retained CUDA COW uses on the
+// current stream. First join all prior uses, including aliases and saved
+// pointers, onto that stream. Requires exclusive host access to the storage
+// and its aliases. Releases the retained reference; later access through a
+// completed current reference is forbidden, including through saved pointers.
+C10_API void record_done(StorageImpl& storage);
 
 } // namespace c10::impl::cow

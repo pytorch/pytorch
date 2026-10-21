@@ -113,7 +113,7 @@ Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor&
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
-      auto* range_data = reinterpret_cast<const dtype*>(range.data_ptr());
+      auto* range_data = reinterpret_cast<const dtype*>(range.const_data_ptr());
       at::cuda::cub::radix_sort_pairs<int64_t, dtype>(
         keys.const_data_ptr<int64_t>(), keys_out,
         range_data, shuffled_data_,

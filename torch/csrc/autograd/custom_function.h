@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
@@ -16,16 +17,33 @@ using optional_variable_list = std::vector<std::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
 using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
+// attached_node is set to the node actually attached as the outputs'
+// history: cdata, or the CopySlices node wrapping cdata when a dirty view
+// input forced a rebase. Callers fire node creation hooks on it once the
+// node is fully populated (i.e. after saving variables).
 TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata,
+    const c10::intrusive_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view);
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node);
+
+TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
+    at::ArrayRef<const Variable*> input_vars,
+    const std::unordered_set<at::TensorImpl*>& non_differentiable,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
+    const c10::intrusive_ptr<Node>& cdata,
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn,
+    bool pure_view,
+    c10::intrusive_ptr<Node>& attached_node);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -169,7 +187,7 @@ struct TORCH_API AutogradContext {
   // The CppNode in the autograd graph that owns this AutogradContext. We need a
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
   // will always be alive when we want to use it.
-  std::weak_ptr<Node> grad_fn_;
+  c10::weak_intrusive_ptr<Node> grad_fn_{c10::intrusive_ptr<Node>()};
   bool has_freed_buffers_{false};
 
   // Compiled autograd overrides saved_variables() and needs_input_grad().
@@ -252,7 +270,7 @@ inline variable_list CppNode_apply_functional(
           ", std the corresponding forward input was not a Variable");
       continue;
     }
-    results.emplace_back(outputs[i]);
+    results.emplace_back(std::move(outputs[i]));
   }
 
   return results;
@@ -283,8 +301,9 @@ struct CppNode : public Node {
   std::vector<VariableInfo> output_info_;
 
   void release_variables() override;
+  void release_resources() override;
 
-  void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
+  void set_ctx_grad_fn(c10::intrusive_ptr<Node> node);
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) const override {
@@ -434,13 +453,8 @@ inline void extract_vars(
 template <typename T>
 std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
     std::vector<std::optional<Variable>>& output_list) {
-  variable_list result;
-  std::transform(
-      output_list.begin(),
-      output_list.end(),
-      std::back_inserter(result),
-      [](const std::optional<Variable>& var) { return *var; });
-  return result;
+  return c10::fmap(
+      output_list, [](const std::optional<Variable>& var) { return *var; });
 }
 
 template <typename T>
@@ -454,13 +468,7 @@ inline std::vector<std::optional<Variable>> to_optional(Variable& output) {
 }
 
 inline std::vector<std::optional<Variable>> to_optional(variable_list& output) {
-  std::vector<std::optional<Variable>> result;
-  std::transform(
-      output.begin(),
-      output.end(),
-      std::back_inserter(result),
-      [](const Variable& var) { return var; });
-  return result;
+  return c10::fmap<std::optional<Variable>>(output);
 }
 
 template <class T>
@@ -475,7 +483,7 @@ auto Function<T>::apply(Args&&... args)
     functorch_tls->checkSupportsCppAutogradFunction();
   }
 
-  std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
+  auto node = c10::make_intrusive<CppNode<T>>();
   variable_list input_vars;
 
   const size_t num_inputs = sizeof...(Args);
@@ -516,6 +524,7 @@ auto Function<T>::apply(Args&&... args)
     return x.view_as(x);
   };
 
+  c10::intrusive_ptr<Node> attached_node;
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
       node->ctx_.get_non_differentiable(),
@@ -525,7 +534,8 @@ auto Function<T>::apply(Args&&... args)
       jvp_fn,
       {},
       view_as_self_fn,
-      false);
+      false,
+      attached_node);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
@@ -538,6 +548,10 @@ auto Function<T>::apply(Args&&... args)
 
   if (is_executable) {
     node->save_variables_to_ctx();
+    // Fire only after saved variables are stored on the node.
+    if (attached_node) {
+      fire_node_creation_hooks(attached_node);
+    }
   }
 
   // wrapped_outputs will be a variable_list so, convert it to the correct
@@ -568,13 +582,22 @@ void CppNode<T>::release_variables() {
 }
 
 template <class T>
+void CppNode<T>::release_resources() {
+  Node::release_resources();
+
+  // AutogradContext deletes copy/move, so destroy and reconstruct in place.
+  ctx_.~AutogradContext();
+  new (&ctx_) AutogradContext();
+}
+
+template <class T>
 void CppNode<T>::save_variables_to_ctx() {
   ctx_.save_variables();
 }
 
 template <class T>
-void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
-  ctx_.grad_fn_ = node;
+void CppNode<T>::set_ctx_grad_fn(c10::intrusive_ptr<Node> node) {
+  ctx_.grad_fn_ = std::move(node);
 }
 
 } // namespace torch::autograd

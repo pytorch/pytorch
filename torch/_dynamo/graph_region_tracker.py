@@ -27,7 +27,7 @@ from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten
 
@@ -54,7 +54,7 @@ GlobalStateKey = tuple[
     tuple[bool, bool],
     torch.dtype,
     bool,
-    bool,
+    str,
     bool,
     bool,
 ]
@@ -71,7 +71,7 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
 
 def _extract_tensor_metadata_for_node_hash(
     x: torch.Tensor,
-) -> tuple[Callable[[T], T], tuple[Any, ...]]:
+) -> tuple[Callable[[T], T], tuple[object, ...]]:
     from torch._inductor.codecache import _ident, extract_tensor_metadata_for_cache_key
 
     out = []
@@ -96,7 +96,6 @@ class InputPickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: _extract_tensor_metadata_for_node_hash,
                 torch.SymInt: lambda x: (_ident, (str(x),)),
                 torch.SymBool: lambda x: (_ident, (str(x),)),
                 torch.SymFloat: lambda x: (_ident, (str(x),)),
@@ -104,7 +103,14 @@ class InputPickler(pickle.Pickler):
         )
         self.fast = True
 
-    def dumps(self, obj: Any) -> bytes:
+    # cannot rely on python faketensor type for c++ fakes
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: object) -> Any:
+        if is_fake_tensor(obj):
+            return _extract_tensor_metadata_for_node_hash(obj)
+        return NotImplemented
+
+    def dumps(self, obj: object) -> bytes:
         """
         Pickle an object and return a byte string.
         """
@@ -118,7 +124,7 @@ class InputPickler(pickle.Pickler):
             self._stream.truncate(0)
 
 
-def _extract_args(arg: Any) -> Any:
+def _extract_args(arg: object) -> object:
     if isinstance(arg, Node):
         return arg.meta.get("example_value")
     elif isinstance(arg, (torch.Tensor, int)):
@@ -129,7 +135,7 @@ def _extract_args(arg: Any) -> Any:
 
 def _normalize_args(
     node: Node,
-) -> tuple[tuple[str, ...], tuple[Any | None, ...]]:
+) -> tuple[tuple[str, ...], tuple[object, ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
@@ -139,7 +145,7 @@ def _normalize_args(
 
 
 def _sort_with_ref_region(
-    index_to_rank: dict[int, int], regions: list[list[Any]]
+    index_to_rank: dict[int, int], regions: list[list[T]]
 ) -> None:
     # sort topologically
     # we need to handle edge cases where some nodes have no dependencies
@@ -159,7 +165,7 @@ def get_global_state_key() -> GlobalStateKey:
         torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
         torch.get_default_dtype(),
         torch.are_deterministic_algorithms_enabled(),
-        torch._C._get_cublas_allow_tf32(),
+        torch._C._get_fp32_precision_getter("cuda", "matmul"),
         torch.is_deterministic_algorithms_warn_only_enabled(),
         torch._C._autograd._saved_tensors_hooks_is_enabled(),  # type: ignore[attr-defined]
     )
@@ -183,7 +189,8 @@ class BackwardBfsArgIter:
         it.add_children(origin)
         # pop the origin node, since it is the origin of
         # the region and does not need to be considered for addition
-        assert it.next()
+        if not it.next():
+            raise AssertionError("expected origin node to be popped from iterator")
         return it
 
     def next(self) -> Node | None:
@@ -381,7 +388,8 @@ class RegionWrapper:
     def __init__(
         self, region: Region, node_to_recursive_ancestors: dict[Node, set[Node]]
     ) -> None:
-        assert len(region) == 1, "all regions should start with one node"
+        if len(region) != 1:
+            raise AssertionError("all regions should start with one node")
         node = region[0]
         self.node_to_recursive_ancestors = node_to_recursive_ancestors
         self.iter = BackwardBfsArgIter.create(node)
@@ -417,7 +425,8 @@ def fully_expand_region_group(
     debug_log("expanding new region group: %s", regions)
 
     # All regions should start with 1 node
-    assert all(len(region) == 1 for region in regions)
+    if not all(len(region) == 1 for region in regions):
+        raise AssertionError("all regions should start with one node")
     region_wrappers = [
         RegionWrapper(region, node_to_recursive_ancestors) for region in regions
     ]
@@ -469,9 +478,10 @@ def fully_expand_region_group(
             debug_log("--------------------")
 
         if add_to_all_regions:
-            assert len(region_wrappers) == len(nodes_to_add), (
-                "Number of nodes to add must equal the number of regions"
-            )
+            if len(region_wrappers) != len(nodes_to_add):
+                raise AssertionError(
+                    "Number of nodes to add must equal the number of regions"
+                )
             for region_wrapper, node in zip(region_wrappers, nodes_to_add):
                 region_wrapper.add(node)
                 debug_log("adding %s's children", node)

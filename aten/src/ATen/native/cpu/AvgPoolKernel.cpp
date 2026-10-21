@@ -1012,7 +1012,7 @@ void cpu_avg_pool3d_backward_channels_last(
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_depth * input_height * input_width * channels;
-      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      scalar_t* grad_output_ptr = grad_output_data + n * output_depth * output_height * output_width * channels;
 
       for (const auto od : c10::irange(output_depth)) {
         for (const auto oh : c10::irange(output_height)) {

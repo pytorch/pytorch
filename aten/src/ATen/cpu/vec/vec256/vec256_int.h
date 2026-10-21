@@ -114,14 +114,12 @@ class Vectorized<int64_t> : public Vectorizedi {
   }
   static Vectorized<int64_t> loadu(const void* ptr, int64_t count) {
     __at_align__ int64_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
+    std::memcpy(
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int64_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -132,7 +130,8 @@ class Vectorized<int64_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int64_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int64_t));
     }
   }
   const int64_t& operator[](int idx) const = delete;
@@ -194,7 +193,7 @@ class Vectorized<int32_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(int32_t v) {
     values = _mm256_set1_epi32(v);
   }
@@ -264,14 +263,12 @@ class Vectorized<int32_t> : public Vectorizedi {
   }
   static Vectorized<int32_t> loadu(const void* ptr, int32_t count) {
     __at_align__ int32_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
+    std::memcpy(
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int32_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -282,7 +279,8 @@ class Vectorized<int32_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int32_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int32_t));
     }
   }
   const int32_t& operator[](int idx) const = delete;
@@ -412,7 +410,7 @@ class Vectorized<int16_t> : public Vectorizedi {
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() = default;
   Vectorized(int16_t v) {
     values = _mm256_set1_epi16(v);
   }
@@ -564,14 +562,12 @@ class Vectorized<int16_t> : public Vectorizedi {
   }
   static Vectorized<int16_t> loadu(const void* ptr, int16_t count) {
     __at_align__ int16_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
+    std::memcpy(
+        tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(int16_t));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -582,7 +578,8 @@ class Vectorized<int16_t> : public Vectorizedi {
     } else if (count > 0) {
       __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      std::memcpy(
+          ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(int16_t));
     }
   }
   const int16_t& operator[](int idx) const = delete;
@@ -642,7 +639,7 @@ class Vectorized8 : public Vectorizedi {
     return 32;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized8() {}
+  Vectorized8() = default;
   Vectorized8(T v) {
     values = _mm256_set1_epi8(v);
   }
@@ -912,14 +909,11 @@ class Vectorized8 : public Vectorizedi {
   }
   static Vectorized<T> loadu(const void* ptr, T count) {
     __at_align__ T tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(T));
+    std::memcpy(tmp_values, ptr, std::min<int64_t>(count, size()) * sizeof(T));
     return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
@@ -935,7 +929,8 @@ class Vectorized8 : public Vectorizedi {
       } else {
         __at_align__ T tmp_values[size()];
         _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-        std::memcpy(ptr, tmp_values, count * sizeof(T));
+        std::memcpy(
+            ptr, tmp_values, std::min<int64_t>(count, size()) * sizeof(T));
       }
     }
   }

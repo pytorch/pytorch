@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +49,21 @@ def run_test_plan(
     title = tests.get("title", "unknown test")
     logger.info("Running tests: %s", title)
 
+    # torchtitan's tests/integration_tests/features.py builds the
+    # --checkpoint.initial_load_path as $RUNNER_TEMP/artifacts-to-be-uploaded/...
+    # when RUNNER_TEMP is set, but the paired save reads OUTPUT_DIR (default
+    # "artifacts-to-be-uploaded", relative to cwd). Pin OUTPUT_DIR to the same
+    # absolute prefix so save and load land in the same directory.
+    env_vars = dict(tests.get("env_vars", {}))
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp:
+        env_vars.setdefault(
+            "OUTPUT_DIR", os.path.join(runner_temp, "artifacts-to-be-uploaded")
+        )
+
     with (
         working_directory(tests.get("working_directory", "")),
-        temp_environ(tests.get("env_vars", {})),
+        temp_environ(env_vars),
     ):
         failures = []
         for step in tests["steps"]:

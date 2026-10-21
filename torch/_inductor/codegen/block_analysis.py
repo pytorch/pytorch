@@ -179,23 +179,27 @@ class BlockPatternMatcher:
         # The leading dimension is not directly matched in our expression.
         # We solve for it by dividing the range tree numel by the product of
         # all other dimensions. We quit if they are not known to be divisible.
-        assert dims[0] not in match, "Expected not to match the leading dimension!"
+        if dims[0] in match:
+            raise AssertionError("Expected not to match the leading dimension!")
         if not sizevars.statically_known_multiple_of(numel, slice_numels[0]):
             return None
         dims[0] = numel / slice_numels[0]
 
         # Sanity check that we can recover the index from the matched subexpressions.
         matched_index = sympy_dot(strides, block_index_exprs)
-        assert sizevars.statically_known_equals(
+        if not sizevars.statically_known_equals(
             matched_index,
             index,
-        ), textwrap.dedent(
-            f"""
-            Invalid match!
-            Index: {index}
-            Matched expression: {matched_index}
-            """
-        )
+        ):
+            raise AssertionError(
+                textwrap.dedent(
+                    f"""
+                    Invalid match!
+                    Index: {index}
+                    Matched expression: {matched_index}
+                    """
+                )
+            )
 
         return dims, strides, block_index_exprs
 

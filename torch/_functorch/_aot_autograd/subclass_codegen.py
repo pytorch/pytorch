@@ -9,16 +9,18 @@ subclass types, symint positions) is baked in at compile time.
 
 import functools
 import keyword
-import logging
 from collections.abc import Callable, Iterable
+from typing import cast, TYPE_CHECKING
 
-import torch
 from torch import SymInt
 
-from .schemas import OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
+from .codegen import _compile_and_exec_source, PySourceBuilder
+from .schemas import ActInputPaths, OpaqueMeta, PlainTensorMeta, SubclassCreationMeta
+from .utils import import_async_collective_tensor_type
 
 
-log = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 
 def _is_symint_placeholder(x: None | int | SymInt) -> bool:
@@ -44,63 +46,128 @@ def _safe_attr_access(var: str, attr: str) -> str:
     return f"getattr({var}, {attr!r})"
 
 
-class _CodegenState:
-    """Accumulates lines of generated source and global bindings."""
+class _OutputWrapState:
+    def __init__(
+        self,
+        *,
+        remaining_min_count: int,
+        remaining_max_count: int,
+        optional_symint_check: str,
+    ) -> None:
+        self.remaining_min_count = remaining_min_count
+        self.remaining_max_count = remaining_max_count
+        self.optional_symint_check = optional_symint_check
 
-    def __init__(self) -> None:
-        self.lines: list[str] = []
-        self.globals: dict[str, object] = {}
-        self._name_counter: int = 0
+    def mark_required(self) -> None:
+        self.remaining_min_count -= 1
+        self.remaining_max_count -= 1
 
-    def emit(self, line: str, indent: int = 1) -> None:
-        self.lines.append("    " * indent + line)
+    def mark_optional(self) -> None:
+        self.remaining_max_count -= 1
 
-    def fresh_name(self, prefix: str) -> str:
-        name = f"{prefix}_{self._name_counter}"
-        self._name_counter += 1
-        return name
 
-    def add_global(self, name: str, value: object) -> str:
-        self.globals[name] = value
-        return name
+def _maybe_wait_async_collective_tensor(
+    x: object,
+    AsyncCollectiveTensor: type["AsyncCollectiveTensor"],
+) -> object:
+    """Wait on ACT values and leave all other runtime inputs unchanged."""
+    if isinstance(x, AsyncCollectiveTensor):
+        return cast("AsyncCollectiveTensor", x).trigger_wait()
+    return x
 
 
 def _codegen_unwrap_subclass(
-    state: _CodegenState,
+    state: PySourceBuilder,
     meta: SubclassCreationMeta,
     var: str,
     indent: int = 1,
     include_symints: bool = True,
+    act_input_paths: set[tuple[str, ...]] | None = None,
+    act_wait_fn: str | None = None,
 ) -> None:
     """Emit code to recursively unwrap a single subclass input."""
+    act_input_paths = act_input_paths or set()
+
+    def emit_plain_tensor_symints(var: str, meta: PlainTensorMeta) -> None:
+        if not include_symints:
+            return
+
+        if any(meta.size_symbol_placeholders):
+            size_var = state.fresh_name("_size")
+            state.emit(f"{size_var} = {var}.size()", indent=indent)
+            for i, is_sym in enumerate(meta.size_symbol_placeholders):
+                if is_sym:
+                    state.emit(f"unwrapped_args.append({size_var}[{i}])", indent=indent)
+
+        if any(meta.stride_symbol_placeholders):
+            stride_var = state.fresh_name("_stride")
+            state.emit(f"{stride_var} = {var}.stride()", indent=indent)
+            for i, is_sym in enumerate(meta.stride_symbol_placeholders):
+                if is_sym:
+                    state.emit(
+                        f"unwrapped_args.append({stride_var}[{i}])", indent=indent
+                    )
+
     for attr, attr_meta in meta.attrs.items():
+        attr_expr = _safe_attr_access(var, attr)
+        attr_act_input_paths = {
+            path[1:] for path in act_input_paths if path and path[0] == attr
+        }
         match attr_meta:
-            case PlainTensorMeta() | OpaqueMeta():
-                state.emit(
-                    f"unwrapped_args.append({_safe_attr_access(var, attr)})",
-                    indent=indent,
-                )
+            case PlainTensorMeta():
+                if attr_act_input_paths:
+                    if attr_act_input_paths != {()}:
+                        raise AssertionError(
+                            f"ACT path for {attr} continues past a leaf meta"
+                        )
+                    if act_wait_fn is None:
+                        raise AssertionError("missing ACT wait function")
+                    resolved_var = state.fresh_name("_resolved")
+                    state.emit(
+                        f"{resolved_var} = {act_wait_fn}({attr_expr})",
+                        indent=indent,
+                    )
+                    attr_expr = resolved_var
+                state.emit(f"unwrapped_args.append({attr_expr})", indent=indent)
+                emit_plain_tensor_symints(attr_expr, attr_meta)
+            case OpaqueMeta():
+                if attr_act_input_paths:
+                    if attr_act_input_paths != {()}:
+                        raise AssertionError(
+                            f"ACT path for {attr} continues past a leaf meta"
+                        )
+                    if act_wait_fn is None:
+                        raise AssertionError("missing ACT wait function")
+                    resolved_var = state.fresh_name("_resolved")
+                    state.emit(
+                        f"{resolved_var} = {act_wait_fn}({attr_expr})",
+                        indent=indent,
+                    )
+                    state.emit(f"unwrapped_args.append({resolved_var})", indent=indent)
+                else:
+                    state.emit(
+                        f"unwrapped_args.append({attr_expr})",
+                        indent=indent,
+                    )
             case SubclassCreationMeta():
+                if () in attr_act_input_paths:
+                    raise AssertionError(f"ACT path for {attr} stops at subclass meta")
                 inner_var = state.fresh_name("_inner")
-                state.emit(
-                    f"{inner_var} = {_safe_attr_access(var, attr)}", indent=indent
-                )
+                state.emit(f"{inner_var} = {attr_expr}", indent=indent)
                 _codegen_unwrap_subclass(
                     state,
                     attr_meta,
                     inner_var,
                     indent=indent,
                     include_symints=include_symints,
+                    act_input_paths=attr_act_input_paths,
+                    act_wait_fn=act_wait_fn,
                 )
 
-    # Emit symint extraction
     if include_symints:
         size_placeholders = _compute_placeholders(meta.outer_size)
         stride_placeholders = _compute_placeholders(meta.outer_stride)
-        has_size_symints = any(size_placeholders)
-        has_stride_symints = any(stride_placeholders)
-
-        if has_size_symints or has_stride_symints:
+        if any(size_placeholders) or any(stride_placeholders):
             size_var = state.fresh_name("_size")
             state.emit(f"{size_var} = {var}.size()", indent=indent)
             for i, is_sym in enumerate(size_placeholders):
@@ -131,24 +198,37 @@ def _concrete_value(val: None | int | SymInt) -> int:
     raise AssertionError(f"Expected concrete int, got {type(val)}: {val}")
 
 
+def _is_optional_symint_output(val: object) -> bool:
+    return isinstance(val, (int, SymInt))
+
+
 def _codegen_wrap_subclass(
-    state: _CodegenState,
+    state: PySourceBuilder,
     meta: SubclassCreationMeta,
-    out_idx_ref: list[int],
+    output_state: _OutputWrapState,
 ) -> str:
     """Emit code to reconstruct one subclass output. Returns the variable name."""
     inner_dict_var = state.fresh_name("_out_inner")
     entries: list[str] = []
+    attr_exprs: dict[str, str] = {}
 
     for attr, attr_meta in meta.attrs.items():
         match attr_meta:
-            case PlainTensorMeta() | OpaqueMeta():
-                idx = out_idx_ref[0]
-                out_idx_ref[0] += 1
-                entries.append(f"{attr!r}: unwrapped_outs[{idx}]")
+            case PlainTensorMeta():
+                attr_expr = state.fresh_name("_out_attr")
+                state.emit(f"{attr_expr} = unwrapped_outs[_out_idx]")
+                state.emit("_out_idx += 1")
+                output_state.mark_required()
+                _emit_optional_plain_tensor_symint_skips(state, output_state, attr_meta)
+            case OpaqueMeta():
+                attr_expr = state.fresh_name("_out_attr")
+                state.emit(f"{attr_expr} = unwrapped_outs[_out_idx]")
+                state.emit("_out_idx += 1")
+                output_state.mark_required()
             case SubclassCreationMeta():
-                nested_var = _codegen_wrap_subclass(state, attr_meta, out_idx_ref)
-                entries.append(f"{attr!r}: {nested_var}")
+                attr_expr = _codegen_wrap_subclass(state, attr_meta, output_state)
+        attr_exprs[attr] = attr_expr
+        entries.append(f"{attr!r}: {attr_expr}")
 
     state.emit(f"{inner_dict_var} = {{{', '.join(entries)}}}")
 
@@ -162,17 +242,35 @@ def _codegen_wrap_subclass(
         parts: list[str] = []
         for val, is_sym in zip(outer, placeholders):
             if is_sym:
-                idx = out_idx_ref[0]
-                out_idx_ref[0] += 1
-                parts.append(f"unwrapped_outs[{idx}]")
+                sym_expr = state.fresh_name("_out_sym")
+                state.emit(f"{sym_expr} = unwrapped_outs[_out_idx]")
+                state.emit("_out_idx += 1")
+                output_state.mark_required()
+                parts.append(sym_expr)
             else:
                 parts.append(repr(_concrete_value(val)))
         if len(parts) == 1:
             return f"({parts[0]},)"
         return f"({', '.join(parts)})"
 
-    size_expr = _build_tuple(meta.outer_size, size_placeholders)
-    stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
+    def _consume_optional_placeholders(placeholders: list[bool]) -> None:
+        for is_sym in placeholders:
+            if is_sym:
+                _emit_optional_symint_skip(state, output_state)
+
+    outer_size_from_attr = meta.outer_size_from_attr
+    outer_stride_from_attr = meta.outer_stride_from_attr
+    if outer_size_from_attr is not None:
+        size_expr = f"{attr_exprs[outer_size_from_attr]}.size()"
+        _consume_optional_placeholders(size_placeholders)
+    else:
+        size_expr = _build_tuple(meta.outer_size, size_placeholders)
+
+    if outer_stride_from_attr is not None:
+        stride_expr = f"{attr_exprs[outer_stride_from_attr]}.stride()"
+        _consume_optional_placeholders(stride_placeholders)
+    else:
+        stride_expr = _build_tuple(meta.outer_stride, stride_placeholders)
 
     type_name = state.add_global(
         state.fresh_name("_subclass_type"),
@@ -188,49 +286,190 @@ def _codegen_wrap_subclass(
     return result_var
 
 
+def _count_output_args(
+    meta: PlainTensorMeta | SubclassCreationMeta,
+    *,
+    include_subclass_symints: bool,
+) -> int:
+    if isinstance(meta, PlainTensorMeta):
+        return meta.arg_count if include_subclass_symints else 1
+
+    total = 0
+    for attr_meta in meta.attrs.values():
+        if isinstance(attr_meta, OpaqueMeta):
+            total += 1
+        else:
+            total += _count_output_args(
+                attr_meta, include_subclass_symints=include_subclass_symints
+            )
+
+    if include_subclass_symints:
+        total += sum(_compute_placeholders(meta.outer_size))
+        total += sum(_compute_placeholders(meta.outer_stride))
+    else:
+        if meta.outer_size_from_attr is None:
+            total += sum(_compute_placeholders(meta.outer_size))
+        if meta.outer_stride_from_attr is None:
+            total += sum(_compute_placeholders(meta.outer_stride))
+    return total
+
+
+def _emit_optional_symint_skip(
+    state: PySourceBuilder,
+    output_state: _OutputWrapState,
+) -> None:
+    remaining_var = state.fresh_name("_remaining_outs")
+    include_var = state.fresh_name("_include_symints")
+    later_min_count = output_state.remaining_min_count
+    later_max_count = output_state.remaining_max_count - 1
+    max_fits = (
+        f"{remaining_var} - 1 >= {later_min_count} and "
+        f"{remaining_var} - 1 <= {later_max_count}"
+    )
+    min_fits = (
+        f"{remaining_var} >= {later_min_count} and {remaining_var} <= {later_max_count}"
+    )
+
+    state.emit(f"{remaining_var} = _num_wrapped_outs - _out_idx")
+    state.emit(
+        f"{include_var} = ({max_fits}) and "
+        f"{output_state.optional_symint_check}(unwrapped_outs[_out_idx])"
+    )
+    state.emit(
+        f"assert {include_var} or ({min_fits}), "
+        "'could not match output layout with optional SymInt outputs'"
+    )
+    state.emit(f"if {include_var}:")
+    state.emit("_out_idx += 1", indent=2)
+    output_state.mark_optional()
+
+
+def _emit_optional_plain_tensor_symint_skips(
+    state: PySourceBuilder,
+    output_state: _OutputWrapState,
+    meta: PlainTensorMeta,
+) -> None:
+    for is_sym in meta.size_symbol_placeholders:
+        if is_sym:
+            _emit_optional_symint_skip(state, output_state)
+    for is_sym in meta.stride_symbol_placeholders:
+        if is_sym:
+            _emit_optional_symint_skip(state, output_state)
+
+
 def _emit_output_wrapping(
-    state: _CodegenState,
+    state: PySourceBuilder,
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
+    num_fw_outs_saved_for_bw: int | None,
 ) -> tuple[list[str], int]:
     """Emit wrapping code for output metas.
 
     Returns (result_exprs, num_args_tallied) where result_exprs are Python
     expression strings referencing each wrapped output.
     """
-    out_idx_ref = [0]
     result_exprs: list[str] = []
     num_args_tallied = 0
+    saved_for_bw = num_fw_outs_saved_for_bw or 0
+    min_counts = [
+        _count_output_args(meta, include_subclass_symints=False) for meta in out_metas
+    ]
+    max_counts = [
+        _count_output_args(meta, include_subclass_symints=True) for meta in out_metas
+    ]
+    min_wrapped_outputs = sum(min_counts)
+    max_wrapped_outputs = sum(max_counts)
 
+    optional_symint_check = (
+        state.add_global(
+            state.fresh_name("_is_optional_symint_output"),
+            _is_optional_symint_output,
+        )
+        if min_wrapped_outputs != max_wrapped_outputs
+        else ""
+    )
+    state.emit("_out_idx = 0")
+    if saved_for_bw:
+        state.emit(f"_num_wrapped_outs = len(unwrapped_outs) - {saved_for_bw}")
+    else:
+        state.emit("_num_wrapped_outs = len(unwrapped_outs)")
+    if min_wrapped_outputs != max_wrapped_outputs:
+        state.emit(
+            "assert "
+            f"{min_wrapped_outputs} <= _num_wrapped_outs <= {max_wrapped_outputs}, "
+            f"f'expected between {min_wrapped_outputs} and {max_wrapped_outputs} "
+            "wrapped outputs, got {_num_wrapped_outs}'"
+        )
+    else:
+        state.emit(
+            f"assert _num_wrapped_outs == {max_wrapped_outputs}, "
+            f"f'expected {max_wrapped_outputs} wrapped outputs, "
+            "got {_num_wrapped_outs}'"
+        )
+
+    output_state = _OutputWrapState(
+        remaining_min_count=min_wrapped_outputs,
+        remaining_max_count=max_wrapped_outputs,
+        optional_symint_check=optional_symint_check,
+    )
     for meta in out_metas:
         if isinstance(meta, PlainTensorMeta):
-            result_exprs.append(f"unwrapped_outs[{meta.unwrapped_idx}]")
-            num_args_tallied += 1
-            out_idx_ref[0] = max(out_idx_ref[0], meta.unwrapped_idx + 1)
+            out_expr = state.fresh_name("_out_plain")
+            state.emit(f"{out_expr} = unwrapped_outs[_out_idx]")
+            state.emit("_out_idx += 1")
+            output_state.mark_required()
+            _emit_optional_plain_tensor_symint_skips(state, output_state, meta)
+            result_exprs.append(out_expr)
+            num_args_tallied += meta.arg_count
         else:
-            result_var = _codegen_wrap_subclass(state, meta, out_idx_ref)
+            result_var = _codegen_wrap_subclass(state, meta, output_state)
             result_exprs.append(result_var)
             num_args_tallied += meta.arg_count
 
+    if output_state.remaining_min_count != 0 or output_state.remaining_max_count != 0:
+        raise AssertionError(
+            "output wrapping counts did not balance: "
+            f"{output_state.remaining_min_count}, "
+            f"{output_state.remaining_max_count}"
+        )
+    state.emit(
+        "assert _out_idx == _num_wrapped_outs, "
+        "f'wrapped {_out_idx} outputs, expected {_num_wrapped_outs}'"
+    )
     return result_exprs, num_args_tallied
 
 
 def _emit_input_unwrapping(
-    state: _CodegenState,
+    state: PySourceBuilder,
     inp_metas: list[PlainTensorMeta | SubclassCreationMeta],
     frozen_inp_indices: frozenset[int] = frozenset(),
     include_symints: bool = True,
+    act_input_paths_by_input: dict[int, set[tuple[str, ...]]] | None = None,
+    act_wait_fn: str | None = None,
 ) -> None:
     """Emit unwrapping code for input metas into unwrapped_args.
 
     Caller must have already emitted ``unwrapped_args = []``.
     """
+    act_input_paths_by_input = act_input_paths_by_input or {}
     for i, meta in enumerate(inp_metas):
+        input_act_paths = act_input_paths_by_input.get(i, set())
         if isinstance(meta, PlainTensorMeta):
-            state.emit(f"unwrapped_args.append(args[{i}])")
+            if input_act_paths:
+                if input_act_paths != {()}:
+                    raise AssertionError(
+                        f"ACT path for input {i} continues past a plain meta"
+                    )
+                if act_wait_fn is None:
+                    raise AssertionError("missing ACT wait function")
+                state.emit(f"unwrapped_args.append({act_wait_fn}(args[{i}]))")
+            else:
+                state.emit(f"unwrapped_args.append(args[{i}])")
         elif i in frozen_inp_indices:
             # Frozen by inductor freezing: constant already baked into graph.
             state.emit("unwrapped_args.append(None)")
         else:
+            if () in input_act_paths:
+                raise AssertionError(f"ACT path for input {i} stops at subclass meta")
             inp_var = state.fresh_name("_inp")
             type_name = state.add_global(
                 state.fresh_name("_expected_type"),
@@ -242,7 +481,13 @@ def _emit_input_unwrapping(
                 f"f'expected {{{type_name}}}, got {{type({inp_var})}}'",
             )
             _codegen_unwrap_subclass(
-                state, meta, inp_var, indent=1, include_symints=include_symints
+                state,
+                meta,
+                inp_var,
+                indent=1,
+                include_symints=include_symints,
+                act_input_paths=input_act_paths,
+                act_wait_fn=act_wait_fn,
             )
 
 
@@ -251,28 +496,40 @@ def _codegen_subclass_wrapper_source(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
-    act_input_indices: list[int] | None = None,
+    act_input_paths: ActInputPaths | None = None,
 ) -> tuple[str, dict[str, object]]:
     """Generate source and globals for a subclass wrapper.
 
     Returns (source, globals_dict).  The globals_dict will NOT contain
     ``compiled_fn`` — the caller is responsible for adding it before exec.
     """
-    state = _CodegenState()
+    state = PySourceBuilder()
 
     state.emit("def inner_fn(args):", indent=0)
 
-    # --- Resolve AsyncCollectiveTensors ---
-    # ACTs are transient eager-mode wrappers for async collective overlap.
-    # Inductor triton kernels bypass __torch_dispatch__, so we must call
-    # trigger_wait() before the compiled graph uses the data.
-    if act_input_indices:
-        for i in act_input_indices:
-            state.emit(f"args[{i}] = args[{i}].trigger_wait()")
+    act_input_paths_by_input: dict[int, set[tuple[str, ...]]] = {}
+    act_wait_fn = None
+    if act_input_paths:
+        AsyncCollectiveTensor = import_async_collective_tensor_type()
+        act_wait_fn = state.add_global(
+            state.fresh_name("_maybe_wait_act"),
+            functools.partial(
+                _maybe_wait_async_collective_tensor,
+                AsyncCollectiveTensor=AsyncCollectiveTensor,
+            ),
+        )
+        for i, attr_path in act_input_paths:
+            act_input_paths_by_input.setdefault(i, set()).add(attr_path)
 
     # --- Input unwrapping ---
     state.emit("unwrapped_args = []")
-    _emit_input_unwrapping(state, inp_metas, frozen_inp_indices=frozen_inp_indices)
+    _emit_input_unwrapping(
+        state,
+        inp_metas,
+        frozen_inp_indices=frozen_inp_indices,
+        act_input_paths_by_input=act_input_paths_by_input,
+        act_wait_fn=act_wait_fn,
+    )
 
     # Pass through any trailing args not covered by inp_metas
     # (e.g. rng seed/offset added by FunctionalizedRngRuntimeWrapper).
@@ -284,16 +541,17 @@ def _codegen_subclass_wrapper_source(
     state.emit("unwrapped_outs = compiled_fn(unwrapped_args)")
 
     # --- Output wrapping ---
-    result_exprs, num_args_tallied = _emit_output_wrapping(state, out_metas)
+    result_exprs, _ = _emit_output_wrapping(state, out_metas, num_fw_outs_saved_for_bw)
     result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     if num_fw_outs_saved_for_bw is not None:
         state.emit(
-            f"return {result_tuple} + tuple(unwrapped_outs[{num_args_tallied}:])"
+            f"_activation_start = len(unwrapped_outs) - {num_fw_outs_saved_for_bw}"
         )
+        state.emit(f"return {result_tuple} + tuple(unwrapped_outs[_activation_start:])")
     else:
         state.emit(f"return {result_tuple}")
 
-    source = "\n".join(state.lines)
+    source = state.getvalue()
     return source, state.globals
 
 
@@ -305,47 +563,15 @@ def _codegen_subclass_wrap_source(
     Used for the backward epilogue. Shares output-wrapping logic with
     _codegen_subclass_wrapper_source via _emit_output_wrapping.
     """
-    state = _CodegenState()
+    state = PySourceBuilder()
     state.emit("def wrap_fn(unwrapped_outs):", indent=0)
-    result_exprs, _ = _emit_output_wrapping(state, out_metas)
+    result_exprs, _ = _emit_output_wrapping(
+        state, out_metas, num_fw_outs_saved_for_bw=None
+    )
     result_tuple = f"({', '.join(result_exprs)},)" if result_exprs else "()"
     state.emit(f"return {result_tuple}")
-    source = "\n".join(state.lines)
+    source = state.getvalue()
     return source, state.globals
-
-
-def _compile_and_exec_source(
-    source: str,
-    globals_dict: dict[str, object],
-    fn_name: str,
-    artifact_name: str,
-    wrapped_fn: Callable[..., object] | None = None,
-) -> Callable[..., object]:
-    """Compile generated source, exec it, and return the named function.
-
-    If wrapped_fn is provided, applies functools.update_wrapper so that
-    __wrapped__ and __dict__ (e.g. _fx_graph_cache_key) propagate to the
-    generated function.
-    """
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Generated %s:\n%s", artifact_name, source)
-
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": artifact_name,
-            "encoding": "string",
-        },
-        payload_fn=lambda: source,
-    )
-
-    code = compile(source, f"<{artifact_name}>", "exec")
-    local_dict: dict[str, object] = {}
-    exec(code, globals_dict, local_dict)
-    fn = local_dict[fn_name]
-    if wrapped_fn is not None:
-        functools.update_wrapper(fn, wrapped_fn)  # type: ignore[arg-type]
-    return fn  # type: ignore[return-value]
 
 
 def codegen_backward_subclass_fns(
@@ -381,7 +607,7 @@ def codegen_subclass_wrapper(
     out_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: int | None,
     frozen_inp_indices: frozenset[int] = frozenset(),
-    act_input_indices: list[int] | None = None,
+    act_input_paths: ActInputPaths | None = None,
 ) -> Callable[..., object]:
     """Generate a specialized wrapper function for subclass unwrap/wrap."""
     source, globals_dict = _codegen_subclass_wrapper_source(
@@ -389,7 +615,7 @@ def codegen_subclass_wrapper(
         out_metas,
         num_fw_outs_saved_for_bw,
         frozen_inp_indices,
-        act_input_indices=act_input_indices,
+        act_input_paths=act_input_paths,
     )
     globals_dict["compiled_fn"] = compiled_fn
     return _compile_and_exec_source(

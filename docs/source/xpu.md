@@ -13,11 +13,13 @@
 
     StreamContext
     can_device_access_peer
+    clock_rate
     current_device
     current_stream
     device
     device_count
     device_of
+    device_memory_used
     get_arch_list
     get_device_capability
     get_device_name
@@ -29,10 +31,14 @@
     is_bf16_supported
     is_initialized
     is_tf32_supported
+    memory_usage
+    power_draw
     set_device
     set_stream
     stream
     synchronize
+    temperature
+    utilization
 ```
 
 ## Random Number Generator
@@ -93,6 +99,7 @@
      change_current_allocator
      empty_cache
      get_per_process_memory_fraction
+     list_gpu_processes
      max_memory_allocated
      max_memory_reserved
      mem_get_info

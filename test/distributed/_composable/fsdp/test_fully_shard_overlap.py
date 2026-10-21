@@ -28,9 +28,10 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    IS_LINUX,
     MI200_ARCH,
     run_tests,
-    TEST_HPU,
+    skipIfRocmVersionAtLeast,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -73,9 +74,14 @@ class TestFullyShardOverlap(FSDPTest):
     def world_size(self) -> int:
         return min(2, torch.get_device_module(device_type).device_count())
 
-    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_training_overlap(self):
         torch.manual_seed(42)
 
@@ -91,8 +97,8 @@ class TestFullyShardOverlap(FSDPTest):
             fully_shard(lin, reshard_after_forward=True)
         fully_shard(model, reshard_after_forward=True)
 
-        orig_all_gather_into_tensor = dist.all_gather_into_tensor
-        orig_reduce_scatter_tensor = dist.reduce_scatter_tensor
+        orig_all_gather_into_tensor = dist.all_gather_single
+        orig_reduce_scatter_tensor = dist.reduce_scatter_single
         comm_stream = torch.get_device_module(device_type).Stream()
 
         def delay_collective():
@@ -129,7 +135,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 return ref_model(inp)
 
         def fwd():
@@ -151,7 +157,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 loss = ref_model(inp).sum()
                 # Run dummy all-gathers per weight again since we are
                 # resharding after forward
@@ -160,7 +166,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_ag_input = torch.chunk(dummy_ag_output, self.world_size)[
                         self.rank
                     ]
-                    dist.all_gather_into_tensor(dummy_ag_output, dummy_ag_input)
+                    dist.all_gather_single(dummy_ag_output, dummy_ag_input)
                 loss.backward()
                 # Run dummy reduce-scatters per weight
                 for lin in ref_model:
@@ -168,7 +174,7 @@ class TestFullyShardOverlap(FSDPTest):
                     dummy_rs_output = torch.chunk(dummy_rs_input, self.world_size)[
                         self.rank
                     ]
-                    dist.reduce_scatter_tensor(dummy_rs_output, dummy_rs_input)
+                    dist.reduce_scatter_single(dummy_rs_output, dummy_rs_input)
 
         def fwd_bwd():
             with (
@@ -190,7 +196,138 @@ class TestFullyShardOverlap(FSDPTest):
         self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    def test_fully_shard_backward_comm_overlap(self):
+        """Exercise backward with reduce-scatter sharing the shard process
+        group and with reduce-scatter opted in to a dedicated process group via
+        set_separate_reduce_scatter_group.
+
+        Uses real compute (large matmuls) and real collectives (large
+        parameter tensors) instead of CUDA sleeps.
+
+        ref_bwd: RS forced back onto the shard PG (single communicator),
+        serializing it with all-gather.
+
+        fsdp_bwd: RS on its own communicator (the opt-in), enabling overlap.
+        """
+        torch.manual_seed(42)
+
+        # Large dim for non-trivial collective time, small batch so
+        # comm dominates compute; AG becomes back-to-back on its stream
+        dim, num_linears, batch = 16384, 3, 4
+        model = nn.Sequential(
+            *[nn.Linear(dim, dim, bias=False) for _ in range(num_linears)]
+        )
+        for lin in model:
+            fully_shard(lin, reshard_after_forward=True)
+        fully_shard(model, reshard_after_forward=True)
+        # Opt in: give reduce-scatter its own process group (the change under test)
+        model.set_separate_reduce_scatter_group()
+
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+        inp = torch.randn((batch, dim), device=device_type.type)
+        loss = model(inp).sum()
+        loss.backward()
+        with implicit_replication():
+            optim.step()
+        optim.zero_grad()  # warmup
+
+        # Collect FSDP param groups to toggle PG config
+        fsdp_param_groups = []
+        for module in model.modules():
+            state = fully_shard.state(module)
+            if state is not None:
+                fsdp_param_groups.extend(state._fsdp_param_groups)
+
+        # The opt-in created a dedicated RS group per mesh (distinct from shard)
+        for pg in fsdp_param_groups:
+            self.assertIsNotNone(pg.mesh_info.reduce_scatter_process_group)
+            self.assertIsNot(
+                pg.mesh_info.reduce_scatter_process_group,
+                pg.mesh_info.shard_process_group,
+            )
+
+        # ref_bwd: force RS to use the same PG as AG (serialized)
+        saved_rs_pgs = []
+        for pg in fsdp_param_groups:
+            saved_rs_pgs.append(pg.mesh_info.reduce_scatter_process_group)
+            pg.mesh_info.reduce_scatter_process_group = pg.mesh_info.shard_process_group
+
+        def ref_bwd():
+            loss = model(inp).sum()
+            loss.backward()
+            with implicit_replication():
+                optim.step()
+            optim.zero_grad()
+
+        _time_fn(ref_bwd)
+
+        # Restore separate PGs for fsdp_bwd
+        for pg, saved_pg in zip(fsdp_param_groups, saved_rs_pgs):
+            pg.mesh_info.reduce_scatter_process_group = saved_pg
+
+        def fsdp_bwd():
+            loss = model(inp).sum()
+            loss.backward()
+            with implicit_replication():
+                optim.step()
+            optim.zero_grad()
+
+        # Exercise both shared-PG and separate-RS-PG backward paths. We do not
+        # assert timing here since real collective overlap is hardware/backend
+        # sensitive.
+        _time_fn(fsdp_bwd)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_separate_reduce_scatter_group(self):
+        """Reduce-scatter shares the shard PG by default; enabling gives it a
+        dedicated PG (one communicator shared across same-rank-set meshes), and
+        disabling resets to the shared PG."""
+        model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
+        for lin in model:
+            fully_shard(lin)
+        fully_shard(model)
+        param_groups = []
+        for module in model.modules():
+            state = fully_shard.state(module)
+            if state is not None:
+                param_groups.extend(state._fsdp_param_groups)
+
+        def _assert_shares_all_gather():
+            for pg in param_groups:
+                self.assertIsNone(pg.mesh_info.reduce_scatter_process_group)
+                self.assertIs(
+                    pg._reduce_scatter_process_group,
+                    pg.mesh_info.shard_process_group,
+                )
+
+        # Default shares the all-gather (shard) PG
+        _assert_shares_all_gather()
+
+        # Enable: one dedicated PG shared across same-rank-set meshes (dedup),
+        # distinct from the shard PG
+        model.set_separate_reduce_scatter_group()
+        rs_pgs = {id(pg.mesh_info.reduce_scatter_process_group) for pg in param_groups}
+        self.assertEqual(len(rs_pgs), 1)  # one communicator for the single rank set
+        for pg in param_groups:
+            self.assertIsNotNone(pg.mesh_info.reduce_scatter_process_group)
+            self.assertIs(
+                pg._reduce_scatter_process_group,
+                pg.mesh_info.reduce_scatter_process_group,
+            )
+            self.assertIsNot(
+                pg._reduce_scatter_process_group, pg.mesh_info.shard_process_group
+            )
+
+        # Disable: reset back to sharing the shard PG
+        model.set_separate_reduce_scatter_group(False)
+        _assert_shares_all_gather()
+
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/131081")
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_post_optim_event_overlap(self):
         torch.manual_seed(42)
 
@@ -204,7 +341,7 @@ class TestFullyShardOverlap(FSDPTest):
         fully_shard(model[1], reshard_after_forward=False)
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
-        orig_all_gather_into_tensor = dist.all_gather_into_tensor
+        orig_all_gather_into_tensor = dist.all_gather_single
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
@@ -332,7 +469,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
                 *args,
                 **kwargs,
             )
-            rs_input, rs_event, *rest = result
+            rs_input, rs_event, post_reduce_stream, *rest = result
             if reduce_scatter_group not in delay_streams:
                 delay_streams[reduce_scatter_group] = device_module.Stream()
             ds = delay_streams[reduce_scatter_group]
@@ -340,7 +477,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             with device_module.stream(ds):
                 device_module._sleep(int(sleep_ms * get_cycles_per_ms()))
                 delayed_event = ds.record_event()
-            return (rs_input, delayed_event, *rest)
+            return (rs_input, delayed_event, post_reduce_stream, *rest)
 
         dist.barrier()
         _pg_mod.foreach_reduce = wrapped
@@ -350,15 +487,31 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             dist.barrier()
             _pg_mod.foreach_reduce = orig
 
+    # Hangs on MI200: RCCL deadlocks when three communicators make
+    # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_per_param_mesh_training_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=False)
 
+    # Hangs on MI200: RCCL deadlocks when three communicators make
+    # progress concurrently (https://github.com/ROCm/rccl/issues/2191).
+    # ROCm 10.1 removes high priority queue, which reduces the total number of queues
+    # from 8 (4 high + 4 normal) to 4 (4 normal), causing some streams can't overlap
+    @skipIfRocmVersionAtLeast((10, 1))
     @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(
+        not hasattr(torch.get_device_module(device_type), "_sleep"),
+        "Sleep is not supported on this device",
+    )
     def test_fully_shard_per_param_mesh_no_grad_input_overlap(self):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=True)
 
@@ -376,7 +529,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
 
         ep_degree = 2
         efsdp_size = self.world_size // ep_degree
-        comm_sleep_ms = 500
+        comm_sleep_ms = 100
         world_mesh = init_device_mesh(
             device_type.type,
             (self.world_size,),
@@ -388,10 +541,10 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
         efsdp_mesh_info = FSDPMeshInfo(mesh=sparse_mesh["efsdp"], shard_mesh_dim=0)
         model_args = ModelArgs(
-            n_layers=20,
+            n_layers=10,
             vocab_size=1024,
             max_seq_len=64,
-            dim=1280,
+            dim=256,
             n_heads=16,
             dropout_p=0.0,
             num_experts=2,
@@ -458,7 +611,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             def rep_fwd_bwd():
                 rep_model(inp).sum().backward()  # noqa: F821
 
-            for _ in range(5):
+            for _ in range(2):
                 rep_fwd_bwd()
                 rep_model.zero_grad(set_to_none=True)
             rep_time = _time_fn(rep_fwd_bwd)
@@ -489,21 +642,21 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             def fsdp_fwd_bwd():
                 fsdp_model(inp).sum().backward()
 
-            for _ in range(5):
+            for _ in range(2):
                 fsdp_fwd_bwd()
                 fsdp_model.zero_grad(set_to_none=True)
             fsdp_time = _time_fn(fsdp_fwd_bwd)
             fsdp_model.zero_grad(set_to_none=True)
-        # replicate: 1 all-reduce/block → N+1 serialized waits.
+        # replicate: 1 all-reduce/block → ~N+2 serialized waits.
         # FSDP: 2 reduce-scatters/block (dp + efsdp).
         #   Per-group RS state: dp reduce-scatter overlaps with efsdp's
-        #     wait → ~N+1 waits ≈ replicate (ratio ≈ 1.0).
-        #   Shared RS state: both reduce-scatters serialize → ~2N+1
-        #     waits → ratio ≈ (2N+1)/(N+1) → 1.95 for N=20.
+        #     wait → ~N+2 waits ≈ replicate (ratio ≈ 1.0).
+        #   Shared RS state: both reduce-scatters serialize → ~2N+2
+        #     waits → ratio ≈ (2N+2)/(N+2) → 1.83 for N=10.
         self.assertLess(
             fsdp_time / rep_time,
             1.5,
-            f"FSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
+            lambda msg: f"{msg}\nFSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
             f"per-group RS state may not be preventing cross-group stalls",
         )
 

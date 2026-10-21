@@ -16,6 +16,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_custom_class_obj
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -81,7 +82,7 @@ def _disable_interpreter():
 # Assign attribute 'from_obj' to the qualified name 'target' on 'to_module
 # This installs empty Modules where none exist yet if they are subpaths of target
 def _assign_attr(
-    from_obj: torch.Tensor | torch.ScriptObject | torch.nn.Module,
+    from_obj: Any,
     to_module: torch.nn.Module,
     target: str,
     attr_kind: _AttrKind,
@@ -100,6 +101,12 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
+            # Collect `item` and every call-name variant `item@N` present in
+            # _modules, regardless of contiguity. Export passes (e.g.
+            # replace_set_grad_with_hop_pass) can relocate intermediate calls
+            # into HOP subgraphs, leaving non-contiguous indices (e.g. base + @3
+            # with @1/@2 absent); scanning contiguously from @1 would stop at the
+            # gap and never populate the surviving higher-index copies.
             ts.update(
                 t_call  # type: ignore[misc]
                 for k, t_call in to_module._modules.items()
@@ -131,9 +138,9 @@ def _assign_attr(
                     torch.Tensor,
                     torch.ScriptObject,
                 ),
-            ):
+            ) and not is_custom_class_obj(from_obj):
                 raise AssertionError(
-                    f"expected torch.Tensor or torch.ScriptObject for CONSTANT attr_kind, got {type(from_obj)}"
+                    f"expected torch.Tensor, torch.ScriptObject, or opaque type for CONSTANT attr_kind, got {type(from_obj)}"
                 )
             setattr(to_module, field, from_obj)
         elif attr_kind == _AttrKind.MODULE:
@@ -620,7 +627,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
             if len(flat_args) != signature.in_spec.num_leaves:
                 raise TypeError(
                     f"Flat args adaption failed, number of args mismatch "
-                    f"Adatped: {len(flat_args)} \n"
+                    f"Adapted: {len(flat_args)} \n"
                     f"Exported module: {signature.in_spec.num_leaves}"
                 )
             return flat_args
@@ -1698,9 +1705,15 @@ class _IVals:
             raise AssertionError(
                 f"expected node.op to be 'call_function', got {node.op!r}"
             )
-        b = self._is_mutable(node.target)
-        print("Checking mutability", node.target, b)
-        if not b:
+        if not isinstance(node.args[0], torch.fx.Node):
+            # update() can only replay a mutation of a single tensor.
+            fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
+            raise RuntimeError(
+                f"Cannot unflatten {node.format_node()}: it is used outside {fqn!r} "
+                f"but is not an output of its call signature, and it is not a "
+                f"single-tensor mutation that could be replayed."
+            )
+        if not self._is_mutable(node.target):
             # so the mutation was functionalized;
             # we will apply the original mutation later (see below)
             fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
@@ -1875,7 +1888,7 @@ def _sink_params(
 
         inputs_to_state_of_scope[node] = state_name
 
-    # Record name of remove inputs for return purpose.
+    # Record name of removed inputs for return purpose.
     inputs_removed: set[str] = set()
 
     for node, state_name in inputs_to_state_of_scope.items():

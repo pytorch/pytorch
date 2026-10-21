@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import re
 import subprocess
 import sys
 
@@ -13,6 +14,10 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class TestTritonWrapper(TestCase):
+    def setUp(self):
+        super().setUp()
+        PyCodeCache.cache_clear()
+
     def get_compiled_module(self):
         compiled_module = None
         for v in PyCodeCache.modules:
@@ -89,6 +94,43 @@ class TestTritonWrapper(TestCase):
             env={**os.environ, "PYTHONPATH": augmented_pp},
         ).decode()
         self.assertTrue(len(bench_out) > 0)
+
+    def test_get_args_preserves_aliased_inputs(self):
+        @torch.compile
+        def f(x, y, empty_bool, empty_long):
+            return x + y, empty_bool.logical_not(), empty_long + 1
+
+        base = torch.arange(64, device=GPU_TYPE, dtype=torch.long)
+        x = torch.as_strided(base, (3, 4), (4, 1), 2)
+        y = torch.as_strided(base, (3, 4), (4, 1), 10)
+        empty_bool = torch.empty((0, 3), device=GPU_TYPE, dtype=torch.bool)
+        empty_long = torch.empty((0, 2), device=GPU_TYPE, dtype=torch.long)
+        f(x, y, empty_bool, empty_long)
+
+        compiled_module = self.get_compiled_module()
+        get_args_src = inspect.getsource(compiled_module.get_args)
+        shared_storage_names = re.findall(
+            r"(_shared_storage_\d+) = rand_strided\(",
+            get_args_src,
+        )
+        self.assertEqual(len(shared_storage_names), 1, get_args_src)
+
+        shared_storage = shared_storage_names[0]
+        aliased_view_lines = re.findall(
+            rf"^\s+\w+ = torch\.as_strided\({shared_storage}, .*$",
+            get_args_src,
+            re.MULTILINE,
+        )
+        self.assertEqual(len(aliased_view_lines), 2, get_args_src)
+
+        args = compiled_module.get_args()
+        recreated_x, recreated_y, _, _ = args
+
+        self.assertEqual(
+            recreated_x.untyped_storage().data_ptr(),
+            recreated_y.untyped_storage().data_ptr(),
+        )
+        self.assertEqual(len(args), 4)
 
 
 if __name__ == "__main__":

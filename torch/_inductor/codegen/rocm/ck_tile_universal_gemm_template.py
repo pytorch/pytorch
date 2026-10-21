@@ -1,13 +1,16 @@
 # mypy: allow-untyped-defs, disable-error-code="attr-defined, valid-type"
 import functools
 import logging
+import os
 import random
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from typing import Any
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.rocm.ck_tile_template import CKTileTemplate
+from torch._inductor.codegen.rocm.compile_command import _rocm_header_search_dirs
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.codegen.rocm.rocm_template import ArgInfo
 from torch._inductor.ir import Buffer, Layout
@@ -17,6 +20,94 @@ from ...utils import IndentedBuffer
 
 
 log = logging.getLogger(__name__)
+
+# Dtypes for which universal GEMM instances are generated. Every entry must have
+# a ck_dtype_to_size entry and a _CK_DTYPE_ALIASES entry on CKTileTemplate.
+GEMM_DTYPES = (
+    CKTileTemplate._TORCH_DTYPE_TO_CK[torch.float16],
+    CKTileTemplate._TORCH_DTYPE_TO_CK[torch.bfloat16],
+)
+
+_CK_TILE_PIPELINE_PROBLEM_HEADER = "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
+_STRUCT_ANCHOR = "struct UniversalGemmPipelineProblem"
+_SCHEDULER_PARAM = "GemmPipelineScheduler Scheduler_"
+
+
+def _header_has_v2_universal_gemm_pipeline(header_text: str) -> bool | None:
+    pos = header_text.find(_STRUCT_ANCHOR)
+    if pos < 0:
+        return None
+
+    # ck_tile writes the template parameter list above the struct name.
+    template_start = header_text.rfind("template", 0, pos)
+    if template_start < 0:
+        return None
+
+    template_block = header_text[template_start:pos]
+    sched_pos = template_block.rfind(_SCHEDULER_PARAM)
+    if sched_pos < 0:
+        return None
+
+    after_scheduler = template_block[sched_pos:]
+    elemwise_pos = after_scheduler.find("AElementWise_")
+    hotloop_pos = after_scheduler.find("HasHotLoop_")
+    if elemwise_pos >= 0 and (hotloop_pos < 0 or elemwise_pos < hotloop_pos):
+        return True
+    if hotloop_pos >= 0 and (elemwise_pos < 0 or hotloop_pos < elemwise_pos):
+        return False
+    return None
+
+
+def _find_ck_tile_header(rocm_home: str | None, ck_dir: str | None) -> str | None:
+    for include_dir in _rocm_header_search_dirs(rocm_home, ck_dir):
+        header_path = os.path.join(include_dir, _CK_TILE_PIPELINE_PROBLEM_HEADER)
+        if os.path.exists(header_path):
+            return header_path
+    return None
+
+
+@functools.cache
+def _ck_tile_universal_gemm_v2_api(rocm_home: str | None, ck_dir: str | None) -> bool:
+    # ck_tile headers come from the compiler's include path at kernel compile
+    # time, not from torch.version.hip, which is frozen when PyTorch is built.
+    # Probe the header the compiler will pick, and say so loudly when we cannot:
+    # the version fallback below is the very signal we are trying to avoid.
+    if torch.version.hip is None:
+        return False
+
+    try:
+        header_path = _find_ck_tile_header(rocm_home, ck_dir)
+        if header_path is None:
+            reason = f"{_CK_TILE_PIPELINE_PROBLEM_HEADER} is not on the include path"
+        else:
+            with open(header_path) as header_file:
+                header_v2 = _header_has_v2_universal_gemm_pipeline(header_file.read())
+            if header_v2 is not None:
+                return header_v2
+            reason = f"the template clause in {header_path} was not recognized"
+    except OSError as e:
+        reason = str(e)
+
+    # torch.version.hip is the HIP version, conventionally aligned with ROCm.
+    try:
+        rocm_version = tuple(int(v) for v in torch.version.hip.split(".")[:2])
+    except ValueError:
+        log.warning(
+            "Could not probe the CK-Tile universal GEMM API (%s) and "
+            "torch.version.hip=%s is unparsable; assuming the legacy API",
+            reason,
+            torch.version.hip,
+        )
+        return False
+
+    log.warning(
+        "Could not probe the CK-Tile universal GEMM API (%s); falling back to "
+        "torch.version.hip=%s, which reflects the ROCm PyTorch was built against "
+        "rather than the headers these kernels compile against",
+        reason,
+        torch.version.hip,
+    )
+    return rocm_version >= (7, 14)
 
 
 def is_static_int(number):
@@ -102,6 +193,8 @@ def ops():
     """
     import itertools
 
+    gemm_dtypes = [(d,) * 3 for d in GEMM_DTYPES]
+
     compute_v3_instances = [
         CKTileGemmOperation(
             layout_a=layout_a,
@@ -130,7 +223,7 @@ def ops():
             ("Row", "Row", "Row"),
             ("Row", "Col", "Row"),
         ]
-        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
         for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
@@ -168,7 +261,7 @@ def ops():
             ("Row", "Row", "Row"),
             ("Row", "Col", "Row"),
         ]
-        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
         for (tile_m, tile_n, tile_k) in [
             (256, 256, 32)
         ]  # half the tile size since it has double buffering
@@ -208,7 +301,7 @@ def ops():
             ("Row", "Row", "Row"),
             ("Row", "Col", "Row"),
         ]
-        for (datatype_a, datatype_b, datatype_c) in [("FP16",) * 3, ("BF16",) * 3]
+        for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
         for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(32, 32, 16)]
@@ -229,19 +322,7 @@ class CKTileGemmTemplate(CKTileTemplate):
     This class is used for rendering CK-Tile Universal GEMM kernels
     """
 
-    gemm_template = r"""{{version_comment}}
-    {{headers}}
-    {{globals}}
-    {{instance_definition}}
-    extern "C" {
-    PT_EXPORT {{kernel_definition}} {
-
-        using {{instance_namespace}}::BaseGemmPipeline;
-        using {{instance_namespace}}::TilePartitioner;
-
-        constexpr auto TileK = {{instance_namespace}}::TileK;
-        constexpr auto kPrefetchStages = BaseGemmPipeline::PrefetchStages;
-
+    gemm_kernel_launch = r"""
         const auto BiasTerms = std::array<const void*, 0> ();
         const auto BiasStrides = std::array<int32_t, 0> ();
 
@@ -265,22 +346,24 @@ class CKTileGemmTemplate(CKTileTemplate):
             return 0;
         }
 
-        // run the kernel
-        const auto dispatch = [&](const auto has_hot_loop_, const auto tail_number_) constexpr {
-            using Kernel = {{instance_namespace}}::Kernel<has_hot_loop_.value, tail_number_.value>;
+        {% if use_v2_api %}
+        using Kernel = {{instance_namespace}}::Kernel;
 
-            if (!Kernel::IsSupportedArgument(kargs)) {
-                // we do our best to statically avoid this case in `filter_op`
-                throw std::runtime_error("invalid argument");
-            }
-            auto stream_config = ck_tile::stream_config{stream};
-            auto grid_size = Kernel::GridSize(M, N, kBatch);
-            constexpr auto block_size = Kernel::BlockSize();
-            constexpr auto lds_bytes = 0;
-            constexpr auto kBlockPerCU = 1;
-            auto gemm = ck_tile::make_kernel<block_size.x, kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
-            float elapsed_time = ck_tile::launch_kernel(stream_config, gemm);
-        };
+        if (!Kernel::IsSupportedArgument(kargs)) {
+            throw std::runtime_error("invalid argument");
+        }
+        auto stream_config = ck_tile::stream_config{stream};
+        auto grid_size = Kernel::GridSize(M, N, kBatch);
+        auto block_size = Kernel::BlockSize();
+        constexpr auto lds_bytes = 0;
+        constexpr auto kBlockPerCU = 1;
+        auto gemm = ck_tile::make_kernel<kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
+        ck_tile::launch_kernel(stream_config, gemm);
+        {% else %}
+        using {{instance_namespace}}::BaseGemmPipeline;
+        using {{instance_namespace}}::TilePartitioner;
+
+        constexpr auto TileK = {{instance_namespace}}::TileK;
 
         const ck_tile::index_t k_grain     = kBatch * TileK;
         const ck_tile::index_t K_split     = (K + k_grain - 1) / k_grain * TileK;
@@ -288,8 +371,36 @@ class CKTileGemmTemplate(CKTileTemplate):
         const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
-        {{rendered_dispatch}}
+        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
+            constexpr bool has_hot_loop_v = has_hot_loop_.value;
+            constexpr auto tail_number_v = tail_number_.value;
 
+            using Kernel = {{instance_namespace}}::Kernel<has_hot_loop_v, tail_number_v>;
+
+            if (!Kernel::IsSupportedArgument(kargs)) {
+                // we do our best to statically avoid this case in filter_op
+                throw std::runtime_error("invalid argument");
+            }
+            auto stream_config = ck_tile::stream_config{stream};
+            auto grid_size = Kernel::GridSize(M, N, kBatch);
+            auto block_size = Kernel::BlockSize();
+            constexpr auto lds_bytes = 0;
+            constexpr auto kBlockPerCU = 1;
+            auto gemm = ck_tile::make_kernel<kBlockPerCU>(Kernel{}, grid_size, block_size, lds_bytes, kargs);
+            ck_tile::launch_kernel(stream_config, gemm);
+        };
+
+        BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+        {% endif %}
+    """
+
+    gemm_template = r"""{{version_comment}}
+    {{headers}}
+    {{globals}}
+    {{instance_definition}}
+    extern "C" {
+    PT_EXPORT {{kernel_definition}} {
+{{kernel_launch}}
         return 0;
     } // kernel definition
     } // extern C
@@ -326,70 +437,6 @@ class CKTileGemmTemplate(CKTileTemplate):
 
                 using Row = ck_tile::tensor_layout::gemm::RowMajor;
                 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
-
-                template <ck_tile::index_t PrefetchStages, typename Dispatcher>
-                void dispatch_memory_pipeline_hot_loop(const ck_tile::TailNumber tail_num, Dispatcher dispatch)
-                {
-                    if(tail_num == ck_tile::TailNumber::One)
-                    {
-                        dispatch(ck_tile::bool_constant<true>{},
-                            ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::One>{});
-                    }
-                    else if(tail_num == ck_tile::TailNumber::Full)
-                    {
-                        dispatch(ck_tile::bool_constant<true>{},
-                            ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Full>{});
-                    }
-
-                    if constexpr(PrefetchStages > 2)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Two)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Two>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 3)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Three)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Three>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 4)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Four)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Four>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 5)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Five)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Five>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 6)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Six)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Six>{});
-                        }
-                    }
-                    if constexpr(PrefetchStages > 7)
-                    {
-                        if(tail_num == ck_tile::TailNumber::Seven)
-                        {
-                            dispatch(ck_tile::bool_constant<true>{},
-                                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Seven>{});
-                        }
-                    }
-                }
             """
         )
         return res
@@ -566,6 +613,21 @@ class CKTileGemmTemplate(CKTileTemplate):
             return False
         return True
 
+    def check_epilogue(self, op: "CKTileGemmOperation"):
+        """
+        Pre-v2 CShuffleEpilogueProblem takes a memory_operation_enum argument
+        with no default, which we don't emit, so those instances don't compile.
+        ck_tile dropped it one release after it simplified
+        UniversalGemmPipelineProblem, so a snapshot taken between the two is
+        misclassified as supported here; both shipped ROCm releases are on one
+        side or the other.
+        """
+        if op.epilogue == "CShuffle" and not _ck_tile_universal_gemm_v2_api(
+            config.rocm.rocm_home, config.rocm.ck_dir
+        ):
+            return False
+        return True
+
     def filter_op(self, op: "CKTileGemmOperation"):
         """
         Determines whether a given op definition is suitable for the current
@@ -575,6 +637,8 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         Returns None if the op is not suitable, otherwise returns the op to be used.
         """
+        if not self.check_epilogue(op):
+            return None
         if not self.check_dtypes(op):
             return None
         if not self.check_layouts(op):
@@ -586,7 +650,7 @@ class CKTileGemmTemplate(CKTileTemplate):
 
         return op
 
-    def emit_ck_instance(self, op: "CKTileGemmOperation"):
+    def emit_ck_instance(self, op: "CKTileGemmOperation", *, use_v2_api: bool):
         """
         This method is used to generate code which defines the type alias for the generated kernel class
         """
@@ -641,35 +705,21 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                        TilePartitionerGroupNum,
                                                        TilePartitionerM01>;
 
-        using Traits  =
-            ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout>;
-
         using GemmUniversalTraits =
             ck_tile::TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
                                              ALayout, BLayout, CLayout, TransposeC>;
 
-        using GemmPipelineProblem =
-            ck_tile::GemmPipelineProblem<ADataType, BDataType, AccDataType, GemmShape, Traits>;
+        {{rendered_pipeline_problem}}
 
         {{rendered_scheduler}}
 
-        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
-        using UniversalGemmProblem =
-            ck_tile::UniversalGemmPipelineProblem<ADataType,
-                                                  BDataType,
-                                                  AccDataType,
-                                                  GemmShape,
-                                                  GemmUniversalTraits,
-                                                  scheduler,
-                                                  has_hot_loop_v,
-                                                  tail_number_v>;
+        {{rendered_universal_gemm_problem}}
 
         {{rendered_pipeline}}
 
         {{rendered_epilogue}}
 
-        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
-        using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline<has_hot_loop_v, tail_number_v>, GemmEpilogue>;
+        {{rendered_kernel}}
     }
 
 """
@@ -677,11 +727,20 @@ class CKTileGemmTemplate(CKTileTemplate):
         def render_epilogue(epilogue_type):
             if epilogue_type == "Default":
                 return r"""
+            using DsDataType = ck_tile::tuple<>;
+            using DsLayout = ck_tile::tuple<>;
+            using CDElementwise = ck_tile::element_wise::PassThrough;
+
             using EpilogueProblem = ck_tile::DefaultGemm2DEpilogueProblem<ADataType,
                                                                           BDataType,
+                                                                          DsDataType,
                                                                           AccDataType,
                                                                           CDataType,
+                                                                          DsLayout,
                                                                           CLayout,
+                                                                          CDElementwise,
+                                                                          TileM,
+                                                                          TileN,
                                                                           kPadM,
                                                                           kPadN,
                                                                           WarpTileM,
@@ -692,10 +751,9 @@ class CKTileGemmTemplate(CKTileTemplate):
         """
             elif epilogue_type == "CShuffle":
                 return r"""
-            constexpr auto kMemoryOperation = ck_tile::memory_operation_enum::set;
             using DsDataType = ck_tile::tuple<>; // no bias terms for vanilla GEMM
             using DsLayout = ck_tile::tuple<>;
-            constexpr auto ELayout = CLayout;
+            using ELayout = CLayout;
             using CDEElementWise = ck_tile::element_wise::PassThrough; // no-op
             using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                                      BDataType,
@@ -705,7 +763,6 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                                      DsLayout,
                                                                      ELayout,
                                                                      CDEElementWise,
-                                                                     GemmPipelineProblem::kBlockSize,
                                                                      TileM,
                                                                      TileN,
                                                                      WarpM,
@@ -713,20 +770,63 @@ class CKTileGemmTemplate(CKTileTemplate):
                                                                      WarpTileM,
                                                                      WarpTileN,
                                                                      WarpTileK,
-                                                                     TransposeC,
-                                                                     kMemoryOperation>;
+                                                                     TransposeC>;
 
             using GemmEpilogue = ck_tile::CShuffleEpilogue<EpilogueProblem>;
         """
             else:
                 raise AssertionError("Epilogue must be set")
 
-        def render_pipeline(pipeline_type):
+        def render_pipeline_v1(pipeline_type):
             return rf"""
             using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCr{pipeline_type}<GemmPipelineProblem>;
 
             template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
             using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem<has_hot_loop_v, tail_number_v>>;
+        """
+
+        def render_pipeline_v2(pipeline_type):
+            return rf"""
+            using UniversalGemmProblem =
+                ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                                      BDataType,
+                                                      AccDataType,
+                                                      GemmShape,
+                                                      GemmUniversalTraits,
+                                                      scheduler>;
+
+            using GemmPipeline = ck_tile::GemmPipelineAgBgCr{pipeline_type}<UniversalGemmProblem>;
+        """
+
+        if use_v2_api:
+            rendered_pipeline_problem = ""
+            rendered_universal_gemm_problem = ""
+            rendered_pipeline = render_pipeline_v2(op.pipeline)
+            rendered_kernel = "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;"
+        else:
+            rendered_pipeline_problem = r"""
+        using Traits  =
+            ck_tile::TileGemmTraits<kPadM, kPadN, kPadK, ALayout, BLayout, CLayout>;
+
+        using GemmPipelineProblem =
+            ck_tile::GemmPipelineProblem<ADataType, BDataType, AccDataType, GemmShape, Traits>;
+        """
+            rendered_universal_gemm_problem = r"""
+        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
+        using UniversalGemmProblem =
+            ck_tile::UniversalGemmPipelineProblem<ADataType,
+                                                  BDataType,
+                                                  AccDataType,
+                                                  GemmShape,
+                                                  GemmUniversalTraits,
+                                                  scheduler,
+                                                  has_hot_loop_v,
+                                                  tail_number_v>;
+        """
+            rendered_pipeline = render_pipeline_v1(op.pipeline)
+            rendered_kernel = r"""
+        template<bool has_hot_loop_v, ck_tile::TailNumber tail_number_v>
+        using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline<has_hot_loop_v, tail_number_v>, GemmEpilogue>;
         """
 
         def render_scheduler(scheduler_type):
@@ -737,9 +837,12 @@ class CKTileGemmTemplate(CKTileTemplate):
         rendered_definition = self._template_from_string(template_definition).render(
             operation_name=op.name(),
             **asdict(op),
+            rendered_pipeline_problem=rendered_pipeline_problem,
             rendered_scheduler=render_scheduler(op.scheduler),
-            rendered_pipeline=render_pipeline(op.pipeline),
+            rendered_universal_gemm_problem=rendered_universal_gemm_problem,
+            rendered_pipeline=rendered_pipeline,
             rendered_epilogue=render_epilogue(op.epilogue),
+            rendered_kernel=rendered_kernel,
             has_double_smem_buffer=("true" if op.pipeline == "CompV4" else "false"),
         )
         return rendered_definition
@@ -751,15 +854,20 @@ class CKTileGemmTemplate(CKTileTemplate):
         The primary entry point for the code rendering process used in this template.
         """
         epilogue_nodes = kwargs.get("epilogue_nodes")
-        assert epilogue_nodes is None or 0 == len(epilogue_nodes)
+        if not (epilogue_nodes is None or 0 == len(epilogue_nodes)):
+            raise AssertionError("expected no epilogue_nodes for CK tile gemm template")
         template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
-        assert 2 == len(self.input_nodes)
+        if 2 != len(self.input_nodes):
+            raise AssertionError(f"expected 2 input_nodes, got {len(self.input_nodes)}")
         X, W = self.input_nodes
         Y = self.output_node
 
-        instance_definition = self.emit_ck_instance(op)
+        use_v2_api = _ck_tile_universal_gemm_v2_api(
+            config.rocm.rocm_home, config.rocm.ck_dir
+        )
+        instance_definition = self.emit_ck_instance(op, use_v2_api=use_v2_api)
 
         version_comment = rf"""/**
 * Generated code for CK inductor backend
@@ -772,79 +880,10 @@ class CKTileGemmTemplate(CKTileTemplate):
 */
 """
 
-        def render_dispatch(pipeline_type, op_name):
-            switch_tailnum_template = r"""
-            switch (tail_num) {
-                {% for tail_num in valid_tailnums %}
-                case ck_tile::TailNumber::{{tail_num}}:
-                    dispatch({{has_hot_loop}},
-                             ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::{{tail_num}}>{});
-                    break;
-                {% endfor %}
-                default:
-                    std::ostringstream err;
-                    err << "Unsupported dispatch: "
-                        << "Pipeline: " << "{{pipeline}}"
-                        << "Prefetch stages: " << kPrefetchStages
-                        << "Tail num: " << tail_num;
-                    throw std::runtime_error(err.str());
-            } // switch tail_num
-            """
-            dispatch_template = r"""
-        if (has_hot_loop) {
-            {{rendered_with_hot_loop}}
-        }
-        else { // has_hot_loop == false
-            {{rendered_without_hot_loop}}
-        } // if has_hot_loop
-        """
-            if pipeline_type == "CompV3":
-                return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, true>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                    rendered_without_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                )
-            elif pipeline_type == "Mem":
-                return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop="dispatch_memory_pipeline_hot_loop<kPrefetchStages>(tail_num, dispatch);",
-                    rendered_without_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                )
-            elif pipeline_type == "CompV4":
-                return self._template_from_string(dispatch_template).render(
-                    rendered_with_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, true>{}",
-                        valid_tailnums=("Two", "Three"),
-                        pipeline=pipeline_type,
-                    ),
-                    rendered_without_hot_loop=self._template_from_string(
-                        switch_tailnum_template
-                    ).render(
-                        has_hot_loop="ck_tile::integral_constant<bool, false>{}",
-                        valid_tailnums=("Full", "Odd", "Even"),
-                        pipeline=pipeline_type,
-                    ),
-                )
-            else:
-                raise AssertionError(f"Pipeline {pipeline_type} is not supported")
+        kernel_launch = self._template_from_string(self.gemm_kernel_launch).render(
+            instance_namespace=op.name(),
+            use_v2_api=use_v2_api,
+        )
 
         return self._template_from_string(self.gemm_template).render(
             headers=self.header().getvalue(),
@@ -858,9 +897,8 @@ class CKTileGemmTemplate(CKTileTemplate):
                     f"int32_t {arg}" for arg in ["M", "N", "K", "LDA", "LDB", "LDC"]
                 ],
             ),
-            instance_namespace=op.name(),
+            kernel_launch=kernel_launch,
             version_comment=version_comment,
-            rendered_dispatch=render_dispatch(op.pipeline, op.name()),
         )
 
     def gen_ops(self):
@@ -879,16 +917,42 @@ class CKTileGemmTemplate(CKTileTemplate):
             )
         filtered_instances = list(filter(self.filter_op, instances))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
-        # which are very similar to each other. Randomizing the choice seems to solve this.
-        random.seed(-11)
-        chosen_instances = (
-            random.sample(
-                filtered_instances,
-                min(len(filtered_instances), config.rocm.ck_tile_max_profiling_configs),
-            )
-            if config.rocm.ck_tile_max_profiling_configs
-            else filtered_instances
-        )
+        # which are very similar to each other. Stratified sampling ensures coverage of
+        # different pipeline/epilogue combinations while still randomizing within each stratum.
+        # Use a local Random instance so we don't mutate the global RNG state shared with
+        # other inductor code paths.
+        rng = random.Random(-11)
+        max_configs = config.rocm.ck_tile_max_profiling_configs
+        if max_configs:
+            strata: dict[tuple[str, str], list] = defaultdict(list)
+            for inst in filtered_instances:
+                strata[(inst.pipeline, inst.epilogue)].append(inst)
+            # Shuffle stratum keys so that when len(strata) > max_configs, the strata that
+            # get represented are not biased by filter/insertion order.
+            stratum_keys = list(strata.keys())
+            rng.shuffle(stratum_keys)
+            # Distribute the budget across strata as evenly as possible. The first
+            # `remainder` strata get one extra slot.
+            per_stratum, remainder = divmod(max_configs, len(stratum_keys))
+            chosen_instances: list = []
+            for i, key in enumerate(stratum_keys):
+                quota = per_stratum + (1 if i < remainder else 0)
+                if quota == 0:
+                    break
+                group = strata[key]
+                chosen_instances.extend(rng.sample(group, min(len(group), quota)))
+            # If some strata were smaller than their quota, fill the slack from the global
+            # remainder so we still hit max_configs when possible.
+            shortfall = max_configs - len(chosen_instances)
+            if shortfall > 0:
+                chosen_ids = OrderedSet(id(x) for x in chosen_instances)
+                remaining = [x for x in filtered_instances if id(x) not in chosen_ids]
+                if remaining:
+                    chosen_instances.extend(
+                        rng.sample(remaining, min(len(remaining), shortfall))
+                    )
+        else:
+            chosen_instances = filtered_instances
         log.debug(
             "generated %d ck instances after sample: %s",
             len(chosen_instances),

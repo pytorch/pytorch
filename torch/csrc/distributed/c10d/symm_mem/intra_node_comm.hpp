@@ -26,7 +26,7 @@ enum class AllReduceAlgo : uint8_t {
   TWO_SHOT = 2,
 };
 
-// NOTE: this class will be be removed soon in favor of SymmetricMemory
+// NOTE: this class will be removed soon in favor of SymmetricMemory
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
@@ -48,7 +48,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   bool rendezvous();
 
   /**
-   * Selects a AllReduceAlgo that we think will outperform nccl.
+   * Selects an AllReduceAlgo that we think will outperform nccl.
    * Returns AllReduceAlgo::NONE if we don't think we can outperform nccl.
    */
   AllReduceAlgo selectAllReduceAlgo(const at::Tensor& input);
@@ -82,7 +82,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
 
 class IntraNodeCommWork : public c10d::Work {
  public:
-  bool wait(std::chrono::milliseconds timeout = kNoTimeout) override {
+  bool wait(std::chrono::milliseconds /*timeout*/ = kNoTimeout) override {
     return true;
   }
 };

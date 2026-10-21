@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch import _prims, Tensor
 from torch._utils import _get_device_index
+from torch.nn import functional as F
 
 
 if TYPE_CHECKING:
@@ -16,6 +17,27 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+def _blackwell_decompose_k_partial_impl(
+    a: Tensor,
+    b: Tensor,
+    k_split: int,
+    config_index: int,
+    m_pad: int,
+    k_part: int,
+) -> Tensor:
+    """Reference for the internal aligned decompose-K partial operation."""
+    del config_index
+    m, k = a.shape
+    n = b.shape[1]
+    partials = []
+    for split in range(k_split):
+        start = split * k_part
+        end = min(start + k_part, k)
+        partial = torch.mm(a[:, start:end], b[start:end], out_dtype=torch.float32)
+        partials.append(F.pad(partial, [0, 0, 0, m_pad - m]))
+    return torch.stack(partials).view(k_split * m_pad, n)
 
 
 def make_prim(
@@ -82,7 +104,7 @@ lookup_seed = make_prim(
 )
 # inductor_random() doesn't accept a dtype.
 # instead, its lowering always burns in float32, and conversions to a different type
-# are explicit in the graph. We therefore need this impl (used during tracing) to hardcoded
+# are explicit in the graph. We therefore need this impl (used during tracing) to hardcode
 # the dtype, so it always faithfully produces a float32 tensor during tracing,
 # even if the default dtype is set to something else.
 random = make_prim(
@@ -96,6 +118,13 @@ randint = make_prim(
     "inductor_randint(SymInt low, SymInt high, SymInt[] size, Tensor seed) -> Tensor",
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
+)
+
+# Internal plan component for the Blackwell aligned decompose-K prototype.
+# Its lowering is a dedicated TMA template over the original rank-2 operands.
+blackwell_decompose_k_partial = make_prim(
+    "blackwell_decompose_k_partial(Tensor a, Tensor b, int k_split, int config_index, int m_pad, int k_part) -> Tensor",
+    _blackwell_decompose_k_partial_impl,
 )
 
 
@@ -210,6 +239,44 @@ fma = make_prim(
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
     tags=(torch.Tag.pointwise,),
 )
+
+
+def _fma_setup_context(ctx, inputs, output):
+    a, b, c = inputs
+    ctx.a_shape = a.shape
+    ctx.b_is_tensor = isinstance(b, Tensor)
+    if ctx.b_is_tensor:
+        ctx.b_shape = b.shape
+        ctx.save_for_backward(a, b)
+    else:
+        ctx.b = b
+        ctx.save_for_backward(a)
+    ctx.c_shape = c.shape
+
+
+def _fma_backward(ctx, grad):
+    if ctx.b_is_tensor:
+        a, b = ctx.saved_tensors
+    else:
+        (a,) = ctx.saved_tensors
+        b = ctx.b
+
+    grad_a = (grad * b).sum_to_size(ctx.a_shape) if ctx.needs_input_grad[0] else None
+    grad_b = (
+        (grad * a).sum_to_size(ctx.b_shape)
+        if ctx.b_is_tensor and ctx.needs_input_grad[1]
+        else None
+    )
+    grad_c = grad.sum_to_size(ctx.c_shape) if ctx.needs_input_grad[2] else None
+    return grad_a, grad_b, grad_c
+
+
+torch.library.register_autograd(
+    fma,
+    _fma_backward,
+    setup_context=_fma_setup_context,
+)
+
 
 # Register DTensor sharding strategies for inductor prims ops.
 # This must happen here (not in _pointwise_ops.py) because the ops

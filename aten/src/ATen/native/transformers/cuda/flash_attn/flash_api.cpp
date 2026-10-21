@@ -1,12 +1,12 @@
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
-#include <c10/core/ScalarType.h>
-#include <c10/core/DeviceType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <cstdint>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 
 #ifdef USE_FLASH_ATTENTION
@@ -50,6 +50,29 @@ namespace FLASH_NAMESPACE {
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
+
+// The kernels use 16-byte vectorized global memory accesses at every row.
+void check_aligned(const at::Tensor &x, const char *name) {
+    if (x.numel() == 0) {
+        return;
+    }
+    bool aligned = reinterpret_cast<uintptr_t>(x.const_data_ptr()) % 16 == 0;
+    for (int64_t dim = 0; dim < x.dim() - 1; ++dim) {
+        aligned &= x.size(dim) <= 1 || x.stride(dim) * x.element_size() % 16 == 0;
+    }
+    TORCH_CHECK(aligned, name, " must have a 16-byte aligned data pointer and strides");
+}
+#define CHECK_ALIGNED(x) check_aligned(x, #x)
+
+static_assert(sizeof(at::PhiloxCudaState) <= sizeof(Flash_fwd_params::philox_args),
+              "Flash_fwd_params::philox_args buffer is too small for at::PhiloxCudaState");
+static_assert(alignof(at::PhiloxCudaState) <= alignof(decltype(Flash_fwd_params::philox_args)),
+              "Flash_fwd_params::philox_args buffer is under-aligned for at::PhiloxCudaState");
+static_assert(std::is_trivially_copyable<at::PhiloxCudaState>::value,
+              "at::PhiloxCudaState must be trivially copyable: it is placement-new'd into "
+              "philox_args and the whole Flash_fwd_params is copied by value to the device kernel "
+              "(so the bytes must be memcpy-safe); this also guarantees a trivial destructor, so "
+              "the placement-new needs no matching delete");
 
 
 void set_params_fprop(Flash_fwd_params &params,
@@ -352,7 +375,7 @@ std::tuple<at::Tensor, at::Tensor> set_params_splitkv(Flash_fwd_params &params, 
         TORCH_CHECK(params.num_splits <= 128, "num_splits > 128 not supported");
     }
 
-    return std::make_tuple(softmax_lse_accum, out_accum);
+    return std::make_tuple(std::move(softmax_lse_accum), std::move(out_accum));
 }
 
 void set_params_alibi(Flash_fwd_params &params, std::optional<at::Tensor> &alibi_slopes_, int batch_size, int num_heads){
@@ -408,6 +431,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
 
     const auto sizes = q.sizes();
 
@@ -477,6 +501,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
         CHECK_DEVICE(out);
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
+        CHECK_ALIGNED(out);
         CHECK_SHAPE(out, batch_size, sizes[1], sizes[2], head_size_og);
         if (seqlenq_ngroups_swapped) {
             out = out.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
@@ -548,7 +573,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         rng_state = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
         params.rng_state = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-        params.philox_args = philox_state;
+        new (params.philox_args) at::PhiloxCudaState(philox_state);
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -590,7 +615,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const float softcap,
                const bool return_softmax,
-               std::optional<at::Generator> gen_) {
+               std::optional<at::Generator> gen_,
+               int num_splits) {
 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     bool is_sm80_or_newer = (dprops->major * 10) >= 80;
@@ -623,6 +649,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
     CHECK_CONTIGUOUS(cu_seqlens_q);
     CHECK_CONTIGUOUS(cu_seqlens_k);
 
@@ -698,6 +725,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
         CHECK_DEVICE(out);
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
+        CHECK_ALIGNED(out);
         CHECK_SHAPE(out, sizes[0], sizes[1], head_size_og);
         if (seqlenq_ngroups_swapped) {
             out = out.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
@@ -763,11 +791,10 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    if (seqlenq_ngroups_swapped) {
-        // Only apply split-k for decoding
+    if (paged_KV || seqlenq_ngroups_swapped) {
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
-                           head_size_rounded, p_dropout, /*num_splits*/0, dprops, opts);
+                           head_size_rounded, p_dropout, num_splits, dprops, opts);
     }
 
     // [Note] BC breaking change to flash seed/offset
@@ -787,7 +814,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         rng_state = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
         params.rng_state = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-        params.philox_args = philox_state;
+        new (params.philox_args) at::PhiloxCudaState(philox_state);
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -809,7 +836,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
     }
 
-    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
+    return {
+        std::move(out),
+        std::move(q_padded),
+        std::move(k_padded),
+        std::move(v_padded),
+        std::move(softmax_lse),
+        std::move(rng_state),
+        std::move(_unused),
+        std::move(p)};
 }
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream) {
@@ -871,7 +906,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
+    CHECK_ALIGNED(out);
 
     const auto sizes = q.sizes();
 
@@ -891,10 +928,15 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
         const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
         at::Tensor softmax_d = at::empty({0, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
-        return {dq, dk, dv, softmax_d};
+        return {
+            std::move(dq),
+            std::move(dk),
+            std::move(dv),
+            std::move(softmax_d)};
     }
 
     TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+    CHECK_ALIGNED(dout);
 
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size % 8 == 0, "head_size should be a multiple of 8");
@@ -1017,7 +1059,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     if (is_dropout) {
         params.rng_state = philox_seed.data_ptr<uint64_t>();
     }
-    params.philox_args = philox_args;
+    new (params.philox_args) at::PhiloxCudaState(philox_args);
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
 
@@ -1097,8 +1139,11 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
     TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+    CHECK_ALIGNED(q); CHECK_ALIGNED(k); CHECK_ALIGNED(v);
     TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
+    CHECK_ALIGNED(out);
     TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+    CHECK_ALIGNED(dout);
     CHECK_CONTIGUOUS(cu_seqlens_q);
     CHECK_CONTIGUOUS(cu_seqlens_k);
 
@@ -1245,7 +1290,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     if (is_dropout) {
         params.rng_state = philox_seed.data_ptr<uint64_t>();
     }
-    params.philox_args = philox_args;
+    new (params.philox_args) at::PhiloxCudaState(philox_args);
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
 
@@ -1540,7 +1585,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
         out = out.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, softmax_lse};
+    return {std::move(out), std::move(softmax_lse)};
 }
 
 } // namespace pytorch_fmha

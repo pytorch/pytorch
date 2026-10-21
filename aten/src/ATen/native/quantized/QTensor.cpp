@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
@@ -78,6 +79,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     const Tensor& zero_points,
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
+  quantized_tensors.reserve(tensors.size());
   for (const auto i : c10::irange(tensors.size())) {
     quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
@@ -108,6 +110,7 @@ Tensor dequantize_quantized(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
+  dequantized_tensors.reserve(tensors.size());
   for (const auto & tensor : tensors) {
     dequantized_tensors.push_back(tensor.dequantize());
   }
@@ -158,9 +161,10 @@ Tensor make_per_channel_quantized_tensor_cpu(
   Tensor self_contig = self.contiguous();
   AT_DISPATCH_QINT_TYPES(
       dst.scalar_type(), "per_channel_affine_qtensor", [&]() {
-        underlying_t* self_data = self_contig.data_ptr<underlying_t>();
+        const underlying_t* self_data =
+            self_contig.const_data_ptr<underlying_t>();
         underlying_t* dst_data =
-            reinterpret_cast<underlying_t*>(dst.data_ptr<scalar_t>());
+            reinterpret_cast<underlying_t*>(dst.mutable_data_ptr<scalar_t>());
         if (self.numel() > 0) {
           memcpy(dst_data, self_data, self.nbytes());
         }
@@ -174,8 +178,10 @@ Tensor& set_storage_quantized_(
     int64_t storage_offset,
     IntArrayRef sizes,
     IntArrayRef strides) {
+  checkSetStorage(self, std::move(storage), storage_offset, sizes, strides);
+  checkInBoundsForStorage(
+      sizes, strides, storage_offset, self.dtype(), self.storage());
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_storage_keep_dtype(std::move(storage));
   self_->set_storage_offset(storage_offset);
   self_->set_sizes_and_strides(sizes, strides);
   return self;
@@ -255,8 +261,8 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   auto self_contig = self.contiguous();
   auto other_contig = other.contiguous();
 
-  void* self_data = self_contig.data_ptr();
-  void* other_data = other_contig.data_ptr();
+  const void* self_data = self_contig.const_data_ptr();
+  const void* other_data = other_contig.const_data_ptr();
   auto data_size = self.numel() * self.element_size();
   // For QUint4x2 and QUInt2x4, two elements are packed in one byte
   if (self.scalar_type() == kQUInt4x2 || self.scalar_type() == kQUInt2x4) {
@@ -390,6 +396,6 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   at::Tensor xmin_tensor = at::empty({1});
   xmax_tensor[0] = xmax;
   xmin_tensor[0] = xmin;
-  return std::make_tuple(xmax_tensor, xmin_tensor);
+  return std::make_tuple(std::move(xmax_tensor), std::move(xmin_tensor));
 }
 } // namespace at::native

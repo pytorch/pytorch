@@ -17,7 +17,11 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.unify_refinements import infer_symbolic_types
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.tensor_type import Dyn, is_consistent, is_more_precise, TensorType
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 try:
@@ -44,6 +48,8 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
 
 
 class AnnotationsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_annotations(self):
         """
         Test type annotations in the forward function.
@@ -142,6 +148,8 @@ class AnnotationsTest(TestCase):
 
 
 class TypeCheckerTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_type_check_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -526,10 +534,10 @@ class TypeCheckerTest(TestCase):
                 if n.type != t:
                     raise AssertionError(f"Expected n.type == {t}, got {n.type}")
             if n.op == "output":
-                if torch.Size(n.type.__args__) != b.shape:
+                if torch.Size(n.type.dims) != b.shape:
                     raise AssertionError(
-                        f"Expected torch.Size(n.type.__args__) == {b.shape}, "
-                        f"got {torch.Size(n.type.__args__)}"
+                        f"Expected torch.Size(n.type.dims) == {b.shape}, "
+                        f"got {torch.Size(n.type.dims)}"
                     )
             if n.op == "call_module":
                 if n.type != t:
@@ -764,10 +772,10 @@ class TypeCheckerTest(TestCase):
                         f"Expected n.type to be TensorType, got {type(n.type)}"
                     )
                 expected_size = B.forward(torch.rand(2, 2, 4, 5)).size()
-                if torch.Size(n.type.__args__) != expected_size:
+                if torch.Size(n.type.dims) != expected_size:
                     raise AssertionError(
-                        f"Expected torch.Size(n.type.__args__) == {expected_size}, "
-                        f"got {torch.Size(n.type.__args__)}"
+                        f"Expected torch.Size(n.type.dims) == {expected_size}, "
+                        f"got {torch.Size(n.type.dims)}"
                     )
 
     def test_type_check_conv2D_maxpool2d_flatten(self):
@@ -1136,7 +1144,7 @@ class TypeCheckerTest(TestCase):
                 raise AssertionError(
                     f"Expected n.type to be TensorType, got {type(n.type)}"
                 )
-            batch_sizes.add(n.type.__args__[0])
+            batch_sizes.add(n.type.dims[0])
         if len(batch_sizes) != 1:
             raise AssertionError(
                 f"Expected len(batch_sizes) == 1, got {len(batch_sizes)}"
@@ -1264,15 +1272,15 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.op == "call_module":
-                if not isinstance(n.type.__args__[2], sympy.floor):
+                if not isinstance(n.type.dims[2], sympy.floor):
                     raise AssertionError(
-                        f"Expected n.type.__args__[2] to be sympy.floor, "
-                        f"got {type(n.type.__args__[2])}"
+                        f"Expected n.type.dims[2] to be sympy.floor, "
+                        f"got {type(n.type.dims[2])}"
                     )
-                if not isinstance(n.type.__args__[3], sympy.floor):
+                if not isinstance(n.type.dims[3], sympy.floor):
                     raise AssertionError(
-                        f"Expected n.type.__args__[3] to be sympy.floor, "
-                        f"got {type(n.type.__args__[3])}"
+                        f"Expected n.type.dims[3] to be sympy.floor, "
+                        f"got {type(n.type.dims[3])}"
                     )
 
     def test_type_check_symbolic_inferenceconv2D_maxpool2d_flatten(self):

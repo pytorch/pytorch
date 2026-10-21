@@ -566,9 +566,7 @@ for o in options:
 code.append("} // namespace caffe2")
 
 with open(filename, "w", encoding="utf8") as fout:
-    for c in code:
-        # print(c, file = fout)
-        fout.write(c + "\n")
+    fout.writelines(c + "\n" for c in code)
 
 
 print("Created " + filename)
