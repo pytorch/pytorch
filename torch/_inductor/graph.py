@@ -3203,10 +3203,7 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.debug("Output code: \n%s", wrapper_code.value)
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
-        from .codegen.wrapper import strip_kernel_configs
-
-        code = strip_kernel_configs(wrapper_code.value)
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=wrapper_code.value)
 
         try:
             linemap = [
