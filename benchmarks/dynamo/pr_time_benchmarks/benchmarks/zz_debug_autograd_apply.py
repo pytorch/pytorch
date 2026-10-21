@@ -58,7 +58,7 @@ def count(fn, n=7):
     return best
 
 
-res = {"config_module": torch.utils._config_module.__file__}
+res = {"torch": torch.__file__, "config_module": torch.utils._config_module.__file__}
 for dev in ("cuda", "cpu"):
     OUT = (torch.empty(0, device=dev), torch.empty(0, device=dev))
     args = tuple(torch.empty(0, device=dev, requires_grad=True) for _ in range(13))
@@ -99,7 +99,8 @@ print("DEBUGJSON " + json.dumps(res))
 
 def run(config, pad=0, types_=0):
     out = subprocess.run(
-        [sys.executable, "-c", CHILD, config, str(pad), str(types_), PRE_CONFIG],
+        # -P: CI runs from the repo root, whose torch/ would shadow the installed wheel.
+        [sys.executable, "-P", "-c", CHILD, config, str(pad), str(types_), PRE_CONFIG],
         capture_output=True,
         text=True,
     )
