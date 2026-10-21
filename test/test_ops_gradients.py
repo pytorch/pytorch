@@ -57,7 +57,6 @@ class TestBwdGradients(TestGradients):
         _bwd_grad_all
         | {
             xfail("cov"),
-            xfail("istft"),
             skip("sparse.sampled_addmm"),
             skip("sparse.mm", variant_name="reduce"),
             xfail("as_strided_scatter"),
@@ -120,10 +119,11 @@ class TestBwdGradients(TestGradients):
             skip("nn.functional.max_unpool1d"),
             skip("nn.functional.max_unpool2d"),
             skip("nn.functional.max_unpool3d"),
-            xfail("cat"),
             xfail("nn.functional.ctc_loss", dtypes=(torch.float64,)),
             xfail("nn.functional.linear_cross_entropy", variant_name="chunked_none"),
             xfail("nn.functional.linear_cross_entropy", variant_name="chunked"),
+            xfail("nn.functional.linear_cross_entropy", variant_name="cutedsl"),
+            xfail("nn.functional.linear_cross_entropy", variant_name="cutedsl_none"),
             xfail("linalg.norm"),
             xfail("linalg.norm", variant_name="subgradients_at_zero"),
             skip("masked.logaddexp"),
@@ -176,7 +176,7 @@ class TestBwdGradients(TestGradients):
         )
 
 
-instantiate_device_type_tests(TestBwdGradients, globals())
+instantiate_device_type_tests(TestBwdGradients, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True

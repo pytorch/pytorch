@@ -11,6 +11,7 @@ from sympy import Expr
 
 from torch import SymInt
 from torch.fx.experimental._size_hinting import (
+    _current_consistent_hints,
     _guarding_hint_or_throw_base,
     _maybe_realize_expr,
     _optimization_hint_base,
@@ -52,6 +53,29 @@ log = logging.getLogger(__name__)
 
 
 Width = int | IntInfinity
+
+
+_RANGE_BOUND_OPS = (
+    sympy.StrictLessThan,
+    sympy.LessThan,
+    sympy.StrictGreaterThan,
+    sympy.GreaterThan,
+)
+
+
+def is_range_bound(expr: sympy.Basic) -> bool:
+    """Whether expr bounds a quantity against a constant, e.g. "u0 >= 4".
+
+    Eq/Ne and relations with symbols on both sides are shape contracts, not
+    sampled ranges. Compound And/Or are not inspected.
+
+    Sound only because canonicalize_bool_expr sign-splits, leaving "u0 <= u1"
+    two-sided. Its docstring claims it moves every non-constant term to the
+    rhs, which would make this match contracts too; it does not do that.
+    """
+    return isinstance(expr, _RANGE_BOUND_OPS) and (
+        not expr.lhs.free_symbols or not expr.rhs.free_symbols
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -194,8 +218,10 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    if not index.has(sympy.Rel):
-        index = sympy.simplify(index)
+    # Avoid full-expression sympy.simplify here.  This helper only needs to
+    # expose lane-uniform FloorDiv/ModularIndexing terms for later stride
+    # analysis, and sympy's general simplifier can be superlinear on the large
+    # dynamic-shape index expressions produced by real models.
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 
@@ -281,6 +307,14 @@ class SizeVarAllocator:
         # (inv_precomputed_replacements).
         self.precomputed_replacements: dict[Expr, sympy.Symbol] = {}
         self.inv_precomputed_replacements: dict[sympy.Symbol, Expr] = {}
+        # optimization_hint is called with the same expression repeatedly
+        # while lowering (on one model, 76k calls over 388 distinct
+        # expressions) and each miss runs sympy substitution plus heuristics,
+        # none of which sympy caches. _lru_cache drops the cache whenever
+        # replacements change.
+        self._optimization_hint_cache = self._lru_cache(
+            self._optimization_hint_uncached
+        )
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -1126,12 +1160,27 @@ class SizeVarAllocator:
         hints. If not provided, fallback will be used along with some heuristics
         that try to maximize consistency with the shape environment.
 
+        Inside torch.fx.experimental._size_hinting.consistent_hints(), hints
+        are computed from one shared per-symbol assignment; see
+        ConsistentHintState.
+
         Special cases:
         - Complex numbers (containing sympy.I): raises an error since tensor
           dimensions cannot be complex.
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
+        state = _current_consistent_hints()
+        if state is not None and state.shape_env is self.shape_env:
+            # Hints differ inside this ShapeEnv's context, so skip the cache.
+            return _optimization_hint_base(
+                self.shape_env, expr, self.inv_precomputed_replacements, fallback
+            )
+        return self._optimization_hint_cache(expr, fallback)
+
+    def _optimization_hint_uncached(
+        self, expr: Expr | int, fallback: int | None
+    ) -> int:
         return _optimization_hint_base(
             self.shape_env, expr, self.inv_precomputed_replacements, fallback
         )
@@ -1543,15 +1592,22 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     divisor = sympy.Wild("divisor", integer=True)
     mod1 = sympy.Wild("modulus", integer=True)
     mod2 = sympy.Wild("modulus2", integer=True)
-    for term1 in expr.args:
+    # sympy matching is slow, and a term can only match a pattern containing
+    # ModularIndexing or FloorDiv if it contains that function. Substituting a
+    # match can simplify the function away (FloorDiv(64 * x, 64) is x), in
+    # which case every term is still tried.
+    modular_terms = [term for term in expr.args if term.has(ModularIndexing)]
+    floordiv_terms = [term for term in expr.args if term.has(FloorDiv)]
+    for term1 in modular_terms:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:
-            for term2 in expr.args:
-                m2 = term2.match(
-                    m1[scale]
-                    * m1[mod1]
-                    * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
-                )
+            pattern = (
+                m1[scale]
+                * m1[mod1]
+                * ModularIndexing(m1[base], m1[divisor] * m1[mod1], mod2)
+            )
+            for term2 in modular_terms if pattern.has(ModularIndexing) else expr.args:
+                m2 = term2.match(pattern)
                 if m2 and term1 != term2:
                     expr = join_dimensions(
                         expr
@@ -1561,13 +1617,12 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
                         * ModularIndexing(m1[base], m1[divisor], m1[mod1] * m2[mod2])
                     )
                     return expr
-    for term1 in expr.args:
+    for term1 in modular_terms:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:
-            for term2 in expr.args:
-                m2 = term2.match(
-                    m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
-                )
+            pattern = m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
+            for term2 in floordiv_terms if pattern.has(FloorDiv) else expr.args:
+                m2 = term2.match(pattern)
                 if m2 is not None:  # in case of success we get an empty dict here
                     expr = join_dimensions(
                         expr

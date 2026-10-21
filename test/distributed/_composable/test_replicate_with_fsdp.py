@@ -58,7 +58,7 @@ class ReplicateTest(MultiProcContinuousTest):
     def _init_pg(cls, rank, world_size, rdvz_file):
         if torch.accelerator.is_available():
             if torch.accelerator.device_count() < world_size:
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             torch.accelerator.set_device_index(rank)
         super()._init_pg(rank, world_size, rdvz_file)
 

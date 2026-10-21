@@ -77,6 +77,40 @@ def _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
     return _ignore_fresh_unbacked_symbols_tls_context()
 
 
+def _as_strided_permutation(
+    tensor: "dtensor.DTensor",
+    size: Sequence[int],
+    stride: Sequence[int],
+) -> list[int] | None:
+    """Return dims such that ``tensor.permute(dims)`` has the requested layout.
+
+    AOTAutograd regenerates an output that aliases an input by calling
+    as_strided on the input, which a sharded tensor cannot answer in general --
+    it has no single global storage to index into. A permutation of the base
+    dims (transpose, t, permute, Tensor.T) is the exception: it maps onto
+    aten.permute, which does have a sharding strategy.
+
+    Returns None when the request is not a permutation, or when two dims have
+    the same (size, stride) and the permutation is therefore ambiguous -- the
+    layouts would be identical but the placements need not be.
+    """
+    if len(size) != tensor.dim():
+        return None
+
+    base = list(zip(tensor.size(), tensor.stride()))
+    dims = []
+    used = [False] * len(base)
+    for target in zip(size, stride):
+        candidates = [
+            i for i, b in enumerate(base) if not used[i] and tuple(b) == tuple(target)
+        ]
+        if len(candidates) != 1:
+            return None
+        used[candidates[0]] = True
+        dims.append(candidates[0])
+    return dims
+
+
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
@@ -86,12 +120,12 @@ def as_strided_handler(
     if kwargs:
         raise AssertionError
     tensor, size, stride, storage_offset = args
-    if (
-        tensor.size() == tuple(size)
-        and tensor.stride() == tuple(stride)
-        and (storage_offset is None or tensor.storage_offset() == storage_offset)
-    ):
-        return torch.ops.aten.alias.default(tensor)
+    if storage_offset is None or tensor.storage_offset() == storage_offset:
+        if tensor.size() == tuple(size) and tensor.stride() == tuple(stride):
+            return torch.ops.aten.alias.default(tensor)
+        dims = _as_strided_permutation(tensor, size, stride)
+        if dims is not None:
+            return torch.ops.aten.permute.default(tensor, dims)
     raise RuntimeError("as_strided not supported with DTensor")
 
 
@@ -189,6 +223,10 @@ class OpDispatcher:
             aten.uniform_.default,
             aten.bernoulli.default,
             aten.bernoulli_.float,
+            aten.exponential_.default,
+            aten.geometric_.default,
+            aten.log_normal_.default,
+            aten.multinomial.default,
         }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
@@ -355,10 +393,16 @@ class OpDispatcher:
                         mesh, run_state_sync
                     )
 
-                first_arg, first_local_arg = (
-                    cast(dtensor.DTensor, args[0]),
-                    cast(torch.Tensor, local_tensor_args[0]),
-                )
+                # Offsets must follow the spec the local op runs on: e.g. multinomial
+                # redistributes a Shard(-1) input to Replicate before sampling.
+                if (
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
+                ):
+                    first_spec = output_sharding.redistribute_schema.args_spec[0]
+                else:
+                    first_spec = cast(dtensor.DTensor, args[0])._spec
+                first_local_arg = cast(torch.Tensor, local_tensor_args[0])
 
                 # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
@@ -375,16 +419,18 @@ class OpDispatcher:
                     and not first_local_arg.is_meta
                     and random._rng_tracker.distribute_region_enabled
                 ):
+                    accelerator = torch.accelerator.current_accelerator()
                     if (
                         maybe_user_generator is not None
-                        or first_local_arg.device.type != "cuda"
+                        or accelerator is None
+                        or first_local_arg.device.type != accelerator.type
                         or (
                             not _are_we_tracing()
                             and type(first_local_arg) is not torch.Tensor
                         )
                     ):
                         with random._rng_tracker._distribute_region(
-                            first_arg._spec, generator=maybe_user_generator
+                            first_spec, generator=maybe_user_generator
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                                 output_sharding.output_spec
@@ -393,13 +439,13 @@ class OpDispatcher:
                                     *local_tensor_args, **op_info.local_kwargs
                                 )
                     else:
-                        # CUDA device without user generator, use HOP for traceability
+                        # Accelerator device without user generator, use HOP for traceability
                         if not isinstance(
                             random._rng_tracker, random.OffsetBasedRNGTracker
                         ):
                             raise AssertionError
                         start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                            random._rng_tracker._compute_rng_offsets(first_spec)
                         )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec

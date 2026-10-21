@@ -5,6 +5,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
+#include <ATen/cuda/detail/CublasLtUtils.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -537,6 +538,13 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
       if (mat1_scale_ptr && mat2_scale_ptr) {
+        // Only RowWise sets a scale mode below, so BlockWise1x32 block scales
+        // arrive with no mode set and are not read as e8m0 blocks: these
+        // candidates are numerically wrong for MX FP8 in either swizzle layout.
+        // (MX FP4 never gets here; no TUNABLE_DISPATCH branch matches its
+        // dtype.) A wrong candidate wins silently, since the numerical check is
+        // off by default. Pre-existing; MX FP8 should stay on the Default op,
+        // which sets the mode via cublasLtMatmulScaleMode.
         hipblasLtMatmulDescAttributes_t a_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
         hipblasLtMatmulDescAttributes_t b_scale_ptr_desc = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
         if (GetAScalingTypeFromParams<CT>(params) == ScalingType::RowWise) {
@@ -602,7 +610,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         return FAIL;
       }
 
-      void* workspace_buffer = at::cuda::getCUDABlasLtWorkspace();
+      at::cuda::blas::detail::CublasLtWorkspace ltworkspace;
 
       TORCH_HIPBLASLT_CHECK(hipblasLtMatmul(op_handle,
             matmul.descriptor(),
@@ -617,8 +625,8 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             params->c,
             mat_c,
             &algo_,
-            workspace_buffer,
-            workspace_size,
+            ltworkspace.ptr,
+            ltworkspace.size,
             at::cuda::getCurrentCUDAStream()));
 
       //TORCH_HIPBLASLT_CHECK(hipblasLtMatmulDescDestroy(matmul));
