@@ -137,6 +137,10 @@ CacheEntry* lookup_in_list(
         backend_match(cache_entry.backend.ptr(), backend);
 
     if (valid) {
+      // Guards can run Python code (e.g. lambda guards), so a weakref finalizer
+      // can invalidate this very entry mid-evaluation and free the guard tree
+      // being walked.
+      py::object guard_manager_keepalive = cache_entry.guard_manager;
       try {
         if (is_skip_guard_eval_unsafe) {
           valid = cache_entry_has_no_guards(
@@ -161,6 +165,13 @@ CacheEntry* lookup_in_list(
         e.restore();
         *guard_error = true;
         return nullptr;
+      }
+      if (!cache_entry.guard_manager.is(guard_manager_keepalive)) {
+        // Invalidation also moved the entry to the back of `entries`, so the
+        // entries after it have not been checked yet. An entry is invalidated
+        // at most once, so the rescan terminates.
+        return lookup_in_list(
+            entries, f_locals, backend, is_skip_guard_eval_unsafe, guard_error);
       }
     }
     if (valid) {

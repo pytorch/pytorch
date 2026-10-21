@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import gc
+import weakref
 from collections import deque
 from unittest.mock import patch
 
@@ -6,6 +8,7 @@ import torch
 import torch._dynamo.guards
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.fx.traceback as fx_traceback
 from torch._dynamo import config as dc
 from torch._dynamo.source import (
     AttrSource,
@@ -989,6 +992,52 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         for out_fn in (max_out, min_out, topk_out):
             torch._dynamo.reset()
             self.assertEqual(count_recompiles(out_fn), 2)
+
+    def test_cache_entry_invalidated_during_its_own_guard_eval(self):
+        # The FX_ANNOTATION lambda guard compares annotations with ==, which runs
+        # Tag.__eq__ in the middle of guard evaluation, with `other` being the
+        # annotation of the entry being evaluated. Freeing the class that entry
+        # ID_MATCHes fires the weakref finalizer that invalidates the same entry
+        # while its guards are still being walked. The other entry still matches.
+        class Tag:
+            def __init__(self, name=None, on_eq=None):
+                self.name = name
+                self.on_eq = on_eq
+
+            def __eq__(self, other):
+                if self.on_eq is not None:
+                    on_eq, self.on_eq = self.on_eq, None
+                    on_eq(other.name)
+                return isinstance(other, Tag)
+
+        def fn(x, box):
+            return x + box["cls"].bias
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        classes = {"A": type("A", (), {"bias": 1}), "B": type("B", (), {"bias": 2})}
+        box = {}
+        for name in classes:
+            box["cls"] = classes[name]
+            with fx_traceback.annotate({"tag": Tag(name)}):
+                opt_fn(x, box)
+        self.assertEqual(cnt.frame_count, 2)
+
+        freed_during_guard_eval = []
+
+        def free_evaluated_entry_cls(name):
+            cls_ref = weakref.ref(classes.pop(name))
+            (box["cls"],) = classes.values()
+            gc.collect()
+            freed_during_guard_eval.append(cls_ref() is None)
+
+        with fx_traceback.annotate({"tag": Tag(on_eq=free_evaluated_entry_cls)}):
+            result = opt_fn(x, box)
+
+        self.assertEqual(freed_during_guard_eval, [True])
+        self.assertEqual(result, x + box["cls"].bias)
+        self.assertEqual(cnt.frame_count, 2)
 
 
 class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
