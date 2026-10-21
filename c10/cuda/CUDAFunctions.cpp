@@ -1,4 +1,7 @@
+#include <c10/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/WaitCounter.h>
 
@@ -151,6 +154,27 @@ void device_synchronize() {
   }
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.cuda_device_synchronize);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void stream_wait_stream(CUDAStream waiter, CUDAStream source) {
+  TORCH_CHECK(waiter.device() == source.device());
+  if (waiter.stream() == source.stream()) {
+    return;
+  }
+  CUDAGuard guard(source.device());
+  const auto source_info = captureInfoMayInitCtx(source);
+  const auto waiter_info = captureInfoMayInitCtx(waiter);
+  TORCH_CHECK(
+      source_info.status == waiter_info.status &&
+          source_info.status != CaptureStatus::Invalidated &&
+          (source_info.status == CaptureStatus::None ||
+           (source_info.id == waiter_info.id &&
+            source_info.graph == waiter_info.graph)),
+      "Cannot establish a stream dependency across CUDA graph capture "
+      "boundaries; order the operation outside capture first");
+  CUDAEvent event;
+  event.record(source);
+  event.block(waiter);
 }
 
 // this function has to be called from callers performing cuda synchronizing

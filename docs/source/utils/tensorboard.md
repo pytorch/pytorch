@@ -67,7 +67,7 @@ for n_iter in range(100):
 
 Expected result:
 
-```{figure} _static/img/tensorboard/hier_tags.png
+```{figure} ../_static/img/tensorboard/hier_tags.png
     :scale: 75 %
 ```
 

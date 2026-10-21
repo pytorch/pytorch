@@ -44,11 +44,13 @@ using DeviceUUIDsT = std::array<unsigned char, 16>;
 inline constexpr bool kReportsEngineIds = true;
 using pti_view_record_kernel_t = pti_view_record_kernel_v2;
 using pti_view_record_memcpy_t = pti_view_record_memory_copy_v2;
+using pti_view_record_memcpy_p2p_t = pti_view_record_memory_copy_p2p_v2;
 using pti_view_record_memfill_t = pti_view_record_memory_fill_v2;
 #else
 inline constexpr bool kReportsEngineIds = false;
 using pti_view_record_kernel_t = pti_view_record_kernel;
 using pti_view_record_memcpy_t = pti_view_record_memory_copy;
+using pti_view_record_memcpy_p2p_t = pti_view_record_memory_copy_p2p;
 using pti_view_record_memfill_t = pti_view_record_memory_fill;
 #endif
 
