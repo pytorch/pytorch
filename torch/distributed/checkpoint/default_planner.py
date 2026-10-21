@@ -478,7 +478,6 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 def create_default_local_load_plan(
     state_dict: dict[str, Any], metadata: Metadata, strict: bool = True
 ) -> LoadPlan:
-    requests = []
     """
     Create the ``LoadPlan`` used by DefaultLoadPlanner.
 
@@ -488,6 +487,7 @@ def create_default_local_load_plan(
     It handles resharding by issuing multiple read requests against storage in order to match
     load requirements.
     """
+    requests = []
 
     for fqn, obj in state_dict.items():
         # ignore state_dict keys which do not exist in `state_dict` if strict=False
