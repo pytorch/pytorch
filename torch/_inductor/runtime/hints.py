@@ -406,6 +406,7 @@ class InductorMeta(typing.TypedDict, total=False):
     precomputed_grids: typing.Any
     config_args: typing.Any
     use_fast_triton_launcher: bool
+    autotune_cache_skip_read: bool
 
 
 class HalideInputSpec(typing.NamedTuple):
