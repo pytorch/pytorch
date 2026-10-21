@@ -386,6 +386,10 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
             )
+        elif encoder_layer.self_attn.use_rotary:
+            why_not_sparsity_fast_path = (
+                f"{enc_layer}.self_attn.use_rotary was True"
+            )
         elif encoder_layer.self_attn.in_proj_bias is None:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn was passed bias=False"
         elif not encoder_layer.activation_relu_or_gelu:
@@ -469,6 +473,10 @@ class TransformerEncoder(Module):
             )
         elif first_layer.training:
             why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
+        elif first_layer.self_attn.use_rotary:
+            why_not_sparsity_fast_path = (
+                f"{str_first_layer}.self_attn.use_rotary was True"
+            )
         elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
@@ -853,6 +861,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "training is enabled"
         elif not self.self_attn.batch_first:
             why_not_sparsity_fast_path = "self_attn.batch_first was not True"
+        elif self.self_attn.use_rotary:
+            why_not_sparsity_fast_path = "self_attn.use_rotary was True"
         elif self.self_attn.in_proj_bias is None:
             why_not_sparsity_fast_path = "self_attn was passed bias=False"
         elif not self.self_attn._qkv_same_embed_dim:
@@ -986,33 +996,33 @@ class TransformerEncoderLayer(Module):
 class TransformerEncoderLayerRoPE(TransformerEncoderLayer):
     def __init__(
         self,
-        d_model,
-        nhead,
-        dim_feedforward,
-        dropout,
-        batch_first,
-        norm_first,
-        bias=True,
-        add_bias_kv=False,
-        add_zero_attn=False,
-        **kwargs,
-    ):
-        # Ensure bias, add_bias_kv, add_zero_attn are bool, not None
-        bias = bool(bias) if bias is not None else True
-        add_bias_kv = bool(add_bias_kv) if add_bias_kv is not None else False
-        add_zero_attn = bool(add_zero_attn) if add_zero_attn is not None else False
+        d_model: int,
+        nhead: int,
+        dim_feedforward: int = 2048,
+        dropout: float = 0.1,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
+        layer_norm_eps: float = 1e-5,
+        batch_first: bool = False,
+        norm_first: bool = False,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        add_bias_kv: bool = False,
+        add_zero_attn: bool = False,
+    ) -> None:
         super().__init__(
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
+            activation=activation,
+            layer_norm_eps=layer_norm_eps,
             batch_first=batch_first,
             norm_first=norm_first,
             bias=bias,
+            device=device,
+            dtype=dtype,
         )
-        factory_kwargs = {"device": kwargs.get("device"), "dtype": kwargs.get("dtype")}
-        device = factory_kwargs.get("device")
-        dtype = factory_kwargs.get("dtype")
         self.self_attn = MultiheadAttention(
             d_model,
             nhead,

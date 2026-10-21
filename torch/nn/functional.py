@@ -6764,7 +6764,7 @@ def multi_head_attention_forward(
     static_v: Tensor | None = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
-    rotary_pos_emb: Optional[Callable[[Tensor], Tensor]] = None,
+    rotary_pos_emb: _Any = None,
 ) -> tuple[Tensor, Tensor | None]:
     r"""Forward method for MultiHeadAttention.
 
@@ -7096,6 +7096,27 @@ def multi_head_attention_forward(
             )
         v = static_v
 
+    # TorchScript does not support passing callables as function arguments.
+    if not torch.jit.is_scripting():
+        if rotary_pos_emb is not None:
+            # The projected tensors are [batch * heads, sequence, head_dim].
+            # Keep the optional learned bias key outside the positional rotation.
+            rotary_src_len = k.size(1) - (1 if bias_k is not None else 0)
+            q_rotary = q.reshape(bsz, num_heads, tgt_len, head_dim).transpose(1, 2)
+            k_rotary = k[:, :rotary_src_len].reshape(
+                bsz, num_heads, rotary_src_len, head_dim
+            ).transpose(1, 2)
+            q = rotary_pos_emb(q_rotary).transpose(1, 2).reshape(
+                bsz * num_heads, tgt_len, head_dim
+            )
+            k_rotary = rotary_pos_emb(k_rotary).transpose(1, 2).reshape(
+                bsz * num_heads, rotary_src_len, head_dim
+            )
+            if bias_k is not None:
+                k = torch.cat([k_rotary, k[:, rotary_src_len:]], dim=1)
+            else:
+                k = k_rotary
+
     # add zero attention along batch dimension (now first)
     if add_zero_attn:
         zero_attn_shape = (bsz * num_heads, 1, head_dim)
@@ -7118,19 +7139,6 @@ def multi_head_attention_forward(
 
     # update source sequence length after adjustments
     src_len = k.size(1)
-    # --- START RoPE ---
-    if rotary_pos_emb is not None:
-        q = q.contiguous().view(tgt_len, bsz, num_heads, -1).permute(1, 0, 2, 3)
-        k = k.contiguous().view(src_len, bsz, num_heads, -1).permute(1, 0, 2, 3)
-
-        # apply rotary positional embeddings
-        q = rotary_pos_emb(q)
-        k = rotary_pos_emb(k)
-
-        # revert permutate and restore shape to 3D [tgt_len, bsz*num_heads, head_dim]
-        q = q.transpose(1, 2).contiguous().view(bsz * num_heads, tgt_len, -1)
-        k = k.transpose(1, 2).contiguous().view(bsz * num_heads, src_len, -1)
-    # --- END RoPE ---
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
