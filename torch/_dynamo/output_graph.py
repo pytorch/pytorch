@@ -176,7 +176,6 @@ from .variables.builder import (
 )
 from .variables.ctx_manager import ContextWrappingVariable
 from .variables.functions import ClosureConversionError, VariableTracker
-from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -483,6 +482,8 @@ class OutputGraphGuardsState:
     compile_on_one_rank: bool = False
     # torch.fx.traceback annotation active when the frame started tracing
     fx_annotation: dict[str, Any] | None = None
+    # ___unnamed_scope_* key -> source of the namespace it was minted for
+    unnamed_scope_sources: dict[str, Source] = dc_field(default_factory=dict)
 
     @property
     def shape_env(self) -> ShapeEnv:
@@ -509,6 +510,7 @@ class OutputGraphGuardsState:
             current_device=self.current_device,
             global_state_guard=self.global_state_guard,
             fx_annotation=self.fx_annotation,
+            unnamed_scope_sources=self.unnamed_scope_sources,
             name_of_builtins_dict_key_in_fglobals=self.name_of_builtins_dict_key_in_fglobals,
             export=self.export,
             export_constraints=self.export_constraints,
@@ -664,6 +666,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.name_of_builtins_dict_key_in_fglobals,
             output_graph_guards_state.compile_on_one_rank,
             fx_annotation=output_graph_guards_state.fx_annotation,
+            unnamed_scope_sources=output_graph_guards_state.unnamed_scope_sources,
         )
 
         self.import_sources = import_sources or {}
@@ -1828,7 +1831,9 @@ class OutputGraph(OutputGraphCommon):
         return wrap_name(name)
 
     def handle_aliases_for_stolen_lists(
-        self, tx: "InstructionTranslatorBase"
+        self,
+        tx: "InstructionTranslatorBase",
+        stack_values: list[VariableTracker],
     ) -> tuple[list[Instruction], dict[Source, Source]]:
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
         maybe_gm = self.local_scope.get("self")
@@ -1839,20 +1844,21 @@ class OutputGraph(OutputGraphCommon):
         alias_insts = []
         needs_alias: dict[str, list[VariableTracker]] = {}
 
-        queue = [
-            *tx.stack,
-            *tx.symbolic_locals.values(),
-            *self.side_effects.store_attr_mutations.keys(),
+        # Match codegen_suffix's reconstruction roots, including inlined frames.
+        reconstruct_values: list[Any] = [
+            stack_values,
+            self.side_effects._get_modified_vars(),
+            self.side_effects.save_for_backward,
+            self.side_effects.tensor_hooks,
+            self.backward_state,
+            tx.debug_locals,
         ]
+        cur_tx = tx
+        while cur_tx.parent is not None:
+            reconstruct_values.append(cur_tx.post_prune_cell_and_freevars)
+            cur_tx = cur_tx.parent
 
-        while queue:
-            x = queue.pop()
-            if isinstance(x, BaseListVariable):
-                if not isinstance(x.items, list):
-                    raise AssertionError(f"x.items must be a list, got {type(x.items)}")
-                queue += x.items
-                continue
-
+        def visit(x: VariableTracker) -> None:
             if not (
                 (
                     x not in self.side_effects.store_attr_mutations
@@ -1862,12 +1868,14 @@ class OutputGraph(OutputGraphCommon):
                 and isinstance(x.source.base, LocalSource)
                 and x.source.base.local_name in stolen_list_names
             ):
-                continue
+                return
 
             stolen_name = x.source.base.local_name
             if stolen_name not in needs_alias:
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
+
+        VariableTracker.visit(visit, reconstruct_values, side_effects=self.side_effects)
 
         # pyrefly: ignore [implicit-any]
         visited = {}
@@ -2145,8 +2153,9 @@ class OutputGraph(OutputGraphCommon):
             raise AssertionError("export does not support pregraph_bytecode")
         self.add_output_instructions(self.pregraph_bytecode)
 
+        stack_values_flat = [val for vals in all_stack_values for val in vals]
         alias_insts, overridden_sources = self.handle_aliases_for_stolen_lists(
-            self.root_tx
+            tx, stack_values_flat
         )
         self.add_output_instructions(alias_insts)
 
@@ -2213,7 +2222,6 @@ class OutputGraph(OutputGraphCommon):
         # NOTE: cells will be loaded into continuation functions directly by symbolic_convert
 
         # this determines the order that values are codegen'd to the stack
-        stack_values_flat = [val for vals in all_stack_values for val in vals]
         stored_graph_output_var = False
         graph_output_var = None
 
@@ -2971,6 +2979,8 @@ class OutputGraph(OutputGraphCommon):
             if next(gm.parameters(), None) is not None:
                 # If dynamo produces a graph with parameters, skip package stuff
                 # Bypass output graph
+                if self.package is not None:
+                    self.package.note_compute()
                 self.bypass_package(
                     "Graph contains named parameters due to static addresses.",
                     gm=gm.print_readable(
