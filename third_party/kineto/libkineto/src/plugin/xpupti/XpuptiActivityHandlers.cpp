@@ -315,6 +315,8 @@ void XpuptiActivityProfilerSession::handleRuntimeKernelMemcpyMemsetActivities(
         "context", handleToHexString(activity->_context_handle));
     trace_activity->addMetadata(
         XpuFields::kSyclQueue, static_cast<uint64_t>(activity->_sycl_queue_id));
+    trace_activity->addMetadata(
+        XpuFields::kStream, static_cast<int64_t>(activity->_sycl_queue_id));
     trace_activity->addMetadataQuoted(
         "l0 queue", handleToHexString(activity->_queue_handle));
     if constexpr (kReportsEngineIds) {
