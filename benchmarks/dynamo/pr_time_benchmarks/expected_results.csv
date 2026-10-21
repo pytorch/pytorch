@@ -146,7 +146,7 @@ nn_module_guard_eval,instruction_count,71160,0.1
 
 
 
-nn_module_guard_eval_dynamic,instruction_count,96320,0.1
+nn_module_guard_eval_dynamic,instruction_count,93200,0.1
 
 
 
@@ -154,15 +154,15 @@ autograd_function_apply_13_in_2_out_no_save,instruction_count,34900,0.1
 
 
 
-runtime_overhead_inductor,instruction_count,148000,0.1
+runtime_overhead_inductor,instruction_count,142300,0.1
 
 
 
-runtime_overhead_inductor_inference_mode,instruction_count,157700,0.1
+runtime_overhead_inductor_inference_mode,instruction_count,152500,0.1
 
 
 
-runtime_overhead_inductor_requires_grad,instruction_count,180100,0.1
+runtime_overhead_inductor_requires_grad,instruction_count,172100,0.1
 
 
 
@@ -170,7 +170,7 @@ runtime_overhead_inductor_requires_grad_backward,instruction_count,107500,0.1
 
 
 
-runtime_overhead_inductor_dynamic,instruction_count,144900,0.1
+runtime_overhead_inductor_dynamic,instruction_count,139800,0.1
 
 
 
@@ -178,7 +178,7 @@ runtime_overhead_inductor_inference_mode_dynamic,instruction_count,155200,0.1
 
 
 
-runtime_overhead_inductor_requires_grad_dynamic,instruction_count,178700,0.1
+runtime_overhead_inductor_requires_grad_dynamic,instruction_count,171300,0.1
 
 
 
