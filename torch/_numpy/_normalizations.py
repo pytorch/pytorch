@@ -6,7 +6,7 @@ import functools
 import inspect
 import operator
 import typing
-from typing import TYPE_CHECKING
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
 
@@ -14,7 +14,7 @@ from . import _dtypes, _dtypes_impl, _util
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from ._ndarray import ndarray
 
@@ -286,16 +286,48 @@ def normalizer(
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]: ...
 
 
+class _SignatureInfo(NamedTuple):
+    params: Mapping[str, inspect.Parameter]
+    first_param: inspect.Parameter
+    has_keepdims: bool
+    # Positions of the parameters that can be passed positionally, to find
+    # keepdims, axis and out in a call without inspect.Signature.bind
+    positions: dict[str, int]
+
+
+# Computed on first call rather than at decoration, to keep importing cheap
+@functools.cache
+def _signature_info(func: Callable[..., Any]) -> _SignatureInfo:
+    params = inspect.signature(func).parameters
+    positions: dict[str, int] = {}
+    for i, param in enumerate(params.values()):
+        if param.kind not in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD):
+            break
+        positions[param.name] = i
+    has_keepdims = "keepdims" in params and params["keepdims"].annotation == "KeepDims"
+    first_param = next(iter(params.values()))
+    return _SignatureInfo(params, first_param, has_keepdims, positions)
+
+
+def _get_arg(
+    info: _SignatureInfo, name: str, args: tuple[object, ...], kwds: dict[str, object]
+) -> Any:
+    # Like sig.bind(*args, **kwds).arguments.get(name), for a call that func has
+    # already accepted. A name only accepted by **kwargs is not bound to name.
+    if name in kwds:
+        return kwds[name] if name in info.params else None
+    i = info.positions.get(name)
+    return args[i] if i is not None and i < len(args) else None
+
+
 def normalizer(
     _func: Callable[_P, _R] | None = None, *, promote_scalar_result: bool = False
 ) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     def normalizer_inner(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
         def wrapped(*args: _P.args, **kwds: _P.kwargs) -> _R:
-            sig = inspect.signature(func)
-            params = sig.parameters
-            first_param = next(iter(params.values()))
-
+            info = _signature_info(func)
+            params, first_param = info.params, info.first_param
             # NumPy's API does not have positional args before variadic positional args
             norm_args: tuple[object, ...]
             if first_param.kind == inspect.Parameter.VAR_POSITIONAL:
@@ -321,15 +353,12 @@ def normalizer(
             result: object = func(*norm_args, **norm_kwds)
 
             # keepdims
-            bound_args = None
-            if "keepdims" in params and params["keepdims"].annotation == "KeepDims":
-                # keepdims can be in any position so we need sig.bind
-                bound_args = sig.bind(*norm_args, **norm_kwds).arguments
-                if bound_args.get("keepdims", False):
+            if info.has_keepdims:
+                if _get_arg(info, "keepdims", norm_args, norm_kwds):
                     # In this case the first arg is the initial tensor and
                     # the second arg is (optionally) the axis
                     tensor = norm_args[0]
-                    axis = bound_args.get("axis")
+                    axis = _get_arg(info, "axis", norm_args, norm_kwds)
                     if not isinstance(tensor, torch.Tensor):
                         raise AssertionError("keepdims requires a tensor first arg")
                     # pyrefly: ignore[bad-argument-type]
@@ -337,10 +366,7 @@ def normalizer(
 
             # out
             if "out" in params:
-                # out can be in any position so we need sig.bind
-                if bound_args is None:
-                    bound_args = sig.bind(*norm_args, **norm_kwds).arguments
-                out = bound_args.get("out")
+                out = _get_arg(info, "out", norm_args, norm_kwds)
                 result = maybe_copy_to(out, result, promote_scalar_result)
             result = wrap_tensors(result)
 

@@ -154,6 +154,22 @@ def get_tma_descriptor_factory_signature(
     function = factory.__func__ if isinstance(factory, types.MethodType) else factory
     if not isinstance(function, types.FunctionType):
         raise TypeError("TMA descriptor factory must be a Python function")
+    # Validating each host TMA descriptor calls this, so cache by function. A
+    # bound method's signature doesn't depend on what it is bound to.
+    return _function_signature(function, isinstance(factory, types.MethodType))
+
+
+@functools.cache
+def _autotuner_init_signature() -> inspect.Signature:
+    from triton.runtime.autotuner import Autotuner
+
+    return inspect.signature(Autotuner.__init__)
+
+
+@functools.cache
+def _function_signature(
+    function: types.FunctionType, as_method: bool
+) -> inspect.Signature:
     function_copy = types.FunctionType(
         function.__code__,
         function.__globals__,
@@ -162,8 +178,8 @@ def get_tma_descriptor_factory_signature(
         function.__closure__,
     )
     function_copy.__kwdefaults__ = function.__kwdefaults__
-    if isinstance(factory, types.MethodType):
-        return inspect.signature(types.MethodType(function_copy, factory.__self__))
+    if as_method:
+        return inspect.signature(types.MethodType(function_copy, object()))
     return inspect.signature(function_copy)
 
 
@@ -2311,7 +2327,7 @@ class TritonHOPifier:
 
             # We only support configs, keys, and restore_value arguments
             # of triton.autotune. Make sure other arguments are defaulted.
-            defaults = inspect.signature(Autotuner.__init__).parameters
+            defaults = _autotuner_init_signature().parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
 
