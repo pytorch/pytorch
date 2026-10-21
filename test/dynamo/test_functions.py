@@ -8891,6 +8891,26 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(result, expected)
                 self.assertEqual(result.dtype, expected.dtype)
 
+    def test_full_with_tensor_fill_value_out_dtype(self):
+        def func(fill_value, out):
+            return torch.full((2,), fill_value, out=out)
+
+        fill_value = torch.tensor(5, dtype=torch.int32)
+        for out_dtype in (None, torch.float64):
+            with self.subTest(out_dtype=out_dtype):
+                expected_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                result_out = (
+                    None if out_dtype is None else torch.empty(2, dtype=out_dtype)
+                )
+                expected = func(fill_value, expected_out)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, result_out
+                )
+                self.assertEqual(result, expected)
+                self.assertEqual(result.dtype, expected.dtype)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:

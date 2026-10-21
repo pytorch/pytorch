@@ -2134,8 +2134,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 fill_value.python_type(), torch.nn.Parameter
             ):
                 dtype = kwargs.get("dtype")
-                if dtype is None or (
-                    isinstance(dtype, ConstantVariable) and dtype.value is None
+                out = kwargs.get("out")
+                if (
+                    dtype is None
+                    or (isinstance(dtype, ConstantVariable) and dtype.value is None)
+                ) and (
+                    out is None
+                    or (isinstance(out, ConstantVariable) and out.value is None)
                 ):
                     kwargs["dtype"] = ConstantVariable.create(
                         torch._prims_common.type_to_dtype(
