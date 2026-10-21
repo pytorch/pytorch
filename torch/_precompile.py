@@ -655,6 +655,10 @@ class PrecompileError(RuntimeError):
     __module__ = "torch.compiler"
 
 
+class _NoForwardError(PrecompileError):
+    """Raised by ``_make_inlined_forward`` when the exec'd source binds no ``forward``."""
+
+
 @dataclasses.dataclass(frozen=True)
 class MakeFxTracer:
     """The ``make_fx`` capture front-end, passed as ``tracer=`` to a precompile capture.
@@ -1712,7 +1716,6 @@ def _capture(
     interning/order established here for params then buffers is the calling
     convention the runtime model must reproduce (invariant 2).
     """
-
     args = tuple(args)
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
@@ -3219,10 +3222,7 @@ def _make_inlined_forward(
     forward = module_ns.get("forward")
     if forward is None:
         where = filename or "the precompile source"
-        raise PrecompileError(
-            f"precompile: {where} defines no forward(); a hand-edit may have dropped or "
-            "renamed it."
-        )
+        raise _NoForwardError(f"precompile: {where} defines no forward().")
     return cast("Callable[..., object]", forward)
 
 

@@ -10153,8 +10153,27 @@ class TestExportPython(TestCase):
         def run2(inp):
             return inp + 1
 
-        with self.assertRaisesRegex(PrecompileError, "clobber.py defines no forward"):
+        with self.assertRaisesRegex(PrecompileError, "clobber.py defines no") as cm:
             run2(x)
+        self.assertIn("hand-edit", str(cm.exception))
+
+        # Source this call just captured is precompile's own output, not a hand-edit.
+        from torch.compiler._export_python import ExportedPythonArtifact
+
+        fresh = self._tmp_path("fresh.py")
+
+        @torch.compiler.export_python(path=fresh, backend="eager")
+        def run3(inp):
+            return inp + 1
+
+        def save_no_forward(self, args):
+            return "x = 1\n"
+
+        cls = ExportedPythonArtifact
+        stub = mock.patch.object(cls, "_precompile_and_save", save_no_forward)
+        with stub, self.assertRaisesRegex(PrecompileError, "defines no forward") as cm:
+            run3(x)
+        self.assertNotIn("hand-edit", str(cm.exception))
 
     def test_kwargs_bound_positionally(self, device):
         path = self._tmp_path("kw.py")
@@ -10297,8 +10316,8 @@ class TestExportPython(TestCase):
             self.assertEqual(f.read(), first)
 
     def test_artifact_raising_at_module_scope_is_a_distinct_error(self, device):
-        # The third arm of _load's taxonomy: not a syntax/structure problem and not a
-        # failed import, but source that blows up while being exec'd.
+        # The catch-all arm of _load: not a syntax/structure problem and not a failed
+        # import, but source that blows up while being exec'd.
         path = self._tmp_path("raises.py")
         x = make_tensor((4,), device=device, dtype=torch.float32)
 
@@ -10309,20 +10328,26 @@ class TestExportPython(TestCase):
         self.assertEqual(run(x), x + 1)
         with open(path, encoding="utf-8") as f:
             code = f.read()
-        # A KeyError raised by the file is not mistaken for a missing forward().
-        for raised in ("RuntimeError('boom')", "KeyError('boom')"):
-            with self.subTest(raised):
+        # A KeyError raised by the file is not mistaken for a missing forward(), and a
+        # SyntaxError from another file it runs is not reported as the artifact's own.
+        cases = [
+            ("raise RuntimeError('boom')", "boom"),
+            ("raise KeyError('boom')", "boom"),
+            ("exec(compile('x = (', 'other.py', 'exec'))", "other.py"),
+        ]
+        for stmt, needle in cases:
+            with self.subTest(stmt):
                 with open(path, "w", encoding="utf-8") as f:
-                    f.write(f"raise {raised}\n" + code)
+                    f.write(f"{stmt}\n" + code)
 
                 @torch.compiler.export_python(path=path, backend="eager")
                 def loaded(inp):
                     return inp + 1
 
-                with self.assertRaisesRegex(
-                    PrecompileError, "unexpected error occurred .*boom"
-                ):
+                with self.assertRaisesRegex(PrecompileError, "unexpected error") as cm:
                     loaded(x)
+                self.assertIn(needle, str(cm.exception))
+                self.assertNotIn("does not parse", str(cm.exception))
 
     def test_artifact_deleted_between_gate_and_read_regenerates(self, device):
         # A peer deleting the artifact to force a regenerate must not surface as a bare
