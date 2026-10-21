@@ -5651,8 +5651,7 @@ class TestMPS(TestCaseMPS):
             if dtype.is_floating_point and dtype != torch.float8_e4m3fn:
                 self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
                 continue
-            error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
-            self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
 
     # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
@@ -16188,7 +16187,8 @@ class TestConsistency(TestCaseMPS):
     def test_mm_stride_zero(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/180201
         # MPSGraph matrixMultiplication produces incorrect results with stride-0
-        # inputs on macOS < 26.4 (only every 16th row is correct).
+        # inputs on macOS < 26.4 and on macOS 27.0.0 (only every 16th row is correct);
+        # mm contiguifies such inputs on those versions.
         expanded = torch.ones(1, 1, device="mps").expand(64, 1)
         w = torch.randn(1, 16, device="mps")
         result = expanded.mm(w)
