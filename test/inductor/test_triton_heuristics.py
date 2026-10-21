@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_TRITON,
     requires_gpu_with_enough_memory,
     requires_triton,
 )
@@ -559,16 +558,8 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(configs[0].kwargs, expected_kwargs)
 
 
-class _TritonDeviceTestCase(TestCase):
-    def setUp(self):
-        device = self.get_primary_device()
-        if not HAS_TRITON:
-            raise unittest.SkipTest(f"triton is required for {device}")
-        super().setUp()
-
-
 @requires_triton()
-class TestTritonHeuristicsRuntime(_TritonDeviceTestCase):
+class TestTritonHeuristicsRuntime(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_artificial_zgrid(self, device):
@@ -713,7 +704,7 @@ class TestTritonHeuristicsRuntime(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class TestTritonHeuristicsBackendConfig(_TritonDeviceTestCase):
+class TestTritonHeuristicsBackendConfig(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
@@ -751,7 +742,7 @@ class TestTritonHeuristicsBackendConfig(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class TestTritonHeuristicsROCm(_TritonDeviceTestCase):
+class TestTritonHeuristicsROCm(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @runOnRocm
@@ -882,7 +873,7 @@ _PLUGIN_FACTORY_PATH = (
 
 
 @requires_triton()
-class TestCachingAutotunerPrecompileDriverSetup(_TritonDeviceTestCase):
+class TestCachingAutotunerPrecompileDriverSetup(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfRocm
@@ -912,7 +903,7 @@ class TestCachingAutotunerPrecompileDriverSetup(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
+class TestCachingAutotunerPlugin(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def _get_stream(self, device):
@@ -1097,7 +1088,8 @@ class TestCachingAutotunerPlugin(_TritonDeviceTestCase):
         self.assertEqual(revived._plugins, [])
 
 
-class TestArgumentCloneAndRestore(_TritonDeviceTestCase):
+@requires_triton()
+class TestArgumentCloneAndRestore(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     # Our tensor is large enough. If a unexpected copy happens, the
@@ -1185,7 +1177,7 @@ class TestArgumentCloneAndRestore(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class TestDumpLaunchTensors(_TritonDeviceTestCase):
+class TestDumpLaunchTensors(TestCase):
     """Test the _dump_launch_tensors functionality"""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1300,7 +1292,7 @@ class TestDumpLaunchTensors(_TritonDeviceTestCase):
 
 
 @requires_triton()
-class TestRecheckAutotuneCache(_TritonDeviceTestCase):
+class TestRecheckAutotuneCache(TestCase):
     """Tests for CachingAutotuner.recheck_autotune_cache"""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -1461,7 +1453,7 @@ def get_hip_autotune_kernel_with_invalid_config():
 
 
 @requires_triton()
-class TestHIPInvalidConfigHandling(_TritonDeviceTestCase):
+class TestHIPInvalidConfigHandling(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @runOnRocm
@@ -1636,7 +1628,7 @@ class TestFastLauncherDeviceSupport(TestCase):
 
 
 @requires_triton()
-class TestDynamicScaleRblockCacheInteraction(_TritonDeviceTestCase):
+class TestDynamicScaleRblockCacheInteraction(TestCase):
     """Tests for _dynamic_scale_rblock + autotune cache interaction.
 
     _dynamic_scale_rblock can add configs that aren't in the original
@@ -1834,7 +1826,7 @@ class TestDynamicScaleRblockCacheLoading(TestCase):
 
 
 @requires_triton()
-class TestCheckLauncherCallArgs(_TritonDeviceTestCase):
+class TestCheckLauncherCallArgs(TestCase):
     """Unit tests for CachingAutotuner._check_launcher_call_args.
 
     These exercise the arg-mismatch error path without Triton compilation,
