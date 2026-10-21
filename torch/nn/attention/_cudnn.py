@@ -5,6 +5,10 @@ The kernels live in the out-of-tree ``nvidia-cudnn-frontend`` package. This
 module swaps the cuDNN SDPA ops (``_scaled_dot_product_cudnn_attention`` and the
 varlen ops) over to it, behind a single switch:
 :func:`torch.backends.cuda.enable_cudnn_sdp_python`.
+
+The package's ``install_sdpa_overrides()`` installs the overrides and returns a
+handle whose ``remove()`` takes them out again. This module holds that handle,
+so whether it is set is the one record of whether the switch is on.
 """
 
 # mypy: allow-untyped-defs
@@ -15,25 +19,24 @@ import importlib
 import importlib.util
 import logging
 import os
-from typing import TYPE_CHECKING
-
-from . import _registry
-
-
-if TYPE_CHECKING:
-    from ._registry import FlashAttentionHandle as _ProviderHandle
+from typing import Protocol
 
 
 _CUDNN_MODULE_PATH = "cudnn.torch"
+_INSTALL_FN = "install_sdpa_overrides"
+# The first nvidia-cudnn-frontend release with install_sdpa_overrides().
+_MIN_FRONTEND_VERSION = "1.32"
 ENV_VAR = "TORCH_CUDNN_SDPA_USE_PYTHON"
 
 logger = logging.getLogger(__name__)
 
+
+class _OverridesHandle(Protocol):
+    def remove(self) -> None: ...
+
+
 # Set while the provider's kernels are installed.
-_ACTIVE_HANDLE: _ProviderHandle | None = None
-# The provider's register_fn, taken from the flash registry; see
-# _take_over_registration().
-_PROVIDER_REGISTER_FN: _registry._RegisterFn | None = None
+_ACTIVE_HANDLE: _OverridesHandle | None = None
 
 
 def is_available(module_path: str = _CUDNN_MODULE_PATH) -> bool:
@@ -45,58 +48,34 @@ def is_available(module_path: str = _CUDNN_MODULE_PATH) -> bool:
 
 
 def is_enabled() -> bool:
-    _take_over_registration()
     return _ACTIVE_HANDLE is not None
 
 
 def enable(module_path: str = _CUDNN_MODULE_PATH) -> None:
     global _ACTIVE_HANDLE
-    _take_over_registration()
-    if _PROVIDER_REGISTER_FN is None:
-        # Importing the provider registers it in the flash registry.
-        importlib.import_module(module_path)
-        _take_over_registration()
     if _ACTIVE_HANDLE is not None:
         return
-    register_fn = _PROVIDER_REGISTER_FN
-    if register_fn is None:
+    provider = importlib.import_module(module_path)
+    install = getattr(provider, _INSTALL_FN, None)
+    if install is None:
         raise RuntimeError(
-            f"'{module_path}' did not register a 'CUDNN' implementation; "
-            "a newer nvidia-cudnn-frontend is required"
+            f"'{module_path}' has no {_INSTALL_FN}(); "
+            f"nvidia-cudnn-frontend>={_MIN_FRONTEND_VERSION} is required"
         )
-    _ACTIVE_HANDLE = register_fn()
+    handle = install()
+    if not callable(getattr(handle, "remove", None)):
+        raise TypeError(
+            f"{module_path}.{_INSTALL_FN}() returned {handle!r}, "
+            "which has no remove() to undo it"
+        )
+    _ACTIVE_HANDLE = handle
 
 
 def disable() -> None:
     global _ACTIVE_HANDLE
-    _take_over_registration()
     handle, _ACTIVE_HANDLE = _ACTIVE_HANDLE, None
     if handle is not None:
         handle.remove()
-
-
-def _take_over_registration() -> None:
-    """Move the provider's "CUDNN" flash registry entry, and its activation, here.
-
-    The package registers "CUDNN" as a flash attention impl on import. Left
-    there, it is a second switch whose state this module cannot see:
-    activating another flash impl would remove cuDNN's kernels, and disabling
-    here would leave them installed. Every entry point above calls this first.
-    """
-    global _ACTIVE_HANDLE, _PROVIDER_REGISTER_FN
-    register_fn = _registry._FLASH_ATTENTION_IMPLS.pop("CUDNN", None)
-    if register_fn is not None:
-        _PROVIDER_REGISTER_FN = register_fn
-    active = _registry._FLASH_ATTENTION_ACTIVE
-    if active is None or active[0] != "CUDNN":
-        return
-    # Adopt the installed kernels rather than reinstall them, so there is
-    # nothing left to fail between removing one copy and installing another.
-    _registry._FLASH_ATTENTION_ACTIVE = None
-    if _ACTIVE_HANDLE is None:
-        _ACTIVE_HANDLE = active[1]
-    else:
-        active[1].remove()
 
 
 def _enable_from_env() -> None:
