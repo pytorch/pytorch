@@ -2817,15 +2817,18 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
     @skip_if_lt_x_gpu(8)
-    def test_shard_placement_fn_tp_ep(self):
+    @parametrize("tp_degree", [1, 2])
+    @parametrize("dp_replicate", [1, 2])
+    def test_shard_placement_fn_tp_ep(self, tp_degree: int, dp_replicate: int):
         # Every new mesh adds NCCL communicators that hold /dev/shm until the
         # processes exit, and the meshes depend only on tp_degree and
-        # dp_replicate, so build them once rather than once per subtest.
+        # dp_replicate, so build them once rather than once per subtest, and
+        # give each configuration its own test (and so its own processes).
         self._parallel_meshes = {}
         self.run_subtests(
             {
-                "tp_degree": [1, 2],
-                "dp_replicate": [1, 2],
+                "tp_degree": [tp_degree],
+                "dp_replicate": [dp_replicate],
                 "reshard_non_layer_modules": [False, True, 2],
             },
             self._test_shard_placement_fn_tp_ep,
@@ -3651,7 +3654,7 @@ class TestFullyShardCudaGraph(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFullyShardGradientAccumulation)
-
+instantiate_parametrized_tests(TestFullyShardNDTraining)
 
 if __name__ == "__main__":
     run_tests()

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ... import config
+from ...autows_utils import has_two_ctas, meta_ws_enabled
 from ...kernel.bmm import (
     BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS,
     blackwell_ws_persistent_tma_bmm_template,
+    is_blackwell_bmm_2cta_compatible,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
 from ...utils import can_use_tma, get_num_sms, has_free_symbols
@@ -30,6 +33,8 @@ if TYPE_CHECKING:
 )
 class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
     """Bounded configs for the Blackwell persistent-TMA BMM template."""
+
+    bmm_configs = BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS
 
     def _get_template_configs_impl(
         self,
@@ -94,28 +99,78 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             and (a_broadcast or b_broadcast or mat1.get_name() != mat2.get_name())
         )
 
-        tma_options = {
+        output_layout = kernel_inputs.output_layout()
+        flatten_output = len(output_layout.size) == 2
+        rank3_output = len(output_layout.size) == 3
+        tma_store = config.triton.enable_template_tma_store and can_use_tma(
+            output_layout=output_layout
+        )
+        descriptor_options = {
+            "BATCH_SIZE": batch,
+            "LOGICAL_M": m,
+            "LOGICAL_N": n,
+            "DESCRIPTOR_K": k,
+            "A_BATCH_STRIDE": int(mat1.get_stride()[0]),
+            "B_BATCH_STRIDE": int(mat2.get_stride()[0]),
+            "K_BATCH_OFFSET": 0,
+            "A_M_STRIDE": int(mat1.get_stride()[1]),
+            "A_K_STRIDE": int(mat1.get_stride()[2]),
+            "B_K_STRIDE": int(mat2.get_stride()[1]),
+            "B_N_STRIDE": int(mat2.get_stride()[2]),
+            "OUTPUT_BATCH_ROWS": m,
             "NUM_SMS": get_num_sms(),
             "HOST_SIDE_TMA": host_side_tma,
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
             "A_BROADCAST_BATCH": a_broadcast,
             "B_BROADCAST_BATCH": b_broadcast,
-            "tma_store": False,
+            "VIRTUAL_BATCH": False,
+            "FLATTEN_OUTPUT": flatten_output,
         }
-        for candidate in BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS:
-            yield {
+        use_meta_ws = meta_ws_enabled()
+        for candidate in self.bmm_configs:
+            # Meta autoWS data partitioning offsets the batch coordinate of a
+            # rank-3 A descriptor load instead of M, so only a broadcast
+            # (rank-2) A may be partitioned.
+            if candidate.data_partition_factor > 1 and not a_broadcast:
+                continue
+            # A flattened output has no batch boundary, so an M tail tile would
+            # overwrite the leading rows of the next batch.
+            if flatten_output and m % candidate.block_m != 0:
+                continue
+            two_ctas = use_meta_ws and candidate.two_ctas and has_two_ctas()
+            if two_ctas and not is_blackwell_bmm_2cta_compatible(
+                output_batch_rows=m,
+                block_m=candidate.block_m,
+                flatten_output=flatten_output,
+                tma_store=tma_store,
+            ):
+                continue
+            template_kwargs = {
                 "BLOCK_M": candidate.block_m,
                 "BLOCK_N": candidate.block_n,
                 "BLOCK_K": candidate.block_k,
+                "K_TILES": math.ceil(k / candidate.block_k),
                 "GROUP_M": 8,
                 "num_stages": candidate.num_stages,
                 "num_warps": candidate.num_warps,
                 "EPILOGUE_SUBTILE": candidate.epilogue_subtile,
+                "USE_META_WS": use_meta_ws,
                 "WARP_SPECIALIZE": True,
-                "FLATTEN": True,
-                **tma_options,
+                "FLATTEN": not use_meta_ws,
+                "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
+                "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
+                "TWO_CTAS": two_ctas,
+                "RANK3_TMA_OUTPUT": tma_store and rank3_output,
+                "tma_store": tma_store,
+                **descriptor_options,
             }
+            if two_ctas:
+                # The kernel strides by NUM_SMS, so it must be the even worker
+                # count the grid launches; an odd count would skip tiles.
+                template_kwargs["NUM_SMS"] = get_num_sms(two_ctas=True)
+                template_kwargs["ctas_per_cga"] = (2, 1, 1)
+            yield template_kwargs
 
     def get_extra_kwargs(
         self,

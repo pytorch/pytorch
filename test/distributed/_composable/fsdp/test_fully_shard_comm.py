@@ -3073,22 +3073,21 @@ class _ParamContiguousAllGather(DefaultAllGather):
 
 @instantiate_parametrized_tests
 class TestAllGatherLayouts(TestCase):
-    @parametrize(
-        "case",
-        [
-            "fsdp_owned",
-            "offset_buffer",
-            "no_buffers",
-            "not_viewing",
-            "strided_output",
-            "wrong_dtype",
-            "extra_param",
-            "missing_output",
-            "new_outputs",
-            "extra_param_refill",
-            "missing_output_refill",
-        ],
-    )
+    ERRORS = {
+        "no_buffers": "of lin.weight does not view the persistent",
+        "not_viewing": "does not view the persistent",
+        "strided_output": "contiguous 1-D tensor of 4 elements, but has size \\(4,\\)",
+        "wrong_dtype": "must have dtype torch.float32, but has torch.float64",
+        "extra_param": "returned 3 parameter outputs for 2 parameters",
+        "missing_output": "returned 0 outputs for the 1 payloads",
+    }
+    REFILL_ERRORS = {
+        "new_outputs": "did not refill",
+        "extra_param_refill": "returned 3 parameter outputs for 2 parameters",
+        "missing_output_refill": "did not refill",
+    }
+
+    @parametrize("case", ["fsdp_owned", "offset_buffer", *ERRORS, *REFILL_ERRORS])
     def test_output_ownership(self, case):
         world_size = 2
         params = []
@@ -3149,16 +3148,8 @@ class TestAllGatherLayouts(TestCase):
             )
 
         source = torch.arange(8.0)
-        errors = {
-            "no_buffers": "of lin.weight does not view the persistent",
-            "not_viewing": "does not view the persistent",
-            "strided_output": "contiguous 1-D tensor of 4 elements, but has size \\(4,\\)",
-            "wrong_dtype": "must have dtype torch.float32, but has torch.float64",
-            "extra_param": "returned 3 parameter outputs for 2 parameters",
-            "missing_output": "returned 0 outputs for the 1 payloads",
-        }
-        if case in errors:
-            with self.assertRaisesRegex(ValueError, errors[case]):
+        if case in self.ERRORS:
+            with self.assertRaisesRegex(ValueError, self.ERRORS[case]):
                 finalize(source, None)
             # FSDP checks every output before adopting any
             for param in params:
@@ -3181,13 +3172,8 @@ class TestAllGatherLayouts(TestCase):
         # Reshard frees the group's buffer
         persistent.free()
         self.assertEqual(storage.size(), 0)
-        refill_errors = {
-            "new_outputs": "did not refill",
-            "extra_param_refill": "returned 3 parameter outputs for 2 parameters",
-            "missing_output_refill": "did not refill",
-        }
-        if case in refill_errors:
-            with self.assertRaisesRegex(ValueError, refill_errors[case]):
+        if case in self.REFILL_ERRORS:
+            with self.assertRaisesRegex(ValueError, self.REFILL_ERRORS[case]):
                 finalize(source + 1, persistent)
             return
         self.assertIs(finalize(source + 1, persistent), persistent)
@@ -3435,9 +3421,7 @@ _LAYOUT_PARITY_CASES = [
 ]
 
 
-def _check_fsdp_owned_layout_training(
-    test, device, mode, reshard, async_op, mixed, keep
-):
+def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
     torch.manual_seed(42)
     ref_model = nn.Sequential(*[MLP(16) for _ in range(3)]).to(device)
     mesh = init_device_mesh(torch.device(device).type, (test.world_size,))
@@ -3529,13 +3513,12 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
     def test_fsdp_owned_layout_training(
         self, device, mode, reshard, async_op, mixed, keep
     ):
-        _check_fsdp_owned_layout_training(
-            self, device, mode, reshard, async_op, mixed, keep
-        )
+        _check_layout_training(self, device, mode, reshard, async_op, mixed, keep)
 
     def test_delegating_layout_shard_dim1(self, device):
         # A custom layout that delegates its outputs to the default one gets the
-        # parameters' outer sizes, which Shard(1) payloads need
+        # parameters' outer sizes, which Shard(1) payloads need, also when a
+        # group's first parameter is an extension without payloads
         test = self
         mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
         torch.manual_seed(42)
@@ -3544,17 +3527,31 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
 
         class Delegating(AllGatherLayout):
             def prepare_output(self, metadata):
-                test.assertEqual(metadata.input_outer_sizes, [64, 1, 16, 1])
+                test.assertEqual(metadata.input_outer_sizes, [1, 16, 1])
                 return metadata.input_outer_sizes
 
             def finalize_outputs(self, metadata):
                 return DefaultAllGatherLayout().finalize_outputs(metadata)
+
+        def pre_all_gather(local_tensor, mesh):
+            return (), None
+
+        @torch.no_grad()
+        def post_all_gather(local_tensor, outputs, metadata, param_dtype, *, out=None):
+            weight = torch.ones(64, 16, device=device)
+            if out is None:
+                return weight, (weight,)
+            with torch.autograd._unsafe_preserve_version_counter(out):
+                out.copy_(weight)
 
         for module in (model, ref_model):
             for block in module:
                 fully_shard(
                     block, mesh=mesh, shard_placement_fn=lambda p: Shard(p.ndim - 1)
                 )
+                local = block.in_proj.weight._local_tensor
+                local.fsdp_pre_all_gather = pre_all_gather.__get__(local)
+                local.fsdp_post_all_gather = post_all_gather.__get__(local)
             fully_shard(module, mesh=mesh)
         model.set_all_gather_layout(Delegating())
         for _ in range(2):
@@ -3578,9 +3575,7 @@ class TestFullyShardLayoutParityNCCL(FSDPTestContinuous):
     def test_fsdp_owned_layout_training(
         self, device, mode, reshard, async_op, mixed, keep
     ):
-        _check_fsdp_owned_layout_training(
-            self, device, mode, reshard, async_op, mixed, keep
-        )
+        _check_layout_training(self, device, mode, reshard, async_op, mixed, keep)
 
 
 instantiate_device_type_tests(

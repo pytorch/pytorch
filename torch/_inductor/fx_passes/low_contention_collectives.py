@@ -16,7 +16,11 @@ def _get_collective_info(node):
         is_reduce_scatter_tensor,
     )
     from torch._inductor.fx_passes.overlap_scheduling import get_group_name
+    from torch._inductor.utils import get_collective_config
 
+    # symm_mem replacements can't carry a collective config.
+    if get_collective_config(node) is not None:
+        return None
     if is_all_gather_into_tensor(node):
         return True, get_group_name(node)
     if is_reduce_scatter_tensor(node):

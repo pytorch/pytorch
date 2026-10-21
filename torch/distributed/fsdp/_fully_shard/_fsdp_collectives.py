@@ -596,7 +596,7 @@ def foreach_all_gather_copy_out(
         default_fn = _default_all_gather_output_fn
         layout._copy_out(all_gather_output, plan, world_size, default_fn)
         return persistent_buffers
-    first_unshard = not fsdp_params[0].all_gather_outputs
+    first_unshard = not any(p.all_gather_outputs for p in fsdp_params)
     buffers: list[torch.Tensor] = []
     if not first_unshard:
         for fsdp_param in fsdp_params:
@@ -987,7 +987,7 @@ def _get_all_gather_input_metadatas(
 ) -> tuple[list[list[torch.dtype]], list[list[int]], torch.dtype]:
     param_all_gather_input_dtypes: list[list[torch.dtype]] = []
     param_all_gather_input_numels: list[list[int]] = []
-    all_gather_dtype = param_all_gather_inputs[0][0].dtype
+    all_gather_dtype = next(chain.from_iterable(param_all_gather_inputs)).dtype
     for all_gather_inputs in param_all_gather_inputs:
         input_dtypes: list[torch.dtype] = []
         input_numels: list[int] = []
