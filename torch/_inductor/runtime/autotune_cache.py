@@ -53,7 +53,7 @@ from ..remote_cache import (
     RemoteCache,
     RemoteCacheJsonSerde,
 )
-from .hints import InductorMeta
+from .hints import InductorMeta, KERNEL_CONFIGS_NAME
 from .triton_compat import Config, HAS_WARP_SPEC
 
 
@@ -640,14 +640,14 @@ class AutotuneCacheBundler:
 
 # The python wrapper's KERNEL_CONFIGS (see _KernelConfigs in codegen/wrapper.py): the
 # config each kernel's compile-time autotuning picked, which timing noise can change.
-_KERNEL_CONFIGS = re.compile(r"(?m)^KERNEL_CONFIGS = \{\n(?:    .*\n)*\}$")
+_KERNEL_CONFIGS = re.compile(rf"(?m)^{KERNEL_CONFIGS_NAME} = \{{\n(?:    .*\n)*\}}$")
 
 
 # Remove the comments from the code (which include things like run ids and file
 # paths) and the KERNEL_CONFIGS rows, and then hash the result.
 def _comment_stripped_hash(code: str) -> str:
     code = re.sub(r"#.*$", "", code, count=0, flags=re.MULTILINE)
-    code = _KERNEL_CONFIGS.sub("KERNEL_CONFIGS = {}", code)
+    code = _KERNEL_CONFIGS.sub(f"{KERNEL_CONFIGS_NAME} = {{}}", code)
     return torch._inductor.codecache.code_hash(code)
 
 
