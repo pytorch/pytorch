@@ -13,11 +13,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -239,10 +235,6 @@ class TestCommunication(FSDPCommTestBase):
         )
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize("nested_model", [False, True])
     @parametrize("use_no_sync", [False, True])
     @parametrize("sharding_strategy", [ShardingStrategy.SHARD_GRAD_OP, None])
@@ -337,10 +329,6 @@ class TestExplicitUnshard(FSDPCommTestBase):
         return min(_get_device_module(self.device_type).device_count(), 2)
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize("use_orig_params", [False, True])
     def test_unshard_async(self, device, use_orig_params: bool):
         device_type = torch.device(self._resolved_device_type())
@@ -428,10 +416,6 @@ class TestExplicitUnshard(FSDPCommTestBase):
             model.module.mlps._wait_unshard_streams_on_current_stream()
 
     @requires_world_size(2)
-    @requires_capabilities(
-        Capability.distributed.backend,
-        Capability.distributed.fsdp,
-    )
     @parametrize("use_orig_params", [False, True])
     @parametrize("async_op", [False, True])
     def test_unshard_after_backward(
