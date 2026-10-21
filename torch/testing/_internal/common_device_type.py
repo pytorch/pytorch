@@ -2654,7 +2654,7 @@ def get_all_device_types() -> list[str]:
 
 # skip since currently flex attention requires at least `avx2` or AArch64 on CPU.
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = not IS_MACOS and (
-    torch.cpu._is_aarch64_supported()
+    torch.cpu._is_aarch64()
     or (
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )

@@ -1654,7 +1654,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
-        use_blas_gemm = torch.cpu._is_aarch64_supported()
+        use_blas_gemm = torch.cpu._is_aarch64()
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1743,7 +1743,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        use_blas_gemm = torch.cpu._is_aarch64_supported()
+        use_blas_gemm = torch.cpu._is_aarch64()
         emit_transpose_b_micro_gemm = not use_blas_gemm
 
         micro_gemm_trans: CppMicroGemmFP32Vec | None = None
