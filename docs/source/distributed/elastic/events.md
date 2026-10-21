@@ -32,6 +32,7 @@
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.elastic.events.api.Event
+   :members: serialize, deserialize
 ```
 
 ```{eval-rst}
@@ -44,4 +45,9 @@
 
 ```{eval-rst}
 .. autoclass:: torch.distributed.elastic.events.api.NodeState
+```
+
+```{eval-rst}
+.. autoclass:: torch.distributed.elastic.events.api.RdzvEvent
+   :members: serialize, deserialize
 ```
