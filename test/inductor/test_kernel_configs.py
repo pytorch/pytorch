@@ -19,6 +19,7 @@ from torch._inductor.runtime.autotune_cache import (
 )
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.runtime.hints import HeuristicType
+from torch._inductor.runtime.triton_compat import OutOfResources
 from torch._inductor.runtime.triton_heuristics import (
     AutotuneCache,
     cached_autotune,
@@ -420,6 +421,34 @@ class TestKernelConfigs(TestCase):
             CachingAutotuner, "autotune_to_one_config", autospec=True, side_effect=tune
         ) as tuned:
             self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
+        tuned.assert_called_once()
+
+    @requires_cuda_and_triton
+    def test_a_pinned_config_that_does_not_compile_falls_back_to_tuning(self):
+        # As on a GPU with less shared memory than the one the module was tuned on.
+        fn = lambda x: x.sum(-1)  # noqa: E731
+        x = torch.randn(64, 3000, device="cuda")
+        cfg = {"autotune_local_cache": False, "max_autotune": True}
+        result, code = _code_for(fn, x, **cfg)
+        (kernel,) = _kernels(code)
+        failed = []
+        precompile_config = CachingAutotuner._precompile_config
+
+        def does_not_fit(self, cfg):
+            if not failed:
+                failed.append(config_to_dict(cfg))
+                raise OutOfResources(1 << 20, 1 << 16, "shared memory")
+            return precompile_config(self, cfg)
+
+        fit = mock.patch.object(CachingAutotuner, "_precompile_config", does_not_fit)
+        tune = CachingAutotuner.autotune_to_one_config
+        spy = mock.patch.object(
+            CachingAutotuner, "autotune_to_one_config", autospec=True, side_effect=tune
+        )
+        with fit, spy as tuned:
+            ns = _load_from_file(code)
+            self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
+        self.assertEqual(failed, [ns["KERNEL_CONFIGS"][kernel]])
         tuned.assert_called_once()
 
     # Nothing launches, so no GPU is needed.
