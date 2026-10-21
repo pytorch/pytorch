@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch._inductor.analysis.device_info import (
     _device_mapping,
-    datasheet_dram_bw_gbs，
+    datasheet_dram_bw_gbs,
     datasheet_tops,
     DeviceInfo,
     lookup_device_info,
