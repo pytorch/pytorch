@@ -935,7 +935,8 @@ class _LineIfNamesUsed(DeferredLineBase):
         super().__init__(line)
         self.names = names
         self.wrapper = wrapper
-        # Whether ``names`` are the ones the line binds, so its right-hand side is a use.
+        # Whether ``names`` are the ones the line binds, so only its right-hand side,
+        # not the whole line, is a use.
         self.binds = binds
 
     def __call__(self) -> str | None:
@@ -2463,7 +2464,8 @@ class PythonWrapperCodegen(CodeGen):
         self, buf: IndentedBuffer, line: str, names: tuple[str, ...] | None = None
     ) -> None:
         """Write a line that is kept only if the module uses a name in ``names``, by
-        default the names the import or binding on it binds."""
+        default the names the import or binding on it binds. A kept line uses the names
+        it reads: a binding's right-hand side, or all of a line given ``names``."""
         binds = names is None
         if names is None:
             names = self._names_bound_by(line)
@@ -2535,17 +2537,16 @@ class PythonWrapperCodegen(CodeGen):
             # Run as a script, the module compiles its module-level kernels, which the
             # scan leaves out, at async_compile.wait.
             used.add("async_compile")
-        # A kept binding uses the names its right-hand side starts from, which another
-        # line may bind: `async_compile = AsyncCompile()`.
-        rhs_words = [
-            (line.names, re.findall(r"(?<![.\w])\w+", line.line.partition(" = ")[2]))
-            for line in self.conditional_lines
-            if line.binds
-        ]
+        # A kept line uses the names it reads, which another line may bind:
+        # `async_compile = AsyncCompile()`.
+        reads = []
+        for line in self.conditional_lines:
+            text = line.line.partition(" = ")[2] if line.binds else line.line
+            reads.append((line.names, re.findall(r"(?<![.\w])\w+", text)))
         while (
             new := OrderedSet(
                 word
-                for names, words in rhs_words
+                for names, words in reads
                 if not used.isdisjoint(names)
                 for word in words
             )
