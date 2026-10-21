@@ -450,6 +450,11 @@ class TestKernelConfigs(TestCase):
         self.assertNotIn(user_kernel, ns["KERNEL_CONFIGS"])
         self.assertEqual(ns[user_kernel].heuristic_type, HeuristicType.USER_AUTOTUNE)
         self.assertEqual(ns["call"]([x])[0], result)
+        # Naming it in the table by hand does not pin it either.
+        row = f"KERNEL_CONFIGS = {{\n    {user_kernel!r}: {{'BLOCK': 64}},\n"
+        ns = _load_from_file(code.replace("KERNEL_CONFIGS = {\n", row, 1))
+        self.assertEqual(ns[user_kernel].heuristic_type, HeuristicType.USER_AUTOTUNE)
+        self.assertEqual(ns["call"]([x])[0], result)
 
     @requires_cuda_and_triton
     def test_kernel_without_a_compile_time_config_tunes_on_first_launch(self):
