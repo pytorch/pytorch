@@ -462,7 +462,10 @@ def check_autotune_cache(
         watchdog.report_phase(watchdog.Phase.QUERYING_CACHE)
         autotune_cache = AutotuneCache.create(inductor_meta, filename, configs_hash)
         if autotune_cache:
-            if best_config := autotune_cache.read_best(inductor_meta, configs):
+            best_config = None
+            if not inductor_meta.get("autotune_cache_skip_read"):
+                best_config = autotune_cache.read_best(inductor_meta, configs)
+            if best_config:
                 configs = [best_config]
                 autotune_cache_info["best_config"] = triton_config_to_hashable(
                     best_config
@@ -3870,10 +3873,11 @@ def cached_autotune(
             # Copies, since _cached_autotune pops from them and a failed build is retried.
             meta = {**inductor_meta, **extra}
             tuner = unpinned(triton_meta={**triton_meta}, inductor_meta=meta)(fn)
-            # A cached winner that is the config that did not fit, as tuned on another GPU.
+            # A cached winner that is the config that did not fit, as tuned on another GPU:
+            # tune again, and save the new winner over it.
             same = [*map(config_to_dict, tuner.configs)] == [config_to_dict(config)]
             if same and not extra:
-                return fallback(force_disable_caches=True)
+                return fallback(autotune_cache_skip_read=True)
             return tuner
 
         kernel.fallback = fallback
