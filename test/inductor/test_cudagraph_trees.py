@@ -6931,26 +6931,33 @@ if HAS_CUDA_AND_TRITON:
                 y2 = x2 + 1
                 return y1, y2
 
-            with config.patch(
-                "triton.autotune_at_compile_time", autotune_at_compile_time
-            ):
+            log, logs = logs_to_string("torch._inductor.codecache", "output_code")
+            cfg = {"triton.autotune_at_compile_time": autotune_at_compile_time}
+            with config.patch(cfg), logs():
                 compiled_foo = torch.compile(foo)
                 x = torch.randn((20, 20), device="cuda")
                 eager_out = foo(x)
                 compiled_out, code = run_and_get_code(compiled_foo, x)
                 self.assertEqual(eager_out, compiled_out)
 
-                # Each kernel is defined once: partition 2 reuses partition 1's
-                # triton kernel, and the module has no compile-time autotune block.
-                FileCheck().check_count(
-                    "Compile-time auto-tuning block", 0, exactly=True
-                ).run(code[0])
-                FileCheck().check_count(
-                    "def triton_poi_fused_add_", 1, exactly=True
-                ).run(code[0])
-                FileCheck().check_count(
-                    "cpp_fused__to_copy_add_1 = ", 1, exactly=True
-                ).run(code[0])
+            # Each kernel is defined once: partition 2 reuses partition 1's triton
+            # kernel, and the module has no compile-time autotune block.
+            module = code[0]
+            self.assertNotIn("Compile-time auto-tuning block", module)
+            self.assertEqual(module.count("def triton_poi_fused_add_"), 1)
+            self.assertEqual(module.count("cpp_fused__to_copy_add_1 = "), 1)
+            # The kernels of the root and of both partitions are tuned in one block,
+            # which runs once.
+            prefix = "Auto-tuning code written to "
+            paths = [
+                line.removeprefix(prefix)
+                for line in log.getvalue().splitlines()
+                if line.startswith(prefix)
+            ]
+            self.assertEqual(len(paths), 1 if autotune_at_compile_time else 0, paths)
+            for path in paths:
+                with open(path) as f:
+                    self.assertIn("triton_poi_fused_add_", f.read())
 
         @unittest.skipUnless(
             config.graph_partition, "Test requires graph_partition to be enabled"
