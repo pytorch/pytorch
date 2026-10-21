@@ -22,6 +22,22 @@ def my_add(self, other, alpha=1.0) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_16.my_add.default(self, other, alpha)
 
 
+def my_is_warn_always_enabled() -> bool:
+    """Stable ``torch_is_warn_always_enabled`` (2.16+)."""
+    return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
+
+
+def test_stable_torch_warn_once(value) -> None:
+    """
+    Tests STABLE_TORCH_WARN_ONCE with one call site for negative values and one
+    for non-negative values.
+
+    Args:
+        value: int - selects the call site
+    """
+    torch.ops.libtorch_agn_2_16.test_stable_torch_warn_once.default(value)
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):
