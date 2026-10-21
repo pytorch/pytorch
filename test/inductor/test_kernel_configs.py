@@ -241,6 +241,39 @@ class TestKernelConfigs(TestCase):
         self.assertEqual(ns["call"]([x])[0], result)
 
     @requires_gpu_and_triton
+    def test_kernel_without_a_compile_time_config_tunes_on_first_launch(self):
+        # As for a kernel the block leaves with more than one launcher.
+        block = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def leave_no_config(self, *args, **kwargs):
+            result = block(self, *args, **kwargs)
+            self.kernel_configs.update(dict.fromkeys(self.kernel_configs))
+            return result
+
+        def fn(x):
+            return x.sum(-1)
+
+        x = torch.randn(64, 3000, device=GPU_TYPE)
+        spy = mock.patch.object(
+            PythonWrapperCodegen, "generate_and_run_autotune_block", leave_no_config
+        )
+        with spy:
+            # max_autotune, so that the kernel has configs to choose between
+            cfg = {"autotune_local_cache": False, "max_autotune": True}
+            result, code = _code_for(fn, x, **cfg)
+        (kernel,) = _kernels(code)
+        ns = _load_from_file(code)
+        self.assertEqual(ns["KERNEL_CONFIGS"], {})
+        self.assertEqual(ns[kernel].heuristic_type, HeuristicType.REDUCTION)
+        self.assertGreater(len(ns[kernel].launchers), 1)
+        tune = CachingAutotuner.autotune_to_one_config
+        with mock.patch.object(
+            CachingAutotuner, "autotune_to_one_config", autospec=True, side_effect=tune
+        ) as tuned:
+            self.assertEqual(ns["call"]([x])[0], result, atol=1e-3, rtol=1e-3)
+        tuned.assert_called_once()
+
+    @requires_gpu_and_triton
     def test_pinned_kernel_keeps_the_backends_autotuner_class(self):
         # An out-of-tree backend's heuristics pass their own CachingAutotuner subclass.
         import triton.language as tl
