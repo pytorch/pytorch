@@ -8,7 +8,10 @@ import tempfile
 
 import torch
 from torch._inductor import config
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+from torch._inductor.codegen.wrapper import (
+    PythonWrapperCodegen,
+    SubgraphPythonWrapperCodegen,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import IndentedBuffer, run_and_get_code
@@ -73,8 +76,12 @@ class TestWrapperPreamble(TestCase):
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
     def _wrapper(self):
+        return self._root_and_subgraph()[0]
+
+    def _root_and_subgraph(self):
         with V.set_graph_handler(GraphLowering(torch.fx.symbolic_trace(lambda x: x))):
-            return PythonWrapperCodegen()
+            root = PythonWrapperCodegen()
+            return root, SubgraphPythonWrapperCodegen("subgraph_0", root)
 
     def test_a_dotted_import_is_kept_when_its_first_component_is_used(self):
         wrapper, buf = self._wrapper(), IndentedBuffer()
@@ -91,6 +98,24 @@ class TestWrapperPreamble(TestCase):
         buf.writeline("print(sep)")
         wrapper.scan_for_used_names(buf)
         self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\nprint(sep)\n")
+
+    def test_a_name_only_a_subgraph_uses_keeps_the_lines_it_needs(self):
+        # The subgraph's code, spliced into the root unscanned, uses sep, whose binding
+        # in turn keeps import os.
+        (root, subgraph), buf = self._root_and_subgraph(), IndentedBuffer()
+        for line in ("import os", "import sys", "sep = os.sep"):
+            root.write_if_used(buf, line)
+        subgraph_code = IndentedBuffer()
+        subgraph_code.writeline("print(sep)")
+        subgraph.scan_for_used_names(subgraph_code)
+        root.scan_for_used_names(buf)
+        self.assertEqual(buf.getvalue(), "import os\nsep = os.sep\n")
+
+    def test_a_subgraph_cannot_write_a_line_kept_only_if_used(self):
+        (_, subgraph), buf = self._root_and_subgraph(), IndentedBuffer()
+        subgraph.write_if_used(buf, "import os")
+        with self.assertRaisesRegex(AssertionError, "subgraph_0 wrote a line"):
+            subgraph.scan_for_used_names(buf)
 
     def test_the_scan_reads_the_text_that_is_emitted(self):
         # getrawvalue would join `y = a\` and `os.sep` into `y = aos.sep`.
@@ -170,28 +195,28 @@ class TestWrapperPreamble(TestCase):
         self.assertIn("from math import inf, nan", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
-    @requires_cuda_and_triton
-    def test_a_name_used_only_in_a_subgraph_is_kept(self):
-        # Only the subgraph, the true branch or the graph partition, calls
-        # extern_kernels.mm, and the root does not scan subgraphs' code.
-        def cond_mm(x):
+    def _check_mm_only_in_a_subgraph(self, fn, x, **cfg):
+        # Only the subgraph calls extern_kernels.mm, and the root does not scan
+        # subgraphs' code.
+        result, code = _code_for(fn, x, **cfg)
+        self.assertIn("extern_kernels.mm(", code)
+        self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
+        self.assertIn("import extern_kernels", code)
+        self.assertEqual(_run_from_file(code, [x])[0], result)
+        return code
+
+    def test_a_name_used_only_in_a_cond_branch_is_kept(self):
+        def fn(x):
             return torch.cond(x.sum() > 0, lambda t: t @ t, lambda t: t.cos(), (x,))
 
-        x = torch.randn(16, 16, device="cuda")
-        for name, fn, cfg in (
-            ("cond", cond_mm, {}),
-            ("partition", lambda x: x @ x, _PARTITIONED),
-        ):
-            with self.subTest(name):
-                result, code = _code_for(fn, x, **cfg)
-                if cfg:
-                    self.assertIn("def partition_0(", code)
-                self.assertIn("extern_kernels.mm(", code)
-                self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
-                self.assertIn("import extern_kernels", code)
-                self.assertEqual(_run_from_file(code, [x])[0], result)
+        self._check_mm_only_in_a_subgraph(fn, torch.randn(16, 16))
 
     @requires_cuda_and_triton
+    def test_a_name_used_only_in_a_graph_partition_is_kept(self):
+        x = torch.randn(16, 16, device="cuda")
+        code = self._check_mm_only_in_a_subgraph(lambda x: x @ x, x, **_PARTITIONED)
+        self.assertIn("def partition_0(", code)
+
     def test_a_name_used_only_in_a_nested_subgraph_is_kept(self):
         # Only the inner true branch calls extern_kernels.mm. Its code is spliced into
         # the outer branch's, which does not scan it either.
@@ -202,7 +227,7 @@ class TestWrapperPreamble(TestCase):
             return torch.cond(x.sum() > 0, outer, lambda t: t.cos(), (x,))
 
         # Positive, so both predicates take the branch that calls mm.
-        x = torch.rand(16, 16, device="cuda")
+        x = torch.rand(16, 16)
         result, code = _code_for(fn, x)
         # Each branch is a module-level function. The one that calls mm is called only
         # from another branch, the outer one, which call() calls.
