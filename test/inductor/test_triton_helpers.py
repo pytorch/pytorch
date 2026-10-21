@@ -157,20 +157,13 @@ if HAS_TRITON:
             tl.store(max_ptr + row, max2(x, 0))
 
 
-class _TritonDeviceTestCase(TestCase):
-    def setUp(self):
-        if not HAS_TRITON:
-            self.skipTest("triton is required")
-        super().setUp()
-
-
-class ExclusiveScanDecoupledLookback64Test(_TritonDeviceTestCase):
+@requires_triton()
+class ExclusiveScanDecoupledLookback64Test(TestCase):
     """Test cases for exclusive_scan_decoupled_lookback_64 dtype fix."""
 
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @requires_triton()
     def test_flag_2_branch_with_int64_index(self, device) -> None:
         """Test `if flag == 2` branch with int64 index."""
 
@@ -194,7 +187,6 @@ class ExclusiveScanDecoupledLookback64Test(_TritonDeviceTestCase):
         torch.testing.assert_close(result, expected)
 
     @onlyAccelerator
-    @requires_triton()
     def test_flag_2_branch_with_int32_index(self, device) -> None:
         """Test `if flag == 2` branch with int32 index."""
 
@@ -218,7 +210,8 @@ class ExclusiveScanDecoupledLookback64Test(_TritonDeviceTestCase):
         torch.testing.assert_close(result, expected)
 
 
-class SelectOneTest(_TritonDeviceTestCase):
+@requires_triton()
+class SelectOneTest(TestCase):
     """Test cases for select_one bitcast fix with sub-32-bit dtypes.
 
     The fix (D93872067) adds an intermediate .to(idtype) truncation before
@@ -243,31 +236,28 @@ class SelectOneTest(_TritonDeviceTestCase):
         torch.testing.assert_close(result, expected)
 
     @onlyAccelerator
-    @requires_triton()
     def test_select_one_bfloat16(self, device) -> None:
         """Test select_one with bfloat16 (16-bit) — triggers the bitcast fix."""
         self._run_select_one(device, torch.bfloat16)
 
     @onlyAccelerator
-    @requires_triton()
     def test_select_one_float16(self, device) -> None:
         """Test select_one with float16 (16-bit) — triggers the bitcast fix."""
         self._run_select_one(device, torch.float16)
 
     @onlyAccelerator
-    @requires_triton()
     def test_select_one_float32(self, device) -> None:
         """Test select_one with float32 (32-bit) — baseline that always worked."""
         self._run_select_one(device, torch.float32)
 
     @onlyAccelerator
-    @requires_triton()
     def test_select_one_float64(self, device) -> None:
         """Test select_one with float64 (64-bit) — baseline that always worked."""
         self._run_select_one(device, torch.float64)
 
 
-class Random4xTest(_TritonDeviceTestCase):
+@requires_triton()
+class Random4xTest(TestCase):
     """Test cases for rand4x/randn4x helper packing order."""
 
     hw_classification = HardwareClassification.ACCELERATOR
@@ -287,32 +277,26 @@ class Random4xTest(_TritonDeviceTestCase):
         torch.testing.assert_close(helper_result, expected_result, atol=0, rtol=0)
 
     @onlyAccelerator
-    @requires_triton()
     def test_rand4x_order(self, device) -> None:
         self._run_random_4x_order(device, normal=False, block_size=16)
 
     @onlyAccelerator
-    @requires_triton()
     def test_randn4x_order(self, device) -> None:
         self._run_random_4x_order(device, normal=True, block_size=16)
 
     @onlyAccelerator
-    @requires_triton()
     def test_rand4x_order_quarter_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=False, block_size=8)
 
     @onlyAccelerator
-    @requires_triton()
     def test_randn4x_order_quarter_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=True, block_size=8)
 
     @onlyAccelerator
-    @requires_triton()
     def test_rand4x_fallback_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=False, block_size=2)
 
     @onlyAccelerator
-    @requires_triton()
     def test_randn4x_fallback_block_size_2(self, device) -> None:
         self._run_random_4x_order(device, normal=True, block_size=2)
 
@@ -341,17 +325,14 @@ class Random4xTest(_TritonDeviceTestCase):
         torch.testing.assert_close(small_block_result, large_block_result)
 
     @onlyAccelerator
-    @requires_triton()
     def test_rand4x_block_size_stability(self, device) -> None:
         self._run_random_4x_block_size_stability(device, normal=False)
 
     @onlyAccelerator
-    @requires_triton()
     def test_randn4x_block_size_stability(self, device) -> None:
         self._run_random_4x_block_size_stability(device, normal=True)
 
     @onlyAccelerator
-    @requires_triton()
     def test_rand4x_distribution(self, device) -> None:
         block_size = 1024
         num_blocks = 128
@@ -375,7 +356,6 @@ class Random4xTest(_TritonDeviceTestCase):
         self.assertLess(max_bucket_error / (sample_count / 10), 0.08)
 
     @onlyAccelerator
-    @requires_triton()
     def test_randn4x_distribution(self, device) -> None:
         block_size = 1024
         num_blocks = 128
@@ -399,7 +379,8 @@ class Random4xTest(_TritonDeviceTestCase):
         self.assertLess(abs(skewness), 0.05)
 
 
-class MinimumMaximumTest(_TritonDeviceTestCase):
+@requires_triton()
+class MinimumMaximumTest(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
@@ -523,19 +504,16 @@ class MinimumMaximumTest(_TritonDeviceTestCase):
 instantiate_device_type_tests(
     ExclusiveScanDecoupledLookback64Test,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     SelectOneTest,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 instantiate_device_type_tests(
     Random4xTest,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 
@@ -549,5 +527,4 @@ if HAS_TRITON:
 
 
 if __name__ == "__main__":
-    if HAS_TRITON:
-        run_tests()
+    run_tests()
