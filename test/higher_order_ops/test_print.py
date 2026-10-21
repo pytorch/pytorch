@@ -10,6 +10,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    empty_line_normalizer,
     InductorAndRecordGraphs,
     normalize_gm,
 )
@@ -368,23 +369,23 @@ x = add_1, y = add_2);  getitem = None
         backend = EagerAndRecordGraphs()
         torch.compile(f, backend=backend, fullgraph=True)(torch.randn(2), "moo")
         self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            empty_line_normalizer(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False))
+            ),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2]", SYNTHETIC_LOCAL_tmp_0_ : torch._library.opaque_object.OpaqueStr, SYNTHETIC_LOCAL_tmp_2_ : torch._library.opaque_object.OpaqueStr):
         l_x_ = L_x_
         synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
         synthetic_local_tmp_2_ = SYNTHETIC_LOCAL_tmp_2_
-
         print_1 = torch.ops.higher_order.print(synthetic_local_tmp_0_);  print_1 = None
-
         print_2 = torch.ops.higher_order.print(synthetic_local_tmp_2_, synthetic_local_tmp_0_);  synthetic_local_tmp_2_ = synthetic_local_tmp_0_ = print_2 = None
-
         sin: "f32[2]" = l_x_.sin();  l_x_ = None
         return (sin,)
 """,
         )
 
+    @skipIfTorchDynamo("Inner compile disabled")
     def test_symbolic_str_not_in_inductor_code(self):
         def f(x, s):
             torch._higher_order_ops.print(s + "!")
