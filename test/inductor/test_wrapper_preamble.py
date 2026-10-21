@@ -37,6 +37,11 @@ def _softmax(x):
     return torch.softmax(x * 2, dim=-1)
 
 
+# A graph partition's code, like a torch.cond branch's, is a subgraph's. Every op of
+# a graph that has no CPU op lands in partition_0.
+_PARTITIONED = {"triton.cudagraphs": True, "graph_partition": True}
+
+
 def _cond_softmax(x):
     # Kernels in both the root and the branch subgraphs, whose text the root splices in.
     return torch.cond(
@@ -133,9 +138,15 @@ class TestWrapperPreamble(TestCase):
         # carries `'device': 0` in its metadata. None of those is a use of the wrapper's
         # binding.
         x = torch.randn(64, 128, device="cuda")
-        for fn in (_softmax, _cond_softmax):
-            with self.subTest(fn.__name__):
-                result, code = _code_for(fn, x)
+        for name, fn, cfg in (
+            ("_softmax", _softmax, {}),
+            ("_cond_softmax", _cond_softmax, {}),
+            ("partition", _softmax, _PARTITIONED),
+        ):
+            with self.subTest(name):
+                result, code = _code_for(fn, x, **cfg)
+                if cfg:
+                    self.assertIn("def partition_0(", code)
                 self.assertIn("math as tl_math", code)
                 self.assertNotIn("\nimport math\n", code)
                 self.assertNotIn("start_graph", code)
@@ -161,17 +172,24 @@ class TestWrapperPreamble(TestCase):
 
     @requires_cuda_and_triton
     def test_a_name_used_only_in_a_subgraph_is_kept(self):
-        # Only the true branch calls extern_kernels.mm, and the root does not scan the
-        # branches' code.
-        def fn(x):
+        # Only the subgraph, the true branch or the graph partition, calls
+        # extern_kernels.mm, and the root does not scan subgraphs' code.
+        def cond_mm(x):
             return torch.cond(x.sum() > 0, lambda t: t @ t, lambda t: t.cos(), (x,))
 
         x = torch.randn(16, 16, device="cuda")
-        result, code = _code_for(fn, x)
-        self.assertIn("extern_kernels.mm(", code)
-        self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
-        self.assertIn("import extern_kernels", code)
-        self.assertEqual(_run_from_file(code, [x])[0], result)
+        for name, fn, cfg in (
+            ("cond", cond_mm, {}),
+            ("partition", lambda x: x @ x, _PARTITIONED),
+        ):
+            with self.subTest(name):
+                result, code = _code_for(fn, x, **cfg)
+                if cfg:
+                    self.assertIn("def partition_0(", code)
+                self.assertIn("extern_kernels.mm(", code)
+                self.assertNotIn("extern_kernels.mm(", code.split("def call(")[-1])
+                self.assertIn("import extern_kernels", code)
+                self.assertEqual(_run_from_file(code, [x])[0], result)
 
     def test_a_graph_that_compiles_nothing_has_no_async_compile(self):
         def fn(a, b):
@@ -207,7 +225,14 @@ class TestWrapperPreamble(TestCase):
         # Positive, so both predicates take the branch that calls mm.
         x = torch.rand(16, 16, device="cuda")
         result, code = _code_for(fn, x)
-        self.assertIn("extern_kernels.mm(", code)
+        # Each branch is a module-level function. The one that calls mm is called only
+        # from another branch, the outer one, which call() calls.
+        defs = dict(re.findall(r"(?ms)^def (\w+)\((.*?)(?=^\S|\Z)", code))
+        (inner,) = [name for name, body in defs.items() if "extern_kernels.mm(" in body]
+        callers = [n for n, body in defs.items() if f"{inner}(" in body]
+        self.assertEqual(len(callers), 1, callers)
+        self.assertNotIn(f"{inner}(", code.split("def call(")[-1])
+        self.assertIn(f"{callers[0]}(", code.split("def call(")[-1])
         self.assertIn("import extern_kernels", code)
         self.assertEqual(_run_from_file(code, [x])[0], result)
 
