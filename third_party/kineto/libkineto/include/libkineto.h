@@ -97,8 +97,10 @@ class LibkinetoApi {
   }
 
   void initProfilerIfRegistered() {
+    // NOLINTNEXTLINE(facebook-hte-InlinedStaticLocalVariableWarning,facebook-hte-std::once_flag)
     static std::once_flag once;
     if (activityProfiler_) {
+      // NOLINTNEXTLINE(facebook-hte-std::call_once)
       std::call_once(once, [this] {
         if (!activityProfiler_->isInitialized()) {
           activityProfiler_->init();
@@ -124,7 +126,7 @@ class LibkinetoApi {
     resetTLS();
   }
 
-  // Provides access to profier configuration manaegement
+  // Provides access to profiler configuration management
   ConfigLoader& configLoader() {
     return configLoader_;
   }
