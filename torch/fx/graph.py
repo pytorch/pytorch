@@ -28,6 +28,7 @@ from torch._C import _fx_map_arg as map_arg, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_constant_type
 from torch.types import py_sym_types
 from torch.utils._dtype_abbrs import dtype_abbrs
+from torch.utils._inspect import _cached_parameters
 
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -424,9 +425,9 @@ class CodeGen:
         self, method: Callable[..., Any], *args: Any, **kwargs: Any
     ) -> Any:
         """Helper to call a method with optional parameters based on signature."""
-        sig = inspect.signature(method)
+        params = _cached_parameters(method)
         # Filter kwargs to only include parameters that exist in the method signature
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in params}
         return method(*args, **filtered_kwargs)
 
     def gen_fn_def(

@@ -463,13 +463,16 @@ def normalize_function(
             raise AssertionError(f"target must be callable, got {type(target)}")
         torch_op_schemas = get_signature_for_torch_op(target)
         matched_schemas: list[inspect.Signature] = []
+        matched_bound_args: list[inspect.BoundArguments] = []
         if torch_op_schemas:
             # Iterate through all of the schema until we find one that matches
             # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    _fast_bind(candidate_signature, *args, **kwargs)
+                    matched_bound_args.append(
+                        _fast_bind(candidate_signature, *args, **kwargs)
+                    )
                     matched_schemas.append(candidate_signature)
                 except TypeError:
                     continue
@@ -480,7 +483,11 @@ def normalize_function(
             elif len(matched_schemas) == 1:
                 # Matched exactly one schema, unambiguous
                 new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
-                    matched_schemas[0], args, kwargs, normalize_to_only_use_kwargs
+                    matched_schemas[0],
+                    args,
+                    kwargs,
+                    normalize_to_only_use_kwargs,
+                    matched_bound_args[0],
                 )
             else:
                 if arg_types is not None or kwarg_types is not None:
@@ -576,6 +583,7 @@ def _args_kwargs_to_normalized_args_kwargs(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
+    bound_args: inspect.BoundArguments | None = None,
 ) -> ArgsKwargsPair | None:
     """
     Given a call target, args, and kwargs, return the arguments normalized into
@@ -588,6 +596,8 @@ def _args_kwargs_to_normalized_args_kwargs(
         args (Tuple): Arguments that appear at the callsite for `target`
         kwargs (Dict): Keyword arguments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
+        bound_args (Optional[inspect.BoundArguments]): ``_fast_bind(sig, *args, **kwargs)``,
+            if the caller already computed it.
 
     Returns:
 
@@ -609,7 +619,8 @@ def _args_kwargs_to_normalized_args_kwargs(
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
 
-    bound_args = _fast_bind(sig, *args, **kwargs)
+    if bound_args is None:
+        bound_args = _fast_bind(sig, *args, **kwargs)
     bound_args.apply_defaults()
 
     new_kwargs: dict[str, Any] = {}

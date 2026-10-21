@@ -1,5 +1,6 @@
 import contextlib
 import functools
+import weakref
 from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -105,6 +106,31 @@ def _resolve_mutated_flat_indices(
     num_flat_args: int,
     input_spec: pytree.TreeSpec,
 ) -> str:
+    # Runs on every eager call of a leaf function, so cache the result per fn,
+    # weakly so that closures and what they capture can still be freed. Fall
+    # back to no caching if fn can't be weakly referenced, or if a custom pytree
+    # node makes the spec unhashable.
+    key = (frozenset(mutates_args), num_flat_args, input_spec)
+    try:
+        fn_cache = _mutated_flat_indices_cache.setdefault(fn, {})
+        indices = fn_cache.get(key)
+    except TypeError:
+        return _resolve_mutated_flat_indices_uncached(
+            fn, mutates_args, num_flat_args, input_spec
+        )
+    if indices is None:
+        indices = fn_cache[key] = _resolve_mutated_flat_indices_uncached(
+            fn, mutates_args, num_flat_args, input_spec
+        )
+    return indices
+
+
+def _resolve_mutated_flat_indices_uncached(
+    fn: Callable,
+    mutates_args: frozenset[str],
+    num_flat_args: int,
+    input_spec: pytree.TreeSpec,
+) -> str:
     """Resolve mutates_args expressions to a comma-separated string of flat-arg indices.
 
     Each expression in mutates_args (e.g. "x", "model.running_mean") is evaluated
@@ -163,6 +189,11 @@ def _resolve_mutated_flat_indices(
             indices.append(sentinel)
     indices.sort()
     return ",".join(str(i) for i in indices)
+
+
+_mutated_flat_indices_cache: weakref.WeakKeyDictionary[Callable, dict[Any, str]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 @dataclass

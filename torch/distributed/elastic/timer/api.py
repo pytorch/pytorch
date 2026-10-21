@@ -6,10 +6,10 @@
 # LICENSE file in the root directory of this source tree.
 import abc
 import logging
+import sys
 import threading
 import time
 from contextlib import contextmanager
-from inspect import getframeinfo, stack
 from typing import Any
 
 
@@ -270,9 +270,13 @@ def expires(after: float, scope: str | None = None, client: TimerClient | None =
             raise RuntimeError("Configure timer client before using countdown timers.")
         client = _timer_client
     if scope is None:
-        # grab the caller file + lineno
-        caller = getframeinfo(stack()[1][0])
-        scope = f"{caller.filename}#{caller.lineno}"
+        # grab the caller file + lineno, skipping contextlib's frames, such as
+        # __enter__ and the wrapper when used as a decorator. Avoid
+        # inspect.stack(), which reads the source of every frame.
+        caller = sys._getframe(1)
+        while caller.f_globals.get("__name__") == "contextlib" and caller.f_back:
+            caller = caller.f_back
+        scope = f"{caller.f_code.co_filename}#{caller.f_lineno}"
     expiration = time.time() + after
     client.acquire(scope, expiration)
     try:
