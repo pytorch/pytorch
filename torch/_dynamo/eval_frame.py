@@ -208,6 +208,10 @@ class DynamoStance:
 
 
 _stance = DynamoStance()
+# _callback_from_stance(None) is False under eager_on_recompile and None under every
+# other stance. _set_stance keeps this in sync, so disable's per-call wrapper can
+# skip computing it.
+_disabled_region_run_only = False
 _force_eager_nested_compile = threading.local()
 
 
@@ -227,7 +231,7 @@ def _is_eager_on_nested_compile() -> bool:
 
 
 def _set_stance(stance: DynamoStance) -> DynamoStance:
-    global _stance
+    global _stance, _disabled_region_run_only
 
     from torch._C._dynamo.eval_frame import get_eval_frame_callback
 
@@ -239,7 +243,8 @@ def _set_stance(stance: DynamoStance) -> DynamoStance:
     prior = _stance
     _stance = stance
     # Mirrors _callback_from_stance(None); see DisableContext's _fn.
-    _set_disabled_region_run_only(stance.stance == "eager_on_recompile")
+    _disabled_region_run_only = stance.stance == "eager_on_recompile"
+    _set_disabled_region_run_only(_disabled_region_run_only)
     return prior
 
 
@@ -1632,16 +1637,17 @@ class DisableContext(_TorchDynamoContext):
             # Hot path (e.g. around custom operators); keep it minimal.
             prior = set_eval_frame(None)
             try:
-                # disable => self.callback is None; _callback_from_stance(None) is
-                # None ("off") for most stances but False (run-only) for
-                # eager_on_recompile. Install only when non-None (skips the
-                # justknob-guarded _maybe_set_eval_frame on the common path).
-                callback = _callback_from_stance(self.callback)
-                if callback is not None:
-                    _maybe_set_eval_frame(callback)
+                # disable => self.callback is None, and _callback_from_stance(None)
+                # is None ("off") except under eager_on_recompile, where it is False
+                # (run-only). Install only then, which skips the justknob-guarded
+                # _maybe_set_eval_frame on the common path.
+                run_only = _disabled_region_run_only
+                if run_only:
+                    _maybe_set_eval_frame(False)
                 try:
-                    # Only export needs the annotation work.
-                    if torch.compiler.is_exporting():
+                    # Only export needs the annotation work. Reads the flag behind
+                    # torch.compiler.is_exporting(), to skip the call.
+                    if torch.compiler._is_exporting_flag:
                         fn_name = getattr(fn, "__name__", type(fn).__name__)
                         # Skip annotation for __torch_dispatch__ (internal detail).
                         if fn_name != "__torch_dispatch__":
@@ -1655,7 +1661,7 @@ class DisableContext(_TorchDynamoContext):
                                 return fn(*args, **kwargs)
                     return fn(*args, **kwargs)
                 finally:
-                    if callback is not None:
+                    if run_only:
                         set_eval_frame(None)
             finally:
                 # Restore via _maybe_set_eval_frame so re-installing honors the
