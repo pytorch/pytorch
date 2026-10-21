@@ -126,12 +126,12 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   std::optional<InlinedCallStackPtr> callee_;
   Function* fn_;
   // Reason for fn_name_ even though we have fn_
-  // Serialized callstack is used in circustmances where InlinedCallstack
+  // Serialized callstack is used in circumstances where InlinedCallstack
   // cannot be constructed during runtime, e.g. mobile runtime or
   // delegated backends.
   // Since in those cases we do not have Function* we store function name
   // fn_name does not give you access to the same information that Function*
-  // does, however in mobile/delegated backend runtime we use InlindedCallStack
+  // does, however in mobile/delegated backend runtime we use InlinedCallStack
   // for exception stack and for that purpose fn_name_ suffices.
   const std::string fn_name_;
   SourceRange source_range_;

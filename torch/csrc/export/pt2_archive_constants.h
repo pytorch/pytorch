@@ -43,6 +43,7 @@ namespace torch::_export::archive_spec {
      "data/constants/{}_constants_config.json")                                \
   DO(TENSOR_CONSTANT_FILENAME_PREFIX, "tensor_")                               \
   DO(CUSTOM_OBJ_FILENAME_PREFIX, "custom_obj_")                                \
+  DO(OPAQUE_OBJ_FILENAME_PREFIX, "opaque_obj_")                                \
   /* example inputs */                                                         \
   DO(SAMPLE_INPUTS_DIR, "data/sample_inputs/")                                 \
   DO(SAMPLE_INPUTS_FILENAME_FORMAT,                                            \

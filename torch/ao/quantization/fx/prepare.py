@@ -4,7 +4,7 @@ import warnings
 from typing import Any
 
 import torch
-from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.ao.quantization import (
     ObserverBase,
     ObserverOrFakeQuantize,
@@ -1048,7 +1048,7 @@ def _maybe_insert_output_observer_for_node(
     # code
     # reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
     # for now we set this to False since reuse_input_obs_or_fq for
-    # the output of a node is implementation in the same code path as observer sharing,
+    # the output of a node is implemented in the same code path as observer sharing,
     # we should refactor this part to make it clearer in the future
     # and we would be able to read this from config directly
     reuse_input_obs_or_fq = False
@@ -1646,8 +1646,9 @@ def insert_observers_for_model(
 
             this_node_dtype_info = node.meta["target_dtype_info"]
             if "val" in node.meta:
-                output_is_a_tensor = this_node_dtype_info is not None and isinstance(
-                    node.meta["val"], FakeTensor
+                output_is_a_tensor = (
+                    this_node_dtype_info is not None
+                    and is_fake_tensor(node.meta["val"])
                 )
             else:
                 output_is_a_tensor = this_node_dtype_info is not None

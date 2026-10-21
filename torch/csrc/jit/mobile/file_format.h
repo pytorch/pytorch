@@ -122,7 +122,7 @@ static void file_not_found_error() {
   } else {
     message << "error no is: " << errno << '\n';
   }
-  TORCH_CHECK(false, message.str());
+  TORCH_CHECK(false, std::move(message).str());
 }
 
 // NOLINTNEXTLINE(facebook-hte-NamespaceScopedStaticDeclaration)

@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+from unittest import mock
+
 import torch
 from torch._inductor.codegen.aoti_hipify_utils import maybe_hipify_code_wrapper
 from torch._inductor.codegen.common import get_device_op_overrides
@@ -38,7 +40,10 @@ class TestCppWrapperHipify(TestCase):
 
     def test_hipify_aoti_driver_header(self) -> None:
         cuda_codegen = get_device_op_overrides("cuda")
-        header = cuda_codegen.kernel_driver()
+        with mock.patch.object(
+            cuda_codegen, "cpp_kernel_launch_supports_pdl", return_value=False
+        ):
+            header = cuda_codegen.kernel_driver()
         expected = """
             #define CUDA_DRIVER_CHECK(EXPR)                    \\
             do {                                               \\
@@ -61,7 +66,8 @@ class TestCppWrapperHipify(TestCase):
                     std::string filePath,
                     const std::string &funcName,
                     uint32_t sharedMemBytes,
-                    const std::optional<std::string> &cubinDir = std::nullopt) {
+                    const std::optional<std::string> &cubinDir = std::nullopt,
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
                 if (cubinDir) {
                     std::filesystem::path p1{*cubinDir};
                     std::filesystem::path p2{filePath};
@@ -71,6 +77,9 @@ class TestCppWrapperHipify(TestCase):
                 hipModule_t mod;
                 hipFunction_t func;
                 CUDA_DRIVER_CHECK(hipModuleLoad(&mod, filePath.c_str()));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(hipFuncSetAttribute(
@@ -82,10 +91,17 @@ class TestCppWrapperHipify(TestCase):
                 return func;
             }
 
-            static inline hipFunction_t loadKernel(const void* start, const std::string &funcName, uint32_t sharedMemBytes) {
+            static inline hipFunction_t loadKernel(
+                    const void* start,
+                    const std::string &funcName,
+                    uint32_t sharedMemBytes,
+                    std::vector<hipModule_t>* loaded_modules = nullptr) {
                 hipModule_t mod;
                 hipFunction_t func;
                 CUDA_DRIVER_CHECK(hipModuleLoadData(&mod, start));
+                if (loaded_modules) {
+                    loaded_modules->push_back(mod);
+                }
                 CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
                 if (sharedMemBytes > 0) {
                     CUDA_DRIVER_CHECK(hipFuncSetAttribute(

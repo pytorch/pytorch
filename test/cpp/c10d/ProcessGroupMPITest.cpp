@@ -199,7 +199,8 @@ void testAllgatherBase(int iter = 10000) {
     auto output = at::zeros({worldSize, 16, 16});
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->_allgather_base(output, tensor);
+    c10::intrusive_ptr<::c10d::Work> work =
+        pg->all_gather_single(output, tensor);
     works.push_back(std::move(work));
   }
 
@@ -274,7 +275,7 @@ void testReduceScatterBase(int iter = 10000) {
 
     // Queue the work.
     c10::intrusive_ptr<::c10d::Work> work =
-        pg->_reduce_scatter_base(output, tensor);
+        pg->reduce_scatter_single(output, tensor);
     works.push_back(std::move(work));
   }
 

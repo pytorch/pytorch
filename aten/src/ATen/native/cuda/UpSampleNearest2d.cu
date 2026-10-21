@@ -79,7 +79,18 @@ __global__ void upsample_nearest2d_out_frame(
   }
 }
 
-template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
+// NHWC (channels-last) forward kernel.
+//
+// `kGridStride` selects the launch contract:
+//   - false: one element per thread; the launch grid covers `out_numel` exactly.
+//            The loop body executes once and the trailing `break` lets the
+//            compiler drop the loop entirely, preserving the original fast path.
+//   - true : grid is host-clamped (currently only on ROCm/HIP, see the comment
+//            on upsample_nearest2d_out_cuda_template) and threads stride over
+//            the output to cover the full range.
+template <typename scalar_t,
+          nn_compute_source_index_fn_t nn_compute_source_index_fn,
+          bool kGridStride>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_nhwc_out_frame(
     const scalar_t* idata,
@@ -92,24 +103,37 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     float height_scale,
     float width_scale,
     const size_t out_numel) {
+  const int64_t start = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t step  = static_cast<int64_t>(gridDim.x) * blockDim.x;
+  const int64_t end   = static_cast<int64_t>(out_numel);
 
-    const int64_t index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-
-    if (index < out_numel) {
-    const auto c = index % channels;
+  for (int64_t index = start; index < end; index += step) {
+    const auto c  = index % channels;
     const auto w2 = (index / channels) % width2;
     const auto h2 = (index / channels / width2) % height2;
-    const auto n = index / channels / width2 / height2;
+    const auto n  = index / channels / width2 / height2;
 
-    const size_t h1 = height1 == height2 ? h2 : nn_compute_source_index_fn(height_scale, h2, height1);
-    const size_t w1 = width1 == width2 ? w2 : nn_compute_source_index_fn(width_scale, w2, width1);
+    const size_t h1 = height1 == height2
+        ? h2
+        : nn_compute_source_index_fn(height_scale, h2, height1);
+    const size_t w1 = width1 == width2
+        ? w2
+        : nn_compute_source_index_fn(width_scale, w2, width1);
 
-    odata[index] = idata[idx_cl(n, h1, w1, c, height1, width1, channels)];
+    odata[index] = idata[idx_cl<size_t>(n, h1, w1, c, height1, width1, channels)];
+
+    if constexpr (!kGridStride) {
+      break;
+    }
   }
 }
 
 // see NOTE [ Nearest neighbor upsampling kernel implementation ]
-template <typename scalar_t, typename accscalar_t, nn_bw_compute_source_index_fn_t nn_bw_compute_source_index_fn>
+// `kGridStride` preserves one element per thread when the grid fits.
+template <typename scalar_t,
+          typename accscalar_t,
+          nn_bw_compute_source_index_fn_t nn_bw_compute_source_index_fn,
+          bool kGridStride>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void upsample_nearest2d_backward_out_frame(
     const scalar_t* grad_o,
@@ -122,42 +146,48 @@ __global__ void upsample_nearest2d_backward_out_frame(
     scalar_t* grad_i,
     float height_scale,
     float width_scale) {
-  int64_t dst_idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-  if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
-    return;
+  const int64_t dst_c_stride = dst_dim_h * dst_dim_w;
+  const int64_t src_c_stride = src_dim_h * src_dim_w;
+  const int64_t dst_numel = static_cast<int64_t>(dim_c) * dst_c_stride;
 
-  int64_t dst_c_stride = dst_dim_h * dst_dim_w;
-  int64_t src_c_stride = src_dim_h * src_dim_w;
+  const int64_t start = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t step = ((int64_t) gridDim.x) * blockDim.x;
 
-  int c = (dst_idx / (dst_c_stride)) % dim_c;
+  for (int64_t dst_idx = start; dst_idx < dst_numel; dst_idx += step) {
+    int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
-  // note that we do not want to clamp src_y to src_dim_y, since we might
-  // intentionally want to skip in case of scale_factor < 1.0
-  int src_y =
-      nn_bw_compute_source_index_fn(height_scale, dst_y, src_dim_h);
-  int src_y_up = nn_bw_compute_source_index_fn(
-      height_scale, dst_y + 1, src_dim_h);
+    int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
+    // note that we do not want to clamp src_y to src_dim_y, since we might
+    // intentionally want to skip in case of scale_factor < 1.0
+    int src_y =
+        nn_bw_compute_source_index_fn(height_scale, dst_y, src_dim_h);
+    int src_y_up = nn_bw_compute_source_index_fn(
+        height_scale, dst_y + 1, src_dim_h);
 
-  int dst_x = dst_idx % dst_dim_w;
-  // note that we do not want to clamp src_x to src_dim_w, since we might
-  // intentionally want to skip in case of scale_factor < 1.0
-  int src_x =
-      nn_bw_compute_source_index_fn(width_scale, dst_x, src_dim_w);
-  int src_x_up = nn_bw_compute_source_index_fn(
-      width_scale, dst_x + 1, src_dim_w);
+    int dst_x = dst_idx % dst_dim_w;
+    // note that we do not want to clamp src_x to src_dim_w, since we might
+    // intentionally want to skip in case of scale_factor < 1.0
+    int src_x =
+        nn_bw_compute_source_index_fn(width_scale, dst_x, src_dim_w);
+    int src_x_up = nn_bw_compute_source_index_fn(
+        width_scale, dst_x + 1, src_dim_w);
 
-  for (int b = 0; b < dim_b; b++) {
-    accscalar_t grad = 0;
-    for (int y = src_y; y < src_y_up; y++) {
-      for (int x = src_x; x < src_x_up; x++) {
-        int64_t src_idx =
-            b * dim_c * src_c_stride + c * src_c_stride + y * src_dim_w + x;
-        grad += grad_o[src_idx];
+    for (int b = 0; b < dim_b; b++) {
+      accscalar_t grad = 0;
+      for (int y = src_y; y < src_y_up; y++) {
+        for (int x = src_x; x < src_x_up; x++) {
+          int64_t src_idx =
+              b * dim_c * src_c_stride + c * src_c_stride + y * src_dim_w + x;
+          grad += grad_o[src_idx];
+        }
       }
+      // dst_idx is the grid-stride cursor, so offset the batch at the store.
+      grad_i[dst_idx + b * dim_c * dst_c_stride] = grad;
     }
-    grad_i[dst_idx] = grad;
-    dst_idx += dim_c * dst_c_stride;
+
+    if constexpr (!kGridStride) {
+      break;
+    }
   }
 }
 
@@ -195,13 +225,20 @@ __global__ void upsample_nearest2d_backward_nhwc_out_frame(
     accscalar_t grad = 0;
     for (int ih = h1; ih < h1_up; ih++) {
       for (int iw = w1; iw < w1_up; iw++) {
-        grad += go[idx_cl(n, ih, iw, c, height1, width1, channels)];
+        grad += go[idx_cl<size_t>(n, ih, iw, c, height1, width1, channels)];
       }
     }
     gi[index] = static_cast<scalar_t>(grad);
   }
 }
 
+// On ROCm/HIP, gridDim.x * blockDim.x must fit in uint32_t per dimension (the
+// HSA AQL dispatch packet stores grid_size_{x,y,z} as uint32_t); violating it
+// returns hipErrorInvalidConfiguration.  Only the NHWC 1D-grid forward launch
+// can hit this in practice: with output.numel() near 2^32, a one-element-per-
+// thread grid overflows that field.  The contiguous (NCHW) 3D launch derives
+// grid_x/grid_y from int output_width/output_height, so per-dimension grids
+// are bounded well below the HIP limit.  See PR pytorch/pytorch#180310.
 template<nn_compute_source_index_fn_t nn_compute_source_index_fn>
 static void upsample_nearest2d_out_cuda_template(
     const Tensor& output,
@@ -234,6 +271,9 @@ static void upsample_nearest2d_out_cuda_template(
     return;
   }
 
+  // =================================================
+  // PATH 1: NHWC (channels-last) layout -- 1D grid
+  // =================================================
   // heuristic: only use channels_last path when it's faster than the contiguous path
   if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
         output.is_contiguous(memory_format)) {
@@ -247,25 +287,47 @@ static void upsample_nearest2d_out_cuda_template(
     const int64_t num_kernels = output.numel();
     const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
+    const int64_t grid = ceil_div(num_kernels, num_threads);
+#ifdef USE_ROCM
+    constexpr int64_t kHipMaxGlobalWorkSize = 4294967295LL;  // UINT32_MAX
+    const int64_t safe_max_grid = kHipMaxGlobalWorkSize / num_threads;
+    const bool use_grid_stride = grid > safe_max_grid;
+    const unsigned int launch_grid =
+        static_cast<unsigned int>(use_grid_stride ? safe_max_grid : grid);
+#else
+    constexpr bool use_grid_stride = false;
+    const int64_t launch_grid = grid;
+#endif
+
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
       const scalar_t* idata = input.const_data_ptr<scalar_t>();
       scalar_t* odata = output.mutable_data_ptr<scalar_t>();
-      upsample_nearest2d_nhwc_out_frame<scalar_t, nn_compute_source_index_fn>
-        <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-          idata,
-          odata,
-          channels,
-          input_height,
-          input_width,
-          output_height,
-          output_width,
-          height_scale,
-          width_scale,
-          output.numel()
-      );
+      auto launch = [&](auto kgrid_stride) {
+        constexpr bool kGridStride = decltype(kgrid_stride)::value;
+        upsample_nearest2d_nhwc_out_frame<scalar_t, nn_compute_source_index_fn, kGridStride>
+          <<<launch_grid, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+            idata,
+            odata,
+            channels,
+            input_height,
+            input_width,
+            output_height,
+            output_width,
+            height_scale,
+            width_scale,
+            output.numel());
+      };
+      if (use_grid_stride) {
+        launch(std::true_type{});
+      } else {
+        launch(std::false_type{});
+      }
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
+  // ==============================================
+  // PATH 2: Contiguous (NCHW) layout -- 3D grid
+  // ==============================================
   else {
     // This is needed for non-contiguous tensors.
     Tensor output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
@@ -281,27 +343,28 @@ static void upsample_nearest2d_out_cuda_template(
 
     // upsample_nearest2d meta call makes sure input/output tensor is not empty;
     int block_x = std::min<int>(
-        maxThreadsDim[0], std::min<int>(lastPow2(output_width), max_threads));
+        {maxThreadsDim[0], lastPow2(output_width), max_threads});
     int block_y = std::min<int>(
-        maxThreadsDim[1],
-        std::min<int>(lastPow2(output_height), max_threads / block_x));
+        {maxThreadsDim[1], lastPow2(output_height), max_threads / block_x});
     int block_z = std::min<int>(
-        maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
+        {maxThreadsDim[2], static_cast<int>(nc), max_threads / block_x / block_y});
     const dim3 block(block_x, block_y, block_z);
 
     int grid_x = ceil_div(output_width, block_x);
     int grid_y = ceil_div(output_height, block_y);
     int grid_z = std::min<int>(
         maxGridSize[2], ceil_div(nc, (int64_t) block_z * 4));
-    const dim3 grid(grid_x, grid_y, grid_z);
-    // Error out on cases where grid_x & grid_y exceeds limit of launch config, as
-    // the current kernel implementation doesn't loop over the two dimensions.
-    // This is unlikely to happen.
+
+    // output_height / output_width are int, so grid_x and grid_y are bounded
+    // by INT_MAX/block_dim - well below both the CUDA maxGridSize and the
+    // ROCm/HIP uint32_t per-dimension limit.  No HIP-specific clamp needed.
     // TODO: kernel implementation could stride on spatial dimension. We probably
     //       need to overhaul the kernel.
     TORCH_CHECK(
         grid_x <= maxGridSize[0] && grid_y <= maxGridSize[1],
         "input tensor has spatial dimension larger than the kernel capacity");
+
+    const dim3 grid(grid_x, grid_y, grid_z);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
           using accscalar_t = at::acc_type<scalar_t, true>;
@@ -329,6 +392,7 @@ static void upsample_nearest2d_out_cuda_template(
   }
 }
 
+// HIP limits the x-dimension global work size to UINT32_MAX.
 template<nn_bw_compute_source_index_fn_t nn_bw_compute_source_index_fn>
 static void upsample_nearest2d_backward_out_cuda_template(
     const Tensor& grad_input,
@@ -402,10 +466,23 @@ static void upsample_nearest2d_backward_out_cuda_template(
     Tensor grad_output = grad_output_.contiguous();
 
     // upsample_nearest2d meta call makes sure `nbatch != 0`
-    size_t n = grad_input.numel() / nbatch;
+    const int64_t n = grad_input.numel() / nbatch;
     dim3 bdim{std::min<unsigned int>(
         at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-    dim3 gdim{(unsigned int) ceil_div(n, (size_t) bdim.x)};
+    const int64_t grid = ceil_div(n, (int64_t) bdim.x);
+#ifdef USE_ROCM
+    constexpr bool kMayUseGridStride = true;
+    constexpr int64_t kHipMaxGlobalWorkSize = 4294967295LL;  // UINT32_MAX
+    const int64_t safe_max_grid = kHipMaxGlobalWorkSize / bdim.x;
+    const bool use_grid_stride = grid > safe_max_grid;
+    const unsigned int launch_grid =
+        static_cast<unsigned int>(use_grid_stride ? safe_max_grid : grid);
+#else
+    // CUDA allows 2^31 - 1 blocks in x, which this launch cannot reach in practice.
+    constexpr bool kMayUseGridStride = false;
+    constexpr bool use_grid_stride = false;
+    const unsigned int launch_grid = static_cast<unsigned int>(grid);
+#endif
     // safe check for int64 indexing; implicitly restrict launch config for kernel
     TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int64_t>::max(), "upsample2d grad_input.numel() <= std::numeric_limits<int64_t>::max(), but got ", grad_input.sizes());
     TORCH_CHECK(grad_output.numel() <= std::numeric_limits<int64_t>::max(), "upsample2d grad_output.numel() <= std::numeric_limits<int64_t>::max(), but got ", grad_output.sizes());
@@ -417,19 +494,31 @@ static void upsample_nearest2d_backward_out_cuda_template(
       auto idata = grad_input_c.mutable_data_ptr<scalar_t>();
       auto odata = grad_output.const_data_ptr<scalar_t>();
 
-
-      upsample_nearest2d_backward_out_frame<scalar_t, accscalar_t, nn_bw_compute_source_index_fn>
-          <<<gdim, bdim, 0, stream>>>(
-              odata,
-              nbatch,
-              channels,
-              output_height,
-              output_width,
-              input_height,
-              input_width,
-              idata,
-              height_scale,
-              width_scale);
+      auto launch = [&](auto kgrid_stride) {
+        constexpr bool kGridStride = decltype(kgrid_stride)::value;
+        upsample_nearest2d_backward_out_frame<scalar_t, accscalar_t, nn_bw_compute_source_index_fn, kGridStride>
+            <<<launch_grid, bdim, 0, stream>>>(
+                odata,
+                nbatch,
+                channels,
+                output_height,
+                output_width,
+                input_height,
+                input_width,
+                idata,
+                height_scale,
+                width_scale);
+      };
+      // if constexpr keeps CUDA from instantiating the grid-stride kernel.
+      if constexpr (kMayUseGridStride) {
+        if (use_grid_stride) {
+          launch(std::true_type{});
+        } else {
+          launch(std::false_type{});
+        }
+      } else {
+        launch(std::false_type{});
+      }
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
 

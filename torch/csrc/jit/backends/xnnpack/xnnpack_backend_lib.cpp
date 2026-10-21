@@ -59,7 +59,7 @@ class XNNPackBackend : public PyTorchBackendInterface {
     return handles;
   }
 
-  // Currently this is not implemented, and everything is computed a head of
+  // Currently this is not implemented, and everything is computed ahead of
   // time the current implementation just takes the computed results from ahead
   // of time and grabs them. The inputs are fed in through the compile spec for
   // the sake of testing. In reality, the inputs will be fed in at this stage

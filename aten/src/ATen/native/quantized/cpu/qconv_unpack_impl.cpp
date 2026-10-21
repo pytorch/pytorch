@@ -1,4 +1,5 @@
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -83,7 +84,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(q_scheme));
   }
   int8_t* unpacked_weights_p =
-      reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(unpacked_weights.mutable_data_ptr<c10::qint8>());
   packed_weights_p->unpack(unpacked_weights_p);
   if(transpose()){
     unpacked_weights =
@@ -91,7 +92,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
             kSpatialDim>(unpacked_weights, groups);
   }
   return std::tuple<at::Tensor, std::optional<at::Tensor>>(
-      unpacked_weights, bias);
+      std::move(unpacked_weights), bias);
 }
 
 template std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<

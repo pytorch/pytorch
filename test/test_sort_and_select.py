@@ -14,9 +14,8 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyAccelerator,
     onlyCPU,
-    onlyCUDA,
-    onlyNativeDeviceTypes,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -34,6 +33,38 @@ from torch.testing._internal.common_utils import (
 
 
 class TestSortAndSelect(TestCase):
+    def test_sort_stable_none(self):
+        # Called sort with stable=None used to trigger an assertion
+        # See https://github.com/pytorch/pytorch/issues/117255
+        x = torch.ones(10)
+        y = x.sort(stable=None).values
+        self.assertTrue(torch.all(y == torch.ones(10)).item())
+
+    def test_topk_quantized_scalar_input(self):
+        # Calling topk on a quantized scalar input used to segfault,
+        # see https://github.com/pytorch/pytorch/issues/116324
+        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
+        x.topk(1)
+
+
+class TestSortAndSelectDevice(TestCase):
+    def test_sort_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "Sort does not support complex dtypes"):
+            torch.sort(x)
+
+    def test_topk_complex_unsupported(self, device):
+        x = torch.tensor([1.0 + 1j, 2.0 + 0j], device=device)
+        with self.assertRaisesRegex(TypeError, "topk does not support complex dtypes"):
+            torch.topk(x, 1)
+
+    def test_topk_bool_unsupported(self, device):
+        x = torch.tensor([True, False], device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError, "topk does not support bool dtypes"
+        ):
+            torch.topk(x, 1)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = x.size(1)
         if order == "descending":
@@ -58,7 +89,7 @@ class TestSortAndSelect(TestCase):
         for k in range(1, SIZE):
             self.assertTrue(
                 check_order(mxx[:, k - 1], mxx[:, k]),
-                f"torch.sort ({order}) values unordered for {task}",
+                lambda msg: f"{msg}\ntorch.sort ({order}) values unordered for {task}",
             )
 
         seen = set()
@@ -73,7 +104,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(
                     x[k][ixx[k][j]],
                     mxx[k][j],
-                    msg=f"torch.sort ({order}) indices wrong for {task}",
+                    msg=lambda msg: f"{msg}\ntorch.sort ({order}) indices wrong for {task}",
                 )
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
@@ -169,36 +200,21 @@ class TestSortAndSelect(TestCase):
             torch.sort(x, out=(res2val, res2ind), descending=True)
             self.assertIsOrdered("descending", x, res2val, res2ind, "random with NaNs")
 
-    def test_sort_stable_none(self):
-        # Called sort with stable=None used to trigger an assertion
-        # See https://github.com/pytorch/pytorch/issues/117255
-        x = torch.ones(10)
-        y = x.sort(stable=None).values
-        self.assertTrue(torch.all(y == torch.ones(10)).item())
-
-    @onlyCPU
-    def test_complex_unsupported_cpu(self):
-        x = torch.tensor([3.0 + 2j, 4.0 + 3j])
-        with self.assertRaisesRegex(
-            RuntimeError, " Sort does not support complex dtypes on CPU"
-        ):
-            torch.sort(input=x)
-
-    @onlyCUDA
+    @onlyAccelerator
     def test_sort_large_slice(self, device):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
+        torch.get_device_module().synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
@@ -215,7 +231,7 @@ class TestSortAndSelect(TestCase):
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device),
             )
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float16)
     @largeTensorTest("200GB")  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
@@ -284,16 +300,66 @@ class TestSortAndSelect(TestCase):
                         self.assertEqual(r1.values.stride(), t.stride())
                         self.assertEqual(r1.indices.stride(), t.stride())
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(torch.float32)
     def test_sort_discontiguous(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
+    # TODO: consolidate with test_sort_discontiguous once slowTest supports
+    # device/accelerator-level granularity.
     @slowTest  # this test is slow on CPU, but not on CUDA
     @onlyCPU
     @dtypes(torch.float32)
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
+
+    def _check_sort_1d(self, orig, vals, idxs, descending, stable):
+        # Values/indices/ordering (NaN-tolerant); unsqueeze to a batch of 1.
+        self.assertIsOrdered(
+            "descending" if descending else "ascending",
+            orig.unsqueeze(0),
+            vals.unsqueeze(0),
+            idxs.unsqueeze(0),
+            "1d parallel",
+        )
+        # assertIsOrdered doesn't check NaN/zero sign fidelity against orig.
+        self.assertEqual(torch.signbit(vals), torch.signbit(orig[idxs]))
+
+        if not stable:
+            return
+        is_nan = vals.isnan()
+        # Equal elements (incl. -0.0/0.0 and NaN/NaN) must keep their order.
+        equal = (vals[:-1] == vals[1:]) | (is_nan[:-1] & is_nan[1:])
+        self.assertTrue(torch.all(idxs[:-1][equal] < idxs[1:][equal]))
+
+    @slowTest  # this test is slow on CPU
+    @onlyCPU
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @parametrize("descending", [False, True])
+    @parametrize("stable", [False, True])
+    def test_sort_1d_parallel(self, device, dtype, descending, stable):
+        # Large enough that the kernel takes its parallel path.
+        size = 100000
+        if dtype.is_floating_point:
+            tensor = torch.randint(
+                low=-128, high=127, size=(size,), device=device, dtype=torch.int8
+            ).to(dtype)
+            # Values random data won't produce but the fast paths must handle.
+            specials = torch.tensor(
+                [nan, -nan, 0.0, -0.0, float("inf"), -float("inf")],
+                device=device,
+                dtype=dtype,
+            )
+            tensor[: len(specials)] = specials
+            tensor[size // 2 : size // 2 + len(specials)] = specials
+        else:
+            low = 0 if dtype == torch.uint8 else -128
+            tensor = torch.randint(
+                low=low, high=127, size=(size,), device=device, dtype=dtype
+            )
+
+        vals, idxs = torch.sort(tensor, descending=descending, stable=stable)
+        self._check_sort_1d(tensor, vals, idxs, descending, stable)
 
     @dtypes(torch.float32)
     def test_sort_1d_output_discontiguous(self, device, dtype):
@@ -304,17 +370,6 @@ class TestSortAndSelect(TestCase):
         values_cont, indices_cont = tensor.sort()
         self.assertEqual(indices, indices_cont)
         self.assertEqual(values, values_cont)
-
-    @slowTest
-    @onlyCPU
-    @dtypes(*integral_types())
-    def test_sort_1d_parallel(self, device, dtype):
-        low = 0 if dtype == torch.uint8 else -128
-        tensor = torch.randint(
-            low=low, high=127, size=(100000,), device=device, dtype=dtype
-        )
-        vals, _ = torch.sort(tensor, stable=True)
-        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     @dtypes(torch.float32)
     def test_topk_1d_output_discontiguous(self, device, dtype):
@@ -507,12 +562,6 @@ class TestSortAndSelect(TestCase):
         t = torch.randn((2, 10000), device=device)
         compare(t, 2000, 1, True)
         compare(t, 2000, 1, False)
-
-    def test_topk_quantized_scalar_input(self):
-        # Calling topk on a quantized scalar input used to segfault,
-        # see https://github.com/pytorch/pytorch/issues/116324
-        x = torch.quantize_per_tensor(torch.randn(()), 0.1, 10, torch.qint8)
-        x.topk(1)
 
     def test_topk_arguments(self, device):
         q = torch.randn(10, 2, 10, device=device)
@@ -804,21 +853,6 @@ class TestSortAndSelect(TestCase):
         run_test(device, torch.uint8)
         run_test(device, torch.bool)
 
-    @onlyCUDA
-    def test_topk_noncontiguous_gpu(self, device):
-        # test different topk paths on cuda
-        single_block_t = torch.randn(20, device=device)[::2]
-        multi_block_t = torch.randn(20000, device=device)[::2]
-        sort_t = torch.randn(200000, device=device)[::2]
-        for t in (single_block_t, multi_block_t, sort_t):
-            for k in (5, 2000, 10000):
-                if k >= t.shape[0]:
-                    continue
-                top1, idx1 = t.topk(k)
-                top2, idx2 = t.contiguous().topk(k)
-                self.assertEqual(top1, top2)
-                self.assertEqual(idx1, idx2)
-
     def _test_topk_dtype(self, device, dtype, integral, size):
         if integral:
             a = torch.randint(
@@ -871,14 +905,14 @@ class TestSortAndSelect(TestCase):
                     vals, idx = a.topk(k, dim=1, largest=largest)
                     self.assertTrue(
                         (idx >= 0).all().item() and (idx < slice_size).all().item(),
-                        f"OOB index from topk k={k} slice_size={slice_size} "
+                        lambda msg: f"{msg}\nOOB index from topk k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
                     ref = a.gather(1, idx)
                     self.assertEqual(
                         vals,
                         ref,
-                        f"value/index mismatch k={k} slice_size={slice_size} "
+                        lambda msg: f"{msg}\nvalue/index mismatch k={k} slice_size={slice_size} "
                         f"dtype={dtype} largest={largest}",
                     )
 
@@ -926,7 +960,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(val, expected_val, atol=0, rtol=0)
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
     @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
@@ -1181,7 +1214,6 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
     @dtypes(torch.float)
-    @onlyNativeDeviceTypes  # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
@@ -1341,7 +1373,7 @@ class TestSortAndSelect(TestCase):
                     c = torch.isin(a, b, assume_unique=assume_unique)
                     self.assertEqual(c, ec)
 
-    @onlyCUDA
+    @onlyAccelerator
     @dtypes(*all_types())
     def test_isin_different_devices(self, device, dtype):
         a = torch.arange(6, device=device, dtype=dtype).reshape([2, 3])
@@ -1368,7 +1400,205 @@ class TestSortAndSelect(TestCase):
         finally:
             torch.set_num_threads(prev_num_threads)
 
-    @onlyCUDA
+
+class TestSortAndSelectCUDA(TestCase):
+    def test_topk_noncontiguous_gpu(self, device):
+        # test different topk paths on cuda
+        single_block_t = torch.randn(20, device=device)[::2]
+        multi_block_t = torch.randn(20000, device=device)[::2]
+        sort_t = torch.randn(200000, device=device)[::2]
+        for t in (single_block_t, multi_block_t, sort_t):
+            for k in (5, 2000, 10000):
+                if k >= t.shape[0]:
+                    continue
+                top1, idx1 = t.topk(k)
+                top2, idx2 = t.contiguous().topk(k)
+                self.assertEqual(top1, top2)
+                self.assertEqual(idx1, idx2)
+
+    @dtypes(torch.bfloat16, torch.float16, torch.float32)
+    def test_topk_deterministic_ties(self, device, dtype):
+        # Single-block topk on ROCm once ordered tied values by warp arrival (#196177).
+        # Slices longer than the block take the multi-round gather; few values force many ties.
+        for (rows, cols), high in product(
+            ((256, 257), (256, 1024), (8, 3000), (8, 4097)), (4, 1000)
+        ):
+            x = torch.randint(0, high, (rows, cols), device=device).to(dtype)
+            x_cpu = x.cpu()
+            for k, largest, sorted_ in product((8, 300), (True, False), (True, False)):
+                if k > cols:
+                    continue
+                msg = f"{rows=} {cols=} {high=} {k=} {largest=} {sorted_=}"
+                _, idx = torch.topk(x, k, largest=largest, sorted=sorted_)
+                for _ in range(10):
+                    rerun = torch.topk(x, k, largest=largest, sorted=sorted_)[1]
+                    self.assertEqual(rerun, idx, msg=msg)
+                # Same slices with a non-unit stride within the slice.
+                xt = x.t().contiguous()
+                idx_t = torch.topk(xt, k, dim=0, largest=largest, sorted=sorted_)[1]
+                self.assertEqual(idx_t.t(), idx, msg=msg)
+                if not sorted_:
+                    # Unsorted output is in gather order: indices strictly past the k-th value in
+                    # ascending order, then the lowest indices equal to it.
+                    kth = x_cpu.topk(k, largest=largest).values[:, -1:]
+                    past = x_cpu > kth if largest else x_cpu < kth
+                    rank = torch.where(past, 0, torch.where(x_cpu == kth, 1, 2))
+                    expected = rank.sort(stable=True).indices[:, :k]
+                    self.assertEqual(idx.cpu(), expected, msg=msg)
+
+    @dtypes(
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.half,
+        torch.bfloat16,
+        torch.float,
+    )
+    def test_select_ties_at_dtype_extremes(self, device, dtype):
+        # Covers the steps of the ROCm register-path select (see the note in SortingRadixSelect.cuh). Its
+        # reductions answer with a key and leave the all-ones key (NaN for floating types, the maximum for
+        # integers) to the radix walk, so ties at the extremes near the selected rank must give exact values.
+        if dtype.is_floating_point:
+            lo, hi = float("-inf"), float("inf")
+            tie_values = (lo, hi, float("nan"))
+        else:
+            lo, hi = torch.iinfo(dtype).min, torch.iinfo(dtype).max
+            tie_values = (lo, hi)
+
+        def check_topk(x_dev, x, k, msg, dim=1):
+            # Compared unsorted (sorted on the CPU) so that GPU sort behavior for NaN does not enter.
+            for largest in (True, False):
+                got = torch.topk(x_dev, k, dim, largest, sorted=False).values
+                want = torch.topk(x, k, dim, largest).values
+                self.assertEqual(
+                    got.cpu().sort(dim=dim).values,
+                    want.sort(dim=dim).values,
+                    atol=0,
+                    rtol=0,
+                    msg=f"{msg} {largest=}",
+                )
+
+        g = torch.Generator().manual_seed(0)
+        # Slice lengths at each register-path size of a 1024-thread block (rows per thread 1, 4, 10, 14 and,
+        # on GFX9, 20); k = 1 and n take the max reduction, k <= 16 from either end the small-k threshold, the
+        # rest the radix walk.
+        for n in (1023, 1024, 4096, 4097, 10241, 14336, 20480):
+            if dtype.is_floating_point:
+                x = torch.randn(3, n, generator=g).to(dtype)
+            else:
+                x = torch.randint(
+                    max(lo, -1000), min(hi, 1000), (3, n), generator=g
+                ).to(dtype)
+            for value in tie_values:
+                y = x.clone()
+                y[:, torch.randperm(n, generator=g)[:5]] = value
+                y_dev = y.to(device)
+                # k near n with five tied extremes selects the extreme itself through the small-k path.
+                for k in (1, 2, 16, 17, n - 16, n - 15, n - 4, n - 3, n - 1, n):
+                    msg = f"{n=} {value=} {k=}"
+                    self.assertEqual(
+                        torch.kthvalue(y_dev, k, dim=1).values,
+                        torch.kthvalue(y, k, dim=1).values,
+                        atol=0,
+                        rtol=0,
+                        msg=msg,
+                    )
+                    # topk on 3 slices this long takes the multi-block path instead.
+                    if n < 20000:
+                        check_topk(y_dev, y, k, msg)
+                for op in (torch.median, torch.nanmedian):
+                    self.assertEqual(
+                        op(y_dev, dim=1).values,
+                        op(y, dim=1).values,
+                        atol=0,
+                        rtol=0,
+                        msg=f"{op.__name__} {n=} {value=}",
+                    )
+        # Few distinct values overflow the small-k candidate buffer, so the radix walk decides.
+        for n in (1000, 4000, 14336):
+            x = torch.randint(0, 4, (3, n), generator=g).to(dtype)
+            x_dev = x.to(device)
+            for k in (2, 8, 16, n - 15, n - 7, n - 1):
+                check_topk(x_dev, x, k, f"few values {n=} {k=}")
+                self.assertEqual(
+                    torch.kthvalue(x_dev, k, dim=1).values,
+                    torch.kthvalue(x, k, dim=1).values,
+                    atol=0,
+                    rtol=0,
+                    msg=f"few values {n=} {k=}",
+                )
+        # Strided slices (dim 0 of an (n, 3) tensor) load row by row instead of through loadChunks. Lengths
+        # at rows per thread 4, 10 and REGS_MAX_E (20480 is past 14 * 1024, so the general path on wave32).
+        for n in (4096, 4097, 10241, 20480):
+            if dtype.is_floating_point:
+                x = torch.randn(n, 3, generator=g).to(dtype)
+            else:
+                x = torch.randint(
+                    max(lo, -1000), min(hi, 1000), (n, 3), generator=g
+                ).to(dtype)
+            for col, value in zip(range(3), tie_values * 2):
+                x[torch.randperm(n, generator=g)[:5], col] = value
+            x_dev = x.to(device)
+            for k in (1, 2, 16, 17, n // 2, n - 16, n - 15, n):
+                msg = f"strided {n=} {k=}"
+                self.assertEqual(
+                    torch.kthvalue(x_dev, k, dim=0).values,
+                    torch.kthvalue(x, k, dim=0).values,
+                    atol=0,
+                    rtol=0,
+                    msg=msg,
+                )
+                if n < 20000:
+                    check_topk(x_dev, x, k, msg, dim=0)
+            for op in (torch.median, torch.nanmedian):
+                self.assertEqual(
+                    op(x_dev, dim=0).values,
+                    op(x, dim=0).values,
+                    atol=0,
+                    rtol=0,
+                    msg=f"strided {op.__name__} {n=}",
+                )
+        # Step 3 ranks the `total` keys at or above T, the kEff-th largest wave maximum, by one of three
+        # methods (total <= 16, <= 64, <= CAP), else the walk decides. CAP is 192 with 10 rows per thread on
+        # wave64 and 160 on wave32. h distinct values in elements 0 to h - 1 (wave 0 in every load layout)
+        # above c spread copies of 60 make T = 60 for kEff = 2, so total = h + c. Row 1 mirrors row 0, so
+        # each end of the order takes step 3 in one row. (1-D slices this long take the sort path in topk.)
+        n = 10240
+        for h, c in [(16, 1)] + [(32, c) for c in (32, 33, 128, 129, 160, 161)]:
+            x = torch.randint(0, 51, (n,), generator=g)
+            x[:h] = torch.arange(92, 92 - h, -1)
+            x[n - 1 - torch.arange(c) * ((n - h) // c)] = 60
+            y = torch.stack((x, 100 - x)).to(dtype)
+            y_dev = y.to(device)
+            for k in (2, 16):
+                msg = f"step 3 {h=} {c=} {k=}"
+                check_topk(y_dev, y, k, msg)
+                for kk in (k, n + 1 - k):
+                    self.assertEqual(
+                        torch.kthvalue(y_dev, kk, dim=1).values,
+                        torch.kthvalue(y, kk, dim=1).values,
+                        atol=0,
+                        rtol=0,
+                        msg=f"{msg} {kk=}",
+                    )
+        if dtype in (torch.uint8, torch.int8):
+            # Seeded 8-bit input from randomized testing: ties at the maximum, with k = n - 15 reaching the
+            # small-k threshold from the low end. 1-byte keys take the register path only on GFX9.
+            n = 1024
+            gen = torch.Generator().manual_seed(35)
+            x = torch.randint(lo, hi, (n,), generator=gen)
+            ties = torch.rand(n, generator=gen) < 0.003
+            ties[torch.randint(0, n, (3,), generator=gen)] = True
+            x[ties] = hi
+            x = x.to(dtype)
+            self.assertEqual(
+                torch.topk(x.to(device), n - 15).values,
+                torch.topk(x, n - 15).values,
+                atol=0,
+                rtol=0,
+            )
+
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
     @largeTensorTest("170GB", "cpu")
@@ -1423,7 +1653,9 @@ class TestSortAndSelect(TestCase):
         cpu_indices_copy.copy_(indices.squeeze(0))
         total_unique = torch.unique(cpu_indices_copy).numel()
         self.assertEqual(
-            total_unique, k, f"Duplicates found in topk test: {k - total_unique}"
+            total_unique,
+            k,
+            lambda msg: f"{msg}\nDuplicates found in topk test: {k - total_unique}",
         )
         # for random case, values must match at returned indices (use pre-allocated tensor)
         if test_case == "random":
@@ -1439,7 +1671,9 @@ class TestSortAndSelect(TestCase):
                     data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual]
                 )
                 self.assertEqual(
-                    chunk_values, actual_values, msg=f"Value mismatch in chunk {i + 1}"
+                    chunk_values,
+                    actual_values,
+                    msg=lambda msg: f"{msg}\nValue mismatch in chunk {i + 1}",
                 )
 
         # for identical case, all values must equal to constant
@@ -1452,8 +1686,64 @@ class TestSortAndSelect(TestCase):
                 "Values not equal to random constant",
             )
 
+    @slowTest
+    @largeTensorTest("60GB", "cuda")
+    def test_sort_slice_larger_than_int_max(self, device):
+        """Sorting a dimension longer than INT_MAX.
 
-instantiate_device_type_tests(TestSortAndSelect, globals())
+        The sort path used to reject this outright, and behind the rejection it
+        sized its batches and filled its initial indices in 32 bits. int8 keeps
+        the keys cheap; the int64 indices dominate the footprint.
+        """
+        n = 2**31 + 2
+        data = torch.empty(n, device=device, dtype=torch.int8)
+        data.random_(-128, 128)
+
+        values, indices = torch.sort(data)
+
+        non_decreasing = torch.all(values[1:] >= values[:-1]).item()
+        self.assertTrue(non_decreasing, "sorted output is not non-decreasing")
+        # the initial indices used to be filled by a kernel taking `int numel`,
+        # which goes negative here so the fill wrote nothing at all and left the
+        # buffer uninitialized. Only the full permutation has this sum.
+        self.assertEqual(indices.sum().item(), n * (n - 1) // 2)
+        # spot-check past INT_MAX rather than gathering all n indices
+        tail = slice(n - 1024, n)
+        self.assertEqual(data[indices[tail]], values[tail])
+
+    @slowTest
+    @dtypes(torch.int8, torch.bfloat16)
+    @largeTensorTest("88GB", "cuda")
+    def test_topk_large_k_sorted(self, device, dtype):
+        """topk(sorted=True) with k > INT_MAX.
+
+        sorted=True is topk's default, so this is the path a caller reaches
+        without asking for anything unusual. Ordering the selected values goes
+        through the same sort that could not handle more than INT_MAX elements,
+        which made the default fail on inputs topk itself handles. bfloat16 also
+        covers should_use_sort, which only routes the half types into the ROCm
+        full-sort fallback.
+        """
+        n = 2**31 + 2
+        # k has to clear INT_MAX for the ordering step to be the one under test,
+        # which at this n leaves the selection itself trivial. Non-trivial
+        # selection above INT_MAX is already covered by test_topk_large_k.
+        k = 2**31 + 1
+        data = torch.empty(n, device=device, dtype=dtype)
+        data.random_(-128, 128)
+
+        values, indices = torch.topk(data, k, sorted=True)
+
+        self.assertEqual(values.numel(), k)
+        non_increasing = torch.all(values[1:] <= values[:-1]).item()
+        self.assertTrue(non_increasing, "topk output is not non-increasing")
+        # spot-check past INT_MAX rather than gathering all k indices
+        tail = slice(k - 1024, k)
+        self.assertEqual(data[indices[tail]], values[tail])
+
+
+instantiate_device_type_tests(TestSortAndSelectDevice, globals())
+instantiate_device_type_tests(TestSortAndSelectCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()

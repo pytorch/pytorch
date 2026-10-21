@@ -203,6 +203,19 @@ def my_view(t, size) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_view.default(t, size)
 
 
+def my_view_dtype(t, dtype) -> Tensor:
+    """
+    Returns a view of the input tensor with the same data reinterpreted as dtype.
+
+    Args:
+        t: Tensor - tensor to view
+        dtype: ScalarType - dtype to reinterpret the data as
+
+    Returns: Tensor - view with the specified dtype
+    """
+    return torch.ops.libtorch_agn_2_10.my_view_dtype.default(t, dtype)
+
+
 def my_shape(t) -> tuple[int]:
     """
     Returns a shape of the input tensor.
@@ -669,6 +682,247 @@ def my_subtract(self, other, alpha=1.0) -> Tensor:
     Returns: Tensor - result of subtraction
     """
     return torch.ops.libtorch_agn_2_10.my_subtract.default(self, other, alpha)
+
+
+def my_bitwise_and(self, other) -> Tensor:
+    """
+    Computes the element-wise bitwise AND of self and other.
+
+    Args:
+        self: Tensor - first input tensor
+        other: Tensor - second input tensor
+
+    Returns: Tensor - result of the bitwise AND
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_and.default(self, other)
+
+
+def my_bitwise_or(self, other) -> Tensor:
+    """
+    Computes the element-wise bitwise OR of self and other.
+
+    Args:
+        self: Tensor - first input tensor
+        other: Tensor - second input tensor
+
+    Returns: Tensor - result of the bitwise OR
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_or.default(self, other)
+
+
+def my_bitwise_left_shift(self, other) -> Tensor:
+    """
+    Computes the element-wise left bitwise shift of self by other.
+
+    Args:
+        self: Tensor - input tensor to shift
+        other: Tensor - tensor of shift amounts
+
+    Returns: Tensor - result of the left bitwise shift
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_left_shift.default(self, other)
+
+
+def my_bitwise_right_shift(self, other) -> Tensor:
+    """
+    Computes the element-wise right bitwise shift of self by other.
+
+    Args:
+        self: Tensor - input tensor to shift
+        other: Tensor - tensor of shift amounts
+
+    Returns: Tensor - result of the right bitwise shift
+    """
+    return torch.ops.libtorch_agn_2_10.my_bitwise_right_shift.default(self, other)
+
+
+def my_permute(self, dims) -> Tensor:
+    """
+    Returns a view of the input tensor with its dimensions rearranged.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - desired ordering of dimensions
+
+    Returns: Tensor - permuted view of the input
+    """
+    return torch.ops.libtorch_agn_2_10.my_permute.default(self, dims)
+
+
+def my_index_select(self, dim, index) -> Tensor:
+    """
+    Indexes the input tensor along dimension dim using entries in index.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to index along
+        index: Tensor - 1-D tensor of indices to select
+
+    Returns: Tensor - values selected along dim
+    """
+    return torch.ops.libtorch_agn_2_10.my_index_select.default(self, dim, index)
+
+
+def my_floor_divide(self, other) -> Tensor:
+    """
+    Computes the element-wise floor division of self by other.
+
+    Args:
+        self: Tensor - dividend tensor
+        other: Tensor - divisor tensor
+
+    Returns: Tensor - result of floor division
+    """
+    return torch.ops.libtorch_agn_2_10.my_floor_divide.default(self, other)
+
+
+def my_is_pinned(self) -> bool:
+    """
+    Returns whether the tensor's storage is allocated in pinned memory.
+
+    Args:
+        self: Tensor - input tensor
+
+    Returns: bool - True if the tensor is pinned, False otherwise
+    """
+    return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
+
+
+def my_sort(self, dim=-1, descending=False) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort.default(self, dim, descending)
+
+
+def my_sort_stable(
+    self, stable=None, dim=-1, descending=False
+) -> tuple[Tensor, Tensor]:
+    """
+    Sorts the elements of the input tensor along a dimension.
+
+    Args:
+        self: Tensor - input tensor
+        stable: bool | None - if True, equal elements keep their relative order
+        dim: int - dimension to sort along
+        descending: bool - if True, sort in descending order
+
+    Returns: tuple[Tensor, Tensor] - the sorted values and their indices
+    """
+    return torch.ops.libtorch_agn_2_10.my_sort_stable.default(
+        self, stable, dim, descending
+    )
+
+
+def my_masked_select(self, mask) -> Tensor:
+    """
+    Selects the elements of the input tensor where the mask is True.
+
+    Args:
+        self: Tensor - input tensor
+        mask: Tensor - boolean tensor broadcastable with self
+
+    Returns: Tensor - a 1-D tensor of the selected elements
+    """
+    return torch.ops.libtorch_agn_2_10.my_masked_select.default(self, mask)
+
+
+def my_mm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out.default(out, self, mat2)
+
+
+def my_bmm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out.default(out, self, mat2)
+
+
+def my_mm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_bmm_out_dtype(out, self, mat2, out_dtype) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out in out_dtype.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+        out_dtype: ScalarType - dtype of the result
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out_dtype.default(
+        out, self, mat2, out_dtype
+    )
+
+
+def my_flip(self, dims) -> Tensor:
+    """
+    Reverses the order of elements along the given dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dims: list[int] - dimensions to flip, negative values are wrapped
+
+    Returns: Tensor - a new tensor with the given dimensions reversed
+    """
+    return torch.ops.libtorch_agn_2_10.my_flip.default(self, dims)
+
+
+def my_from_file(filename, shared=None, size=0, dtype=None) -> Tensor:
+    """
+    Creates a CPU tensor backed by the contents of a file.
+
+    Args:
+        filename: str - path of the file to read
+        shared: bool or None - whether the mapping is shared with the file
+        size: int or None - number of elements to read from the file
+        dtype: ScalarType or None - data type of the tensor elements
+
+    Returns: Tensor - a tensor holding the file contents
+    """
+    op = torch.ops.libtorch_agn_2_10.my_from_file.default
+    return op(filename, shared, size, dtype)
 
 
 # =============================================================================

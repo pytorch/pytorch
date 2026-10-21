@@ -13,13 +13,12 @@ The module is critical for PyTorch Dynamo's ability to optimize code while prese
 Python semantics and execution state.
 """
 
+from __future__ import annotations
+
 import copy
 import dataclasses
 import sys
-import types
-from collections.abc import Callable, Iterable
-from contextlib import AbstractContextManager
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from .bytecode_transformation import (
     add_push_null,
@@ -36,6 +35,14 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .utils import ExactWeakKeyDictionary
+
+
+if TYPE_CHECKING:
+    import types
+    from collections.abc import Callable, Iterable
+    from contextlib import AbstractContextManager
+
+    from .output_graph import CodeOptions
 
 
 # taken from code.h in cpython
@@ -120,10 +127,10 @@ def _try_except_tf_mode_template(dummy: Any) -> None:
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: tuple[Any, ...] | None = None
+    target_values: tuple[object, ...] | None = None
 
     def try_except_torch_function_mode(
-        self, code_options: dict[str, Any], cleanup: list[Instruction]
+        self, code_options: CodeOptions, cleanup: list[Instruction]
     ) -> list[Instruction]:
         """
         Codegen based off of:
@@ -144,7 +151,7 @@ class ReenterWith:
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
     def try_finally(
-        self, code_options: dict[str, Any], cleanup: list[Instruction]
+        self, code_options: CodeOptions, cleanup: list[Instruction]
     ) -> list[Instruction]:
         """
         Codegen based off of:
@@ -156,8 +163,7 @@ class ReenterWith:
             exit context
         """
         # NOTE: we assume that TOS is a context manager CLASS!
-        # pyrefly: ignore [implicit-any]
-        load_args = []
+        load_args: list[Instruction] = []
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
@@ -199,8 +205,7 @@ class ReenterWith:
             (rest)
         """
         # NOTE: we assume that TOS is a context manager CLASS!
-        # pyrefly: ignore [implicit-any]
-        load_args = []
+        load_args: list[Instruction] = []
         if self.target_values:
             load_args = [create_load_const(val) for val in self.target_values]
 
@@ -291,7 +296,7 @@ def _filter_iter(
     return res
 
 
-def _load_tuple_and_call(tup: tuple[Any, ...]) -> list[Instruction]:
+def _load_tuple_and_call(tup: tuple[object, ...]) -> list[Instruction]:
     insts: list[Instruction] = []
     _initial_push_null(insts)
     insts.extend(create_load_const(val) for val in tup)
@@ -327,8 +332,8 @@ class ContinueExecutionCache:
         argnames_null: tuple[str, ...],
         setup_fns: tuple[ReenterWith, ...],
         handle_inactive_ctx: bool,
-        stack_ctx_vars: tuple[tuple[int, tuple[Any, ...]], ...],
-        argnames_ctx_vars: tuple[tuple[str, tuple[Any, ...]], ...],
+        stack_ctx_vars: tuple[tuple[int, tuple[object, ...]], ...],
+        argnames_ctx_vars: tuple[tuple[str, tuple[object, ...]], ...],
         null_idxes: tuple[int, ...],
         # mainly used to ensure distinct code objects per stack trace,
         # which prevents excessive recompilation of inner frames

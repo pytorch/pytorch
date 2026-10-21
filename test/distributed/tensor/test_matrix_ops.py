@@ -27,18 +27,24 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_FP8,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_ROCM,
+    skipIfRocm,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    LocalDTensorContinuousTestBase,
+    NUM_DEVICES,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -61,7 +67,9 @@ def scale_for_fp8(
     return t_fp8.flatten(end_dim=1).flatten(start_dim=-2), scale.view(scale_shape)
 
 
-class DistMatrixOpsTest(DTensorTestBase):
+class DistMatrixOpsTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_addmm(self):
         """
@@ -273,7 +281,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertEqual(
                         bias_placement.reduce_op,
                         output_placement.reduce_op,
-                        f"Bias Partial should have same reduce_op as output Partial. "
+                        lambda msg: f"{msg}\nBias Partial should have same reduce_op as output Partial. "
                         f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
                     )
 
@@ -452,6 +460,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180006")
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(
@@ -494,8 +503,8 @@ class DistMatrixOpsTest(DTensorTestBase):
             (repl, repl, repl, (m, 1), (n, 1), repl, repl),
             # Column-parallel
             (shrd1, repl, shrd0, (m, 1), (n, 1), repl, shrd0),
-            # Row-parallel (which actually ends up doing sub-row-wise scaling)
-            (part, shrd1, shrd1, (m, ws), (n, ws), shrd1, shrd1),
+            # Row-parallel
+            (part, shrd1, shrd1, (m, 1), (n, 1), repl, repl),
         ]:
             full_ref_res = t1 @ t2.t()
 
@@ -550,6 +559,22 @@ class DistMatrixOpsTest(DTensorTestBase):
             Shard(0), torch.Size([16, 1]), contracting_dim=1
         )
         self.assertEqual(result, Shard(0))
+
+        # --- 2D scale, shard on a size-1 (broadcast) dim -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([1, 64]), contracting_dim=0
+        )
+        self.assertEqual(result, Replicate())
+
+        # --- 2D scale + Partial -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Partial(), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
 
         # --- 1D blockwise + non-contracting shard -> Shard(0) ---
         # A (mk): dim 0 = m (non-contracting), dim 1 = k (contracting)
@@ -1004,10 +1029,10 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
+    @parametrize("backend", ["cublaslt", "cutlass"])
     @parametrize(
         "kwargs",
         [
@@ -1025,9 +1050,10 @@ class DistMatrixOpsTest(DTensorTestBase):
             },
             {
                 # Case that would have invalid strides on inp * mat1 when sharded
+                # Keep the local BF16 row stride unaligned on 2- and 4-rank meshes
                 "inp_shape": (64, 16),
-                "w1_shape": (2, 16, 16),
-                "w2_shape": (2, 16, 16),
+                "w1_shape": (2, 16, 8),
+                "w2_shape": (2, 8, 16),
                 "inp_placements": [Replicate()],
                 "w1_placements": [Shard(2)],
                 "w2_placements": [Shard(1)],
@@ -1037,7 +1063,13 @@ class DistMatrixOpsTest(DTensorTestBase):
             },
         ],
     )
-    def test_grouped_mm(self, kwargs):
+    def test_grouped_mm(self, backend, kwargs):
+        if backend == "cublaslt":
+            if _get_torch_cuda_version() < (13, 3):
+                self.skipTest("cublaslt grouped gemm requires CUDA Toolkit >= 13.3")
+            sm_major = torch.cuda.get_device_capability()[0]
+            if sm_major < 9 or sm_major >= 12:
+                self.skipTest("cublaslt grouped gemm requires SM 9.0-11.0")
         # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()
@@ -1062,6 +1094,15 @@ class DistMatrixOpsTest(DTensorTestBase):
             requires_grad=True,
         )
         offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
+
+        prev = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+        torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = backend == "cublaslt"
+        self.addCleanup(
+            setattr,
+            torch.backends.cuda.matmul,
+            "prefer_cublaslt_grouped_gemm",
+            prev,
+        )
 
         h = F.grouped_mm(inp, w1, offs=offs)
         out = F.grouped_mm(h, w2, offs=offs)
@@ -1136,7 +1177,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 instantiate_parametrized_tests(DistMatrixOpsTest)
 
 DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
-    DistMatrixOpsTest,
+    DistMatrixOpsTest, base_class=LocalDTensorContinuousTestBase
 )
 
 if __name__ == "__main__":

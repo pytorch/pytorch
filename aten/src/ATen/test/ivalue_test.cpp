@@ -292,14 +292,14 @@ TEST(IValueTest, TuplePrint) {
 
     std::stringstream ss;
     ss << tp;
-    ASSERT_EQ(ss.str(), "(3,)");
+    ASSERT_EQ(std::move(ss).str(), "(3,)");
   }
 
   {
     IValue tp = std::make_tuple(3, 3);
     std::stringstream ss;
     ss << tp;
-    ASSERT_EQ(ss.str(), "(3, 3)");
+    ASSERT_EQ(std::move(ss).str(), "(3, 3)");
   }
 }
 
@@ -308,21 +308,21 @@ TEST(IValueTest, ComplexIValuePrint) {
     IValue complex(c10::complex<double>(2, -3));
     std::stringstream ss;
     ss << complex;
-    ASSERT_EQ(ss.str(), "2.-3.j");
+    ASSERT_EQ(std::move(ss).str(), "2.-3.j");
   }
 
   {
     IValue complex(c10::complex<double>(2, 0));
     std::stringstream ss;
     ss << complex;
-    ASSERT_EQ(ss.str(), "2.+0.j");
+    ASSERT_EQ(std::move(ss).str(), "2.+0.j");
   }
 
   {
     IValue complex(c10::complex<double>(0, 3));
     std::stringstream ss;
     ss << complex;
-    ASSERT_EQ(ss.str(), "0.+3.j");
+    ASSERT_EQ(std::move(ss).str(), "0.+3.j");
   }
 }
 

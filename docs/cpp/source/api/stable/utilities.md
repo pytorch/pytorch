@@ -39,18 +39,30 @@ tensors and CUDA operations.
 
 ## Stream Utilities
 
-For CUDA stream access, we currently recommend the ABI stable C shim API. This
-will be improved in a future release with a more ergonomic wrapper.
-
 ### Getting the Current CUDA Stream
 
 To obtain the current `cudaStream_t` for use in CUDA kernels:
+
+PyTorch version 2.13+
+
+```cpp
+#include <torch/csrc/stable/accelerator.h>
+
+// nativeHandle() requires PyTorch 2.13+
+cudaStream_t stream = static_cast<cudaStream_t>(
+    torch::stable::accelerator::getCurrentStream(tensor.get_device_index()).nativeHandle());
+
+// Now you can use 'stream' in your CUDA kernel launches
+my_kernel<<<blocks, threads, 0, stream>>>(args...);
+```
+
+PyTorch version 2.9-2.12
 
 ```cpp
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/headeronly/util/shim_utils.h>
 
-// For now, we rely on the ABI stable C shim API to get the current CUDA stream.
+// Use the ABI-stable C shim API to get the current CUDA stream.
 void* stream_ptr = nullptr;
 TORCH_ERROR_CODE_CHECK(
     aoti_torch_get_current_cuda_stream(tensor.get_device_index(), &stream_ptr));
@@ -62,8 +74,7 @@ my_kernel<<<blocks, threads, 0, stream>>>(args...);
 
 ```{note}
 
-The `TORCH_ERROR_CODE_CHECK` macro is required when using C shim APIs
-to properly check error codes and throw appropriate exceptions.
+When using C shim APIs, the `TORCH_ERROR_CODE_CHECK` macro is required to properly check error codes and throw appropriate exceptions. `nativeHandle()`, along with all our highlevel C++ utility APIs, does this check for you.
 ```
 
 ## CUDA Error Checking Macros
@@ -104,6 +115,52 @@ STD_CUDA_KERNEL_LAUNCH_CHECK();
 
 Minimum compatible version: PyTorch 2.10.
 ```
+
+## Warning Macros
+
+These macros are the stable ABI counterparts of `TORCH_WARN` and
+`TORCH_WARN_ONCE`.
+
+They differ from `TORCH_WARN` and `TORCH_WARN_ONCE` in two ways:
+
+- Arguments are streamed through `std::ostringstream` rather than `c10::str`,
+  so `std::optional`, scoped enums without an `operator<<`, and wide strings
+  compile with `TORCH_WARN` but not with `STABLE_TORCH_WARN`.
+- The warning is always a `UserWarning`. There is not yet a stable ABI
+  equivalent of `TORCH_WARN_DEPRECATION`.
+
+### STABLE_TORCH_WARN
+
+```{c:macro} STABLE_TORCH_WARN(...)
+
+Emits a warning with the given message.
+
+**Example:**
+
+```cpp
+STABLE_TORCH_WARN("my_op got n=", n, ", which may be slow");
+```
+
+Minimum compatible version: PyTorch 2.9.
+Build time minimum version: PyTorch 2.16.
+```
+### STABLE_TORCH_WARN_ONCE
+
+```{c:macro} STABLE_TORCH_WARN_ONCE(...)
+
+Emits a warning the first time the call site is reached, or on every call while
+`torch.set_warn_always(True)` is in effect.
+
+**Example:**
+
+```cpp
+STABLE_TORCH_WARN_ONCE("my_op is deprecated, use my_new_op instead");
+```
+
+Minimum compatible version: PyTorch 2.16.
+Build time minimum version: PyTorch 2.16.
+```
+
 ## Header-Only Utilities
 
 The `torch::headeronly` namespace provides header-only versions of common
@@ -146,6 +203,17 @@ auto dtype = torch::headeronly::ScalarType::Float;
 auto device_type = torch::headeronly::DeviceType::CUDA;
 auto memory_format = torch::headeronly::MemoryFormat::Contiguous;
 auto layout = torch::headeronly::Layout::Strided;
+```
+
+### Accumulate Types
+
+`acc_type<T, is_cuda>` and `acc_type_device<T, DeviceType>` give the dtype a
+reduction over `T` should accumulate into, using the same tables as `at::acc_type`:
+
+```cpp
+#include <torch/headeronly/core/AccumulateType.h>
+
+using acc_t = torch::headeronly::acc_type<torch::headeronly::Half, /*is_cuda*/true>;
 ```
 
 ### TensorAccessor

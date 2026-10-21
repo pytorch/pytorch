@@ -207,6 +207,20 @@ class TestInferSchemaWithAnnotation(TestCase):
 
             torch.library.infer_schema(foo_op_2, mutates_args=mutates_args)
 
+    def test_name_error_hint(self):
+        # When from __future__ import annotations is active and a type name cannot
+        # be resolved (e.g. because it was only imported inside a nested function),
+        # the error should include the original NameError and a hint about module scope.
+        with self.assertRaisesRegex(
+            ValueError,
+            r"from __future__ import annotations",
+        ):
+
+            def foo_op(x: D) -> Tensor:  # noqa: F821
+                return torch.Tensor(x)
+
+            torch.library.infer_schema(foo_op, mutates_args=mutates_args)
+
 
 if __name__ == "__main__":
     run_tests()

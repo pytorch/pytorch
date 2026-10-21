@@ -1,12 +1,13 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import cast, TYPE_CHECKING
+from typing import cast
 
 import torch
 from torch import Tensor
 
 from .optimizer import (
     _disable_dynamo_if_unsupported,
+    _functional_api_doc,
     _get_scalar_dtype,
     _maximize_doc,
     _params_doc,
@@ -197,7 +198,7 @@ Adafactor.__doc__ = (
             &\hspace{5mm}\textbf{else}                                                           \\
             &\hspace{10mm}G_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm}\widehat{\beta}_{2_t} \leftarrow 1 - t^{\tau}                           \\
-            &\hspace{5mm}\rho_t         \leftarrow min(lr, \frac{1}{\sqrt{t}})                   \\
+            &\hspace{5mm}\rho_t         \leftarrow min(\gamma, \frac{1}{\sqrt{t}})               \\
             &\hspace{5mm}\alpha_t       \leftarrow max(\epsilon_2,
                 \text{RMS}(\theta_{t-1}))\rho_t                                                  \\
             &\hspace{5mm}\theta_t       \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}    \\
@@ -265,7 +266,7 @@ Adafactor.__doc__ = (
 
         .. math::
             \begin{aligned}
-                &\hspace{5mm}\rho_t \leftarrow min(lr, \frac{1}{\sqrt{t}})
+                &\hspace{5mm}\rho_t \leftarrow min(\gamma, \frac{1}{\sqrt{t}})
             \end{aligned}
 
         This differs from Noam Shazeer and Mitchell Stern, who use a constant of 0.01 as
@@ -380,7 +381,7 @@ def _single_tensor_adafactor(
         rho_t = min(lr, 1 / (step_float**0.5))
         alpha = max(eps2, param.norm(2).item() / (param.numel() ** 0.5)) * rho_t
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             param.mul_(1 - lr * weight_decay)
 
@@ -391,12 +392,16 @@ def _single_tensor_adafactor(
                 )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_mean = (
-                torch.norm(grad, dim=-1, keepdim=True).square_().div_(grad.size(-1))
+                torch.linalg.vector_norm(grad, dim=-1, keepdim=True)
+                .square_()
+                .div_(grad.size(-1))
             )
             row_var.lerp_(row_mean, one_minus_beta2_t)
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_mean = (
-                torch.norm(grad, dim=-2, keepdim=True).square_().div_(grad.size(-2))
+                torch.linalg.vector_norm(grad, dim=-2, keepdim=True)
+                .square_()
+                .div_(grad.size(-2))
             )
             col_var.lerp_(col_mean, one_minus_beta2_t)
             var_estimate = row_var @ col_var
@@ -413,7 +418,7 @@ def _single_tensor_adafactor(
         update = var_estimate.clamp_(min=eps1 * eps1).rsqrt_()
         update.mul_(grad)
         denom = max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d))
-        param.add_(update, alpha=-alpha / denom)
+        param.add_(update, alpha=-alpha / denom)  # type: ignore[arg-type]
 
 
 def _group_tensors_by_device_dtype_and_is_multidim(
@@ -502,9 +507,6 @@ def _multi_tensor_adafactor(
             eps_dtype = dtype if dtype is not None else device_params[0].dtype
             eps1 = torch.finfo(eps_dtype).eps
 
-        if TYPE_CHECKING:
-            assert device_state_steps[0] is not None
-
         if maximize:
             device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
 
@@ -532,7 +534,7 @@ def _multi_tensor_adafactor(
             for p, r in zip(device_params, rho_ts, strict=True)
         ]
 
-        # Perform stepweight decay
+        # Perform step weight decay
         if weight_decay != 0:
             torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 
@@ -545,7 +547,8 @@ def _multi_tensor_adafactor(
                 )
             # same as (g * g).mean(dim=-1) w/o materializing an intermediate size g
             row_means = [
-                torch.norm(grad, dim=-1, keepdim=True) for grad in device_grads
+                torch.linalg.vector_norm(grad, dim=-1, keepdim=True)
+                for grad in device_grads
             ]
             torch._foreach_mul_(row_means, row_means)
             torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
@@ -554,7 +557,8 @@ def _multi_tensor_adafactor(
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
             col_means = [
-                torch.norm(grad, dim=-2, keepdim=True) for grad in device_grads
+                torch.linalg.vector_norm(grad, dim=-2, keepdim=True)
+                for grad in device_grads
             ]
             torch._foreach_mul_(col_means, col_means)
             torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
@@ -595,7 +599,7 @@ def _multi_tensor_adafactor(
             -a / (max(1.0, update.norm(2).item() / ((update.numel() ** 0.5) * d)))
             for a, update in zip(alphas, updates, strict=True)
         ]
-        torch._foreach_mul_(updates, alphas)
+        torch._foreach_mul_(updates, alphas)  # type: ignore[arg-type]
         torch._foreach_add_(device_params, updates)
 
 
@@ -622,10 +626,6 @@ def adafactor(
     eps2: float,
     maximize: bool,
 ) -> None:
-    r"""Functional API that performs Adafactor algorithm computation.
-
-    See :class:`~torch.optim.Adafactor` for details.
-    """
     if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
@@ -656,3 +656,6 @@ def adafactor(
         found_inf=found_inf,
         has_complex=has_complex,
     )
+
+
+adafactor.__doc__ = _functional_api_doc.format(optimizer="Adafactor")

@@ -38,10 +38,16 @@ Unit tests for _pycute.int_tuple
 """
 
 from torch.distributed._pycute import *
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestIntTuple(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_product(self):
         self.assertEqual(product(2), 2)
 
@@ -201,7 +207,9 @@ class TestIntTuple(TestCase):
                 crd = idx2crd(idx, shape)
                 recovered_idx = crd2idx(crd, shape)
                 self.assertEqual(
-                    recovered_idx, idx, f"Failed roundtrip for shape {shape}, idx {idx}"
+                    recovered_idx,
+                    idx,
+                    lambda msg: f"{msg}\nFailed roundtrip for shape {shape}, idx {idx}",
                 )
 
     def test_idx2crd_crd2idx_roundtrip(self):
@@ -220,7 +228,9 @@ class TestIntTuple(TestCase):
             idx = crd2idx(crd, shape)
             recovered_crd = idx2crd(idx, shape)
             self.assertEqual(
-                recovered_crd, crd, f"Failed roundtrip for crd {crd}, shape {shape}"
+                recovered_crd,
+                crd,
+                lambda msg: f"{msg}\nFailed roundtrip for crd {crd}, shape {shape}",
             )
 
 

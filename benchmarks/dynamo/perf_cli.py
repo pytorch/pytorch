@@ -52,8 +52,8 @@ WORKFLOWS = {
         "name": "inductor-perf-nightly-rocm-mi300",
         "id": 197925166,
     },
-    "rocm-mi355": {
-        "name": "inductor-perf-nightly-rocm-mi355",
+    "rocm-mi350": {
+        "name": "inductor-perf-nightly-rocm-mi350",
         "id": 197925165,
     },
     "x86": {
@@ -85,7 +85,7 @@ S3_URL = f"https://{S3_BUCKET}.s3.amazonaws.com"
 REPO = "pytorch/pytorch"
 
 # Regex to parse test job names like:
-# "cuda13.0-py3.10-gcc11-sm80 / test (inductor_huggingface_perf, 1, 5, linux.aws.a100)"
+# "cuda13.0-py3.10-gcc11-sm80 / test (inductor_huggingface_perf, 1, 5, mt-l-x86iavx512-11-125-a100)"
 JOB_RE = re.compile(
     r"(?P<job_name>test(?:-osdc)?) \((?P<config>[^,]+),\s*(?P<shard>\d+),\s*(?P<num_shards>\d+),\s*(?P<runner>[^)]+)\)"
 )
@@ -1510,7 +1510,8 @@ def cmd_prepare_repro(args):
     if "timm_models" in suites:
         print("# ── Timm ──")
         print(
-            f"pip install git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
+            "pip install --no-deps "
+            f"git+https://github.com/huggingface/pytorch-image-models@{timm_pin}"
         )
         print()
 

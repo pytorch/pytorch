@@ -186,10 +186,18 @@ def celu(
 
     rhs: TensorLikeType
     if alpha is not None:
+        torch._check(
+            alpha != 0,
+            lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+        )
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
+        torch._check(
+            alpha != 0,
+            lambda: "ZeroDivisionError: alpha cannot be 0 for CELU",
+        )
         rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
         rhs = torch.expm1(a)
@@ -527,7 +535,6 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     return torch.where(torch.abs(a) <= lambd, 0, a)
 
 
-@aten.softshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -539,10 +546,26 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         0 <= lambd <= torch.finfo(a.dtype).max,
         lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
-    # We implement this in one torch.where to generate better code in the backward
-    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
-    # We multiply by 0 for dealing with nans
-    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, a * 0)
+    if a.dtype in (torch.bfloat16, torch.float16):
+        lambd = torch.scalar_tensor(lambd, dtype=a.dtype, device=a.device)  # type: ignore[arg-type]
+    # Match the eager kernels' NaN and signed-zero results. This decomposition
+    # is not registered for Autograd, so the backward is softshrink_backward
+    # rather than the derivative of these wheres, whose accumulation would turn
+    # a -0.0 gradient into +0.0.
+    if a.device.type == "mps":
+        # The MPS kernel computes a * 0: NaN propagates, and the dead zone is
+        # -0.0 for negative inputs
+        return torch.where(
+            a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, a * 0)
+        )
+    # The CUDA kernel returns NaN as is and +0 in the dead zone. The CPU
+    # vectorized path also returns +0, but computes NaN as a - lambd, which
+    # quiets a signaling NaN. (The CPU scalar path, used for loop tails and
+    # non-vectorizable layouts, computes a * 0 like MPS, so CPU eager is not
+    # consistent itself.)
+    result = torch.where(a > lambd, a - lambd, torch.where(a < -lambd, a + lambd, 0))
+    nan = a - lambd if a.device.type == "cpu" else a
+    return torch.where(torch.isnan(a), nan, result)
 
 
 # Losses
@@ -746,14 +769,14 @@ def _nll_loss_nd(
     # TODO: This check does not work with FakeTensor inputs; See Issue #85834
     # Explicit cast for class_check to bool; See Issue #78071
     """
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and(
         (flat_target >= 0), (flat_target < num_classes)
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
     torch._check(
-        isinstance(target, FakeTensor) or bool(class_check.item()),
+        is_fake_tensor(target) or bool(class_check.item()),
         lambda: "A target class is out-of-bounds and not the ignore index.",
     )
     """
@@ -1029,7 +1052,49 @@ def _triplet_margin_with_distance_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten.hardtanh)
+def _hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+    *,
+    check_bounds: bool,
+) -> TensorLikeType:
+    if inplace:
+        raise NotImplementedError
+    if utils.is_boolean_dtype(a.dtype):
+        raise NotImplementedError("Bool inputs not supported for hardtanh")
+
+    # preserve legacy behavior of boundaries not causing type promotion
+    if utils.is_integer_dtype(a.dtype):
+        min_val = int(min_val)  # type: ignore[arg-type]
+        max_val = int(max_val)  # type: ignore[arg-type]
+
+    if check_bounds and min_val > max_val:  # type: ignore[operator]
+        raise ValueError("min_val cannot be greater than max_val")
+
+    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+
+
+@register_decomposition([aten.hardtanh.default, aten.hardtanh.out])
+@_inplace_wrapper
+@out_wrapper()
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def _aten_hardtanh(
+    a: TensorLikeType,
+    min_val: NumberType = -1,
+    max_val: NumberType = 1,
+    inplace: bool = False,
+) -> TensorLikeType:
+    return _hardtanh(
+        a, min_val=min_val, max_val=max_val, inplace=inplace, check_bounds=False
+    )
+
+
 @_inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
@@ -1046,24 +1111,9 @@ def hardtanh(
     """
     Reference implementation of torch.nn.functional.hardtanh
     """
-    if inplace:
-        raise NotImplementedError
-    if utils.is_boolean_dtype(a.dtype):
-        raise RuntimeError("Bool inputs not supported for hardtanh")
-
-    # preserve legacy behavior of boundaries not causing type promotion
-    if utils.is_integer_dtype(a.dtype):
-        min_val = int(min_val)  # type: ignore[arg-type]
-        max_val = int(max_val)  # type: ignore[arg-type]
-        if not (a.dtype != torch.uint8 or (min_val >= 0 and max_val >= 0)):
-            raise RuntimeError(
-                "Cannot do hardtanh on an unsigned type with negative limits"
-            )
-
-    if min_val > max_val:  # type: ignore[operator]
-        raise ValueError("min_val cannot be greater than max_val")
-
-    return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+    return _hardtanh(
+        a, min_val=min_val, max_val=max_val, inplace=inplace, check_bounds=True
+    )
 
 
 @register_decomposition(aten.gelu)
@@ -1250,6 +1300,21 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for upscale_factor=0.
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Eager also rejects a factor whose square overflows int64 (TORCH_CHECK_VALUE ->
+    # ValueError). Without it `upscale_factor**2` below is an arbitrary-precision
+    # Python int, so the view() built from it fails with an internal shape error
+    # instead of this message.
+    torch._check_value(
+        upscale_factor <= torch.iinfo(torch.int64).max // upscale_factor,
+        lambda: f"upscale factor is too large, (upscale_factor)^2 overflowed: "
+        f"upscale_factor={upscale_factor}",
+    )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
@@ -1278,6 +1343,16 @@ def pixel_unshuffle(self: Tensor, downscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    # Matches the eager check; without it the division below raises
+    # ZeroDivisionError for downscale_factor=0.
+    torch._check(
+        downscale_factor > 0,
+        lambda: f"pixel_unshuffle expects a positive downscale_factor, but got {downscale_factor}",
+    )
+    # Deliberately no int64-overflow check here. Unlike pixel_shuffle, eager never
+    # squares the factor before using it -- it only tests H and W for divisibility --
+    # so a huge downscale_factor raises the ordinary divisibility RuntimeError. Adding
+    # an overflow check would introduce a divergence rather than remove one.
     batch = self.shape[:-3]
     C_out = self.shape[-3] * downscale_factor**2
     HW_out = (self.shape[-2] // downscale_factor, self.shape[-1] // downscale_factor)

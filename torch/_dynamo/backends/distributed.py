@@ -29,6 +29,7 @@ from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.node import Node
 
 
@@ -152,8 +153,12 @@ def has_higher_order_op(gm: fx.GraphModule) -> bool:
 
 
 def propagate_metadata(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -> None:
+    # Only propagate to partition submodules, not to HOP body subgraphs (e.g.
+    # wrap_body_*) which are also hoisted as top-level children by split_module
+    # and carry their own metadata (e.g. _checkpoint_context_fn for SAC).
+    partition_names = split_gm.meta["partition_names"]
     for name, module in split_gm.named_modules():
-        if "." not in name and len(name):
+        if name in partition_names:
             # TODO: add split id to CompileId: https://github.com/pytorch/tlparse/pull/83/files#r1880649384
             module.meta = orig_gm.meta
             module._param_name_to_source = orig_gm._param_name_to_source
@@ -164,8 +169,9 @@ def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -
     for node in orig_gm.graph.find_nodes(op="placeholder"):
         name_to_dynamo_source[node.name] = node._dynamo_source
 
+    partition_names = split_gm.meta["partition_names"]
     for name, module in split_gm.named_modules():
-        if "." not in name and len(name):
+        if name in partition_names:
             for node in module.graph.find_nodes(op="placeholder"):
                 # non-placeholder in original_gm may become placeholder in submodules
                 node._dynamo_source = name_to_dynamo_source.get(node.name)
@@ -367,7 +373,11 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     if not all(
-                        (not isinstance(t, torch.Tensor) or type(t) is not torch.Tensor)
+                        (
+                            not isinstance(t, torch.Tensor)
+                            or is_fake_tensor(t)
+                            or type(t) is not torch.Tensor
+                        )
                         for t in (out if isinstance(out, (list, tuple)) else [out])
                     ):
                         raise AssertionError(

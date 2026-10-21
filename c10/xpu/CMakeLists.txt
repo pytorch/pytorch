@@ -4,7 +4,7 @@
 
 include(../../cmake/public/xpu.cmake)
 
-if(NOT BUILD_LIBTORCHLESS)
+if(BUILD_LIBTORCHLESS)
   find_library(C10_XPU_LIB c10_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
 endif()
 
@@ -35,7 +35,7 @@ set(C10_XPU_HEADERS
 if(NOT BUILD_LIBTORCHLESS)
   add_library(c10_xpu ${C10_XPU_SRCS} ${C10_XPU_HEADERS})
   torch_compile_options(c10_xpu)
-  target_compile_options(c10_xpu PRIVATE "-DC10_XPU_BUILD_MAIN_LIB")
+  target_compile_definitions(c10_xpu PRIVATE C10_XPU_BUILD_MAIN_LIB)
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_xpu PRIVATE "-fvisibility=hidden")

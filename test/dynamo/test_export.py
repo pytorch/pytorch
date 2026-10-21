@@ -36,6 +36,11 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    TEST_WITH_SLOW,
+)
 
 
 @torch._dynamo.assume_constant_result
@@ -44,6 +49,8 @@ def dynamo_assume_constant_result_global_function():
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
@@ -4377,7 +4384,7 @@ def forward(self, x):
         gm_edit.recompile()
 
         expected = [
-            """x = torch.sin(l_x_)""",
+            """sin = torch.sin(l_x_)""",
             """cos = torch.cos(l_nested_frame_values_0_1_)""",
         ]
 
@@ -4585,6 +4592,8 @@ def forward(self, x, b, y):
 
 
 class ExportTestsSubprocess(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_strict_export_under_pythonoptimize(self):
         env = dict(os.environ)
         env["PYTHONOPTIMIZE"] = "1"
@@ -4606,11 +4615,18 @@ torch.testing.assert_close(out_export, out_orig)
         self.assertEqual(
             result.returncode,
             0,
-            msg=f"strict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
+            msg=lambda msg: (
+                f"{msg}\nstrict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}"
+            ),
         )
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/181344"
+    )
     def test_export_with_parameters(self, device):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -4677,7 +4693,9 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
-instantiate_device_type_tests(ExportTestsDevice, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    ExportTestsDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

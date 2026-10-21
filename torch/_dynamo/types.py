@@ -13,8 +13,8 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from collections.abc import Callable
-from typing import Any, NamedTuple, Protocol
+from collections.abc import Callable, Mapping
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -47,6 +47,12 @@ class GuardFilterEntry:
     derived_guard_types: tuple[str, ...]
     is_global: bool
     orig_guard: Guard
+    # Snapshot of orig_guard.code_list (the rendered checks, as GuardFn's
+    # code_parts) as of the inspection build. A later build_guards over the
+    # kept guards rebinds that attribute, so reading it off orig_guard later
+    # yields whatever the last build that included the guard emitted; a
+    # dropped guard is never rebuilt, so for it the snapshot is only defensive.
+    code_parts: tuple[str, ...] = ()
 
 
 class GuardFn(Protocol):
@@ -103,6 +109,14 @@ class DynamoCallbackFn(Protocol):
 
 
 DynamoCallback = DynamoCallbackFn | None | bool
+
+
+CompilerConfig = Mapping[str, Any]
+
+
+@runtime_checkable
+class CompilerConfigProvider(Protocol):
+    def get_compiler_config(self) -> CompilerConfig | None: ...
 
 
 class DynamoGuardHook(Protocol):

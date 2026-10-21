@@ -174,7 +174,7 @@ class AveragedModel(Module):
     but using exponential weights instead of equal weights across iterations.
 
     AveragedModel class creates a copy of the provided module :attr:`model`
-    on the device :attr:`device` and allows to compute running averages of the
+    on the device :attr:`device` and allows computing running averages of the
     parameters of the :attr:`model`.
 
     Args:
@@ -484,7 +484,7 @@ class SWALR(LRScheduler):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
             raise ValueError(
-                "anneal_strategy must by one of 'cos' or 'linear', "
+                "anneal_strategy must be one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
         self._set_anneal_func(anneal_strategy)

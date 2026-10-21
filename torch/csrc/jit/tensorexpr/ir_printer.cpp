@@ -40,7 +40,7 @@ std::string IRPrinter::to_string(CompareSelectOperation op) {
     case CompareSelectOperation::kLE:
       return "<=";
     default:
-      throw std::runtime_error("invalid compare select operator");
+      TORCH_CHECK(false, "invalid compare select operator");
   }
 }
 
@@ -131,7 +131,7 @@ void IRPrinter::visit(const ModPtr& v) {
   } else if (v->dtype().is_floating_point()) {
     os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ')';
   } else {
-    throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
+    TORCH_CHECK(false, "invalid dtype: " + std::to_string(v->dtype()));
   }
 }
 
@@ -679,13 +679,13 @@ namespace std {
 std::string to_string(const ExprPtr& expr) {
   std::ostringstream oss;
   oss << *expr;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 std::string to_string(const StmtPtr& stmt) {
   std::ostringstream oss;
   oss << *stmt;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 std::string to_string(const Tensor& t) {
@@ -699,6 +699,6 @@ std::string to_string(const Tensor& t) {
     oss << *t.buf()->dim(i);
   }
   oss << "]:\n" << *t.stmt() << '\n';
-  return oss.str();
+  return std::move(oss).str();
 }
 } // namespace std

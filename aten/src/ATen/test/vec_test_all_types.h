@@ -863,7 +863,7 @@ public:
         }
         stream << "Expected:\n#\t" << exp << "\nActual:\n#\t" << act;
         stream << "\nFirst mismatch Index: " << index;
-        return stream.str();
+        return std::move(stream).str();
     }
 
     bool check(bool bitwise = false, bool checkWithTolerance = false, ValueType<T> toleranceEps = {}) const

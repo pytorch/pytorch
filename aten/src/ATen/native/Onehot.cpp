@@ -6,6 +6,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/eq.h>
@@ -50,18 +51,19 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     // non-empty tensor
     if (self.device().is_cpu()) {
       // for cuda, rely on device assert thrown by scatter
-      TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
-    }
-    if (num_classes == -1) {
-        num_classes = self.max().item().toLong() + 1;
-    } else {
-        if (self.device().is_cpu()) {
+      auto [self_min, self_max] = at::aminmax(self);
+      TORCH_CHECK(self_min.item<int64_t>() >= 0, "Class values must be non-negative.");
+      if (num_classes == -1) {
+          num_classes = self_max.item<int64_t>() + 1;
+      } else {
           // rely on device asserts from scatter to avoid sync here
-          TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
-        } else {
-            //for cuda, assert that num_classes is at least 1
-            TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
-        }
+          TORCH_CHECK(num_classes > self_max.item<int64_t>(), "Class values must be smaller than num_classes.");
+      }
+    } else if (num_classes == -1) {
+        num_classes = self.max().item<int64_t>() + 1;
+    } else {
+        //for cuda, assert that num_classes is at least 1
+        TORCH_CHECK(num_classes >= 1, "num_classes should be positive");
     }
 
     shape.emplace_back(num_classes);

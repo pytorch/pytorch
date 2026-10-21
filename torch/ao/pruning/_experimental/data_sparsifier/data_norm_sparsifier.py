@@ -16,7 +16,7 @@ class DataNormSparsifier(BaseDataSparsifier):
     r"""L1-Norm Sparsifier
     This sparsifier computes the *L1-norm* of every sparse block and "zeroes-out" the
     ones with the lowest norm. The level of sparsity defines how many of the
-    blocks is removed.
+    blocks are removed.
     This sparsifier is controlled by three variables:
     1. `sparsity_level` defines the number of *sparse blocks* that are zeroed-out
     2. `sparse_block_shape` defines the shape of the sparse blocks. Note that

@@ -13,10 +13,11 @@
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/trie.h>
 #include <torch/csrc/lazy/python/python_util.h>
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
-#endif // FBCODE_CAFFE2 || OVRSOURCE
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
 #include <string>
 #include <utility>
 #include <vector>
@@ -210,11 +211,12 @@ void initLazyBindings(PyObject* module) {
   });
 
   lazy_ts_backend.def("_init", []() {
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     torch::lazy::InitTorchScriptBackend();
 #else
-      TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds");
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+      TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
   });
 
   /*
@@ -225,7 +227,8 @@ void initLazyBindings(PyObject* module) {
       "_get_tensors_ts_device_data_node",
       [](const std::vector<at::Tensor>& tensors)
           -> std::pair<std::vector<int64_t>, std::vector<at::IValue>> {
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         std::vector<const Node*> roots;
         for (auto& tensor : tensors) {
           auto xtensor = TryGetLtcTensor(tensor);
@@ -270,9 +273,8 @@ void initLazyBindings(PyObject* module) {
         }
         return std::make_pair(tensor_ids, ivalues);
 #else
-        TORCH_CHECK(
-            false, "TorchScript backend not yet supported in FBCODE builds");
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+        TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
       });
   // TODO(shunting) revisit this part for XLA
   lazy_ts_backend.def(
@@ -280,7 +282,8 @@ void initLazyBindings(PyObject* module) {
       [](const std::string& hash_str,
          const std::vector<at::IValue>& graph_inputs) {
         std::vector<at::Tensor> result;
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
         TORCH_CHECK(hash_str.size() == sizeof(hash_t));
         hash_t hash = *(hash_t*)(hash_str.c_str());
         auto cachedComputation =
@@ -303,12 +306,12 @@ void initLazyBindings(PyObject* module) {
         }
         return result;
 #else
-        TORCH_CHECK(
-            false, "TorchScript backend not yet supported in FBCODE builds");
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+        TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
       });
   lazy_ts_backend.def("_get_latest_computation_graph", []() -> std::string {
-#if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(BUILD_LAZY_TS_BACKEND) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     auto computation = LazyGraphExecutor::Get()
                            ->GetComputationCache()
                            ->GetLatest()
@@ -317,9 +320,8 @@ void initLazyBindings(PyObject* module) {
     TORCH_CHECK(ts_computation, "Found non-TSComputation in cache");
     return ts_computation->graph()->toString();
 #else
-    TORCH_CHECK(
-        false, "TorchScript backend not yet supported in FBCODE builds");
-#endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+    TORCH_CHECK(false, "TorchScript backend not available");
+#endif // BUILD_LAZY_TS_BACKEND && !(FBCODE_CAFFE2 || OVRSOURCE)
   });
 
   // GetPythonFramesFunction() has not ever worked with

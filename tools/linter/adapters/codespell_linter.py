@@ -13,13 +13,13 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
 
 REPO_ROOT = Path(__file__).absolute().parents[3]
-PYPROJECT = REPO_ROOT / "pyproject.toml"
 DICTIONARY = REPO_ROOT / "tools" / "linter" / "dictionary.txt"
 
 FORBIDDEN_WORDS = {
@@ -80,13 +80,21 @@ def run_codespell(path: Path) -> str:
                 sys.executable,
                 "-m",
                 "codespell_lib",
-                "--toml",
-                str(PYPROJECT),
+                "--ignore-words",
+                str(DICTIONARY),
                 str(path),
             ],
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
+            # codespell (<= 2.4.2 and main) crashes reading a pyproject.toml that
+            # has an array-of-tables directly under [tool] (e.g. the
+            # [[tool.dynamic-metadata]] scikit-build-core requires): it feeds the
+            # whole [tool] table to configparser.read_dict, which fails on the list
+            # value. codespell also auto-reads ./pyproject.toml, so run it from a
+            # directory that has none and pass the dictionary directly (the sole
+            # [tool.codespell] setting we use). Upstream bug: codespell-project/codespell#3969.
+            cwd=tempfile.gettempdir(),
         )
     except subprocess.CalledProcessError as exc:
         raise ValueError(exc.output) from exc
@@ -157,8 +165,16 @@ def check_dictionary(filename: str) -> list[LintMessage]:
                 "inline comment instead."
             )
     except Exception as err:
-        return [format_error_message(str(filename), err)]
+        return [format_error_message(filename, err)]
     return []
+
+
+def _default_num_workers() -> int | None:
+    # Forks one process per file batch, so respect MAX_JOBS to cap parallelism.
+    max_jobs = os.environ.get("MAX_JOBS")
+    if max_jobs and max_jobs.isdigit() and int(max_jobs) > 0:
+        return int(max_jobs)
+    return os.cpu_count()
 
 
 def main() -> None:
@@ -172,11 +188,19 @@ def main() -> None:
         help="verbose logging",
     )
     parser.add_argument(
+        "-j",
+        "--num-workers",
+        type=int,
+        default=None,
+        help="number of parallel workers (defaults to MAX_JOBS or the CPU count)",
+    )
+    parser.add_argument(
         "filenames",
         nargs="+",
         help="paths to lint",
     )
     args = parser.parse_args()
+    num_workers = args.num_workers or _default_num_workers()
 
     logging.basicConfig(
         format="<%(processName)s:%(levelname)s> %(message)s",
@@ -189,7 +213,7 @@ def main() -> None:
     )
 
     with concurrent.futures.ProcessPoolExecutor(
-        max_workers=os.cpu_count(),
+        max_workers=num_workers,
     ) as executor:
         futures = {executor.submit(check_file, x): x for x in args.filenames}
         futures[executor.submit(check_dictionary, str(DICTIONARY))] = str(DICTIONARY)

@@ -35,8 +35,6 @@ using at::IntArrayRef;
 using at::OptionalIntArrayRef;
 using at::Generator;
 using at::TensorList;
-using at::Dimname;
-using at::DimnameList;
 
 using namespace torch::autograd::utils;
 
@@ -65,13 +63,9 @@ void initNestedFunctions(PyObject* module) {
   };
   PyObject* nested = PyModule_Create(&def);
   THPNestedVariableFunctionsModule = nested;
-  if (!nested) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(nested);
   // steals a reference to nested
-  if (PyModule_AddObject(module, "_nested", nested) != 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddObject(module, "_nested", nested) == 0);
 }
 
 // generated methods start here

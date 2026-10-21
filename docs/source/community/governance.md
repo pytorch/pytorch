@@ -68,6 +68,9 @@ Responsibilities of the maintainer includes:
 * Supporting public documentation related to the module
 * Running public developer meetings
 
+The day-to-day expectations for handling issues and pull requests are described in the
+[maintainer guide](maintainer_guide.md).
+
 ## Core Maintainers
 
 The core maintainers are expected to have a deep understanding
@@ -226,17 +229,15 @@ the reasoning behind the decision publicly.
 
 Primary work happens through issues and pull requests on
 GitHub. Maintainers should avoid pushing their changes directly to
-the PyTorch repository, instead relying on pull requests. Approving a
-pull request by a core or module maintainer allows it to be merged
-without further process. Core and module maintainers, as listed on
-the [Maintainers](https://pytorch.org/docs/stable/community/persons_of_interest.html)
-page and within [CODEOWNERS](https://github.com/pytorch/pytorch/blob/master/CODEOWNERS)
-ultimately approve these changes.
+the PyTorch repository, instead relying on pull requests.
 
-Notifying relevant experts about an issue or a pull request
-is important. Reviews from experts in the given interest area are
-strongly preferred, especially on pull request approvals. Failure to do
-so might end up with the change being reverted by the relevant expert.
+Pull requests from contributors without write access to the repository need to be linked to an issue marked
+`actionable` by a maintainer, or pre-approved by a maintainer, as described in the
+[Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow).
+
+Every pull request needs to be reviewed by the appropriate maintainer. The list of maintainers is in
+[Persons of Interest](persons_of_interest.md), and merge approval rights are defined in
+[`.github/merge_rules.yaml`](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml).
 
 ### Controversial Decision Process
 
@@ -295,12 +296,10 @@ community of independent developers around PyTorch. If you have
 suggestions or inputs, please reach out on the PyTorch forums to
 discuss.
 
-**Q: How do I contribute code to the project?** If the change is
-relatively minor, a pull request on GitHub can be opened up immediately
-for review and merge by the project committers. For larger changes,
-please open an issue to make a proposal to discuss prior. Please also
-see the [PyTorch Contributor
-Wiki](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions) for contribution
+**Q: How do I contribute code to the project?** Start by opening an
+issue, or finding an existing one. Once a maintainer marks it `actionable`,
+you can open a pull request for it. Please see the
+[Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow)
 for a walkthrough.
 
 **Q: Can I become a committer on the project?** Unfortunately, the

@@ -5,6 +5,7 @@ import inspect
 import textwrap
 import types
 import warnings
+from typing_extensions import Format, get_annotations as get_type_annotations
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -156,26 +157,12 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 
 def get_annotations(obj):
-    # In Python-3.10+ it is recommended to use inspect.get_annotations
-    # See https://docs.python.org/3.10/howto/annotations.html
-    # But also, in 3.10 annotations from base class are not inherited
-    # by unannotated derived one, so they must be manually extracted
-    annotations = inspect.get_annotations(obj)
-    if annotations:
-        return annotations
-
-    def get_cls_annotations(cls):
-        cls_annotations = inspect.get_annotations(cls)
-        if cls_annotations:
-            return cls_annotations
-        for base in cls.__bases__:
-            cls_annotations = get_cls_annotations(base)
-            if cls_annotations:
-                return cls_annotations
-        return {}
-
     cls = obj if isinstance(obj, type) else type(obj)
-    return get_cls_annotations(cls)
+    for base in cls.__mro__:
+        annotations = get_type_annotations(base, format=Format.FORWARDREF)
+        if annotations:
+            return annotations
+    return {}
 
 
 def infer_concrete_type_builder(nn_module, share_types=True):
@@ -273,7 +260,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         attr_type, _ = infer_type(name, item)
         if item is None:
             # Modules can be None. We don't have direct support for optional
-            # Modules, so the register it as an NoneType attribute instead.
+            # Modules, so we register it as a NoneType attribute instead.
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
             continue
         if attr_type.success():
@@ -674,7 +661,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     # Make the compiled methods available to the Python ScriptModule class.
     for method_stub in method_stubs:
         if method_stub.original_method is None:
-            # define()'d methods don't have an Python original_method, so we
+            # define()'d methods don't have a Python original_method, so we
             # don't need to do any Python re-wrapping stuff
             continue
 

@@ -397,8 +397,8 @@ void gemm_impl_wmma(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
   float gb_per_sec = num_btype / 1.E6 / ave_time;
 
   std::cout << "Perf: " << std::setw(10) << ave_time << " ms, " << tflops << " TFlops, "
-                          << gb_per_sec << " GB/s, " << N <<" " <<M<<" " << k <<" "
-                          << "stride: "<<StrideA <<" "<<StrideB <<" "<<StrideC <<" "
+                          << gb_per_sec << " GB/s, " << N << ' ' << M << ' ' << k << ' '
+                          << "stride: " << StrideA << ' ' << StrideB << ' ' << StrideC << ' '
                           <<  gemm.GetTypeString()
                           << std::endl;
 #endif

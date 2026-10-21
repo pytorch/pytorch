@@ -361,7 +361,7 @@ namespace at::native {
 
 at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
   Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  float* weight_contig_ptr = weight_contig.mutable_data_ptr<float>();
   quant_utils::HandleWeightsSaturation(weight.size(0) * weight.size(1), weight_contig_ptr);
   return weight;
 }
@@ -590,8 +590,11 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -602,7 +605,8 @@ class QLinearPackWeightInt8 final {
     }
 #endif
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
     }
 #endif // #if AT_MKLDNN_ENABLED()

@@ -53,6 +53,14 @@
 ```
 
 ```{eval-rst}
+.. autofunction:: set_cublaslt_requested_algo_count
+```
+
+```{eval-rst}
+.. autofunction:: get_cublaslt_requested_algo_count
+```
+
+```{eval-rst}
 .. autofunction:: set_filename
 ```
 
@@ -90,4 +98,16 @@
 
 ```{eval-rst}
 .. autofunction:: set_numerical_check_tolerances
+```
+
+```{eval-rst}
+.. autofunction:: dynamic_dims_mask
+```
+
+```{eval-rst}
+.. autofunction:: wildcard_fallback_enable
+```
+
+```{eval-rst}
+.. autofunction:: wildcard_fallback_is_enabled
 ```

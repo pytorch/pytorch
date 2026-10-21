@@ -394,6 +394,10 @@ class enforce_grad_layout_policy(_DecoratorContextManager):
         torch._C._set_grad_layout_enforcement_enabled(enable)
         self.mode = enable
 
+    def __call__(self, orig_func: F) -> F:
+        torch._C._set_grad_layout_enforcement_enabled(self.prev)
+        return super().__call__(orig_func)
+
     def __enter__(self) -> None:
         pass
 
@@ -454,7 +458,7 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
     This context manager can lead to arbitrary silent-correctness issues in any other part of your code
     (even the ones not touched directly by the context manager)!
 
-    Ordinarily, autograd will track mutations to tensors by incrementing it's `._version` attribute.
+    Ordinarily, autograd will track mutations to tensors by incrementing its `._version` attribute.
     This is generally important for correctness, as for example, mutating a tensor that autograd has saved
     for the backwards pass can result in incorrect gradients, and autograd uses the version counter to detect
     and error out in this situation.

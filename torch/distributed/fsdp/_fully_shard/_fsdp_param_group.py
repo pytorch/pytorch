@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
-from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed import _spmd_no_typecheck
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
@@ -20,6 +23,9 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
+    _wait_all_gather,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -72,6 +78,9 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
+    all_gather_state: AllGatherState | None = None
+    active_gradient_reduction: _GradientReductionState | None = None
+
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
@@ -103,8 +112,12 @@ class FSDPCommContext:
         # All-gather/reduce-scatter states keep references to collective
         # tensors produced in one stream and used in another and accompanying
         # CUDA events for synchronization
-        self.all_gather_state: AllGatherState | None = None
         self.reduce_scatter_states: list[ReduceScatterState] = []
+        # Effective cap on retained reduce_scatter_states, resolved from the
+        # per-group reduce_scatter_max_input_buffers in
+        # FSDPState._init_shared_state. It lives here, not per group, because
+        # reduce_scatter_states is a single shared list governed by one cap.
+        self.reduce_scatter_max_input_buffers: int = 1
         # Post-forward order for explicit backward prefetching
         self.post_forward_order: list[FSDPParamGroup] = []  # will cause ref cycles
 
@@ -120,6 +133,42 @@ class FSDPCommContext:
         current_stream = self.device_handle.current_stream()
         return current_stream, current_stream
 
+    def wait_all_gather_streams_on_event(self, event: torch.Event | None) -> None:
+        """Order both all-gather streams after the given event."""
+        if event is None:
+            return
+        # Calling ``unshard`` before lazy init means streams are not initialized.
+        if not hasattr(self, "all_gather_copy_in_stream"):
+            return
+        self.all_gather_copy_in_stream.wait_event(event)
+        self.all_gather_stream.wait_event(event)
+
+    def release_all_gather_state_for_comm_reuse(self) -> None:
+        """Release deferred state before reuse by all-gather streams.
+
+        Forward prefetch may immediately reuse the retained buffers on either
+        all-gather stream, so both streams must follow the saved copy-out event
+        before ownership is released.
+        """
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        self.wait_all_gather_streams_on_event(all_gather_state.event)
+        self.all_gather_state = None
+
+    def release_all_gather_state_on_current_stream(self) -> None:
+        """Release deferred state at a current-stream lifecycle boundary.
+
+        Post-backward and reset execute on the current stream. Ordering that
+        stream after copy-out avoids introducing reverse dependencies onto the
+        communication streams. Root pre-forward orders those streams after the
+        current stream before the next implicit all-gather.
+        """
+        if (all_gather_state := self.all_gather_state) is None:
+            return
+        if all_gather_state.event is not None and hasattr(self, "device_handle"):
+            self.device_handle.current_stream().wait_event(all_gather_state.event)
+        self.all_gather_state = None
+
 
 # See [Note: Overlapping all-gather copy-in and all-gather]
 class AllGatherState(NamedTuple):
@@ -130,14 +179,22 @@ class AllGatherState(NamedTuple):
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
     event: torch.Event | None  # reduce-scatter event
+    allocation_stream: torch.Stream  # Owns the input allocation
+    param_group: FSDPParamGroup  # Identifies the owning FSDP root
+
+
+@dataclass
+class _GradientReductionState:
+    owner: object
 
 
 class AllReduceState(NamedTuple):
-    # Holding all_reduce_input (the reduce-dtype AR buffer) keeps the
-    # caching allocator from reusing the block across layers. This is a
-    # structural invariant, not bookkeeping: without it, the next layer's
-    # RS can reuse the same physical block before this layer's AR finishes
-    # under slow AR, causing gradient aliasing. See PR #140044, PR #180900.
+    # Holding all_reduce_input (the reduce-dtype AR buffer, or the RS output
+    # passed to the all-reduce hook) keeps the caching allocator from reusing
+    # the block across layers. This is a structural invariant, not
+    # bookkeeping: without it, the next layer's RS can reuse the same
+    # physical block before this layer's AR or hook finishes under slow AR,
+    # causing gradient aliasing. See PR #140044, PR #180900.
     all_reduce_input: torch.Tensor
     event: torch.Event | None  # all-reduce event
 
@@ -145,7 +202,6 @@ class AllReduceState(NamedTuple):
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
-    _orig_dtype: torch.dtype | None
     _reduce_dtype: torch.dtype | None
 
     def __init__(
@@ -170,7 +226,7 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                mp_policy._resolve_for_param(param),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -179,7 +235,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -199,10 +254,15 @@ class FSDPParamGroup:
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
-        self._all_reduce_hook_stream: torch.cuda.Stream | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        # See Note [All-gather output fn] and Note [Reduce-scatter input fn]
+        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
+        self._reduce_scatter_param_indices: list[int] = []
+        self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -216,6 +276,12 @@ class FSDPParamGroup:
         # Whether to reshard parameters after backward (only useful for
         # gradient accumulation)
         self.reshard_after_backward: bool = True
+        # Per-group input for the reduce-scatter copy-in (chunk_cat) buffer
+        # cap-K, set via FSDPModule.set_reduce_scatter_max_input_buffers (see
+        # its docstring). FSDP keeps 1 by default. These per-group values are
+        # resolved into the single shared
+        # comm_ctx.reduce_scatter_max_input_buffers that post_backward reads.
+        self.reduce_scatter_max_input_buffers: int = 1
         # Optional custom factor for the gradient reduction op (e.g. to divide
         # by a factor other than the world size)
         self.gradient_divide_factor: float | None = None
@@ -246,41 +312,63 @@ class FSDPParamGroup:
         # different world size, which should be waited on in the next unshard
         self._reshard_after_forward_event: torch.Event | None = None
 
-        # Only for HSDP, if accumulating gradients without all-reduce, save the
-        # partial reduce output (only reduce-scattered but not all-reduced)
+        # Gradients awaiting all-reduce (HSDP or replication), in reduction dtype.
         self._partial_reduce_output: torch.Tensor | None = None
+        # Whether post-backward work remains for this group.
+        self._post_backward_pending: bool = False
+        # Parameter order and (offset, padded numel) persist after all-reduce so the
+        # next accumulation can reuse the layout without retaining gradient storage.
+        self._partial_reduce_output_layout: dict[FSDPParam, tuple[int, int]] = {}
         # Holds the reduce-dtype AR buffer + completion event across
-        # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
-        # reduce + fp32 params). Structural invariant: the live Python
-        # ref keeps the buffer off the caching allocator's free list,
-        # preventing the next layer's RS from reusing the same physical
-        # block while this layer's AR is still in flight. See
+        # layers in HSDP+AR or with an all-reduce hook, with reduce_dtype !=
+        # orig_dtype (e.g., bf16 reduce + fp32 params). Structural invariant:
+        # the live Python ref keeps the buffer off the caching allocator's
+        # free list, preventing the next layer's RS from reusing the same
+        # physical block while this layer's AR or hook is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
-        orig_dtypes = {p.orig_dtype for p in trainable_params}
-        reduce_dtypes = {p.reduce_dtype for p in trainable_params}
+        if trainable_params:
+            params_for_dtype = trainable_params
+        else:
+            params_for_dtype = [
+                p for p in self.fsdp_params if p.orig_dtype.is_floating_point
+            ]
+        orig_dtypes = {p.orig_dtype for p in params_for_dtype}
+        reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
             # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes)) if trainable_params else None
         if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
-            # This can be relaxed if we issue one reduce-scatter per reduce
-            # dtype (but we would need a way for users to specify multiple
-            # reduce dtypes)
             raise AssertionError(
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
-        self._reduce_dtype = next(iter(reduce_dtypes)) if trainable_params else None
+        dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
+        self._reduce_dtype = (
+            next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
+        )
+        self._fsdp_params_deferring_grad_upcast = [
+            p for p in self.fsdp_params if p.defers_grad_upcast
+        ]
+
+    def _init_reduce_scatter_param_order(self) -> None:
+        # Cache the packing order after resolving dtypes, keeping all-gather's
+        # parameter order unchanged. Backward filters this order to active grads.
+        dtype_indices: dict[torch.dtype | None, list[int]] = {}
+        for index, fsdp_param in enumerate(self.fsdp_params):
+            dtype_indices.setdefault(fsdp_param.sharded_grad_dtype, []).append(index)
+        self._reduce_scatter_param_indices = [
+            index for indices in dtype_indices.values() for index in indices
+        ]
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -296,9 +384,11 @@ class FSDPParamGroup:
             self._reset_sharded_params = True
         self._validate_no_meta_params()
         self._validate_cpu_offload_params()
+        self._validate_reduce_scatter_max_input_buffers()
         # Initialize mixed precision attributes lazily in case the user changes
         # the parameter dtypes after construction time but before forward
         self._init_mp_dtypes()
+        self._init_reduce_scatter_param_order()
         self._register_state_dict_hooks()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
@@ -370,7 +460,9 @@ class FSDPParamGroup:
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams
-            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(
+                self._reshard_after_forward_event
+            )
             self._reshard_after_forward_event = None
 
         if isinstance(self.mesh_info, FSDPMeshInfo):
@@ -415,9 +507,7 @@ class FSDPParamGroup:
             return  # no preceding unshard
         async_op = self._all_gather_result.all_gather_work is not None
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
-            if prev_all_gather_state := self.comm_ctx.all_gather_state:
-                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
-                self.comm_ctx.all_gather_state = None  # free the all-gather result
+            self.comm_ctx.release_all_gather_state_for_comm_reuse()
         if isinstance(self.mesh_info, FSDPMeshInfo):
             world_size = self._all_gather_process_group.size()
         else:
@@ -426,25 +516,34 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                # Use all_gather_inputs which already handles conversion to param_dtype
-                # This is consistent with the world_size > 1 path
-                all_gather_input = fsdp_param.all_gather_inputs[0]
-
-                # Make sure the all_gather_outputs has proper storage size before using it
-                # First ensure we have at least one tensor in all_gather_outputs
-                fsdp_param.init_all_gather_outputs(
-                    [all_gather_input.numel()],
-                    [all_gather_input.dtype],
-                    world_size,
-                    self.device,
-                )
-
-                tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
-
-                # find alternative way to check if tensor.is_inference
-                with torch.autograd._unsafe_preserve_version_counter(tensor):
-                    tensor.copy_(all_gather_input)
+                all_gather_inputs = fsdp_param.all_gather_inputs
+                # Avoids building the lists once the outputs exist
+                if not fsdp_param.all_gather_outputs:
+                    fsdp_param.init_all_gather_outputs(
+                        [t.numel() for t in all_gather_inputs],
+                        [t.dtype for t in all_gather_inputs],
+                        world_size,
+                        self.device,
+                    )
+                for tensor, all_gather_input in zip(
+                    fsdp_param.all_gather_outputs, all_gather_inputs, strict=True
+                ):
+                    alloc_storage(tensor)
+                    with (
+                        torch.autograd._unsafe_preserve_version_counter(tensor)
+                        if not tensor.is_inference()
+                        else contextlib.nullcontext()
+                    ):
+                        # Copy smaller payloads of the same dtype into a prefix, and
+                        # byte payloads of typed outputs into all of their bytes
+                        if (
+                            tensor.dtype == all_gather_input.dtype
+                            and tensor.numel() != all_gather_input.numel()
+                        ):
+                            tensor = tensor[: all_gather_input.numel()]
+                        elif all_gather_input.dtype == torch.uint8:
+                            tensor = tensor.view(torch.uint8)
+                        tensor.copy_(all_gather_input)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
@@ -452,6 +551,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
+                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -472,16 +572,9 @@ class FSDPParamGroup:
                 self._all_gather_result, all_gather_copy_out_event
             )
         else:
-            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(all_gather_copy_out_event)
 
         self._all_gather_result = None  # free unless saved in `all_gather_state`
-
-    def _wait_all_gather_streams_on_event(self, event: torch.Event | None):
-        # Calling `unshard` before lazy init means streams are not initialized
-        if hasattr(self.comm_ctx, "all_gather_copy_in_stream") and event is not None:
-            self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
-            self.comm_ctx.all_gather_stream.wait_event(event)
 
     @_disable_functorch_if_active
     def reshard(self):
@@ -502,11 +595,7 @@ class FSDPParamGroup:
         # accumulated grad-reduction state, and restores sharded params.
         current_stream = self.device_handle.current_stream()
         if self._all_gather_result is not None:
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                current_stream.wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
         if self._post_reduce_event is not None:
             current_stream.wait_event(self._post_reduce_event)
@@ -518,9 +607,19 @@ class FSDPParamGroup:
             current_stream.wait_event(self._all_reduce_state.event)
         self._all_reduce_state = None
         if self._reshard_after_forward_event is not None:
-            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self.comm_ctx.wait_all_gather_streams_on_event(
+                self._reshard_after_forward_event
+            )
             self._reshard_after_forward_event = None
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.sharded_param.grad = None
+            leaf = getattr(fsdp_param, "_unsharded_param", None)
+            if leaf is not None:
+                leaf.grad = None
+        self._restore_unsharded_grad_dtypes()
         self._partial_reduce_output = None
+        self._post_backward_pending = False
+        self._partial_reduce_output_layout.clear()
         self._post_forward_indices.clear()
         self._training_state = TrainingState.IDLE
         self._to_sharded()
@@ -534,17 +633,27 @@ class FSDPParamGroup:
             # ``fully_shard([a, b])`` already registered post_backward this
             # pass; skip to avoid duplicate ``RegisterPostBackwardFunction``
             # autograd nodes.
-            entering_forward_pass = self._training_state != TrainingState.FORWARD
-            self._training_state = TrainingState.FORWARD
-            self.unshard(self.unshard_async_op)
-            self.wait_for_unshard()
+            with _spmd_no_typecheck():
+                entering_forward_pass = self._training_state != TrainingState.FORWARD
+                self._training_state = TrainingState.FORWARD
+                self.unshard(self.unshard_async_op)
+                self.wait_for_unshard()
+                # No-grad forwards have no backward, and recomputation keeps the
+                # choice of the forward it recomputes
+                if torch.is_grad_enabled() and not is_bw():
+                    self._set_unsharded_grad_dtypes()
+            for fsdp_param in self.fsdp_params:
+                fsdp_param._restore_spmd_types(fsdp_param.unsharded_param)
             if entering_forward_pass:
                 args, kwargs = self._register_post_backward_hook(args, kwargs)
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
         logger.debug("%s", self._with_fqn("FSDP::post_forward"))
-        with record_function(self._with_fqn("FSDP::post_forward")):
+        with (
+            _spmd_no_typecheck(),
+            record_function(self._with_fqn("FSDP::post_forward")),
+        ):
             # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
             # it shouldn't change post_forward_order
             if not is_bw():
@@ -565,7 +674,10 @@ class FSDPParamGroup:
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
         logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
-        with record_function(self._with_fqn("FSDP::pre_backward")):
+        with (
+            _spmd_no_typecheck(),
+            record_function(self._with_fqn("FSDP::pre_backward")),
+        ):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
@@ -574,175 +686,201 @@ class FSDPParamGroup:
 
     @_dynamo_disable
     def post_backward(self, *unused: Any):
-        # This method should be idempotent and safe to call even when this
-        # FSDP parameter group was not used in backward (should be a no-op)
-        logger.debug("%s", self._with_fqn("FSDP::post_backward"))
-        # Partial-group-forward detection: grouped ``fully_shard([a, b, ...])``
-        # where the forward ran only a subset of the group's modules (chunked
-        # loss, 1F1B, etc.). The wrapped post-hook took its partial path, so
-        # ``state._post_forward`` never ran and no ``_pre_backward`` hook was
-        # registered — ``pre_backward`` therefore never fired and state stays
-        # at FORWARD instead of transitioning IDLE → PRE_BACKWARD.
-        is_partial_group_backward = (
-            len(self.modules) > 1  # grouped (structural)
-            and self._training_state == TrainingState.FORWARD  # partial path taken
-        )
-        self._training_state = TrainingState.POST_BACKWARD
-        with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
-            for fsdp_param in self.fsdp_params:
-                fsdp_param.accumulate_unsharded_grad_if_needed()
-        with record_function(self._with_fqn("FSDP::post_backward_reshard")):
-            if not self.reduce_grads:
+        with _spmd_no_typecheck():
+            # This method should be idempotent and safe to call even when this
+            # FSDP parameter group was not used in backward (should be a no-op)
+            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
+            # Partial-group-forward detection: grouped ``fully_shard([a, b, ...])``
+            # where the forward ran only a subset of the group's modules (chunked
+            # loss, 1F1B, etc.). The wrapped post-hook took its partial path, so
+            # ``state._post_forward`` never ran and no ``_pre_backward`` hook was
+            # registered — ``pre_backward`` therefore never fired and state stays
+            # at FORWARD instead of transitioning IDLE → PRE_BACKWARD.
+            is_partial_group_backward = (
+                len(self.modules) > 1  # grouped (structural)
+                and self._training_state == TrainingState.FORWARD  # partial path taken
+            )
+            self._training_state = TrainingState.POST_BACKWARD
+            with record_function(self._with_fqn("FSDP::post_backward_reshard")):
+                if not self.reduce_grads:
+                    self._post_backward_pending = True
+                    self._restore_unsharded_grad_dtypes()
+                    if self.reshard_after_backward:
+                        self.reshard()
+                    return
+                self._post_backward_pending = False
+                self._validate_unused_param_grad_dtypes()
+                # Save the autograd-computed gradients before resharding to only
+                # access the unsharded parameters when their data is present
+                fsdp_params_with_grad, unsharded_grads = (
+                    self._take_unsharded_grads_to_reduce()
+                )
+                self._restore_unsharded_grad_dtypes()
                 if self.reshard_after_backward:
                     self.reshard()
-                for fsdp_param in self.fsdp_params:
-                    fsdp_param.to_accumulated_grad_if_needed()
-                return
-            # Save the autograd-computed gradients before resharding to only
-            # access the unsharded parameters when their data is present
-            fsdp_params_with_grad: list[FSDPParam] = []
-            unsharded_grads: list[torch.Tensor] = []
-
-            for fsdp_param in self.fsdp_params:
-                if not hasattr(fsdp_param, "_unsharded_param"):
-                    continue
-                # May have an accumulated gradient of the reduce dtype if the
-                # previous backward did not reduce-scatter
-                if fsdp_param.unsharded_accumulated_grad is not None:
-                    fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(fsdp_param.unsharded_accumulated_grad_data)
-                    fsdp_param.unsharded_accumulated_grad = None
-                elif fsdp_param.unsharded_param.grad is not None:
-                    fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(fsdp_param.unsharded_grad_data)
-                    fsdp_param.unsharded_param.grad = None
-                elif (
-                    self.reduce_scatter_unused_params
-                    and fsdp_param.unsharded_param.requires_grad
+            # Recycle prior modules' reduce-scatter input buffers, keeping at most
+            # `max_input_buffers` in flight: reclaim the oldest (wait on its
+            # reduce-scatter, then drop the keepalive ref that was deferring the
+            # allocator's reuse of its memory) until fewer than that remain, before
+            # this module's reduce appends one more. See
+            # set_reduce_scatter_max_input_buffers for the memory/overlap tradeoff.
+            # (Assumes backward fires groups N-1 first; if not, overlap degrades but
+            # correctness is preserved.)
+            max_input_buffers = self.comm_ctx.reduce_scatter_max_input_buffers
+            states = self.comm_ctx.reduce_scatter_states
+            if (
+                self._param_group_index == self._num_param_groups - 1
+                and len(states) >= max_input_buffers
+            ):
+                with record_function(
+                    f"FSDP::post_backward_rs_wait ({self._module_fqn})"
                 ):
-                    fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(fsdp_param.unsharded_zero_grad_data)
-            if self.reshard_after_backward:
-                self.reshard()
-        # Wait on prior module's RS states (assumes backward fires groups
-        # N-1 first; if not, overlap degrades but correctness is preserved).
-        if (
-            self._param_group_index == self._num_param_groups - 1
-            and self.comm_ctx.reduce_scatter_states
-        ):
-            with record_function(f"FSDP::post_backward_rs_wait ({self._module_fqn})"):
-                for rs_state in self.comm_ctx.reduce_scatter_states:
-                    if rs_state.event is not None:
-                        self.device_handle.current_stream().wait_event(rs_state.event)
-                self.comm_ctx.reduce_scatter_states.clear()
-        if len(fsdp_params_with_grad) == 0:
-            return
-        with record_function(self._with_fqn("FSDP::post_backward_reduce")):
-            all_reduce_pg = (
-                self._all_reduce_process_group
-                if isinstance(self.mesh_info, DDPMeshInfo)
-                else None
-            )
-            all_reduce_stream: torch.cuda.Stream
-            if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
-                # this means the native HSDP is not enabled,
-                # but user may want to have a custom HSDP setup
-                if self._all_reduce_hook is None:
-                    raise AssertionError(
-                        "all reduce hook stream is specified but hook itself is missing."
-                    )
-                all_reduce_stream = self._all_reduce_hook_stream
-            else:
-                all_reduce_stream = self.comm_ctx.all_reduce_stream
-
+                    while len(states) >= max_input_buffers:
+                        oldest = states.pop(0)
+                        if oldest.event is not None:
+                            # The allocation stream waits before the input storage
+                            # is released. The current stream also waits, when
+                            # different, so the next allocation cannot exceed the
+                            # global buffer cap.
+                            oldest.allocation_stream.wait_event(oldest.event)
+                            current_stream = self.device_handle.current_stream()
+                            if current_stream != oldest.allocation_stream:
+                                current_stream.wait_event(oldest.event)
+                        del oldest
+            if not unsharded_grads:
+                return
             self._wait_for_post_backward()
-            (
-                reduce_scatter_input,
-                reduce_scatter_event,
-                post_reduce_stream,
-                self._post_reduce_event,
-                all_reduce_input,
-                all_reduce_event,
-                self._partial_reduce_output,
-            ) = foreach_reduce(
-                fsdp_params_with_grad,
-                unsharded_grads,
-                (
-                    # pyrefly: ignore [bad-argument-type]
-                    self._reduce_scatter_process_group
-                    if isinstance(self.mesh_info, FSDPMeshInfo)
-                    else None  # pyre-fixme[6]
-                ),
-                self.comm_ctx.reduce_scatter_stream,
-                self._reduce_scatter_comm,
-                self._orig_dtype,
-                self._reduce_dtype,
-                self.device,
-                self.gradient_divide_factor,
-                (
+            with record_function(self._with_fqn("FSDP::post_backward_reduce")):
+                all_reduce_pg = (
                     self._all_reduce_process_group
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else None
-                ),
-                all_reduce_stream,
-                self.all_reduce_grads,
-                self._partial_reduce_output,
-                self._all_reduce_hook,
-                self.force_sum_reduction_for_comms,
-            )
-            self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
-                self._post_reduce_event
-            )
-            self.comm_ctx.reduce_scatter_states.append(
-                ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
-            )
-            if is_partial_group_backward:
-                # Serialize the default stream on this invocation's
-                # post-accumulate event before returning to autograd.
-                # Otherwise the next partial-group invocation's autograd
-                # kernels queue on the default stream concurrently with
-                # this one's accumulate on the RS stream; the caching
-                # allocator then hands an autograd kernel a block that is
-                # a live input/output of this accumulate, corrupting grads
-                # on non-zero ranks. The post-accumulate event is load-
-                # bearing (pre-accumulate reduce_scatter_event is NOT, per
-                # MI350X); waiting at the next post_backward's entry is
-                # too late because autograd runs between post_backwards.
-                # No CPU sync.
-                #
-                # TODO(#181218): open questions on scope.
-                #   1. Conditional vs unconditional. The same cross-stream
-                #      hazard exists structurally in regular FSDP but has
-                #      not been observed to fire, plausibly because
-                #      ``reduce_scatter_states.append(...)`` ref-holds
-                #      ``reduce_scatter_input`` and cross-layer allocator
-                #      pressure is looser than within a group. Dropping
-                #      the gate needs a real-model overlap-loss measurement.
-                #   2. ROCm-specific vs cross-platform. Only observed on
-                #      ROCm/RCCL/MI350X; CUDA FSDP passes without this fix.
-                #      The standalone repro shows the stream-ordering
-                #      hazard (vector 1) is cross-platform, but FSDP's
-                #      ref-hold closes it on both. The residual FSDP-side
-                #      race on ROCm (vector 2) is on a non-Python-reachable
-                #      buffer — RCCL workspace or allocator fragment.
-                #      Whether vector 2 exists on CUDA FSDP but is timing-
-                #      masked is unresolved. See
-                #      ``fsdp2_chunked_loss_rocm_race.md``.
-                self.device_handle.current_stream().wait_event(self._post_reduce_event)
-            if all_reduce_input is not None:
-                if self.device.type != "cpu":
-                    if all_reduce_event is None:
-                        raise AssertionError(
-                            "Expected all_reduce_event to be set for non-CPU device"
-                        )
-                self._all_reduce_state = AllReduceState(
-                    all_reduce_input, all_reduce_event
                 )
+                all_reduce_stream: torch.Stream
+                if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
+                    # this means the native HSDP is not enabled,
+                    # but user may want to have a custom HSDP setup
+                    if self._all_reduce_hook is None:
+                        raise AssertionError(
+                            "all reduce hook stream is specified but hook itself is missing."
+                        )
+                    all_reduce_stream = self._all_reduce_hook_stream
+                else:
+                    all_reduce_stream = self.comm_ctx.all_reduce_stream
+
+                reduce_dtype = self._get_reduce_dtype(
+                    fsdp_params_with_grad, unsharded_grads
+                )
+                partial_sizes = (
+                    [p.padded_sharded_param_size.numel() for p in fsdp_params_with_grad]
+                    if isinstance(self.mesh_info, DDPMeshInfo)
+                    else []
+                )
+                partial_input = None
+                if partial_sizes:
+                    rs_stream = self.comm_ctx.reduce_scatter_stream
+                    if self._partial_reduce_output is not None:
+                        # The cast/repack below allocates on the RS stream before
+                        # foreach_reduce orders it after the compute stream. Wait
+                        # now so it cannot reuse a block another stream still uses,
+                        # e.g. an all-reduce buffer released by finalize_backward.
+                        rs_stream.wait_stream(self.device_handle.current_stream())
+                    # Allocate on the RS stream so reuse is ordered after consumption.
+                    with self.device_handle.stream(rs_stream):
+                        partial_input = self._prepare_partial_reduce_output(
+                            fsdp_params_with_grad, partial_sizes, reduce_dtype
+                        )
+                (
+                    reduce_scatter_input,
+                    reduce_scatter_event,
+                    post_reduce_stream,
+                    self._post_reduce_event,
+                    all_reduce_input,
+                    all_reduce_event,
+                    self._partial_reduce_output,
+                ) = foreach_reduce(
+                    fsdp_params_with_grad,
+                    unsharded_grads,
+                    (
+                        # pyrefly: ignore [bad-argument-type]
+                        self._reduce_scatter_process_group
+                        if isinstance(self.mesh_info, FSDPMeshInfo)
+                        else None  # pyre-fixme[6]
+                    ),
+                    self.comm_ctx.reduce_scatter_stream,
+                    self._reduce_scatter_comm,
+                    reduce_dtype,
+                    self.device,
+                    self.gradient_divide_factor,
+                    (
+                        self._all_reduce_process_group
+                        if isinstance(self.mesh_info, DDPMeshInfo)
+                        else None
+                    ),
+                    all_reduce_stream,
+                    self.all_reduce_grads,
+                    partial_input,
+                    self._all_reduce_hook,
+                    self.force_sum_reduction_for_comms,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                )
+                self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
+                    self._post_reduce_event
+                )
+                self.comm_ctx.reduce_scatter_states.append(
+                    ReduceScatterState(
+                        reduce_scatter_input,
+                        reduce_scatter_event,
+                        self.device_handle.current_stream(),
+                        self,
+                    )
+                )
+                if is_partial_group_backward:
+                    # Serialize the default stream on this invocation's
+                    # post-accumulate event before returning to autograd.
+                    # Otherwise the next partial-group invocation's autograd
+                    # kernels queue on the default stream concurrently with
+                    # this one's accumulate on the RS stream; the caching
+                    # allocator then hands an autograd kernel a block that is
+                    # a live input/output of this accumulate, corrupting grads
+                    # on non-zero ranks. The post-accumulate event is load-
+                    # bearing (pre-accumulate reduce_scatter_event is NOT, per
+                    # MI350X); waiting at the next post_backward's entry is
+                    # too late because autograd runs between post_backwards.
+                    # No CPU sync.
+                    #
+                    # TODO(#181218): open questions on scope.
+                    #   1. Conditional vs unconditional. The same cross-stream
+                    #      hazard exists structurally in regular FSDP but has
+                    #      not been observed to fire, plausibly because
+                    #      ``reduce_scatter_states.append(...)`` ref-holds
+                    #      ``reduce_scatter_input`` and cross-layer allocator
+                    #      pressure is looser than within a group. Dropping
+                    #      the gate needs a real-model overlap-loss measurement.
+                    #   2. ROCm-specific vs cross-platform. Only observed on
+                    #      ROCm/RCCL/MI350X; CUDA FSDP passes without this fix.
+                    #      The standalone repro shows the stream-ordering
+                    #      hazard (vector 1) is cross-platform, but FSDP's
+                    #      ref-hold closes it on both. The residual FSDP-side
+                    #      race on ROCm (vector 2) is on a non-Python-reachable
+                    #      buffer — RCCL workspace or allocator fragment.
+                    #      Whether vector 2 exists on CUDA FSDP but is timing-
+                    #      masked is unresolved. See
+                    #      ``fsdp2_chunked_loss_rocm_race.md``.
+                    self.device_handle.current_stream().wait_event(
+                        self._post_reduce_event
+                    )
+                if all_reduce_input is not None:
+                    if self.device.type != "cpu":
+                        if all_reduce_event is None:
+                            raise AssertionError(
+                                "Expected all_reduce_event to be set for non-CPU device"
+                            )
+                    self._all_reduce_state = AllReduceState(
+                        all_reduce_input, all_reduce_event
+                    )
 
     def finalize_backward(self):
-        for event in self.comm_ctx._last_post_reduce_events.values():
-            self.device_handle.current_stream().wait_event(event)
-        self.comm_ctx._last_post_reduce_events = dict()
         self._post_reduce_event = None
         self._all_reduce_state = None
         for fsdp_param in self.fsdp_params:
@@ -752,13 +890,160 @@ class FSDPParamGroup:
         if self._all_gather_result is not None:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
-            if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.accelerator.current_stream().wait_event(event)
-            work = self._all_gather_result.all_gather_work
-            if isinstance(work, dist.distributed_c10d.Work):
-                work.wait()
+            _wait_all_gather(self._all_gather_result)
             self._all_gather_result = None
         self._post_forward_indices.clear()
+
+    def _get_partial_reduce_grad(self, param: FSDPParam) -> torch.Tensor | None:
+        output = self._partial_reduce_output
+        if output is None or param not in self._partial_reduce_output_layout:
+            return None
+        offset, _ = self._partial_reduce_output_layout[param]
+        return output.narrow(0, offset, param.sharded_size.numel()).view(
+            param.sharded_size
+        )
+
+    def _validate_unused_param_grad_dtypes(self) -> None:
+        # Check configuration rather than gradient presence so every rank raises
+        # together; a rank-local error would leave peers hanging in reduction.
+        if not self.reduce_scatter_unused_params:
+            return
+        for fsdp_param in self.fsdp_params:
+            if (
+                fsdp_param.sharded_param.requires_grad
+                and fsdp_param.unsharded_grad_dtype is None
+            ):
+                raise ValueError(
+                    "Reducing unused parameters with grad_dtype=None requires an "
+                    "explicit MixedPrecisionPolicy.reduce_dtype so every rank can "
+                    f"build zero gradients of the same dtype: {fsdp_param._param_fqn}. "
+                    "Set reduce_dtype to the dtype its gradients already have."
+                )
+
+    def _set_unsharded_grad_dtypes(self) -> None:
+        # Leave gradients in the dtype autograd produces, saving a cast per
+        # parameter: AccumulateGrad adds them in place to existing wider
+        # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
+        # gradient that starts accumulating across backwards needs the cast.
+        # Chosen in pre-forward and kept until post-backward so that a
+        # compiled backward can use the grad_dtype its forward was traced with.
+        for fsdp_param in self._fsdp_params_deferring_grad_upcast:
+            param = getattr(fsdp_param, "_unsharded_param", None)
+            if param is None or not param.requires_grad:
+                continue
+            defer = self.reduce_grads or param.grad is not None
+            param.grad_dtype = None if defer else fsdp_param.unsharded_grad_dtype
+
+    def _restore_unsharded_grad_dtypes(self) -> None:
+        # Gradients produced outside a forward and its backward, e.g. by a
+        # pipeline schedule's weight passes, get autograd's upcast. Widen a
+        # gradient created while deferred but not reduced, so later ones
+        # accumulate in the unsharded gradient dtype.
+        for fsdp_param in self._fsdp_params_deferring_grad_upcast:
+            param = getattr(fsdp_param, "_unsharded_param", None)
+            if param is None or not param.requires_grad:
+                continue
+            grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
+            if grad is not None and grad.dtype != dtype:
+                param.grad = grad.to(dtype)
+            param.grad_dtype = dtype
+
+    def _get_reduce_dtype(
+        self, fsdp_params: list[FSDPParam], grads: list[torch.Tensor]
+    ) -> torch.dtype:
+        if self._reduce_dtype is not None:
+            return self._reduce_dtype
+        # Promote over accumulation dtypes (grad_dtype, or the original dtype if
+        # unset) since they match across ranks. Gradient dtypes may not: a fresh
+        # gradient may not be upcast to its accumulation dtype yet, while an
+        # accumulated one is. grad_dtype=None has no accumulation dtype, so use
+        # its gradient's dtype.
+        dtypes = {p.unsharded_grad_dtype or g.dtype for p, g in zip(fsdp_params, grads)}
+        if self._partial_reduce_output is not None:
+            # The pending partial has an earlier backward's reduce dtype, and
+            # _prepare_partial_reduce_output casts it to this one's. Only
+            # grad_dtype=None params can make these dtypes narrower: their dtype
+            # follows the computation, e.g. fp32 in one microbatch and bf16 in
+            # the next. Promoting over these dtypes alone would then cast the
+            # fp32 partial down to bf16.
+            dtypes.add(self._partial_reduce_output.dtype)
+        return functools.reduce(torch.promote_types, dtypes)
+
+    def _take_unsharded_grads_to_reduce(
+        self,
+    ) -> tuple[list[FSDPParam], list[torch.Tensor]]:
+        """Returns the gradients to reduce, clearing them from the unsharded parameters."""
+        fsdp_params_with_grad: list[FSDPParam] = []
+        unsharded_grads: list[torch.Tensor] = []
+        for index in self._reduce_scatter_param_indices:
+            fsdp_param = self.fsdp_params[index]
+            if (grad := self._get_unsharded_grad_to_reduce(fsdp_param)) is None:
+                continue
+            fsdp_params_with_grad.append(fsdp_param)
+            unsharded_grads.append(grad)
+            fsdp_param.unsharded_param.grad = None
+        return fsdp_params_with_grad, unsharded_grads
+
+    def _get_unsharded_grad_to_reduce(self, param: FSDPParam) -> torch.Tensor | None:
+        """Returns the unsharded gradient to reduce-scatter, or ``None`` to skip."""
+        if not hasattr(param, "_unsharded_param"):
+            return None
+        unsharded_param = param.unsharded_param
+        # A group unused in this microbatch may still own gradients from an
+        # earlier backward without synchronization.
+        if unsharded_param.grad is not None:
+            return param.unsharded_grad_data
+        if self._get_partial_reduce_grad(param) is not None or (
+            self.reduce_scatter_unused_params and unsharded_param.requires_grad
+        ):
+            return param.unsharded_zero_grad_data
+        return None
+
+    def _prepare_partial_reduce_output(
+        self,
+        params: list[FSDPParam],
+        sizes: list[int],
+        dtype: torch.dtype,
+    ) -> torch.Tensor | None:
+        output = self._partial_reduce_output
+        if output is None and self.all_reduce_grads:
+            return None
+        layout_matches = len(params) == len(self._partial_reduce_output_layout) and all(
+            param is cached_param and size == cached_size
+            for param, size, (cached_param, (_, cached_size)) in zip(
+                params, sizes, self._partial_reduce_output_layout.items()
+            )
+        )
+        if layout_matches:
+            # Reuse the allocation directly. An unrestricted gradient policy can
+            # change the reduction dtype, requiring only one flat cast here.
+            if output is not None and output.dtype != dtype:
+                self._partial_reduce_output = output.to(dtype)
+            return self._partial_reduce_output
+
+        # Preserve parameter identities when the next microbatch changes the
+        # packed layout, zero-filling entries with no previous contribution.
+        # Per-parameter copies are fine: the layout only changes when a parameter
+        # first gets a gradient partway through accumulation.
+        repacked_output = (
+            torch.zeros(sum(sizes), dtype=dtype, device=output.device)
+            if output is not None
+            else None
+        )
+        new_layout = {}
+        offset = 0
+        for param, size in zip(params, sizes):
+            new_layout[param] = (offset, size)
+            if repacked_output is not None:
+                grad_pending_all_reduce = self._get_partial_reduce_grad(param)
+                if grad_pending_all_reduce is not None:
+                    repacked_output.narrow(
+                        0, offset, grad_pending_all_reduce.numel()
+                    ).copy_(grad_pending_all_reduce.reshape(-1))
+            offset += size
+        self._partial_reduce_output_layout = new_layout
+        self._partial_reduce_output = repacked_output
+        return repacked_output
 
     def _wait_for_post_backward(self):
         if self._post_reduce_event is not None:
@@ -829,12 +1114,21 @@ class FSDPParamGroup:
     # Utilities #
     def _to_sharded(self):
         if not self.is_sharded:
+            if self._all_gather_result is not None:
+                # A backward prefetch of a group that backward did not use was
+                # gathered over the post-forward mesh, which a later forward
+                # cannot copy out, so wait for it and discard it
+                _wait_all_gather(self._all_gather_result)
+                self._all_gather_result = None
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
+            # Check every parameter before resharding any
+            for fsdp_param in self.fsdp_params:
+                fsdp_param.check_post_forward_reshard()
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
@@ -927,8 +1221,10 @@ class FSDPParamGroup:
 
     @property
     def _all_gather_process_group(self) -> dist.ProcessGroup:
+        # Post-forward shards are gathered over the mesh their parameters resharded
+        # with, which set_reshard_after_forward does not change
         mesh_info = (
-            cast(FSDPMeshInfo, self.post_forward_mesh_info)
+            self.fsdp_params[0].post_forward_mesh_info
             if self.is_sharded_post_forward
             else self.mesh_info
         )
@@ -944,7 +1240,51 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"Expected mesh_info to be FSDPMeshInfo, got {type(self.mesh_info)}"
             )
-        return self.mesh_info.shard_process_group
+        # Falls back to the shard PG (shared with all-gather) unless
+        # set_separate_reduce_scatter_group opted in to a dedicated PG.
+        return (
+            self.mesh_info.reduce_scatter_process_group
+            or self.mesh_info.shard_process_group
+        )
+
+    def _set_separate_reduce_scatter_group(
+        self, enable: bool, new_groups: dict[tuple[int, ...], dist.ProcessGroup]
+    ) -> None:
+        # Give reduce-scatter its own process group (separate from the shared
+        # all-gather/shard PG) so the two can overlap in backward, or reset to
+        # the shared group. ``new_groups`` caches groups by shard ranks within
+        # one set_separate_reduce_scatter_group call so meshes sharding over the
+        # same ranks share one communicator (typically one total) rather than one
+        # per mesh. HSDP ranks may create only their local shard subgroup, so
+        # use local synchronization to avoid waiting for nonmember ranks in
+        # new_group's post-init barrier.
+        mesh_info = self.mesh_info
+        if not isinstance(mesh_info, FSDPMeshInfo):
+            raise AssertionError(
+                f"Expected mesh_info to be FSDPMeshInfo, got {type(mesh_info)}"
+            )
+        if not enable:
+            mesh_info.reduce_scatter_process_group = None
+            return
+        ranks = tuple(dist.get_process_group_ranks(mesh_info.shard_process_group))
+        if ranks not in new_groups:
+            # Reuse the mesh's existing group if already enabled (idempotent),
+            # else create one for this rank set.
+            existing = mesh_info.reduce_scatter_process_group
+            if existing is not None:
+                new_groups[ranks] = existing
+            else:
+                new_group = dist.new_group(
+                    list(ranks),
+                    use_local_synchronization=True,
+                    group_desc="fsdp_reduce_scatter",
+                )
+                if new_group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"Current rank was not included in process group {ranks}"
+                    )
+                new_groups[ranks] = new_group
+        mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
@@ -992,6 +1332,27 @@ class FSDPParamGroup:
                 'For example, load a CPU state dict or call module.to_empty(device="cpu"). '
                 "Found following parameters on non-CPU device: "
                 f"{[(fsdp_param._param_fqn, fsdp_param.sharded_param.device) for fsdp_param in fsdp_params_not_on_cpu]}\n"
+            )
+
+    def _validate_reduce_scatter_max_input_buffers(self):
+        # Reject max_input_buffers > 1 with the symmetric-memory reduce-scatter
+        # comm: retaining >1 input buffers relies on the allocator handing out a
+        # fresh buffer while prior ones are ref-held, but the symmetric-memory
+        # pool reuses a single buffer, so retaining K would force K symmetric
+        # segments and can exhaust symmetric memory. Read the per-group cap (set
+        # in __init__) so this is safe to call before the comm context is lazily
+        # initialized (e.g. unshard before the first forward).
+        if self.reduce_scatter_max_input_buffers > 1 and isinstance(
+            self._reduce_scatter_comm, SymmMemReduceScatter
+        ):
+            raise ValueError(
+                "set_reduce_scatter_max_input_buffers(>1) is not supported with "
+                "the symmetric-memory reduce-scatter comm, but got "
+                f"{self.reduce_scatter_max_input_buffers} for module "
+                f"'{self._module_fqn}' using "
+                f"{self._reduce_scatter_comm.__class__.__name__}. Keep "
+                "max_input_buffers=1 with symmetric memory, or use the default "
+                "reduce-scatter comm."
             )
 
 
@@ -1055,3 +1416,9 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
+
+
+if dist._is_spmd_types_available():
+    import spmd_types
+
+    spmd_types.register_local_autograd_function(RegisterPostBackwardFunction)

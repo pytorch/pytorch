@@ -3,6 +3,7 @@
 import functools
 import os
 import sys
+import unittest
 import warnings
 from collections import namedtuple
 from contextlib import nullcontext
@@ -20,6 +21,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
 from torch.distributed.fsdp.wrap import (
@@ -43,6 +45,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_LINUX,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -504,7 +507,7 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                         self.assertNotEqual(
                             p,
                             p_prev,
-                            f"{n_prev} Params at iter {i} same as previous iter!",
+                            lambda msg: f"{msg}\n{n_prev} Params at iter {i} same as previous iter!",
                         )
 
                 # Verify overlap and non overlapped are the same
@@ -517,15 +520,17 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                             self.assertEqual(
                                 p,
                                 p_overlap,
-                                f"Rank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
+                                lambda msg: f"{msg}\nRank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
                             )
                             self.assertEqual(
-                                None, p.grad, f"Expected param {n} grad to be None"
+                                None,
+                                p.grad,
+                                lambda msg: f"{msg}\nExpected param {n} grad to be None",
                             )
                             self.assertEqual(
                                 None,
                                 p_overlap.grad,
-                                f"Expected param {n_overlap} grad to be None",
+                                lambda msg: f"{msg}\nExpected param {n_overlap} grad to be None",
                             )
 
                     fsdp_overlap_prev_params = [
@@ -564,6 +569,67 @@ class TestFSDPMiscMultiProcess(FSDPTestContinuous):
                     _optim.step()
                     _optim.zero_grad()
                 self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_summon_full_params_offload_to_cpu_on_cpu_model(self):
+        """
+        Tests ``summon_full_params(offload_to_cpu=True)`` when the FSDP compute
+        device is already CPU. There, the unsharded ``FlatParameter`` is already
+        on CPU, so ``to_cpu()`` must skip freeing the unsharded storage that
+        ``flat_param`` and its views alias; otherwise the summoned parameters
+        read freed memory.
+        """
+        gloo_pg = dist.new_group(backend="gloo")
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                ],
+                "use_orig_params": [False, True],
+                "writeback": [False, True],
+            },
+            self._test_summon_full_params_offload_to_cpu_on_cpu_model,
+            gloo_pg,
+        )
+
+    def _test_summon_full_params_offload_to_cpu_on_cpu_model(
+        self,
+        gloo_pg,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        writeback: bool,
+    ):
+        torch.manual_seed(42)
+        ref_model = MyModel()
+        ref_params = dict(ref_model.named_parameters())
+        model = FSDP(
+            deepcopy(ref_model),
+            sharding_strategy=sharding_strategy,
+            auto_wrap_policy=always_wrap_policy,
+            process_group=gloo_pg,
+            device_id=torch.device("cpu"),
+            use_orig_params=use_orig_params,
+        )
+        cpu = torch.device("cpu")
+        with FSDP.summon_full_params(model, offload_to_cpu=True, writeback=writeback):
+            summoned = dict(model.named_parameters())
+            self.assertEqual(len(summoned), len(ref_params))
+            for name, param in summoned.items():
+                self.assertEqual(param.device, cpu)
+                self.assertEqual(param, ref_params[clean_tensor_name(name)])
+            if writeback:
+                with torch.no_grad():
+                    for param in model.parameters():
+                        param.add_(1.0)
+        for param in model.parameters():
+            self.assertEqual(param.device, cpu)
+        # Re-summon to confirm the exit path resharded correctly and that the
+        # in-place edit was (not) persisted according to `writeback`.
+        delta = 1.0 if writeback else 0.0
+        with FSDP.summon_full_params(model, offload_to_cpu=True):
+            for name, param in model.named_parameters():
+                self.assertEqual(param, ref_params[clean_tensor_name(name)] + delta)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
@@ -869,8 +935,10 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             def __init__(self, rank):
                 super().__init__()
                 self.rank = rank
-                self.a = nn.Linear(1, 1).cuda(self.rank)
-                self.b = nn.Linear(1, 1).cuda((self.rank + 1) % dist.get_world_size())
+                self.a = nn.Linear(1, 1).to(torch.device(device_type, self.rank))
+                self.b = nn.Linear(1, 1).to(
+                    torch.device(device_type, (self.rank + 1) % dist.get_world_size())
+                )
 
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
@@ -903,7 +971,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         context = (
             (
                 self.assertRaisesRegex(
-                    ValueError, f"Inconsistent.*cuda:{self.rank} vs cuda:0"
+                    ValueError,
+                    f"Inconsistent.*{device_type}:{self.rank} vs {device_type}:0",
                 )
             )
             if self.rank != 0
@@ -955,6 +1024,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/105024")
     @skip_if_lt_x_gpu(2)
     def test_homogeneous_attributes(self):
         """
@@ -1007,6 +1077,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             inp = fsdp_model.module.get_input(torch.device(device_type))
             fsdp_model(*inp)
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/137948")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_unsupported_module_cls(self):
         regex = r"FSDP will not all-gather parameters for containers that do not implement forward"
@@ -1083,7 +1154,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module unexpectedly has parameters on cpu. Make "
-            "sure to move the module to cuda:0 before training.",
+            f"sure to move the module to {device_type}:0 before training.",
         ):
             fsdp_model(inp)
 
@@ -1095,8 +1166,8 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         with self.assertRaisesRegex(
             RuntimeError,
             "An FSDP-managed module with parameter CPU offloading enabled has "
-            "parameters on cuda:0. Make sure to not move the module from CPU "
-            "when offloading parameters.",
+            f"parameters on {device_type}:0. Make sure to not move the module from "
+            "CPU when offloading parameters.",
         ):
             fsdp_model(inp)
 

@@ -1,7 +1,11 @@
 #pragma once
 
-#if !defined(_MSC_VER) && __cplusplus < 201703L
-#error C++17 or later compatible compiler is required to use ATen.
+// MSVC keeps __cplusplus at 199711L unless /Zc:__cplusplus is passed, so check
+// _MSVC_LANG there. nvcc on Windows preprocesses with cl and forwards its -std
+// to it, so this also covers .cu files.
+#if (defined(_MSVC_LANG) && _MSVC_LANG < 202002L) || \
+    (!defined(_MSVC_LANG) && __cplusplus < 202002L)
+#error C++20 or later compatible compiler is required to use ATen.
 #endif
 
 #include <ATen/Context.h>
@@ -11,7 +15,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Formatting.h>
 #include <ATen/Functions.h>
-#include <ATen/NamedTensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>

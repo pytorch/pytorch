@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #define NVSHMEM_CHECK(stmt, msg)                                             \
   do {                                                                       \
@@ -17,6 +18,9 @@ namespace c10d::nvshmem_extension {
 // Check if NVSHMEM is available
 TORCH_API bool is_nvshmem_available();
 
+// Release the NVSHMEM team pool associated with a process group.
+TORCH_API void release_nvshmem_team_pool(const std::string& group_name);
+
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
@@ -24,6 +28,13 @@ TORCH_API void nvshmemx_cumodule_init(uintptr_t module);
 TORCH_API void nvshmem_put(at::Tensor& tensor, const int64_t peer);
 
 TORCH_API void nvshmem_get(at::Tensor& tensor, const int64_t peer);
+
+TORCH_API void nvshmem_get_out(
+    at::Tensor& dst,
+    const c10::intrusive_ptr<c10d::symmetric_memory::SymmetricMemory>& hdl,
+    int64_t offset,
+    int64_t size,
+    int64_t peer);
 
 at::Tensor nvshmem_broadcast(
     at::Tensor& input,

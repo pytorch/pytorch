@@ -67,6 +67,22 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
+  # Flash Attention runtime (aotriton_v2.dll + its liblzma.dll dependency).
+  # aotriton's ExternalProject generates these in torch/lib/ during the build,
+  # after configure, so OPTIONAL defers the existence check to install time;
+  # a configure-time EXISTS guard misses them (WinError 126 loading torch_hip).
+  foreach(_fa_dll aotriton_v2.dll liblzma.dll)
+    install(FILES "${TORCH_SRC_DIR}/lib/${_fa_dll}"
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+  endforeach()
+
+  # MSVC OpenMP (libomp140) - TheRock copies this into torch/lib/ before the
+  # wheel build when using MSVC OpenMP instead of MKL libiomp.
+  set(_libomp140 "${TORCH_SRC_DIR}/lib/libomp140.x86_64.dll")
+  if(EXISTS "${_libomp140}")
+    install(FILES "${_libomp140}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+
   # libuv (uv.dll) - required by torch distributed (gloo transport).
   # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
   # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
@@ -82,7 +98,7 @@ if(WIN32 AND BUILD_PYTHON)
   endif()
 
   # CUDA runtime DLLs - only for CUDA builds.
-  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
+  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR AND NOT "$ENV{PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" MATCHES "cuda-toolkit")
     # CUDA 13+ moves DLLs to bin/x64.
     if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
@@ -99,6 +115,8 @@ if(WIN32 AND BUILD_PYTHON)
       "${_cuda_bin}/nvrtc*64_*.dll"
       "${_cuda_bin}/nvJitLink_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/bin/cudnn*64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/x64/cupti64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/x64/nvperf_host*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/cupti64_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/nvperf_host*.dll"
     )
@@ -109,16 +127,59 @@ if(WIN32 AND BUILD_PYTHON)
       endif()
     endforeach()
 
-    # NvToolsExt (legacy, may not exist on all systems).
-    set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
-    if(EXISTS "${_nvtoolsext}")
-      install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
-
     # zlibwapi (needed by some CUDA libraries).
     if(EXISTS "C:/Windows/System32/zlibwapi.dll")
       install(FILES "C:/Windows/System32/zlibwapi.dll"
               DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     endif()
+  endif()
+
+  # Retain the legacy NvToolsExt DLL for existing Windows binaries until its
+  # separate deprecation; cuda-toolkit no longer provides it.
+  set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
+  if(USE_CUDA AND EXISTS "${_nvtoolsext}")
+    install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+endif()
+
+# --- macOS OpenMP embedding ---
+# Copy libomp.dylib / libiomp5.dylib into the wheel and fix rpaths so the
+# wheel is self-contained (replicates setup.py's _embed_libomp).
+# Gated on USE_OPENMP as well as OpenMP_FOUND so that a user-forced
+# USE_OPENMP=OFF doesn't ship an orphan libomp.dylib in the wheel.
+if(APPLE AND BUILD_PYTHON AND USE_OPENMP AND OpenMP_FOUND)
+  # OpenMP_libomp_LIBRARY is set by our FindOpenMP module to the full path
+  # of the OpenMP shared library (e.g. /path/to/libomp.dylib).
+  if(OpenMP_libomp_LIBRARY AND EXISTS "${OpenMP_libomp_LIBRARY}")
+    install(FILES "${OpenMP_libomp_LIBRARY}"
+            DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+    # Install omp.h so Inductor's C++ backend can find it at runtime.
+    # FindOpenMP doesn't export an include-dir variable; OpenMP_C_FLAGS
+    # carries -I<path> on macOS, so parse it for the header location.
+    if(OpenMP_C_FLAGS)
+      separate_arguments(_omp_c_flags UNIX_COMMAND "${OpenMP_C_FLAGS}")
+      foreach(_flag IN LISTS _omp_c_flags)
+        if(_flag MATCHES "^-I(.+)$")
+          set(_omp_h_dir "${CMAKE_MATCH_1}")
+          if(EXISTS "${_omp_h_dir}/omp.h")
+            install(FILES "${_omp_h_dir}/omp.h"
+                    DESTINATION "${TORCH_INSTALL_INCLUDE_DIR}")
+            break()
+          endif()
+        endif()
+      endforeach()
+    endif()
+    # Fix libtorch_cpu's load command and rpaths so the bundled libomp is
+    # the only one resolved at runtime. See tools/embed_libomp_macos.py
+    # for the two-case logic (homebrew abs-path vs. conda @rpath build).
+    install(CODE "
+      execute_process(
+        COMMAND \"${_python_exe}\"
+          \"${_project_src}/tools/embed_libomp_macos.py\"
+          --libomp-path \"${OpenMP_libomp_LIBRARY}\"
+          --lib-dir \"\${CMAKE_INSTALL_PREFIX}/${TORCH_INSTALL_LIB_DIR}\"
+        COMMAND_ERROR_IS_FATAL ANY
+      )
+    ")
   endif()
 endif()

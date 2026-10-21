@@ -60,6 +60,11 @@ __global__ void embedding_backward_feature_kernel
 
   for(int batch_start = 0; batch_start < n; batch_start += blockDim.x*blockDim.y)
   {
+    // Warps still finishing the previous batch's last chunk read indices_batch
+    // to elect their match-group leader, so nobody may overwrite it until every
+    // warp is done with it.
+    __syncthreads();
+
     // Entire block cooperates to load a batch of 1024 indices to process
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
@@ -324,8 +329,6 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
-      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2

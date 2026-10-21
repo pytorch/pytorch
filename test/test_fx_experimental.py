@@ -50,18 +50,18 @@ from torch.fx.passes.split_module import split_module, split_module_simple
 from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCPU,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
-    TEST_Z3,
     run_tests,
-    TestCase,
     TEST_WITH_CROSSREF,
+    TEST_Z3,
+    TestCase,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
@@ -88,6 +88,8 @@ def symbolic_trace_with_rewrite(root: torch.nn.Module | Callable) -> GraphModule
 
 
 class TestFXExperimental(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -1153,7 +1155,7 @@ terrible spacing
                 elif node.op == "placeholder":
                     self.assertFalse(
                         seen_get_attr,
-                        f"placeholder '{node.name}' found after get_attr "
+                        lambda msg: f"{msg}\nplaceholder '{node.name}' found after get_attr "
                         f"in submodule '{name}'",
                     )
 
@@ -1686,7 +1688,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+                self.assertIsNotNone(node.type, lambda msg: f"{msg}\nNode {node} should be annotated but is not.")
 
         my_module = MyModule2()
         my_module_traced = torch.fx.symbolic_trace(my_module)
@@ -1701,7 +1703,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+                self.assertIsNotNone(node.type, lambda msg: f"{msg}\nNode {node} should be annotated but is not.")
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -2128,7 +2130,8 @@ class {test_classname}(torch.nn.Module):
 
 
 class TestNormalizeOperators(JitTestCase):
-    @onlyCPU
+    hw_classification = HardwareClassification.CPU
+
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
@@ -2255,6 +2258,10 @@ class TestModule(torch.nn.Module):
             test_out = traced(*param_values)
             self.assertEqual(test_out, ref_out)
 
+
+class TestNormalizeOperatorsGeneric(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_normalize_quantized_eb(self):
         target = torch.ops.quantized.embedding_bag_byte_rowwise_offsets
         args = (
@@ -2300,6 +2307,8 @@ if TEST_Z3:
     from torch.utils._sympy.functions import FloorDiv, Mod, BitwiseFn_bitwise_and
 
     class TestTranslationValidation(TestCase):
+        hw_classification = HardwareClassification.GENERIC
+
         def _prepare_for_translation_validation(self):
             validator = TranslationValidator()
 
@@ -2380,7 +2389,7 @@ if TEST_Z3:
             for sympy_expr, z3_expr in test_cases:
                 result = toZ3.run(sympy_expr)
                 self.assertTrue(
-                    z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+                    z3_expr.eq(result), msg=lambda msg: f"{msg}\nexpected: {z3_expr}. Got: {result}"
                 )
 
         def test_sat(self):
@@ -2467,7 +2476,7 @@ if TEST_Z3:
 
 
 instantiate_parametrized_tests(TestFXExperimental)
-instantiate_device_type_tests(TestNormalizeOperators, globals())
+instantiate_device_type_tests(TestNormalizeOperators, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

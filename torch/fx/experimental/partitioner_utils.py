@@ -6,7 +6,7 @@ from torch.fx.node import map_arg, Node
 
 class Partition:
     """Partition class contains all the information about an individual partition.
-    It also provides necessary methods for manipulation the partition.
+    It also provides necessary methods for manipulating the partition.
     """
 
     def __init__(self, partition_id: int) -> None:
@@ -47,7 +47,7 @@ class Partition:
             map_arg(node.kwargs, input_nodes.setdefault)
             # Check if an input node is a placeholder or get_attr,
             # and this input node is not used by some other nodes in this partition,
-            # the remove this input node
+            # then remove this input node
             for input_node in input_nodes:
                 if all(
                     n not in self.nodes for n in input_node.users

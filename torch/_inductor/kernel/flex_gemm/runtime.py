@@ -1,0 +1,563 @@
+# mypy: allow-untyped-defs
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import functools
+import logging
+import os
+from typing import Any, TYPE_CHECKING
+
+import torch
+from torch._inductor.kernel.flex_gemm.constraints import (
+    FlexGemmLocalReduceGeometry,
+    FlexGemmOutputContraction,
+    FlexGemmOutputExpansion,
+    FlexGemmOutputTransform,
+    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+    LOCAL_REDUCE_RUNTIME_OUT_ERROR,
+    LOCAL_REDUCE_STORE_ARG_NAME,
+)
+from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
+from torch._inductor.runtime.cache_dir_utils import cache_dir
+from torch._inductor.utils import ceildiv
+from torch._prims_common import is_expandable_to
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
+
+
+log = logging.getLogger(__name__)
+
+
+def inductor_quack_cache_dir() -> str:
+    """Return the Inductor-owned QuACK cache root for generated FlexGEMM."""
+    # Avoid per-launch cache_dir()/os.makedirs; QuACK creates dirs before writes.
+    # Key memoization on TORCHINDUCTOR_CACHE_DIR so fresh_cache() still works.
+    return _quack_cache_dir(os.environ.get("TORCHINDUCTOR_CACHE_DIR"))
+
+
+@functools.cache
+def _quack_cache_dir(_inductor_cache_dir_env: str | None) -> str:
+    return os.path.join(cache_dir(), "quack")
+
+
+@functools.cache
+def _quack_gemm_config(config: QuackConfigKey) -> Any:
+    from torch._vendor.quack.gemm_config import GemmConfig
+
+    return GemmConfig(**dict(config))
+
+
+def flex_gemm_problem(
+    device: torch.device,
+    m: int,
+    n: int,
+    concat_layout: Any,
+    *,
+    blockscaled: bool = False,
+    varlen_m: bool = False,
+    varlen_k: bool = False,
+) -> Any:
+    """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
+    from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
+
+    return ModProblem(
+        device=device,
+        m=m,
+        n=n,
+        b_kn=not varlen_k and mod_b_kn(device, concat_layout),
+        varlen_m=varlen_m,
+        blockscaled=blockscaled,
+        concat=bool(concat_layout),
+    )
+
+
+def flex_gemm_preferred_config(problem: Any) -> Any:
+    """QuACK's untuned default for ``problem``; leads the legal list when legal."""
+    from torch._vendor.quack.cute_dsl_utils import get_device_capacity
+    from torch._vendor.quack.gemm_config import (
+        blockscaled_default_config,
+        default_config,
+    )
+
+    if problem.blockscaled:
+        capacity = get_device_capacity(problem.device)[0]
+        return blockscaled_default_config(
+            problem.m, problem.n, device_capacity=capacity
+        )
+    return default_config(problem.device)
+
+
+# NOTE [Byte-backed epilogue tensor storage]
+# PyTorch bool tensors are byte-addressed while CuTeDSL models cutlass.Boolean as
+# a 1-bit logical type; Float4E2M1FN similarly exposes two values per byte. Pass
+# both through QuACK as their physical uint8 carrier.
+def quack_epilogue_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Return the physical dtype QuACK sees for a logical epilogue tensor."""
+    return torch.uint8 if dtype in (torch.bool, torch.float4_e2m1fn_x2) else dtype
+
+
+def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
+    """Adapt logical epilogue tensors to QuACK's physical tensor ABI."""
+    physical = quack_epilogue_dtype(arg.dtype)
+    return arg if physical is arg.dtype else arg.view(physical)
+
+
+def selection_callback(acc, *operands):
+    """Stand in for generated callbacks in config-selection EpiMods."""
+    raise AssertionError("config-selection EpiMods are never launched")
+
+
+def quack_blockscaled_scale_view(
+    scale: torch.Tensor, mn: int, storage_k: int, format_name: str
+) -> torch.Tensor:
+    """View a public flat SWIZZLE_32_4_4 scale as QuACK's (rm, rk, 32, 4, 4) blocked tensor."""
+    from torch._vendor.quack.blockscaled import operand as blockscaled
+
+    format = blockscaled.BlockScaledFormat.from_name(format_name)
+    sf_k = ceildiv(format.logical_k(storage_k), format.sf_vec_size)
+    return scale.view(ceildiv(mn, 128), ceildiv(sf_k, 4), 32, 4, 4)
+
+
+def normalize_c(
+    C: torch.Tensor | None, expected_shape: tuple[int, ...], beta: float
+) -> torch.Tensor | None:
+    """Return the effective C tensor that QuACK should read for alpha/beta GEMMs."""
+    if C is None:
+        return None
+    if not is_expandable_to(tuple(C.shape), expected_shape):
+        raise RuntimeError(
+            f"C shape must broadcast to {expected_shape}, got {tuple(C.shape)}"
+        )
+    if beta == 0:
+        return None
+    broadcast_C = torch.broadcast_to(C, expected_shape)
+    if broadcast_C.ndim not in (2, 3):
+        raise NotImplementedError("FlexGEMM currently supports only 2-D or 3-D C")
+    if not broadcast_C.is_cuda:
+        raise RuntimeError("FlexGEMM requires CUDA C")
+    if broadcast_C.stride(-1) != 1 and broadcast_C.stride(-2) != 1:
+        raise NotImplementedError("FlexGEMM requires C to be row- or column-major")
+    return broadcast_C
+
+
+@dataclasses.dataclass(frozen=True)
+class FlexGemmRuntimeLocalReducePlan:
+    """QuACK EpiOp configuration for one grouped local reduction (physical geometry)."""
+
+    geometry: FlexGemmLocalReduceGeometry
+    stores: bool = False
+    out: torch.Tensor | None = None
+    feeds_main: bool = False
+    combine: str | None = None
+    finalize: Callable[..., Any] | str | None = None
+    finalize_operands: tuple[str, ...] = ()
+    fragment_reduced: bool = False
+    store_finalize: Callable[..., Any] | str | None = None
+    binary_store_finalize: bool = False
+    prepass: Callable[..., Any] | None = None
+    prepass_combine: str | None = None
+    prepass_finalize: Callable[..., Any] | str | None = None
+    output_layout: FlexGemmOutputStorageLayout | None = None
+
+    def __post_init__(self) -> None:
+        if not self.stores and not self.feeds_main:
+            raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if self.out is not None and not self.stores:
+            raise RuntimeError("local-reduce out buffers require stores=True")
+        if self.combine is None:
+            raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
+        if self.output_layout is not None and not isinstance(
+            self.output_layout, FlexGemmOutputStorageLayout
+        ):
+            raise TypeError(
+                "local-reduce output_layout must be a FlexGemmOutputStorageLayout"
+            )
+        if (self.prepass is None) != (self.prepass_combine is None):
+            raise RuntimeError(
+                "FlexGEMM EpiMod prepasses require both a callable and combine"
+            )
+        if self.prepass_finalize is not None and self.prepass is None:
+            raise RuntimeError("FlexGEMM EpiMod prepass finalizers require a prepass")
+        if self.finalize_operands and not callable(
+            self.store_finalize or self.finalize
+        ):
+            raise RuntimeError(
+                "FlexGEMM EpiMod finalize operands require a generated finalizer"
+            )
+
+    @property
+    def group(self) -> int:
+        return self.geometry.group
+
+    @property
+    def axis(self) -> int:
+        return self.geometry.axis
+
+    @property
+    def cache_key(self) -> tuple[Any, ...]:
+        return (
+            self.geometry,
+            self.feeds_main,
+            self.combine,
+            self.finalize,
+            self.finalize_operands,
+            self.fragment_reduced,
+            self.store_finalize,
+            self.prepass,
+            self.prepass_combine,
+            self.prepass_finalize,
+            self.output_layout,
+            self.stores,
+            self.binary_store_finalize,
+        )
+
+
+_EPIMOD_CACHE: dict[tuple[Any, ...], Any] = {}
+
+
+def flex_gemm_epimod(
+    epilogue_fn: Any,
+    epilogue_arg_dtypes: tuple[torch.dtype, ...],
+    epilogue_arg_kinds: tuple[str, ...],
+    aux_output_count: int,
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None,
+    output_transform: FlexGemmOutputTransform | None,
+    *,
+    varlen_m: bool,
+):
+    """Build and cache a QuACK TensorSSA EpiMod from FlexGEMM metadata.
+
+    The EpiOp set fixes which GemmConfigs are legal, so lowering builds the same
+    EpiMod with ``selection_callback`` as the epilogue to select configs.
+    """
+    key = (
+        epilogue_fn,
+        epilogue_arg_kinds,
+        epilogue_arg_dtypes,
+        aux_output_count,
+        None if local_reduce is None else local_reduce.cache_key,
+        output_transform,
+        varlen_m,
+    )
+    epimod = _EPIMOD_CACHE.get(key)
+    if epimod is not None:
+        return epimod
+
+    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
+    from torch._inductor.kernel.flex_gemm.quack_ops.interleaved import (
+        InterleavedMainStore,
+        InterleavedTileLoad,
+    )
+    from torch._vendor.quack import cute_dsl_utils
+    from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
+
+    op_types = {
+        "scalar": epi_ops.Scalar,
+        "row": epi_ops.RowVecLoad,
+        "col": epi_ops.ColVecLoad,
+        "tile": epi_ops.TileLoad,
+        "interleaved": InterleavedTileLoad,
+    }
+    ops: dict[str, Any] = {}
+    for index, (arg_dtype, kind) in enumerate(
+        zip(epilogue_arg_dtypes, epilogue_arg_kinds, strict=True)
+    ):
+        name = f"operand{index}"
+        if arg_dtype not in cute_dsl_utils.torch2cute_dtype_map:
+            raise NotImplementedError(
+                f"FlexGEMM QUACK does not support capture dtype {arg_dtype}"
+            )
+        dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
+        op_type = op_types[kind]
+        if varlen_m and kind == "col" and dtype.width < 32:
+            op_type = ScalarColVecLoad
+        ops[name] = op_type(name, dtype=dtype)
+    aux_output_names = tuple(f"output{index}" for index in range(aux_output_count))
+    if isinstance(output_transform, FlexGemmOutputContraction):
+        from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
+            GroupedMainStore,
+        )
+
+        min_fragment_n = (
+            local_reduce.group
+            if local_reduce is not None
+            and local_reduce.feeds_main
+            and local_reduce.fragment_reduced
+            else None
+        )
+        aux_stores = (
+            tuple(GroupedMainStore(f"output0_lane{lane}", 2) for lane in range(2))
+            if output_transform.chunked and aux_output_count
+            else aux_output_names
+        )
+        outputs: tuple[Any, ...] = (
+            GroupedMainStore(
+                "main",
+                output_transform.group,
+                min_fragment_n=min_fragment_n,
+            ),
+            *aux_stores,
+        )
+    elif isinstance(output_transform, FlexGemmOutputExpansion):
+        outputs = (
+            ("main0", "main1", *aux_output_names)
+            if output_transform.chunked
+            else (InterleavedMainStore("main"), *aux_output_names)
+        )
+    else:
+        outputs = aux_output_names
+    sinks: dict[str, Any] = {}
+    prepass = None
+    prepass_outs: tuple[str, ...] = ()
+    if local_reduce is not None:
+        from torch._inductor.kernel.flex_gemm.quack_ops import grouped_reduce
+
+        finalize = local_reduce.finalize
+        store_finalize = local_reduce.store_finalize or finalize
+        output_layout = (
+            None
+            if local_reduce.output_layout is None
+            else local_reduce.output_layout.quack_layout(grouped_reduce)
+        )
+        if local_reduce.prepass is not None:
+            prepass = local_reduce.prepass
+            ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = (
+                grouped_reduce.GroupedLocalReducePrepass(
+                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+                    axis=local_reduce.axis,
+                    group=local_reduce.group,
+                    combine=local_reduce.prepass_combine,
+                    finalize=local_reduce.prepass_finalize,
+                )
+            )
+            prepass_outs = (LOCAL_REDUCE_FEED_MAIN_ARG_NAME,)
+            if local_reduce.stores:
+                if local_reduce.binary_store_finalize:
+                    if output_layout is not None:
+                        raise RuntimeError(
+                            "local-reduce output layouts do not support binary finalizers"
+                        )
+                    sink = grouped_reduce.GroupedLocalReduceWithFinalizeArg(
+                        LOCAL_REDUCE_STORE_ARG_NAME,
+                        axis=local_reduce.axis,
+                        group=local_reduce.group,
+                        combine=local_reduce.combine,
+                        finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
+                    )
+                else:
+                    sink = grouped_reduce.GroupedLocalReduce(
+                        LOCAL_REDUCE_STORE_ARG_NAME,
+                        axis=local_reduce.axis,
+                        group=local_reduce.group,
+                        combine=local_reduce.combine,
+                        finalize=store_finalize,
+                        finalize_operands=local_reduce.finalize_operands,
+                        output_layout=output_layout,
+                    )
+                sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
+        else:
+            if local_reduce.feeds_main and not local_reduce.fragment_reduced:
+                if output_layout is not None:
+                    raise RuntimeError(
+                        "feed-main local reductions do not support output layouts"
+                    )
+                reduce_op = grouped_reduce.GroupedLocalReduceFeed(
+                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+                    axis=local_reduce.axis,
+                    group=local_reduce.group,
+                    combine=local_reduce.combine,
+                    finalize=finalize,
+                )
+                ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
+            elif local_reduce.stores:
+                reduce_op = grouped_reduce.GroupedLocalReduce(
+                    LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
+                    axis=local_reduce.axis,
+                    group=local_reduce.group,
+                    combine=local_reduce.combine,
+                    finalize=finalize,
+                    finalize_operands=local_reduce.finalize_operands,
+                    fragment_reduced=local_reduce.fragment_reduced,
+                    output_layout=output_layout,
+                )
+                sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
+    epimod = epilogue_module.fragment_epilogue(
+        outputs=outputs,
+        ops=ops,
+        outs=sinks,
+        prepass=prepass,
+        prepass_outs=prepass_outs,
+    )(epilogue_fn)
+    _EPIMOD_CACHE[key] = epimod
+    return epimod
+
+
+def gemm_epilogue(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    epilogue_fn,
+    *,
+    C: torch.Tensor | None = None,
+    alpha: float = 1.0,
+    beta: float = 0.0,
+    SFA: torch.Tensor | None = None,
+    SFB: torch.Tensor | None = None,
+    blockscaled_format: str | None = None,
+    out: torch.Tensor,
+    aux_outs: tuple[torch.Tensor, ...] = (),
+    epilogue_args: tuple[torch.Tensor, ...] = (),
+    epilogue_arg_kinds: tuple[str, ...] = (),
+    local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
+    output_transform: FlexGemmOutputTransform | None = None,
+    cu_seqlens_m: torch.Tensor | None = None,
+    cu_seqlens_k: torch.Tensor | None = None,
+    config: QuackConfigKey,
+    stream: int | None = None,
+) -> torch.Tensor:
+    """Run a dense, block-scaled or varlen-M/K call through the vendored QuACK EpiMod.
+
+    ``config`` pins the exact GemmConfig Inductor selected at lowering time.
+    ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
+    ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
+    row/col vectors are always passed rank-1; QuACK shares a row across groups
+    and offsets a ``[total_m]`` column per group. ``cu_seqlens_k`` instead segments
+    the reduction of ``a[M, total_k] @ b[total_k, N]`` into ``out[E, M, N]``.
+    """
+    if cu_seqlens_k is not None and out.numel() == 0:
+        return out
+    if blockscaled_format is not None:
+        if SFA is None or SFB is None:
+            raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
+        SFA = quack_blockscaled_scale_view(
+            SFA, a.shape[0], a.shape[1], blockscaled_format
+        )
+        SFB = quack_blockscaled_scale_view(
+            SFB, b.shape[1], b.shape[0], blockscaled_format
+        )
+    if (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
+        and b.stride(-1) == 1
+    ):
+        raise NotImplementedError(
+            "chunked grouped main output requires column-major B storage"
+        )
+    quack_epilogue_args = tuple(quack_epilogue_arg(arg) for arg in epilogue_args)
+    epimod = flex_gemm_epimod(
+        epilogue_fn,
+        tuple(arg.dtype for arg in quack_epilogue_args),
+        epilogue_arg_kinds,
+        len(aux_outs),
+        local_reduce,
+        output_transform,
+        varlen_m=cu_seqlens_m is not None,
+    )
+    effective_C = normalize_c(C, (*a.shape[:-1], b.shape[-1]), beta)
+    operands: dict[str, Any] = {}
+    if "alpha" in epimod.operand_names:
+        operands["alpha"] = alpha
+    if "beta" in epimod.operand_names:
+        operands["beta"] = beta
+    for index, (arg, kind) in enumerate(
+        zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
+    ):
+        if kind in ("row", "col"):
+            arg = arg.squeeze(0 if kind == "row" else -1)
+        operands[f"operand{index}"] = arg
+    initialize_local_reduce_out = None
+    if local_reduce is not None:
+        # QuACK's host_validate checks the compressed buffer against the GEMM
+        # problem; only the caller-owned carrier view is built here.
+        local_reduce_out = local_reduce.out
+        if local_reduce.stores and local_reduce_out is None:
+            raise RuntimeError(LOCAL_REDUCE_RUNTIME_OUT_ERROR)
+        if local_reduce_out is not None and local_reduce.output_layout is not None:
+            grouped_dim = a.shape[-2] if local_reduce.axis == 0 else b.shape[-1]
+            if grouped_dim % local_reduce.group:
+                raise ValueError(
+                    f"group {local_reduce.group} must divide the grouped dim "
+                    f"{grouped_dim} (axis={local_reduce.axis})"
+                )
+            rows, cols = (
+                (a.shape[-2], b.shape[-1] // local_reduce.group)
+                if local_reduce.axis == 1
+                else (a.shape[-2] // local_reduce.group, b.shape[-1])
+            )
+            if local_reduce_out.numel() != rows * cols:
+                initialize_local_reduce_out = local_reduce_out
+            local_reduce_out = local_reduce.output_layout.runtime_view(
+                local_reduce_out, 1, rows, cols
+            )
+        if local_reduce.prepass is not None:
+            operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = None
+            if local_reduce.stores:
+                operands[LOCAL_REDUCE_STORE_ARG_NAME] = local_reduce_out
+        else:
+            operands[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = local_reduce_out
+
+    from torch._vendor.quack.cache import cache_dir_override
+
+    main_name = "main" if output_transform is not None else "D"
+    output_names = (main_name, *(f"output{index}" for index in range(len(aux_outs))))
+    output_buffers = dict(
+        zip(
+            output_names,
+            (quack_epilogue_arg(out), *map(quack_epilogue_arg, aux_outs)),
+            strict=True,
+        )
+    )
+    chunked_output = (
+        isinstance(output_transform, FlexGemmOutputExpansion)
+        and output_transform.chunked
+    )
+    if chunked_output:
+        # Each ordinary TileStore sees [M, N], with the full output's row stride.
+        output_buffers["main0"], output_buffers["main1"] = output_buffers.pop(
+            "main"
+        ).chunk(2, dim=-1)
+    elif (
+        isinstance(output_transform, FlexGemmOutputContraction)
+        and output_transform.chunked
+        and aux_outs
+    ):
+        output_buffers["output0_lane0"], output_buffers["output0_lane1"] = (
+            output_buffers.pop("output0").chunk(2, dim=-1)
+        )
+    concat_layout = None if output_transform is None else output_transform.concat_layout
+    # Generated wrappers pass the current stream; switching streams costs ~20us.
+    stream_context = (
+        torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
+        if stream is not None
+        and stream != torch._C._cuda_getCurrentRawStream(a.device.index)
+        else contextlib.nullcontext()
+    )
+    with cache_dir_override(inductor_quack_cache_dir()), stream_context:
+        # Layout callbacks predicate logical stores but do not own padded bytes.
+        if initialize_local_reduce_out is not None:
+            initialize_local_reduce_out.zero_()
+        result = epimod(
+            a,
+            b,
+            C=effective_C,
+            SFA=SFA,
+            SFB=SFB,
+            bs_format_a=blockscaled_format,
+            bs_format_b=blockscaled_format,
+            out=output_buffers,
+            out_dtype=out.dtype,
+            store_d=output_transform is None,
+            config=_quack_gemm_config(config),
+            tuned=False,
+            concat_layout=concat_layout,
+            cu_seqlens_m=cu_seqlens_m,
+            cu_seqlens_k=cu_seqlens_k,
+            compile_dispatch=False,
+            **operands,
+        )
+    return out if chunked_output else result[main_name]

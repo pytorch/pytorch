@@ -50,7 +50,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
         {batch_size + 1}, TensorOptions().device(at::kCPU).dtype(at::kInt));
 
     const auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
-    auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
+    auto* cumulative_seqlen_ptr = cumulative_seqlen.mutable_data_ptr<int32_t>();
 
     int64_t sum = 0;
     int64_t max_seqlen = -1;
@@ -437,14 +437,14 @@ sdpa_nested_preprocessing(
   }
 
   return std::make_tuple(
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      cumulative_sequence_length_q,
-      cumulative_sequence_length_kv,
+      std::move(query_buffer_reshaped),
+      std::move(key_buffer_reshaped),
+      std::move(value_buffer_reshaped),
+      std::move(cumulative_sequence_length_q),
+      std::move(cumulative_sequence_length_kv),
       max_seqlen_batch_q,
       max_seqlen_batch_kv,
-      output_shape);
+      std::move(output_shape));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
@@ -530,11 +530,11 @@ sdpa_nested_preprocessing_backward(
   }
 
   return std::make_tuple(
-      grad_out_buffer_reshaped,
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      output_buffer_reshaped);
+      std::move(grad_out_buffer_reshaped),
+      std::move(query_buffer_reshaped),
+      std::move(key_buffer_reshaped),
+      std::move(value_buffer_reshaped),
+      std::move(output_buffer_reshaped));
 }
 
 } // namespace at::native::preprocessing

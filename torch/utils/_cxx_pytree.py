@@ -603,7 +603,7 @@ def tree_map_(
     Returns:
         The original ``tree`` with the value at each leaf is given by the side-effect of function
         ``func(x, *xs)`` (not the return value) where ``x`` is the value at the corresponding leaf
-        in ``tree`` and ``xs`` is the tuple of values at values at corresponding nodes in ``rests``.
+        in ``tree`` and ``xs`` is the tuple of values at corresponding nodes in ``rests``.
     """
     return optree.tree_map_(
         func,

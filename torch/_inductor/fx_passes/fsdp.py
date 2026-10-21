@@ -23,6 +23,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch._inductor.utils import get_collective_config
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
@@ -38,7 +39,8 @@ def is_fsdp_all_gather(n: torch.fx.Node) -> bool:
     Handles multi-input chains (e.g. cat(param, zeros) for padding) that the old
     single-input-chain walk would miss.
     """
-    assert is_all_gather(n)
+    if not is_all_gather(n):
+        raise AssertionError(f"expected an all_gather node, got {n}")
     visited: OrderedSet[torch.fx.Node] = OrderedSet()
     queue = list(n.all_input_nodes)
     placeholders = 0
@@ -132,6 +134,9 @@ def _get_dedup_rs_pass() -> PatternMatcherPass:
                 return False
             if len(node.users) != 1:
                 return False
+            # The rewrite would drop the collective config.
+            if get_collective_config(node) is not None:
+                return False
         input_a = match.kwargs["input_a"]
         input_b = match.kwargs["input_b"]
         if input_a.meta["val"].dtype != input_b.meta["val"].dtype:
@@ -205,7 +210,8 @@ def bucket_fsdp_all_gather(
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
-    assert bucket_cap_mb_by_bucket_idx is not None
+    if bucket_cap_mb_by_bucket_idx is None:
+        raise AssertionError("expected bucket_cap_mb_by_bucket_idx to be set")
     ag_buckets = bucket_all_gather_by_mb(
         gm,
         bucket_cap_mb_by_bucket_idx,
@@ -298,7 +304,8 @@ def _get_collective_kwargs(n: fx.Node) -> dict[str, object]:
         kwargs=n.kwargs,
         normalize_to_only_use_kwargs=True,
     )
-    assert opt is not None
+    if opt is None:
+        raise AssertionError(f"normalize_function returned None for {n.target}")
     _, kwargs = opt
     return kwargs
 
@@ -466,7 +473,7 @@ def pre_bucket_fsdp_collectives(
     """Pre-bucket FSDP collectives before overlap scheduling.
 
     Identifies FSDP process groups via all_gather structural heuristics,
-    then merges all_gather, reduce_scatter, and all_reduce ops on  those
+    then merges all_gather, reduce_scatter, and all_reduce ops on those
     groups into bandwidth-saturating buckets.
     """
     import torch._inductor.config as inductor_config

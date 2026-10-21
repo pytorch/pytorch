@@ -60,6 +60,7 @@
     "AllToAllOptions",
     "AllreduceCoalescedOptions",
     "AllreduceOptions",
+    "BackendBase",
     "BarrierOptions",
     "BroadcastOptions",
     "BuiltinCommHookType",
@@ -463,9 +464,11 @@
     "matrix_norm",
     "matrix_power",
     "matrix_rank",
+    "matrix_sqrth",
     "multi_dot",
     "norm",
     "pinv",
+    "polar",
     "qr",
     "slogdet",
     "solve",
@@ -552,7 +555,6 @@
   "torch.multiprocessing.reductions": [
     "ForkingPickler",
     "Union",
-    "check_serializing_named_tensor",
     "register_after_fork"
   ],
   "torch.multiprocessing.spawn": [
@@ -2625,23 +2627,6 @@
   ],
   "torch.export.graph_signature": [
     "TokenArgument"
-  ],
-  "torch.fx.experimental.shape_inference.infer_shape": [
-    "DimDynamic",
-    "FakeTensorMode",
-    "LocalSource",
-    "ShapeEnv",
-    "defaultdict",
-    "infer_symbol_values",
-    "make_fx"
-  ],
-  "torch.fx.experimental.shape_inference.infer_symbol_values": [
-    "Any",
-    "DefaultDict",
-    "Dict",
-    "List",
-    "Tuple",
-    "Union"
   ],
   "torch.fx.passes.runtime_assert": [
     "Any",
