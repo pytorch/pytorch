@@ -325,6 +325,18 @@ class SymbolicStreamState:
             return stream.peek_value().device.type
         return stream.value.device.type
 
+    def has_tracked_stream_for(self, device: torch.device) -> bool:
+        """Whether cur_stream(device) would find a matching stream on the
+        tracked stack. Peeks values so lazy trackers are not realized."""
+        for stream in reversed(self.cur_stream_stack):
+            if isinstance(stream, LazyVariableTracker) and not stream.is_realized():
+                stream_device = stream.peek_value().device
+            else:
+                stream_device = stream.value.device
+            if stream_device == device:
+                return True
+        return False
+
     def in_stream_context(self) -> bool:
         return len(self.cur_stream_stack) > 0
 

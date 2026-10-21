@@ -3054,7 +3054,35 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                # An explicit index with no matching tracked stream would
+                # silently return the tracked (top) stream - the wrong
+                # device's. Mint a tracked stream for the requested device
+                # instead (the seeded-stream pattern); escaping values
+                # reconstruct via CurrentStreamSource as a runtime query,
+                # and a failing query falls through to the break below.
+                if (
+                    device is not None
+                    and device.index is not None
+                    and not tx.symbolic_stream_state.has_tracked_stream_for(device)
+                ):
+                    from ..source import CurrentStreamSource
+                    from ..graph_bytecode_inputs import register_user_object
+                    from .lazy import LazyVariableTracker
+
+                    minted = torch.get_device_module(device.type).current_stream(
+                        device.index
+                    )
+                    minted_source = CurrentStreamSource(device)
+                    minted_var = LazyVariableTracker.create(
+                        minted, source=minted_source
+                    )
+                    # Instance attribute, to avoid realizing the lazy tracker.
+                    minted_var.user_object_index = register_user_object(  # type: ignore[union-attr]
+                        minted, minted_source
+                    )
+                    stream_var = minted_var
+                else:
+                    stream_var = tx.symbolic_stream_state.cur_stream(device)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
                 if stream_variable_cls is not None and not isinstance(
                     stream_var, stream_variable_cls

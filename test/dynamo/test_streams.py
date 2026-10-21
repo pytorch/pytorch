@@ -3721,6 +3721,40 @@ class TestPrivateUse1StreamHandler(torch._dynamo.test_case.TestCase):
         "Requires an accelerator with Stream/current_stream device APIs "
         "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
     )
+    def test_untracked_device_index_returns_correct_stream(self):
+        """
+        An explicit device index with no matching tracked stream used to
+        silently return the tracked (device 0) stream - the wrong device's
+        stream. With a second device the handler now mints a tracked
+        stream for the requested device (compiled matches eager); with a
+        single device the query fails loudly.
+        """
+        device_type = torch.accelerator.current_accelerator().type
+        device_module = torch.get_device_module(device_type)
+        x = torch.ones(2, device=device_type)
+
+        def fn(x):
+            return device_module.current_stream(1), x + 1
+
+        if device_module.device_count() >= 2:
+            torch.zeros(1, device=f"{device_type}:1")  # init device 1 stream
+            eager = fn(x)[0]
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)(x)[0]
+            self.assertEqual(eager.device_index, 1)
+            self.assertEqual(
+                compiled.device_index,
+                1,
+                "must return device 1's stream, not the tracked device 0 stream",
+            )
+        else:
+            with self.assertRaises(torch._dynamo.exc.Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @unittest.skipUnless(
+        _accelerator_has_stream_api(),
+        "Requires an accelerator with Stream/current_stream device APIs "
+        "(skips on MPS) to populate cur_stream_stack in SymbolicStreamState",
+    )
     def test_bad_device_arg_is_clean_graph_break(self):
         """
         A bogus device argument must surface as the structured "bad device
