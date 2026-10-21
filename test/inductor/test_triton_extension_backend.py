@@ -75,9 +75,6 @@ if has_triton_package():
     import triton.language as tl
 
 
-requires_triton_backend = unittest.skipUnless(HAS_TRITON, "Requires Triton backend.")
-
-
 def mock_triton_hash_with_backend(*args, **kwargs):
     # Generate a random string of length 64. Used to mock the triton_hash_with_backend function
     # since we don't have a triton backend
@@ -111,45 +108,6 @@ class TritonExtensionBackendTestBase(BaseExtensionBackendTests):
 
         # Restore the default backend.
         cls._default_backend_patch.stop()
-
-    def _test_open_device_registration(self):
-        torch._register_device_module("privateuseone", self.module)
-        register_backend_for_device(
-            "privateuseone", ExtensionScheduling, ExtensionWrapperCodegen
-        )
-        register_device_op_overrides("privateuseone", CPUDeviceOpOverrides())
-        device_interface.register_interface_for_device("privateuseone", DeviceInterface)
-
-        self.assertEqual(
-            get_scheduling_for_device("privateuseone"), ExtensionScheduling
-        )
-        self.assertEqual(
-            get_wrapper_codegen_for_device("privateuseone"), ExtensionWrapperCodegen
-        )
-        self.assertEqual(
-            device_interface.get_interface_for_device("privateuseone"), DeviceInterface
-        )
-
-        device = torch.device("privateuseone")
-        x = torch.empty(2, 16).fill_(1).to(device)
-
-        def foo(x):
-            return torch.sin(x) + x.min()
-
-        metrics.reset()
-        opt_fn = torch.compile(foo)
-
-        # Since we don't have a triton backend, we need to mock the triton_hash_with_backend
-        # function
-        with unittest.mock.patch(
-            "torch.utils._triton.triton_hash_with_backend",
-            new=mock_triton_hash_with_backend,
-        ):
-            code = get_triton_code(opt_fn, x)
-
-        FileCheck().check("import triton").check("@triton.jit").check(
-            "tl_math.sin"
-        ).check("device_str='privateuseone'").run(code)
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
@@ -291,7 +249,43 @@ class TritonExtensionBackendGenericTests(TritonExtensionBackendTestBase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_open_device_registration(self):
-        self._test_open_device_registration()
+        torch._register_device_module("privateuseone", self.module)
+        register_backend_for_device(
+            "privateuseone", ExtensionScheduling, ExtensionWrapperCodegen
+        )
+        register_device_op_overrides("privateuseone", CPUDeviceOpOverrides())
+        device_interface.register_interface_for_device("privateuseone", DeviceInterface)
+
+        self.assertEqual(
+            get_scheduling_for_device("privateuseone"), ExtensionScheduling
+        )
+        self.assertEqual(
+            get_wrapper_codegen_for_device("privateuseone"), ExtensionWrapperCodegen
+        )
+        self.assertEqual(
+            device_interface.get_interface_for_device("privateuseone"), DeviceInterface
+        )
+
+        device = torch.device("privateuseone")
+        x = torch.empty(2, 16).fill_(1).to(device)
+
+        def foo(x):
+            return torch.sin(x) + x.min()
+
+        metrics.reset()
+        opt_fn = torch.compile(foo)
+
+        # Since we don't have a triton backend, we need to mock the triton_hash_with_backend
+        # function
+        with unittest.mock.patch(
+            "torch.utils._triton.triton_hash_with_backend",
+            new=mock_triton_hash_with_backend,
+        ):
+            code = get_triton_code(opt_fn, x)
+
+        FileCheck().check("import triton").check("@triton.jit").check(
+            "tl_math.sin"
+        ).check("device_str='privateuseone'").run(code)
 
     @unittest.skipUnless(has_triton_package(), "Requires the triton package")
     def test_flex_attention_open_device_registration(self):
@@ -347,12 +341,10 @@ class TritonExtensionBackendAcceleratorTests(TritonHeuristicsTestBase):
         super().setUp()
 
     @onlyAccelerator
-    @requires_triton_backend
     def test_codegen_with_custom_heuristics_module(self, device):
         self._test_codegen_with_custom_heuristics_module(device)
 
     @onlyAccelerator
-    @requires_triton_backend
     def test_codegen_with_custom_heuristics_module_udtk(self, device):
         self._test_codegen_with_custom_heuristics_module_udtk(device)
 
@@ -365,7 +357,6 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TritonExtensionBackendAcceleratorTests,
     globals(),
-    except_for=("cpu",),
     allow_xpu=True,
 )
 
