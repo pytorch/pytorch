@@ -1004,9 +1004,17 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 True: "_sfdp_pattern_5_training",
             },
         )
-        # counters hold the last (training) run; both layers must have fused
+        # counters hold the last run _check_common performed: that is the
+        # training run everywhere except XPU, which has no sdpa backward and
+        # skips training (see _check_common), leaving the inference run's
+        # counters behind. Pick the pattern for whichever run ran last so both
+        # layers are asserted to have fused on every device.
+        # TODO: remove this workaround when sdpa backward for XPU is merged.
         per_pattern = counters["inductor_pattern_matcher_per_pattern"]
-        self.assertEqual(per_pattern["_sfdp_pattern_5_training"], 2)
+        if (self.device == "xpu"):
+            self.assertEqual(per_pattern["_sfdp_pattern_5_inference"], 2)
+        else:
+            self.assertEqual(per_pattern["_sfdp_pattern_5_training"], 2)
 
     def _test_pattern_fuses_with_symint_scale(self):
         # A SymInt scale is a scalar the fused kernel accepts. _check_common
