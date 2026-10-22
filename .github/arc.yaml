@@ -20,7 +20,7 @@
 # forced to 'mt-'. Keyed by ARC label, the shared Karpenter resource that
 # several EC2 types bin-pack onto.
 lf_allowlist:
-  mode: all
+  mode: restricted
   runners:
     - l-x86iavx512-8-64        # c5.2xlarge, c7i.2xlarge, r7i.2xlarge
     - l-x86iavx512-16-128      # c5.4xlarge, c7i.4xlarge, r7i.4xlarge, r5.4xlarge
