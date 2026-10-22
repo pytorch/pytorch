@@ -12073,6 +12073,51 @@ class TestExportPython(TestCase):
         with ind_config.patch({"cpp.simdlen": 0}):
             self.assertEqual(loaded(x, y), expected)
 
+    def test_arm_isa_spelling_from_the_build_is_not_refused(self, device):
+        # str(VecNEON) is "neon" in fbcode builds and "asimd" in OSS ones, so the same
+        # ARM host must not refuse an artifact captured by the other build.
+        if torch.device(device).type != "cpu":
+            self.skipTest("the stamp is about C++ kernels")
+        from torch._inductor.async_compile import AsyncCompile
+        from torch.compiler._export_python import _CPU_ISA_TAG
+
+        path = self._tmp_path("isa_arm.py")
+
+        def fn(x, y):
+            return ((x * 2.0 + y).tanh() * x).sum(dim=0)
+
+        x = make_tensor((256, 256), device=device, dtype=torch.float32)
+        y = make_tensor((256, 256), device=device, dtype=torch.float32)
+        torch.compiler.export_python(path=path)(fn)(x, y)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        stamp = next(l for l in source.splitlines() if l.startswith(_CPU_ISA_TAG))
+
+        class FakeArmIsa:
+            def __init__(self, name):
+                self.name = name
+
+            def bit_width(self):
+                return 128
+
+            def __str__(self):
+                return self.name
+
+        # Reaching the kernel compile means the ISA check passed.
+        compiled = RuntimeError("compiled the C++ kernel")
+        for captured, live in (("neon", "asimd"), ("asimd", "neon")):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(source.replace(stamp, f"{_CPU_ISA_TAG}{(128, captured)!r}"))
+            with (
+                mock.patch(
+                    "torch._inductor.cpu_vec_isa.pick_vec_isa",
+                    return_value=FakeArmIsa(live),
+                ),
+                mock.patch.object(AsyncCompile, "cpp_pybinding", side_effect=compiled),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "compiled the C"):
+                    torch.compiler.export_python(path=path)(fn)(x, y)
+
     def test_a_cuda_only_artifact_records_no_cpu_isa(self, device):
         # A CUDA artifact must not start refusing to run, or warning, because it moved
         # between two hosts whose CPUs differ in a way it never depended on.

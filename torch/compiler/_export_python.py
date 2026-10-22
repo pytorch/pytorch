@@ -645,11 +645,13 @@ class ExportedPythonArtifact:
             return None
 
     def _check_capture_environment(self, args: tuple[Any, ...]) -> None:
-        # Two more things make_fx specialized with no runtime guard. Input ALIASING
-        # decides what an in-place mutation means, so an artifact captured with two
-        # arguments sharing memory computes the wrong thing (and mutates the wrong
-        # thing) when they are distinct at runtime -- torch.compile guards this and
-        # recompiles. Ambient AUTOCAST decides the dtypes the kernels were built for.
+        # Three things make_fx specialized with no runtime guard; torch.compile guards
+        # them and recompiles. Input ALIASING decides what an in-place mutation means,
+        # so an artifact captured with two arguments sharing memory computes (and
+        # mutates) the wrong thing when they are distinct at runtime. Input IDENTITY
+        # matters separately: AOTAutograd folds one object passed twice into a single
+        # graph slot, which byte overlap alone cannot tell apart from two views.
+        # Ambient AUTOCAST decides the dtypes the kernels were built for.
         tensors: list[torch.Tensor] | None = None
 
         def input_tensors() -> list[torch.Tensor]:
@@ -775,7 +777,10 @@ class ExportedPythonArtifact:
         # and a scalar capture (width 0) emits no vector code to mismatch. Only the
         # features str(isa) names are compared: the GEMM templates' amx_fp16 and
         # avx512_bf16 choices are not in the stamp, so a change in those goes unchecked.
-        missing = set(name.split()) - set(str(live).split())
+        # str(VecNEON/VecSVE) is "neon" in fbcode builds and "asimd" elsewhere.
+        spell = {"neon": "asimd"}
+        captured_words = {spell.get(f, f) for f in name.split()}
+        missing = captured_words - {spell.get(f, f) for f in str(live).split()}
         if width and (live.bit_width() != width or missing):
             raise _precompile_error(
                 "torch.compiler.export_python: the artifact's C++ kernels were "
