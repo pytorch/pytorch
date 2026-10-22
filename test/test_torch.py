@@ -7154,6 +7154,7 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected scalar type .* but found"):
             torch.compile(lambda x, y: torch.matmul(x, y), fullgraph=True)(a, b)
 
+    @onlyAccelerator
     def test_baddbmm_mixed_dtype_error(self, device):
         inp = torch.randn(2, 8, 64, device=device, dtype=torch.float16)
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
