@@ -851,6 +851,8 @@ class FileSystemReader(StorageReader):
         self,
         path: str | os.PathLike,
         _extension_registry: ExtensionRegistry | None = None,  # EXPERIMENTAL
+        *,
+        mmap: bool = False,
     ) -> None:
         super().__init__()
         self.fs = FileSystem()
@@ -860,6 +862,7 @@ class FileSystemReader(StorageReader):
         self.transforms = _StorageReaderTransforms(_extension_registry)
         self.rank = None
         self.use_collectives = True
+        self.mmap = mmap
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
@@ -927,14 +930,44 @@ class FileSystemReader(StorageReader):
             new_path = self.fs.concat_path(self.path, relative_path)
             with self.fs.create_stream(new_path, "rb") as stream:
                 # TODO sort by offset and cache the reading
+                mapped_storage: torch.UntypedStorage | None = None
+                file_size: int | None = None
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(stream, item_md)
-                    item = self._load_item(req, file_slice)
                     if req.type == LoadItemType.BYTE_IO:
+                        item = self._load_item(req, file_slice)
                         planner.load_bytes(req, cast(io.BytesIO, item))
                     else:
-                        tensor = cast(Tensor, item)
+                        tensor: Tensor | None = None
+                        if self.mmap and type(self.fs) is FileSystem and not (
+                            item_md.transform_descriptors or ()
+                        ):
+                            if file_size is None:
+                                file_size = os.fstat(stream.fileno()).st_size
+                            end = item_md.offset + item_md.length
+                            if not 0 <= item_md.offset < end <= file_size:
+                                raise RuntimeError(
+                                    "DCP storage range is outside the backing file"
+                                )
+                            if mapped_storage is None:
+                                mapped_storage = torch.UntypedStorage.from_file(
+                                    os.fspath(new_path), shared=False, nbytes=file_size
+                                )
+                            try:
+                                tensor = torch.serialization._load_zip_region(
+                                    file_slice,
+                                    overall_storage=mapped_storage,
+                                    storage_base_offset=item_md.offset,
+                                )
+                            except torch.serialization._UnsupportedZipRegion:
+                                pass
+                        if tensor is None:
+                            tensor = cast(Tensor, self._load_item(req, file_slice))
+                        else:
+                            tensor = narrow_tensor_by_index(
+                                tensor, req.storage_offsets, req.lengths
+                            )
                         target_tensor = self._resolve_item(req, tensor, planner)
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
