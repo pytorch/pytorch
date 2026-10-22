@@ -1109,6 +1109,25 @@ def export_python(
     development: **edit ``fn`` and rerun, and you get the old compiled code with no
     warning.** Delete ``path`` to recapture.
 
+    A handful of comment stamps (below) catch the ambient changes that would silently
+    change the answer, and they are a backstop, not a guarantee -- the list of things a
+    generated kernel bakes is longer than the list that is checked. While you are tuning
+    an artifact, set ``COMPILER_EXPORT_PYTHON_CHECK=1`` to qualify each edit before
+    shipping it: every call then re-runs ``fn`` eagerly on a deep copy of the same inputs
+    and compares the results, so an edit that changes numerics is reported instead of
+    trusted. Floating-point results are compared at the working dtype's resolution, with
+    per-dtype tolerances that ``COMPILER_EXPORT_PYTHON_CHECK_RTOL`` and ``..._ATOL``
+    override; integer and bool results must match exactly. It is a debug mode, so leave
+    it off in production: each checked call deep-copies every argument (an ``nn.Module``
+    argument with all of its weights) and runs ``fn`` a second time, so any side effect
+    of ``fn`` -- writing a log, appending to a list, stepping a counter -- happens twice,
+    and a test that deliberately makes the artifact disagree with ``fn`` fails under it.
+    It catches an edit that changes the answer, but it does not prove the edit computes
+    the same function: an approximation whose error is below the dtype's own noise passes
+    by construction. It compares values only, so it cannot see that the artifact's outputs
+    carry no ``grad_fn``: a capture is forward-only, and calling ``.backward()`` on an
+    artifact's output fails where the eager function would have worked.
+
     .. warning::
         This API is experimental and subject to change.
 
