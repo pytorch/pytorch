@@ -3904,14 +3904,40 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(expected, torch.zeros(4))
         self.assertEqual(actual, expected)
 
-    def test_custom_jvp_with_forward_grad_disabled_still_graph_breaks(self):
-        """Forward grad mode is deliberately not part of the break predicate.
+    def test_enter_dual_level_custom_jvp_matches_eager(self):
+        """Dynamo inlines enter_dual_level(), so the global level stays -1."""
 
-        `_set_fwd_grad_enabled(False)` does rule out the jvp being reached, but
-        nothing guards that flag, so skipping the break here would cache a graph
-        that inlines forward(); see the re-enable test below. Breaking on the
-        dual level alone costs an unnecessary break in this rare configuration.
-        """
+        def fn(x, dx):
+            fwAD.enter_dual_level()
+            out = fwAD.unpack_dual(SinWithZeroJvp.apply(fwAD.make_dual(x, dx)))
+            fwAD.exit_dual_level()
+            return out.tangent.clone()
+
+        x, dx = torch.randn(4), torch.randn(4)
+        expected = fn(x, dx)
+        self.assertEqual(expected, torch.zeros(4))
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "custom `jvp`"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, dx)
+        self.assertEqual(torch.compile(fn, backend="eager")(x, dx), expected)
+
+    def test_custom_jvp_on_non_dual_input_does_not_graph_break(self):
+        """A live dual level alone must not break when no tangent reaches apply."""
+
+        c = torch.randn(4)
+
+        def f(x):
+            return x.cos() + SinWithZeroJvp.apply(c)
+
+        def fn(x, dx):
+            return torch.func.jvp(f, (x,), (dx,))
+
+        x, dx = torch.randn(4), torch.randn(4)
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, dx)
+        self.assertEqual(actual, fn(x, dx))
+
+    def test_custom_jvp_with_forward_grad_disabled_does_not_graph_break(self):
+        """With forward grad off, make_dual is a no-op, so no tangent reaches apply."""
 
         def fn(x, dx):
             with fwAD.dual_level(), fwAD._set_fwd_grad_enabled(False):
@@ -3919,10 +3945,8 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
                 return fwAD.unpack_dual(out).primal
 
         x, dx = torch.randn(4), torch.randn(4)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "custom `jvp`"):
-            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, dx)
-
-        self.assertEqual(torch.compile(fn, backend="aot_eager")(x, dx), torch.sin(x))
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, dx)
+        self.assertEqual(actual, torch.sin(x))
 
     def test_custom_jvp_after_forward_grad_re_enabled_at_same_level(self):
         """Re-enabling forward grad at an unchanged dual level must stay correct.

@@ -705,19 +705,32 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
     return trampoline_autograd_apply
 
 
-def _forward_ad_active() -> bool:
-    """Whether a forward-AD level is live at the current tracing point.
+def _forward_ad_active(tx: "InstructionTranslatorBase", value: Any) -> bool:
+    """Whether a forward-AD tangent can reach an `apply` on `value`.
 
-    A dual level covers both entry points: `torch.func.jvp` enters one via
-    `_jvp_with_argnums`, and `dual_level()` is one. Forward grad mode is
-    deliberately not consulted, even though `_set_fwd_grad_enabled(False)` makes
-    `make_dual` a no-op and so rules out the jvp being reached: no guard covers
-    that flag, so a graph compiled with it off is reused once it is turned back
-    on at the same level, which is the silent wrongness this check exists to
-    prevent. Breaking on the level alone keeps the decision a function of state
-    the guard below pins.
+    A dual level live at frame entry means a graph input may be dual on this or
+    a later call, and the DUAL_LEVEL guard pins that level. Otherwise a tangent
+    can only come from a dual made inside the frame (`dual_level()`,
+    `enter_dual_level()`, `torch.func.jvp`), which shows on the fake value. The
+    global `_current_level` is no use for that: Dynamo inlines
+    `enter_dual_level()`, so the global stays -1 while tracing, and a live level
+    says nothing about whether this input carries a tangent. Level 0 is the only
+    one there can be, since forward AD does not support nesting.
     """
-    return torch.autograd.forward_ad._current_level >= 0
+    if tx.output.dual_level >= 0:
+        return True
+    has_dual = False
+
+    def visit(vt: VariableTracker) -> None:
+        nonlocal has_dual
+        if vt.is_tensor():
+            fake = vt.as_proxy().node.meta.get("example_value")
+            if isinstance(fake, torch.Tensor):
+                tangent = torch.autograd.forward_ad.unpack_dual(fake, level=0).tangent
+                has_dual = has_dual or tangent is not None
+
+    VariableTracker.visit(visit, value)
+    return has_dual
 
 
 class AutogradFunctionVariable(VariableTracker):
@@ -900,7 +913,8 @@ class AutogradFunctionVariable(VariableTracker):
         # forward-AD rules of the primitives it decomposes into.
         jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
         if jvp_fn is not torch.autograd.Function.jvp:
-            if (requires_grad and torch.is_grad_enabled()) or _forward_ad_active():
+            forward_ad = _forward_ad_active(tx, (args, kwargs))
+            if (requires_grad and torch.is_grad_enabled()) or forward_ad:
                 unimplemented(
                     gb_type="Unsupported custom jvp",
                     context=f"call_apply {self} {args} {kwargs}",
@@ -915,8 +929,8 @@ class AutogradFunctionVariable(VariableTracker):
             # Not breaking was a decision about the ambient dual level, which
             # nothing guards by default. Pin it so entering a level later
             # recompiles instead of reusing a graph that inlined forward() and
-            # dropped the jvp. The level is always -1 here, since any live level
-            # takes the break above.
+            # dropped the jvp. The level is always -1 here, since a level live at
+            # frame entry takes the break above.
             install_guard(GlobalStateSource().make_guard(GuardBuilder.DUAL_LEVEL))
 
         if requires_grad and torch.is_grad_enabled():
