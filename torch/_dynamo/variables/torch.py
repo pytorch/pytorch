@@ -2132,6 +2132,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if fill_value.is_tensor() and not issubclass(
                 fill_value.python_type(), torch.nn.Parameter
             ):
+                # Eager converts fill_value with item(), which fails for meta tensors.
+                if (
+                    isinstance(fill_value, TensorVariable)
+                    and fill_value.device.type == "meta"
+                ):
+                    raise_observed_exception(
+                        RuntimeError,
+                        tx,
+                        args=["Tensor.item() cannot be called on meta tensors"],
+                    )
                 # Decompose: create empty tensor and fill it
                 # This avoids the scalar extraction at compile time
                 empty_result = TorchInGraphFunctionVariable(torch.empty).call_function(

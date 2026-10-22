@@ -8878,6 +8878,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 )
                 self.assertEqual(result, expected)
 
+    def test_full_with_meta_tensor_fill_value_raises(self):
+        def func(fill_value, x, device):
+            try:
+                torch.full((2,), fill_value, dtype=torch.float64, device=device)
+            except RuntimeError:
+                return x + 1
+            return x - 1
+
+        fill_value = torch.empty((), device="meta")
+        x = torch.ones(2)
+        for device in ("cpu", "meta"):
+            with self.subTest(device=device):
+                expected = func(fill_value, x, device)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value, x, device
+                )
+                self.assertEqual(result, expected)
+
     def test_full_with_parameter_fill_value_raises(self):
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
