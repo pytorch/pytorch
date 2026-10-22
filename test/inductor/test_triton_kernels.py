@@ -4047,7 +4047,8 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
-    def test_kernel_with_backslash_in_docstring(self):
+    @parametrize("cpp_wrapper", [False, True])
+    def test_kernel_with_backslash_in_docstring(self, cpp_wrapper):
         # https://github.com/pytorch/pytorch/issues/183420
         # Backslash escapes in the kernel source text must be doubled before
         # the source is spliced into the generated triple-quoted wrapper,
@@ -4061,8 +4062,12 @@ def forward(self, arg0_1, arg1_1):
             return x
 
         actual = fn(345)
-        expected = torch.compile(fn, fullgraph=True)(345)
+        with inductor_config.patch(cpp_wrapper=cpp_wrapper):
+            compiled = torch.compile(fn, fullgraph=True)
+            expected, code = run_and_get_code(compiled, 345)
         self.assertEqual(actual, expected)
+        if cpp_wrapper:
+            self.assertIn("Compile-time auto-tuning block", "\n".join(code))
 
     @requires_gpu
     @skipIfXpu(
