@@ -112,7 +112,7 @@ class RocprofLogger {
   std::atomic<uint64_t> generation_{0};
   std::atomic<uint64_t> totalRows_{0};
 
-  bool externalCorrelationEnabled_{true};
+  std::atomic<bool> externalCorrelationEnabled_{true};
 
   friend class libkineto::RocprofActivityApi;
 };

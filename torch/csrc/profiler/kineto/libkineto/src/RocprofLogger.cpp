@@ -296,12 +296,8 @@ struct GlobalContext {
   agent_info_map_t agents = {};
 };
 
-alignas(GlobalContext) auto global_context_buffer =
-    std::array<std::byte, sizeof(GlobalContext)>{};
-
 GlobalContext& getGlobalContext() {
-  // placement new into .bss section to prevent destruction issues on shutdown.
-  static auto* instance = new (global_context_buffer.data()) GlobalContext{};
+  static auto* instance = new GlobalContext();
   return *instance;
 }
 
@@ -361,14 +357,13 @@ extern "C" rocprofiler_tool_configure_result_t* rocprofiler_configure(
 }
 
 int RocprofLogger::toolInit(
-    [[maybe_unused]] rocprofiler_client_finalize_t finalize_func,
+    rocprofiler_client_finalize_t finalize_func,
     [[maybe_unused]] void* tool_data) {
   auto& globalContext = getGlobalContext();
   try {
     // Gather api names
     globalContext.name_info = rocprofiler::sdk::get_callback_tracing_names();
-    globalContext.buff_name_info =
-        rocprofiler::sdk::get_buffer_tracing_names();
+    globalContext.buff_name_info = rocprofiler::sdk::get_buffer_tracing_names();
 
     // Gather agent info
     auto agent_info = get_gpu_device_agents();
@@ -398,13 +393,9 @@ int RocprofLogger::toolInit(
     // rocprofiler_context_is_valid returns the validation status itself,
     // so a successful status implies isValid == 1.
     int isValid = 0;
-    ROCPROF_CALL_THROW(rocprofiler_context_is_valid(
-        globalContext.utilityContext, &isValid));
-    if (isValid == 0) {
-      KINETO_THROW(std::runtime_error, "utility context failed validation");
-    }
     ROCPROF_CALL_THROW(
-        rocprofiler_start_context(globalContext.utilityContext));
+        rocprofiler_context_is_valid(globalContext.utilityContext, &isValid));
+    ROCPROF_CALL_THROW(rocprofiler_start_context(globalContext.utilityContext));
 
     //
     // select some api calls to omit, in the most inconvenient way possible
@@ -480,9 +471,13 @@ int RocprofLogger::toolInit(
     return 0;
   } catch (const std::exception& e) {
     LOG(ERROR) << "RocprofLogger initialization failed: " << e.what();
-    // Null the ids so no later call operates on a half-initialized tool;
-    // rocprofiler-sdk cleans up all client contexts since init returns
-    // non-zero.
+    // The SDK discards this function's return value, so nothing upstream
+    // stops the contexts started here. Stop the utility context before
+    // dropping its handle; otherwise its code object callback keeps
+    // running for the rest of the process.
+    if (globalContext.utilityContext != null_context_id) {
+      ROCPROF_CALL(rocprofiler_stop_context(globalContext.utilityContext));
+    }
     globalContext.utilityContext = null_context_id;
     globalContext.context = null_context_id;
     globalContext.buffer = null_buffer_id;
@@ -492,13 +487,13 @@ int RocprofLogger::toolInit(
 
 void RocprofLogger::toolFinalize([[maybe_unused]] void* tool_data) {
   auto& globalContext = getGlobalContext();
-  // Nothing to stop here: rocprofiler-sdk stops all client contexts and
-  // flushes all client buffers before invoking this functor, and
-  // rocprofiler_stop_context on an already-stopped context returns
-  // CONTEXT_NOT_FOUND (NOTE: "fini functor" == this function). The
-  // unchecked flush is a best-effort safety net for the unlikely race
-  // where a record is placed in the buffer after the SDK's internal
-  // flush; its status is not actionable at this point.
+  // Nothing to stop here: rocprofiler-sdk stops all client contexts before
+  // invoking this functor, and rocprofiler_stop_context on an already-stopped
+  // context returns CONTEXT_NOT_FOUND. It does not flush client buffers,
+  // however, so this is the final flush and not a redundant one: records
+  // still below the buffer's threshold are delivered only by this call.
+  // The status is unchecked because nothing is actionable this late in
+  // teardown.
   rocprofiler_flush_buffer(globalContext.buffer);
   // Null the ids so later calls fail fast rather than touching handles
   // the SDK is about to destroy.
@@ -540,14 +535,16 @@ thread_local std::deque<uint64_t>
 }
 
 void RocprofLogger::pushCorrelationID(uint64_t id, CorrelationDomain type) {
-  if (!singleton().externalCorrelationEnabled_) {
+  if (!singleton().externalCorrelationEnabled_.load(
+          std::memory_order_relaxed)) {
     return;
   }
   t_externalIds[type].push_back(id);
 }
 
 void RocprofLogger::popCorrelationID(CorrelationDomain type) {
-  if (!singleton().externalCorrelationEnabled_) {
+  if (!singleton().externalCorrelationEnabled_.load(
+          std::memory_order_relaxed)) {
     return;
   }
   if (!t_externalIds[type].empty()) {
@@ -694,10 +691,6 @@ void RocprofLogger::code_object_callback(
       globalContext.kernel_info.emplace(data->kernel_id, *data);
       globalContext.kernel_names.emplace(
           data->kernel_id, demangle(data->kernel_name));
-    } else if (record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD) {
-      // no need to remove the kernel info/names from the map(s), as the
-      // kernel_id is unique and will not be reused. The kernel info will be
-      // cleared when the process exits.
     }
   }
 }
@@ -872,12 +865,14 @@ void RocprofLogger::buffer_callback(
         // buffer callback for a given buffer always happens on same thread so
         // the only contention here is with code object callback on another
         // thread.
-        std::lock_guard<std::mutex> lock{globalContext.kernel_lock};
-        auto kernel_it = globalContext.kernel_names.find(dispatch.kernel_id);
-        std::string kernel_name =
-            (kernel_it != globalContext.kernel_names.end())
-            ? kernel_it->second
-            : "<unknown kernel>";
+        auto kernel_name = std::string("<unknown kernel>");
+        {
+          std::lock_guard<std::mutex> lock{globalContext.kernel_lock};
+          auto kernel_it = globalContext.kernel_names.find(dispatch.kernel_id);
+          if (kernel_it != globalContext.kernel_names.end()) {
+            kernel_name = kernel_it->second;
+          }
+        }
 
         rocprofAsyncRow* row = new rocprofAsyncRow(
             record.correlation_id.internal,
@@ -985,7 +980,7 @@ void RocprofLogger::startLogging() {
     return;
   }
 
-  externalCorrelationEnabled_ = true;
+  externalCorrelationEnabled_.store(true, std::memory_order_relaxed);
   // start_context is idempotent (it returns SUCCESS for an already-active
   // context), so there is no need to query context state first.
   ROCPROF_CALL(rocprofiler_start_context(globalContext.context));
@@ -1002,7 +997,7 @@ void RocprofLogger::stopLogging() {
     return;
   }
 
-  externalCorrelationEnabled_ = false;
+  externalCorrelationEnabled_.store(false, std::memory_order_relaxed);
   // stop_context returns CONTEXT_NOT_FOUND when the context is not active,
   // which is an expected state (e.g. stopping twice) rather than an error.
   auto status = rocprofiler_stop_context(globalContext.context);
