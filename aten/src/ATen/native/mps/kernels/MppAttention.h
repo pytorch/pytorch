@@ -749,9 +749,10 @@ prefill_attention_mpp(
     stile_t Stile;
     Stile.clear();
 
-    // S = Q @ K^T over one BD-wide chunk of the QK dim starting at column d0.
+    // S = Q @ K^T, accumulated over BD-wide chunks of the QK dim when CHUNKED.
     // K is loaded row-major and consumed transposed by mma.
-    auto qk_chunk = [&](int d0) __attribute__((always_inline)) {
+    const int d_end = CHUNKED ? D : BD;
+    for (int d0 = 0; d0 < d_end; d0 += BD) {
       const bool d_full = d0 + BD <= D;
       MPP_PRAGMA_UNROLL
       for (short iq = 0; iq < TQ; iq++) {
@@ -791,13 +792,6 @@ prefill_attention_mpp(
           }
         }
       }
-    };
-    if constexpr (CHUNKED) {
-      for (int d0 = 0; d0 < D; d0 += BD) {
-        qk_chunk(d0);
-      }
-    } else {
-      qk_chunk(0);
     }
 
     // Scale (in log2 space).

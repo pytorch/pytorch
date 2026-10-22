@@ -130,7 +130,10 @@ static void sdpa_vector_mps(const Tensor& q,
 // PrefillAttention.h and MppAttention.h. Head dims above the widest tile run
 // on kChunkTile: the QK dim in tile-wide chunks, V/O in tile-wide column slabs.
 static constexpr std::array<int64_t, 8> kPrefillTiles{32, 64, 72, 80, 96, 128, 160, 192};
-static constexpr std::array<int64_t, 4> kMppTiles{64, 96, 128, 256};
+static constexpr std::array<int64_t, 3> kMppTiles{64, 96, 128};
+// Before Apple10 only, for an exact head dim: on Apple10 the 256 tile is
+// register-bound and the chunked 128 tile runs 1.7x faster (M5 Pro).
+static constexpr int64_t kMppWideTile = 256;
 static constexpr int64_t kChunkTile = 128;
 // Split-K spreads the keys of a Q block over threadgroups until the grid
 // reaches kSplitTargetThreadgroups (fills an M5 Pro), keeping at least
@@ -163,11 +166,20 @@ static void sdpa_prefill_mps(const Tensor& q,
   // Before Apple10's matrix units, MPP only beats the simdgroup kernel on an
   // unpadded, unchunked tile (M3 Ultra, M4).
   const int64_t d = q.size(3), dv = v.size(3);
-  const bool exact_mpp_tile = d == dv && std::find(kMppTiles.begin(), kMppTiles.end(), d) != kMppTiles.end();
-  const bool use_mpp = at::mps::has_mpp() && q.scalar_type() != kFloat && (is_apple10_or_newer || exact_mpp_tile);
-  const c10::IntArrayRef tiles = use_mpp ? c10::IntArrayRef(kMppTiles) : c10::IntArrayRef(kPrefillTiles);
+  const bool exact_mpp_tile = d == dv &&
+      (std::find(kMppTiles.begin(), kMppTiles.end(), d) != kMppTiles.end() ||
+       (!is_apple10_or_newer && d == kMppWideTile));
   const int64_t widest = std::max(d, dv);
-  const int64_t bd = widest > tiles.back() ? kChunkTile : *std::lower_bound(tiles.begin(), tiles.end(), widest);
+  // On Apple10 a padded QK dim up to 192 with a V/O dim past the 128 tile keeps
+  // its exact simdgroup tile: MPP would chunk QK and recompute the scores per
+  // V/O slab (M5 Pro: 0.66x), while above 192 both kernels chunk and MPP wins.
+  const bool two_slabs = widest > kMppTiles.back() && widest <= kPrefillTiles.back() && dv > kMppTiles.back();
+  const bool use_mpp =
+      at::mps::has_mpp() && q.scalar_type() != kFloat && (exact_mpp_tile || (is_apple10_or_newer && !two_slabs));
+  const c10::IntArrayRef tiles = use_mpp ? c10::IntArrayRef(kMppTiles) : c10::IntArrayRef(kPrefillTiles);
+  const int64_t bd = use_mpp && exact_mpp_tile ? d
+      : widest > tiles.back()                  ? kChunkTile
+                                               : *std::lower_bound(tiles.begin(), tiles.end(), widest);
   const int64_t bq = use_mpp ? kMppBQ : kPrefillBQ, bk = use_mpp ? kMppBK : prefill_bk(bd);
 
   std::optional<Tensor> mask = mask_;
