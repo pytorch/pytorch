@@ -317,6 +317,14 @@ aten_tunableop_timeout: float = float(
     os.environ.get("INDUCTOR_ATEN_TUNABLEOP_TIMEOUT", "900")
 )
 
+# Whether "tune" mode also tunes a ladder of sizes of each GEMM's dynamic dim, or
+# only the traced shape. The ladder is what gives runtime a chance of an exact hit
+# on a size the compile never saw, and is also nearly all of the tuning cost -- on
+# the heavier merge nets, the difference between minutes and hours.
+aten_tunableop_ladder: bool = (
+    os.environ.get("INDUCTOR_ATEN_TUNABLEOP_LADDER", "1") == "1"
+)
+
 # codegen benchmark harness
 benchmark_harness = True
 
