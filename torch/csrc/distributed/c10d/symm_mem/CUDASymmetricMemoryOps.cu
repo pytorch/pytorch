@@ -20,6 +20,7 @@
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -191,6 +192,7 @@ at::Tensor multimem_all_reduce_(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_reduce_: multicast support is required.");
+  GroupStreamGuard stream_guard(group_name, pg);
 
   const size_t alignment =
       get_and_verify_alignment(input, "multimem_all_reduce_");
@@ -290,6 +292,7 @@ at::Tensor multimem_one_shot_reduce_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_one_shot_reduce: requires multicast support.");
+  GroupStreamGuard stream_guard(group_name, pg);
 
   int rank = symm_mem->get_rank();
   int world_size = symm_mem->get_world_size();
@@ -411,6 +414,7 @@ at::Tensor multimem_all_gather_out(
   TORCH_CHECK(
       symm_mem->has_multicast_support(),
       "multimem_all_gather_out: output must have multicast support.");
+  GroupStreamGuard stream_guard(group_name, pg);
 
   TORCH_CHECK(
       input.is_contiguous(),
@@ -621,6 +625,7 @@ at::Tensor one_shot_all_reduce_out_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+  GroupStreamGuard stream_guard(group_name, pg);
 
   const size_t alignment =
       get_and_verify_alignment(input, "one_shot_all_reduce");
@@ -873,6 +878,7 @@ at::Tensor two_shot_all_reduce_impl(
   TORCH_CHECK(
       symm_mem != nullptr,
       "two_shot_all_reduce: input must be allocated with empty_strided_p2p().");
+  GroupStreamGuard stream_guard(group_name, pg);
 
   const size_t alignment =
       get_and_verify_alignment(input, "two_shot_all_reduce");
@@ -1010,6 +1016,7 @@ at::Tensor reduce_scatter_out(
   TORCH_CHECK(
       symm_mem != nullptr,
       "reduce_scatter: input must be allocated with empty_strided_p2p().");
+  GroupStreamGuard stream_guard(group_name, pg);
 
   const size_t alignment = get_and_verify_alignment(input, "reduce_scatter");
 

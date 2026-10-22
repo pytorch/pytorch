@@ -5,7 +5,6 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
-#include <sstream>
 #include <utility>
 
 namespace torch::autograd {
@@ -40,6 +39,7 @@ variable_list wrap_outputs(
         result.emplace_back();
       }
     }
+    fire_node_creation_hooks(grad_fn);
   }
   return result;
 }

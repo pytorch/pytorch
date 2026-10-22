@@ -31,6 +31,12 @@
 
 .. autoclass:: torch.profiler.ProfilerActivity
   :members:
+
+.. autoclass:: torch.profiler.CuspyConfig
+
+.. autoclass:: torch.profiler.ProfilerActivityConfig
+
+.. autoclass:: torch.profiler.PerformanceMetricsConfig
 ```
 
 ## Intel Instrumentation and Tracing Technology APIs

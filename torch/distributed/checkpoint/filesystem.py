@@ -309,7 +309,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
         buckets[i % bins].append(wi)
 
     for wi in tensor_w:
-        # TODO replace with headq
+        # TODO replace with heapq
         idx = min(enumerate(bucket_sizes), key=operator.itemgetter(1))[0]
         buckets[idx].append(wi)
         bucket_sizes[idx] += _item_size(wi)
@@ -438,6 +438,10 @@ def _write_files_from_queue(
                 for tensor, write_item in loader.values():
                     if not tensor.is_cpu:
                         raise AssertionError("Tensor must be on CPU")
+                    if serialization_format == SerializationFormat.SAFETENSORS:
+                        # safetensors only serializes contiguous tensors, and a
+                        # state_dict may hold views such as transposed weights.
+                        tensor = tensor.contiguous()
                     write_results.append(
                         _write_item(
                             transforms,

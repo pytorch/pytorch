@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from sys import platform
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -32,8 +33,11 @@ from torch.testing._internal.common_distributed import (
     tp_transports,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     ADDRESS_IN_USE,
     CONNECT_TIMEOUT,
+    HardwareClassification,
     load_tests,
     retry_on_connect_failures,
     run_tests,
@@ -52,12 +56,31 @@ else:
 
 DEFAULT_HOSTNAME = "localhost"
 
-torch.backends.cuda.matmul.allow_tf32 = False
+
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_PRECISION
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
+    torch.backends.cuda.matmul.allow_tf32 = False
+
+
+def tearDownModule():
+    global _PRIOR_FP32_PRECISION
+    if _PRIOR_FP32_PRECISION is not None:
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
+        _PRIOR_FP32_PRECISION = None
+
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class StoreTestBase:
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_store(self, i):
         raise RuntimeError("not implemented")
 
@@ -114,7 +137,7 @@ class StoreTestBase:
 
     def _test_simple_wait(self, fs):
         with self.assertRaisesRegex(RuntimeError, "[t -i]imeout"):
-            fs.wait(["bad_key"], timedelta(seconds=0.25))
+            fs.wait(["bad_key"], timedelta(milliseconds=1))
         fs.add("good_key", 1)
         fs.wait(["good_key"])
 
@@ -262,6 +285,8 @@ class StoreTestBase:
 
 
 class FileStoreTest(TestCase, StoreTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -312,6 +337,8 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_store(self):
         store = dist.HashStore()
         store.set_timeout(timedelta(seconds=300))
@@ -319,6 +346,8 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 
 class PrefixStoreTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # delete is false as FileStore will automatically clean up the file
@@ -342,6 +371,8 @@ class PrefixStoreTest(TestCase):
 
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -359,6 +390,8 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     _use_libuv = False
 
     def _create_store(self):
@@ -375,7 +408,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        err_msg_reg = f"^The server socket has failed to listen on any local .*{port}"
+        err_msg_reg = "^The server socket has failed to listen on any local .*(?i:address already in use)"
         with self.assertRaisesRegex(dist.DistNetworkError, err_msg_reg):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
@@ -432,35 +465,49 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        os.environ["MASTER_ADDR"] = addr
-        os.environ["MASTER_PORT"] = str(port)
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["MASTER_ADDR"] = addr
+            os.environ["MASTER_PORT"] = str(port)
 
-        # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
-        # initialize even when using the same socket address.
+            # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
+            # initialize even when using the same socket address.
 
-        os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
-        dist.init_process_group(
-            backend="gloo",
-            init_method="env://",
-            rank=0,
-            world_size=1,
-        )
+            os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
+            dist.init_process_group(
+                backend="gloo",
+                init_method="env://",
+                rank=0,
+                world_size=1,
+            )
 
-        backend_opts = rpc.TensorPipeRpcBackendOptions(
-            init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
-        )
-        rpc.init_rpc(
-            name="worker0",
-            rank=0,
-            world_size=1,
-            rpc_backend_options=backend_opts,
-        )
+            backend_opts = rpc.TensorPipeRpcBackendOptions(
+                init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
+            )
+            rpc.init_rpc(
+                name="worker0",
+                rank=0,
+                world_size=1,
+                rpc_backend_options=backend_opts,
+            )
 
-        del os.environ["USE_LIBUV"]
-        if "USE_LIBUV" in os.environ:
-            raise AssertionError("Expected USE_LIBUV to not be in os.environ")
-        rpc.shutdown()
-        dist.destroy_process_group()
+            del os.environ["USE_LIBUV"]
+            if "USE_LIBUV" in os.environ:
+                raise AssertionError("Expected USE_LIBUV to not be in os.environ")
+            rpc.shutdown()
+            dist.destroy_process_group()
+        finally:
+            # A failure can land inside init_rpc, so do not wait on a possibly
+            # half-initialized agent, and tear the group down even if this raises.
+            try:
+                if rpc.api._is_current_rpc_agent_set():
+                    rpc.shutdown(graceful=False)
+            finally:
+                if dist.is_initialized():
+                    dist.destroy_process_group()
+                for var in ("USE_LIBUV", "MASTER_ADDR", "MASTER_PORT"):
+                    os.environ.pop(var, None)
 
     @skip_if_win32()
     def test_take_over_listen_socket(self):
@@ -500,9 +547,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(fs.num_keys(), 5)
         fs.delete_key("key")
         self.assertEqual(fs.num_keys(), 4)
-        fs.set_timeout(timedelta(seconds=2))
+        fs.set_timeout(timedelta(milliseconds=1))
         with self.assertRaises(RuntimeError):
             fs.get("key")
+        fs.set_timeout(timedelta(seconds=2))
         fs.delete_key("key0")
         fs.delete_key("key3")
         self.assertEqual(fs.num_keys(), 2)
@@ -625,15 +673,17 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
         os.environ[USE_AGENT_STORE] = "1"
         os.environ[MASTER_PORT] = str(store.port)
-        second_server = dist.TCPStore(
-            host_name="localhost",
-            port=store.port,
-            world_size=1,
-            is_master=True,
-            use_libuv=self._use_libuv,
-        )
-        del os.environ[USE_AGENT_STORE]
-        del os.environ[MASTER_PORT]
+        try:
+            second_server = dist.TCPStore(
+                host_name="localhost",
+                port=store.port,
+                world_size=1,
+                is_master=True,
+                use_libuv=self._use_libuv,
+            )
+        finally:
+            os.environ.pop(USE_AGENT_STORE, None)
+            os.environ.pop(MASTER_PORT, None)
 
         self.assertEqual(second_server.port, store.port)
 
@@ -649,7 +699,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_barrier_timeout_expires(self):
         store = self._create_store()
         with self.assertRaisesRegex(DistStoreError, "barrier timeout"):
-            store.barrier("test_barrier_fail", 2, timedelta(seconds=0.1))
+            store.barrier("test_barrier_fail", 2, timedelta(milliseconds=1))
 
     def test_barrier_multi_worker(self):
         server_store = self._create_store()
@@ -675,6 +725,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
 
 class LibUvTCPStoreTest(TCPStoreTest):
+    hw_classification = HardwareClassification.GENERIC
+
     _use_libuv = True
 
     def _create_store(self):
@@ -689,6 +741,8 @@ class LibUvTCPStoreTest(TCPStoreTest):
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.tcpstore = create_tcp_store()
@@ -753,6 +807,8 @@ class MyPythonStore(dist.Store):
 
 
 class PythonStoreTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_set_get(self):
         # If we were to inherit from StoreTestBase and try to use
         # its test_set_get function, we would exercise the Python
@@ -765,6 +821,8 @@ class PythonStoreTest(TestCase):
 
 
 class RendezvousTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             dist.rendezvous("invalid://")
@@ -775,26 +833,36 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @retry_on_connect_failures
     def test_nominal(self):
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = str(common.find_free_port())
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
 
-        # Single rank
-        os.environ["RANK"] = "0"
-        gen0 = dist.rendezvous("env://")
-        store0, rank0, size0 = next(gen0)
-        self.assertEqual(0, rank0)
-        self.assertEqual(1, size0)
+            # Single rank
+            os.environ["RANK"] = "0"
+            gen0 = dist.rendezvous("env://")
+            store0, rank0, size0 = next(gen0)
+            self.assertEqual(0, rank0)
+            self.assertEqual(1, size0)
 
-        store0.set("key0", "value0")
+            store0.set("key0", "value0")
 
-        # check with get
-        self.assertEqual(b"value0", store0.get("key0"))
+            # check with get
+            self.assertEqual(b"value0", store0.get("key0"))
+        finally:
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
 
 
 class RendezvousFileTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, "path missing"):
             gen = dist.rendezvous("file://?rank=0&world_size=1")
@@ -829,6 +897,8 @@ class RendezvousFileTest(TestCase):
 
 @skip_if_win32()
 class RendezvousTCPTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def create_tcp_url(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
@@ -918,6 +988,40 @@ class RendezvousTCPTest(TestCase):
         store0, _, _ = next(gen0)
         self.assertTrue(store0.libuvBackend)
 
+    def test_agent_store_ignored_for_other_address(self):
+        # torchrun's elastic agent exports TORCHELASTIC_USE_AGENT_STORE into
+        # every worker, meaning "the agent serves a store at
+        # MASTER_ADDR:MASTER_PORT". _create_c10d_store used to honor it for any
+        # address it was handed, so a private store on a caller-chosen port
+        # became client-only on every rank, nobody ever started a server and
+        # every rank blocked in connect-retry until the store timeout.
+        url = self.create_tcp_url()
+        env = {
+            "TORCHELASTIC_USE_AGENT_STORE": "True",
+            "MASTER_ADDR": DEFAULT_HOSTNAME,
+            "MASTER_PORT": str(common.find_free_port()),
+        }
+        with mock.patch.dict(os.environ, env):
+            gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
+            store0, _, _ = next(gen0)
+        store0.set("key0", "value0")
+        self.assertEqual(b"value0", store0.get("key0"))
+
+    def test_agent_store_honored_for_master_address(self):
+        # The flip side: at MASTER_ADDR:MASTER_PORT the agent is the server, so
+        # every rank must stay a client. Point at a port nothing listens on and
+        # check we fail to connect rather than silently starting a server.
+        port = common.find_free_port()
+        url = f"tcp://{DEFAULT_HOSTNAME}:{port:d}?world_size=1&rank=0"
+        env = {
+            "TORCHELASTIC_USE_AGENT_STORE": "True",
+            "MASTER_ADDR": DEFAULT_HOSTNAME,
+            "MASTER_PORT": str(port),
+        }
+        with mock.patch.dict(os.environ, env):
+            with self.assertRaises(DistNetworkError):
+                next(dist.rendezvous(url, timeout=timedelta(seconds=1)))
+
 
 class DummyStore(dist.Store):
     def __init__(self) -> None:
@@ -942,6 +1046,8 @@ class DummyStore(dist.Store):
 
 
 class TestPythonStore(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_optional_methods_fail(self):
         class TestStore(dist.Store):
             pass
@@ -1011,6 +1117,8 @@ class TestPythonStore(TestCase):
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)  # noqa: SIM115
     hash_store = dist.HashStore()
 
@@ -1072,6 +1180,8 @@ instantiate_parametrized_tests(TestMultiThreadedWait)
 
 @skip_if_win32()
 class TimeoutTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         import signal
 
@@ -1142,6 +1252,8 @@ class InitPgWithNonUvStore(TestCase):
     the default backend.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         super().tearDown()
         os.environ.pop("USE_LIBUV", None)
@@ -1179,6 +1291,8 @@ class InitPgWithNonUvStore(TestCase):
 
 
 class TestClientProtocol(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_client_connect(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("localhost", 0))
@@ -1220,7 +1334,7 @@ class TestClientProtocol(TestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        if torch.get_device_module()._initialized:
+        if getattr(torch.get_device_module(device_type), "_initialized", False):
             raise AssertionError(
                 f"test_distributed must not have initialized {device_type} context on main process"
             )

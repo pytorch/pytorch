@@ -48,7 +48,7 @@ def run_shmem_init_hook(
     kernel_cache = jit_function.device_caches[device][0]
     kernel = kernel_cache.get(key, None)
     if kernel is not None:
-        kernel.run
+        _ = kernel.run
         module_init(kernel.module)
     else:
         logger.warning(

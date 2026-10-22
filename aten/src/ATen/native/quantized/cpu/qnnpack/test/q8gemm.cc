@@ -1276,6 +1276,56 @@ TEST(Q8GEMM_DQ_8x8__AARCH64_NEON, k_div_8_subtile) {
     }
   }
 }
+
+// mr=1..4 variants of the dynamic-quant aarch64 kernel. They use the same
+// nr=8 / np=8 / kr=1 packing as the 8x8 kernel, so they must produce identical
+// results for the first mr activation rows. Only m == mr is exercised: callers
+// dispatch on the exact batch size, so the kernels have no row bounds checks.
+static GemmMicrokernelTester tester8(uint32_t m, size_t k, uint32_t n) {
+  return GemmMicrokernelTester().mr(m).nr(8).np(8).kr(1).m(m).n(n).k(k);
+}
+
+TEST(Q8GEMM_DQ_1TO4x8__AARCH64_NEON, exact_batch_sizes) {
+  const struct {
+    uint32_t m;
+    pytorch_q8gemm_dq_ukernel_function kernel;
+  } kernels[] = {
+      {4, pytorch_q8gemm_dq_ukernel_4x8__aarch64_neon},
+      {3, pytorch_q8gemm_dq_ukernel_3x8__aarch64_neon},
+      {2, pytorch_q8gemm_dq_ukernel_2x8__aarch64_neon},
+      {1, pytorch_q8gemm_dq_ukernel_1x8__aarch64_neon},
+  };
+  for (const auto& [m, kernel] : kernels) {
+    SCOPED_TRACE(m);
+    tester8(m, 8, 8).test(kernel);
+    tester8(m, 8, 8).aStride(37).test(kernel);
+    tester8(m, 8, 8).cStride(17).test(kernel);
+    tester8(m, 8, 8).qmin(128).test(kernel);
+    tester8(m, 8, 8).qmax(128).test(kernel);
+    tester8(m, 8, 8).aZeroPoint(0).test(kernel);
+    tester8(m, 8, 8).bZeroPoint(0).test(kernel);
+    tester8(m, 8, 8).aZeroPoint(0).bZeroPoint(0).test(kernel);
+    for (size_t k = 9; k < 16; k++) {
+      tester8(m, k, 8).test(kernel);
+      tester8(m, k, 8).aStride(37).test(kernel);
+      tester8(m, k, 8).cStride(17).test(kernel);
+      for (uint32_t n = 1; n <= 8; n++) {
+        tester8(m, k, n).iterations(3).test(kernel);
+      }
+    }
+    for (size_t k = 16; k < 128; k += 8) {
+      tester8(m, k, 8).test(kernel);
+      tester8(m, k, 8).aStride(171).test(kernel);
+      tester8(m, k, 8).cStride(17).test(kernel);
+    }
+    for (size_t k = 16; k < 128; k += 24) {
+      for (uint32_t n = 1; n <= 8; n++) {
+        tester8(m, k, n).iterations(3).test(kernel);
+      }
+    }
+  }
+}
+
 #endif
 
 #if CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64

@@ -204,19 +204,6 @@ ArrayRef(const std::initializer_list<T>&) -> ArrayRef<T>;
 
 /// @}
 
-template <typename T>
-std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
-  int i = 0;
-  out << '[';
-  for (const auto& e : list) {
-    if (i++ > 0)
-      out << ", ";
-    out << e;
-  }
-  out << ']';
-  return out;
-}
-
 /// @name ArrayRef Convenience constructors
 /// @{
 
@@ -288,3 +275,15 @@ using IntList [[deprecated(
     ArrayRef<int64_t>;
 
 } // namespace c10
+
+#if __cplusplus >= 202002L
+#include <ranges>
+// ArrayRef is a non-owning view; iterators remain valid after the ArrayRef
+// is destroyed (the underlying array outlives it). Opt in to the ranges
+// borrowed-range contract so that algorithms like std::ranges::find return
+// real iterators rather than std::ranges::dangling for temporary ArrayRefs.
+namespace std::ranges {
+template <typename T>
+inline constexpr bool enable_borrowed_range<c10::ArrayRef<T>> = true;
+} // namespace std::ranges
+#endif

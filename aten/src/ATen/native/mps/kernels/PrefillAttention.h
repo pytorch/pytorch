@@ -78,18 +78,6 @@ struct BlockLoaderT {
         dst(dst_ + bi * kDstStrRow + bj * kDstStrCol),
         src(src_ + bi * src_ld + bj) {}
 
-  template <typename UnaryOp>
-  METAL_FUNC void apply_inplace_op(thread const UnaryOp& op) const {
-    PREFILL_PRAGMA_UNROLL
-    for (short i = 0; i < BROWS; i += TROWS) {
-      PREFILL_PRAGMA_UNROLL
-      for (short j = 0; j < vec_size; j++) {
-        dst[i * kDstStrRow + j * kDstStrCol] =
-            op.apply(dst[i * kDstStrRow + j * kDstStrCol]);
-      }
-    }
-  }
-
   METAL_FUNC void load_unsafe() const {
     PREFILL_PRAGMA_UNROLL
     for (short i = 0; i < BROWS; i += TROWS) {
@@ -140,16 +128,6 @@ struct BlockLoaderT {
 
   METAL_FUNC void next() {
     src += tile_stride;
-  }
-};
-
-template <typename T>
-struct TransformScale {
-  T scale;
-  METAL_FUNC TransformScale(T scale_) : scale(scale_) {}
-
-  METAL_FUNC T apply(T x) const {
-    return scale * x;
   }
 };
 
@@ -550,14 +528,17 @@ struct PrefillAttnParams {
   float scale;
   float softcapping;
   // Strides (B, H, L) - element stride in last dim is assumed to be 1.
-  int Q_strides[3];
-  int K_strides[3];
-  int V_strides[3];
-  int O_strides[3];
+  // 64-bit: a batch/head stride is a product of the other dimensions and
+  // overflows 32 bits on large inputs, and the mask qL stride is multiplied
+  // by an absolute query position, reaching qL * kL.
+  int64_t Q_strides[3];
+  int64_t K_strides[3];
+  int64_t V_strides[3];
+  int64_t O_strides[3];
 };
 
 struct PrefillAttnMaskParams {
-  int M_strides[4]; // (B, H, qL, kL)
+  int64_t M_strides[4]; // (B, H, qL, kL)
 };
 
 template <
@@ -640,9 +621,12 @@ prefill_attention(
   using VBlockLoader = BlockLoaderT<T, BK, BD, LDV_tgp, 1, 0, WM * WN * 32>;
 
   // Stride between consecutive sequence rows for Q/K/V/O.
-  const int q_seq_stride = params->Q_strides[2];
-  const int k_seq_stride = params->K_strides[2];
-  const int v_seq_stride = params->V_strides[2];
+  // Narrowed back to 32-bit: these only ever multiply in-tile offsets, the
+  // base pointers having already been advanced.
+  const int q_seq_stride = int(params->Q_strides[2]);
+  const int k_seq_stride = int(params->K_strides[2]);
+  const int v_seq_stride = int(params->V_strides[2]);
+  const int o_seq_stride = int(params->O_strides[2]);
 
   QBlockLoader loader_q(Q, q_seq_stride, Qs, simd_group_id, simd_lane_id);
   KBlockLoader loader_k(K, k_seq_stride, Ks, simd_group_id, simd_lane_id);
@@ -653,8 +637,10 @@ prefill_attention(
   if (params->softcapping != 1.0f) {
     adjusted_scale = params->scale / params->softcapping;
   }
-  // 1.44269504089 = 1 / ln(2) so we can use exp2 instead of exp.
-  TransformScale<T> ts(static_cast<T>(adjusted_scale * 1.44269504089f));
+  // 1.44269504089 = 1 / ln(2) so we can use exp2 instead of exp. Scale the
+  // scores in AccumType, not Q in T: rounding the scale and the scaled Q to
+  // the input dtype compounds into a visible error at large scales.
+  const AccumType scale2 = adjusted_scale * 1.44269504089f;
 
   constexpr short kFragSize = 8;
   using MMAFrag_acc_t = BaseMMAFrag<AccumType, kFragSize, kFragSize>;
@@ -701,7 +687,6 @@ prefill_attention(
   } else {
     loader_q.load_unsafe();
   }
-  loader_q.apply_inplace_op(ts);
 
   constexpr short kRowsPT = decltype(Stile)::kRowsPerThread;
 
@@ -751,6 +736,20 @@ prefill_attention(
       simdgroup_barrier(mem_flags::mem_none);
 
       tile_matmad(Stile, Qtile, Ktile, Stile);
+    }
+
+    {
+      using stile_t = decltype(Stile);
+      PREFILL_PRAGMA_UNROLL
+      for (short i = 0; i < stile_t::kTileRows; i++) {
+        PREFILL_PRAGMA_UNROLL
+        for (short j = 0; j < stile_t::kTileCols; j++) {
+          PREFILL_PRAGMA_UNROLL
+          for (short jj = 0; jj < stile_t::MMAFrag_t::kElemsPerFrag; jj++) {
+            Stile.frag_at(i, j)[jj] *= scale2;
+          }
+        }
+      }
     }
 
     // Mask out partial K block.
@@ -819,7 +818,7 @@ prefill_attention(
           MMAFrag_mask_t::load_safe(
               mfrag,
               mask,
-              int(mask_params->M_strides[2]),
+              mask_params->M_strides[2],
               Int<1>{},
               q_seq_len,
               k_seq_len,
@@ -948,16 +947,15 @@ prefill_attention(
   Otile.template row_bin_op<DivOp>(sum_score);
   threadgroup_barrier(mem_flags::mem_none);
 
-  device T* O_tile = O + (tm + sm) * params->O_strides[2] + sn;
+  device T* O_tile = O + (tm + sm) * o_seq_stride + sn;
 
   if (q_block_size < BQ) {
     if ((tm + sm) < q_block_size && sn < BD) {
       auto dst_tile_dims = short2(BD - sn, q_block_size - (tm + sm));
-      Otile.template store_safe<T, 1, 1>(
-          O_tile, params->O_strides[2], dst_tile_dims);
+      Otile.template store_safe<T, 1, 1>(O_tile, o_seq_stride, dst_tile_dims);
     }
   } else {
-    Otile.template store<T, 1, 1>(O_tile, params->O_strides[2]);
+    Otile.template store<T, 1, 1>(O_tile, o_seq_stride);
   }
 }
 

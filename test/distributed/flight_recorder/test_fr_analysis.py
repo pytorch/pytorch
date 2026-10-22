@@ -28,6 +28,10 @@ except ValueError:
     backend = "c10d"
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.get_default_backend_for_device(device_type)
+
+
 def create_one_event(
     collective_name,
     pg_info,

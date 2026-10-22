@@ -1,7 +1,9 @@
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
 #include <c10/util/irange.h>
 
+#include <algorithm>
 #include <sstream>
+#include <string>
 
 namespace c10 {
 
@@ -42,28 +44,17 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     // TODO: we could probably optimize this by only lazily updating these values
     // the first time that we see requiresBitsetPerBackend_ = true
     // (which should almost never happen)
-    if (has_fallthrough) {
-      for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
-        nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].remove(k);
-      }
-    } else {
-      for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
-        nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].add(k);
-      }
+    for (auto& keys : nonFallthroughKeysPerBackend_) {
+      keys = has_fallthrough ? keys.remove(k) : keys.add(k);
     }
   }
 }
 
 std::string DispatchKeyExtractor::dumpState() const {
+  std::string bits = dispatch_arg_indices_reverse_.to_string();
+  std::reverse(bits.begin(), bits.end());
   std::ostringstream oss;
-  for (const auto i : c10::irange(c10::utils::bitset::NUM_BITS())) {
-    if (dispatch_arg_indices_reverse_.get(i)) {
-      oss << '1';
-    } else {
-      oss << '0';
-    }
-  }
-  oss << ' ' << nonFallthroughKeys_ << '\n';
+  oss << bits << ' ' << nonFallthroughKeys_ << '\n';
   return std::move(oss).str();
 }
 

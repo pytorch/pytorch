@@ -9,6 +9,15 @@ import torch
 _POOL_HANDLE = tuple[int, int]
 
 
+def is_current_stream_capturing() -> bool:
+    r"""Return whether MTIA graph capture is underway on the current stream.
+
+    If an MTIA context does not exist on the current device, return ``False``
+    without initializing the context.
+    """
+    return torch._C._mtia_isCurrentStreamCapturing()
+
+
 def graph_pool_handle() -> _POOL_HANDLE:
     """
     Return an opaque token representing the id of a graph memory pool.
@@ -101,4 +110,5 @@ __all__ = [
     "MTIAGraph",
     "graph",
     "graph_pool_handle",
+    "is_current_stream_capturing",
 ]

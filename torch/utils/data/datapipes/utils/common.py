@@ -133,7 +133,7 @@ def _is_local_fn(fn):
 
 def _check_unpickable_fn(fn: Callable) -> None:
     """
-    Check function is pickable or not.
+    Check function is picklable or not.
 
     If it is a lambda or local function, a UserWarning will be raised. If it's not a callable function, a TypeError will be raised.
     """

@@ -1,5 +1,6 @@
 #include <string>
 #include <type_traits>
+#include <utility>
 
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
@@ -227,18 +228,13 @@ void Pickler::pushIValue(const IValue& ivalue) {
 }
 
 void Pickler::pushInt(int64_t n) {
-  if (n >= std::numeric_limits<uint8_t>::min() &&
-      n <= std::numeric_limits<uint8_t>::max()) {
+  if (std::in_range<uint8_t>(n)) {
     push<PickleOpCode>(PickleOpCode::BININT1);
     push<uint8_t>(n);
-  } else if (
-      n >= std::numeric_limits<uint16_t>::min() &&
-      n <= std::numeric_limits<uint16_t>::max()) {
+  } else if (std::in_range<uint16_t>(n)) {
     push<PickleOpCode>(PickleOpCode::BININT2);
     push<uint16_t>(to_le16(n));
-  } else if (
-      n >= std::numeric_limits<int32_t>::min() &&
-      n <= std::numeric_limits<int32_t>::max()) {
+  } else if (std::in_range<int32_t>(n)) {
     push<PickleOpCode>(PickleOpCode::BININT);
     push<int32_t>(to_le32(n));
   } else {
@@ -687,31 +683,31 @@ void Pickler::pushGenericList(const IValue& ivalue) {
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {
-  auto tuple = ivalue.toTuple();
-  auto tuple_size = tuple->elements().size();
+  const auto& tuple = ivalue.toTupleRef();
+  auto tuple_size = tuple.elements().size();
 
   switch (tuple_size) {
     case 0: {
       push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     } break;
     case 1: {
-      pushIValue(tuple->elements()[0]);
+      pushIValue(tuple.elements()[0]);
       push<PickleOpCode>(PickleOpCode::TUPLE1);
     } break;
     case 2: {
-      pushIValue(tuple->elements()[0]);
-      pushIValue(tuple->elements()[1]);
+      pushIValue(tuple.elements()[0]);
+      pushIValue(tuple.elements()[1]);
       push<PickleOpCode>(PickleOpCode::TUPLE2);
     } break;
     case 3: {
-      pushIValue(tuple->elements()[0]);
-      pushIValue(tuple->elements()[1]);
-      pushIValue(tuple->elements()[2]);
+      pushIValue(tuple.elements()[0]);
+      pushIValue(tuple.elements()[1]);
+      pushIValue(tuple.elements()[2]);
       push<PickleOpCode>(PickleOpCode::TUPLE3);
     } break;
     default: {
       push<PickleOpCode>(PickleOpCode::MARK);
-      for (const IValue& item : tuple->elements()) {
+      for (const IValue& item : tuple.elements()) {
         pushIValue(item);
       }
       push<PickleOpCode>(PickleOpCode::TUPLE);
