@@ -268,23 +268,21 @@ bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
 bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
-  // In terms of a sparse_csr tensor, it does not support strides information
-  c10::SymIntArrayRef sym_strides(std::vector<SymInt>(v.ndimension(), -1));
-  bool does_not_support_stride = v.layout() == c10::kSparseCsr ||
-      v.layout() == c10::kSparseCsc || v.layout() == c10::kSparseBsc ||
-      v.layout() == c10::kSparseBsr;
-  if (!does_not_support_stride) {
-    sym_strides = v.sym_strides();
+  auto check_with_strides = [&](c10::SymIntArrayRef sym_strides) {
+    return check(
+        state,
+        v.key_set(),
+        v.dtype().toScalarType(),
+        v.device(),
+        v.sym_sizes(),
+        sym_strides,
+        v.requires_grad());
+  };
+  // Compressed sparse layouts don't support strides; compare against -1s.
+  if (at::sparse_csr::is_sparse_compressed(v)) {
+    return check_with_strides(std::vector<SymInt>(v.ndimension(), -1));
   }
-
-  return check(
-      state,
-      v.key_set(),
-      v.dtype().toScalarType(),
-      v.device(),
-      v.sym_sizes(),
-      sym_strides,
-      v.requires_grad());
+  return check_with_strides(v.sym_strides());
 }
 
 bool TensorCheck::check(
@@ -309,17 +307,13 @@ bool TensorCheck::check(
   const auto& sizes = sym_sizes;
   const auto& strides = sym_strides;
   for (auto i : c10::irange(ndim)) {
-    auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
-    if (known_size.has_value()) {
-      if (known_size.value() != sizes[i]) {
-        return false;
-      }
+    const auto& known_size = sizes_[i];
+    const auto& known_stride = strides_[i];
+    if (known_size && *known_size != sizes[i]) {
+      return false;
     }
-    if (known_stride.has_value()) {
-      if (known_stride.value() != strides[i]) {
-        return false;
-      }
+    if (known_stride && *known_stride != strides[i]) {
+      return false;
     }
   }
   return true;
@@ -1993,11 +1987,13 @@ class LAMBDA_GUARD : public LeafGuard {
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
       py::object verbose_code_parts,
-      py::object user_stack)
+      py::object user_stack,
+      bool takes_value = true)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
-            std::move(user_stack)) {
+            std::move(user_stack)),
+        _takes_value(takes_value) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
@@ -2005,9 +2001,10 @@ class LAMBDA_GUARD : public LeafGuard {
     }
   }
 
-  // Runs the lambda function with the current f_locals value.
+  // Runs the lambda function with the guarded value, or with no arguments if
+  // it does not take one.
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
+    PyObject* x = call(value); // new ref
     if (x == nullptr) {
       // An exception is caught in the lambda function.
       PyErr_Clear();
@@ -2018,8 +2015,14 @@ class LAMBDA_GUARD : public LeafGuard {
     return result;
   }
 
+  // Only materialize f_locals as a dict for a lambda that reads them.
+  bool check_nopybind(FrameLocalsMapping* map) override {
+    PyDictObject* f_locals = _takes_value ? map->to_dict() : nullptr;
+    return check_nopybind(reinterpret_cast<PyObject*>(f_locals));
+  }
+
   GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
-    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
+    PyObject* x = call(value); // new ref
     if (x == nullptr) {
       // An exception is caught in the lambda function.
       std::string exc_message = get_exception_message();
@@ -2035,8 +2038,15 @@ class LAMBDA_GUARD : public LeafGuard {
   }
 
  private:
+  PyObject* call(PyObject* value) {
+    return _takes_value ? PyObject_CallOneArg(_guard_check_fn.ptr(), value)
+                        : PyObject_CallNoArgs(_guard_check_fn.ptr());
+  }
+
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
+  // False for a lambda that takes no arguments.
+  bool _takes_value;
 };
 
 class TYPE_MATCH : public LeafGuard {
@@ -2465,6 +2475,70 @@ class DEFAULT_DEVICE : public LeafGuard {
   // Save the current device and the module dict during the guard construction.
   py::object _utils_device_dict;
   py::object _device;
+};
+
+// Checks torch.fx.traceback._get_current_annotation() == expected without
+// calling into Python. That function returns None when current_meta["custom"]
+// is missing or empty, and a copy of it otherwise.
+class FX_ANNOTATION : public LeafGuard {
+ public:
+  FX_ANNOTATION(
+      RootGuardManager* root_guard_manager,
+      py::object expected,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        // traceback.py rebinds current_meta, so keep its module dict instead.
+        _traceback_dict(
+            py::module::import("torch.fx.traceback").attr("__dict__")),
+        _expected(std::move(expected)) {}
+
+  template <typename T>
+  bool check_nopybind_template(T* value) { // borrowed ref
+    static PyObject* current_meta_str = THPUtils_internString("current_meta");
+    py::object meta = get_item(_traceback_dict.ptr(), current_meta_str);
+    if (!meta || !PyDict_Check(meta.ptr())) {
+      return false;
+    }
+
+    static PyObject* custom_str = THPUtils_internString("custom");
+    py::object custom_ref = get_item(meta.ptr(), custom_str);
+    PyObject* custom = custom_ref.ptr();
+    if (!custom || (PyDict_Check(custom) && !PyDict_GET_SIZE(custom))) {
+      return _expected.is_none();
+    }
+
+    // If == raises (e.g. multi-element tensor values), the guard fails, so the
+    // frame recompiles.
+    return py_equals(custom, _expected.ptr(), /*false_on_error=*/true);
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    return check_nopybind_template(value);
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    return check_nopybind_template(value);
+  }
+
+ private:
+  // Returns an owned reference, or an empty object if key is missing. Owning it
+  // keeps a free-threaded build safe when another thread rebinds current_meta
+  // or custom mid-check.
+  static py::object get_item(PyObject* dict, PyObject* key) {
+    PyObject* item = nullptr;
+    if (PyDict_GetItemRef(dict, key, &item) < 0) {
+      PyErr_Clear();
+    }
+    return py::reinterpret_steal<py::object>(item);
+  }
+
+  py::object _traceback_dict;
+  // The annotation at compile time: a dict, or None when there was none.
+  py::object _expected;
 };
 
 class GLOBAL_STATE : public LeafGuard {
@@ -4523,12 +4597,7 @@ class RootGuardManager : public GuardManager {
   // Fast check function.
   template <typename T>
   bool check_nopybind_template(T* value) { // borrowed ref
-    // Check [Note on GIL interaction with mutex lock] for details on why we
-    // need mutex and its interactions with GIL.
-    PyThreadState* _save = nullptr;
-    Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
-    std::lock_guard<std::mutex> lock_guard(_lock);
-    Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+    auto lock_guard = acquire_lock();
 
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
@@ -4588,12 +4657,7 @@ class RootGuardManager : public GuardManager {
   // Fast check_verbose function.
   GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
-    // Check [Note on GIL interaction with mutex lock] for details on why we
-    // need mutex and its interactions with GIL.
-    PyThreadState* _save = nullptr;
-    Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
-    std::lock_guard<std::mutex> lock_guard(_lock);
-    Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+    auto lock_guard = acquire_lock();
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
@@ -4703,6 +4767,17 @@ class RootGuardManager : public GuardManager {
   // }
 
  private:
+  // Check [Note on GIL interaction with mutex lock] for details on why we
+  // need mutex and its interactions with GIL.
+  std::unique_lock<std::mutex> acquire_lock() {
+    std::unique_lock<std::mutex> lock(_lock, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      py::gil_scoped_release no_gil;
+      lock.lock();
+    }
+    return lock;
+  }
+
   // Reset the state of all the relational guards on failure.
   void _reset_relational_guard_state() {
     for (auto& guard : _relational_guard_resetters) {
@@ -4808,9 +4883,10 @@ class RootGuardManager : public GuardManager {
   // instructions). Thread 2 here can decide to release the GIL. Thread 1 can
   // acquire GIL and reach the mutex, where it will wait forever.
   //
-  // To avoid this, each thread releases the GIL before acquiring the mutex and
-  // then acquires the GIL again after acquiring the mutex lock by using
-  // Py_BLOCK_THREADS and Py_UNBLOCK_THREADS. This avoids the deadlock.
+  // To avoid this, a thread that finds the mutex held releases the GIL while
+  // waiting for it, and acquires the GIL again after acquiring the mutex. An
+  // uncontended try_lock never blocks, so it can keep the GIL. This avoids the
+  // deadlock without a GIL handoff on every check.
   std::mutex _lock;
 
   // We init LocalState only when this flag it set. This flag is set during
@@ -8285,6 +8361,19 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(user_stack)));
           })
       .def(
+          "add_lambda_guard_no_args",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(verbose_code_parts),
+                std::move(user_stack),
+                /*takes_value=*/false));
+          })
+      .def(
           "add_type_match_guard",
           [](GuardManager& self,
              py::object value,
@@ -8438,6 +8527,18 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<DEFAULT_DEVICE>(
                 self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_fx_annotation_guard",
+          [](GuardManager& self,
+             py::object expected,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<FX_ANNOTATION>(
+                self.get_root(),
+                std::move(expected),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
