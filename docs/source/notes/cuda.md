@@ -1387,6 +1387,15 @@ systems. However, excessive pinning can put pressure on available RAM
 (see {ref}`cuda-memory-pinning`).
 
 ```{note}
+The term "pinning" has two meanings. In CUDA, pinned memory cannot migrate
+from the CPU to the GPU or to another CPU NUMA node. In the Linux kernel,
+pinning refers to page-locking, which makes the physical pages immovable.
+
+On non-coherent systems, both meanings apply: CUDA must page-lock host
+memory to make it accessible to the GPU, as `cudaMallocHost` does on these
+systems. On hardware-coherent systems, only the CUDA meaning applies.
+Pinned memory is automatically populated and mapped for GPU access.
+
 On hardware-coherent systems, pinned memory does not guarantee immovable
 physical pages. Operating system memory compaction can still cause page
 faults, including for memory allocated with `cudaMallocHost` or registered
