@@ -872,25 +872,53 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
+    if isinstance(self, InterleavedComplexTensor):
+        out = aten.alias(self)
+        torch._C._set_conj(out, not self.is_conj())
+        return out
+
     return ComplexTensor(aten.alias(self.re), -self.im)
 
 
 @register_complex(aten._neg_view)
 def _neg_view_impl(self: ComplexTensor) -> ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
+    if isinstance(self, InterleavedComplexTensor):
+        out = aten.alias(self)
+        torch._C._set_neg(out, not self.is_neg())
+        return out
+
     return ComplexTensor(-self.re, -self.im)
 
 
 @register_complex(aten.resolve_conj)
-def resolve_conj_impl(self: ComplexTensor) -> ComplexTensor:
+def resolve_conj_impl(self: ComplexTensor) -> InterleavedComplexTensor | ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
-    return self
+    conj = self.is_conj()
+    if not conj:
+        return aten.alias(self)
+
+    re, im = split_complex_arg(self)
+    re, im = re.clone(), im.clone()
+    neg = self.is_neg()
+    if neg:
+        re, im = aten._neg_view(re), aten._neg_view(im)
+    return ComplexTensor(re, im)
 
 
 @register_complex(aten.resolve_neg)
-def resolve_neg_impl(self: ComplexTensor) -> ComplexTensor:
+def resolve_neg_impl(self: ComplexTensor) -> InterleavedComplexTensor | ComplexTensor:
     # See "NOTE conj/neg (hameerabbasi)"
-    return self
+    neg = self.is_neg()
+    if not neg:
+        return aten.alias(self)
+
+    re, im = split_complex_arg(self)
+    re, im = re.clone(), im.clone()
+    conj = self.is_conj()
+    if conj:
+        im = aten._neg_view(im)
+    return ComplexTensor(re, im)
 
 
 @register_complex(aten.index_add)

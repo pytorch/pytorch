@@ -97,9 +97,6 @@ SKIPS = {
     Descriptor(op=aten.isfinite, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.transpose, variant=Variant.Distributed): "No scalar support",
     Descriptor(op=aten.view_as_real, variant=Variant.Distributed): "No scalar support",
-    Descriptor(op=aten.mm, variant=Variant.OpInterleaved): "Conjugated inputs",
-    Descriptor(op=aten.dot, variant=Variant.OpInterleaved): "Conjugated inputs",
-    Descriptor(op=aten.addmm, variant=Variant.OpInterleaved): "Conjugated inputs",
 }
 
 EXTRA_KWARGS = {

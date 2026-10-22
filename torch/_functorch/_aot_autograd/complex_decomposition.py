@@ -56,13 +56,24 @@ def _maybe_unwrap(value: Any) -> Any:
 
 
 def _unwrap_output(value: Any, meta: Any) -> Any:
-    """Unwrap a graph output, restoring the strides recorded in the original graph."""
+    """Unwrap a graph output, restoring the strides and conj/neg bits recorded in the original graph."""
     if not isinstance(value, ComplexTensor) or not isinstance(meta, Tensor):
         return _maybe_unwrap(value)
-    # ComplexTensor parts are contiguous; rebuild the layout `meta` promises.
-    real = torch.stack([value.re, value.im], dim=-1)
+    # ComplexTensor parts are contiguous; rebuild the layout `meta` promises. The storage of a
+    # conj/neg view holds the conjugated/negated values, which the view bits then undo.
+    re, im = value.re, value.im
+    if meta.is_neg():
+        re, im = -re, -im
+    if meta.is_conj():
+        im = -im
+    real = torch.stack([re, im], dim=-1)
     real_strides = [2 * s for s in meta.stride()] + [1]
-    return torch.view_as_complex(torch.ops.prims.copy_strided(real, real_strides))
+    out = torch.view_as_complex(torch.ops.prims.copy_strided(real, real_strides))
+    if meta.is_neg():
+        out = torch.ops.aten._neg_view(out)
+    if meta.is_conj():
+        out = torch.ops.aten._conj(out)
+    return out
 
 
 def _view_base(node: Any) -> Any:
@@ -140,9 +151,14 @@ def _view_of_output(base: Tensor, meta: Tensor, base_meta: Tensor) -> Tensor:
     """Recreate output `meta`, a view of output `base_meta`, as a view of unwrapped `base`."""
     offset = base.storage_offset() - base_meta.storage_offset()
     if meta.dtype.is_complex:
-        return base.as_strided(
+        out = base.as_strided(
             meta.size(), meta.stride(), offset + meta.storage_offset()
         )
+        if meta.is_neg() != out.is_neg():
+            out = torch.ops.aten._neg_view(out)
+        if meta.is_conj() != out.is_conj():
+            out = torch.ops.aten._conj(out)
+        return out
     real = torch.view_as_real(base)
     real_offset = 2 * offset + meta.storage_offset()
     return real.as_strided(meta.size(), meta.stride(), real_offset)
