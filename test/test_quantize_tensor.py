@@ -153,6 +153,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
             (2080, 2048),
             (2048, 4224),
             (1, 32, 128),
+            (3, 1, 32),
+            (3, 129, 64),
             (3, 160, 160),
         ),
         name_fn=lambda shape: (f"B{shape[0]}_" if len(shape) == 3 else "")
